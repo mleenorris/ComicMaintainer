@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.ErrorReporting;
@@ -21,6 +23,8 @@ namespace ComicMaintainer.Tests.Services;
 public class ComicProcessorServiceCoverageTests : IDisposable
 {
     private const string RenamingTemplate = "Renaming file from {OldPath} to {NewPath}";
+    private const int LargeEntrySize = 11 * 1024 * 1024;
+    private static readonly DateTimeOffset FixtureTimestamp = new(2021, 3, 4, 5, 6, 8, TimeSpan.Zero);
 
     private readonly string _root;
     private readonly string _library;
@@ -392,17 +396,21 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateMetadataAsync_ArchiveWithLargeEntry_LogsSkipAndStillUpdatesComicInfo()
+    public async Task UpdateMetadataAsync_ArchiveWithEntryOver10MB_KeepsEveryEntryByteForByte()
     {
         var service = CreateService();
-        var path = WriteCbz("Series/large.cbz", Xml("Old", "1", "Chapter 1"), includeLargeEntry: true);
+        var path = WriteCbzWithLargeEntry("Series/large.cbz");
+        var before = SnapshotEntries(path);
+        Assert.Contains(before, e => e.Name == "big.bin" && e.Length == LargeEntrySize);
 
         var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
 
         Assert.True(result);
-        Assert.True(_logger.Has(LogLevel.Warning, "Skipping large entry {Entry} ({Size} bytes) to prevent memory issues"));
         Assert.Equal("Updated", ReadComicInfo(path)!.Element("Series")?.Value);
-        Assert.Contains("page001.jpg", EntryNames(path));
+        var after = SnapshotEntries(path);
+        Assert.Equal("ComicInfo.xml", after[^1].Name);
+        Assert.Equal(before.Where(e => e.Name != "ComicInfo.xml"), after.SkipLast(1));
+        Assert.DoesNotContain(_logger.Entries, e => e.Level >= LogLevel.Warning);
     }
 
     [Fact]
@@ -422,18 +430,84 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoveMetadataAsync_ArchiveWithLargeEntry_RemovesComicInfoAndKeepsPages()
+    public async Task RemoveMetadataAsync_ArchiveWithEntryOver10MB_RemovesComicInfoAndKeepsEveryOtherEntryByteForByte()
     {
         var service = CreateService();
-        var path = WriteCbz("Series/large.cbz", Xml("Old", "1", "Chapter 1"), includeLargeEntry: true);
+        var path = WriteCbzWithLargeEntry("Series/large.cbz");
+        var before = SnapshotEntries(path);
+        Assert.Contains(before, e => e.Name == "big.bin" && e.Length == LargeEntrySize);
 
         var result = await service.RemoveMetadataAsync(path);
 
         Assert.True(result);
-        Assert.True(_logger.Has(LogLevel.Warning, "Skipping large entry {Entry} ({Size} bytes) to prevent memory issues"));
-        var entries = EntryNames(path);
-        Assert.DoesNotContain("ComicInfo.xml", entries);
-        Assert.Contains("page001.jpg", entries);
+        Assert.Equal(before.Where(e => e.Name != "ComicInfo.xml"), SnapshotEntries(path));
+        Assert.DoesNotContain(_logger.Entries, e => e.Level >= LogLevel.Warning);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MetadataRewrite_EntryThatCannotBeRead_FailsAndLeavesArchiveUntouched(bool removeMetadata)
+    {
+        var service = CreateService();
+        var path = WriteCbzWithUnreadableEntry("Series/unreadable.cbz");
+        var before = await File.ReadAllBytesAsync(path);
+
+        var result = removeMetadata
+            ? await service.RemoveMetadataAsync(path)
+            : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
+
+        Assert.False(result);
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+        var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
+        Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
+        Assert.IsType<NotSupportedException>(error.Exception);
+        Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
+        _fileStore.Verify(
+            f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MetadataRewrite_EntryDataCorruptMidCopy_FailsAndLeavesArchiveUntouched(bool removeMetadata)
+    {
+        var service = CreateService();
+        var path = WriteCbzWithCorruptDeflateEntry("Series/corrupt.cbz");
+        var before = await File.ReadAllBytesAsync(path);
+
+        var result = removeMetadata
+            ? await service.RemoveMetadataAsync(path)
+            : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
+
+        Assert.False(result);
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+        var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
+        Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
+        Assert.NotNull(error.Exception);
+        Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MetadataRewrite_EntryWithoutName_FailsAndLeavesArchiveUntouched(bool removeMetadata)
+    {
+        var service = CreateService();
+        var path = WriteNamelessGzipCbz("Series/nameless.cbz");
+        var before = await File.ReadAllBytesAsync(path);
+
+        var result = removeMetadata
+            ? await service.RemoveMetadataAsync(path)
+            : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
+
+        Assert.False(result);
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+        var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
+        Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
+        Assert.IsType<InvalidDataException>(error.Exception);
+        Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
     }
 
     [Fact]
@@ -1332,10 +1406,10 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         return service.GetJob(jobId)!;
     }
 
-    private string WriteCbz(string relativePath, string? comicInfoXml, bool includeLargeEntry = false) =>
-        WriteCbzAt(Path.Combine(_library, relativePath), comicInfoXml, includeLargeEntry);
+    private string WriteCbz(string relativePath, string? comicInfoXml) =>
+        WriteCbzAt(Path.Combine(_library, relativePath), comicInfoXml);
 
-    private static string WriteCbzAt(string path, string? comicInfoXml, bool includeLargeEntry = false)
+    private static string WriteCbzAt(string path, string? comicInfoXml)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
@@ -1348,20 +1422,128 @@ public class ComicProcessorServiceCoverageTests : IDisposable
             }
 
             var page = zip.CreateEntry("page001.jpg");
-            using (var stream = page.Open())
-            {
-                stream.Write(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
-            }
-
-            if (includeLargeEntry)
-            {
-                var big = zip.CreateEntry("big.bin", CompressionLevel.Fastest);
-                using var stream = big.Open();
-                stream.Write(new byte[(10 * 1024 * 1024) + 1]);
-            }
+            using var stream = page.Open();
+            stream.Write(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
         }
 
         return path;
+    }
+
+    /// <summary>
+    /// Pages around an 11 MB entry (zeros, so it compresses to almost nothing), with ComicInfo.xml
+    /// in the middle and distinct old timestamps, so entry order and timestamps are observable.
+    /// </summary>
+    private string WriteCbzWithLargeEntry(string relativePath)
+    {
+        var path = Path.Combine(_library, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            AddEntry(zip, "page001.jpg", new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }, FixtureTimestamp);
+            AddEntry(zip, "ComicInfo.xml", Encoding.UTF8.GetBytes(Xml("Old", "1", "Chapter 1")), FixtureTimestamp.AddDays(1));
+            AddEntry(zip, "big.bin", new byte[LargeEntrySize], FixtureTimestamp.AddDays(2));
+            AddEntry(zip, "extras/page002.jpg", new byte[] { 0x89, 0x50, 0x4E, 0x47 }, FixtureTimestamp.AddDays(3));
+        }
+
+        return path;
+    }
+
+    /// <summary>
+    /// A valid archive whose "unreadable.bin" entry declares the reserved compression method 11
+    /// in its local and central directory headers, so no reader can decompress it.
+    /// </summary>
+    private string WriteCbzWithUnreadableEntry(string relativePath)
+    {
+        var path = Path.Combine(_library, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            AddEntry(zip, "ComicInfo.xml", Encoding.UTF8.GetBytes(Xml("Old", "1", "Chapter 1")), FixtureTimestamp);
+            AddEntry(zip, "page001.jpg", new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }, FixtureTimestamp);
+            AddEntry(zip, "unreadable.bin", new byte[] { 1, 2, 3, 4 }, FixtureTimestamp, CompressionLevel.NoCompression);
+        }
+
+        var bytes = File.ReadAllBytes(path);
+        var name = Encoding.UTF8.GetBytes("unreadable.bin");
+        var patched = 0;
+        for (var i = 0; i + 46 + name.Length <= bytes.Length; i++)
+        {
+            var (methodOffset, nameOffset) = BitConverter.ToUInt32(bytes, i) switch
+            {
+                0x04034b50 => (8, 30), // local file header
+                0x02014b50 => (10, 46), // central directory header
+                _ => (-1, -1),
+            };
+            if (methodOffset >= 0 && bytes.AsSpan(i + nameOffset, name.Length).SequenceEqual(name))
+            {
+                BitConverter.TryWriteBytes(bytes.AsSpan(i + methodOffset, 2), (ushort)11);
+                patched++;
+            }
+        }
+
+        Assert.Equal(2, patched);
+        File.WriteAllBytes(path, bytes);
+        return path;
+    }
+
+    /// <summary>
+    /// A valid archive whose deflated "corrupt.bin" entry starts with a reserved deflate block type,
+    /// so decompression fails while the entry is being copied (after its header was written).
+    /// </summary>
+    private string WriteCbzWithCorruptDeflateEntry(string relativePath)
+    {
+        var path = Path.Combine(_library, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            AddEntry(zip, "ComicInfo.xml", Encoding.UTF8.GetBytes(Xml("Old", "1", "Chapter 1")), FixtureTimestamp);
+            AddEntry(zip, "page001.jpg", new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }, FixtureTimestamp);
+            AddEntry(zip, "corrupt.bin", new byte[64 * 1024], FixtureTimestamp);
+        }
+
+        var bytes = File.ReadAllBytes(path);
+        var name = Encoding.UTF8.GetBytes("corrupt.bin");
+        var patched = 0;
+        for (var i = 0; i + 30 + name.Length <= bytes.Length; i++)
+        {
+            if (BitConverter.ToUInt32(bytes, i) == 0x04034b50 && bytes.AsSpan(i + 30, name.Length).SequenceEqual(name))
+            {
+                Assert.Equal(8, BitConverter.ToUInt16(bytes, i + 8)); // deflate
+                var dataStart = i + 30 + BitConverter.ToUInt16(bytes, i + 26) + BitConverter.ToUInt16(bytes, i + 28);
+                bytes[dataStart] = 0xFF; // BFINAL=1, BTYPE=11 (reserved)
+                patched++;
+            }
+        }
+
+        Assert.Equal(1, patched);
+        File.WriteAllBytes(path, bytes);
+        return path;
+    }
+
+    /// <summary>
+    /// A ".cbz" that really is a gzip stream without a stored file name: SharpCompress opens it as
+    /// an archive with a single entry whose Key is null.
+    /// </summary>
+    private string WriteNamelessGzipCbz(string relativePath)
+    {
+        var path = Path.Combine(_library, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using (var file = File.Create(path))
+        using (var gzip = new GZipStream(file, CompressionLevel.Fastest))
+        {
+            gzip.Write(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
+        }
+
+        return path;
+    }
+
+    private static void AddEntry(
+        ZipArchive zip, string name, byte[] content, DateTimeOffset lastWriteTime, CompressionLevel level = CompressionLevel.Fastest)
+    {
+        var entry = zip.CreateEntry(name, level);
+        entry.LastWriteTime = lastWriteTime;
+        using var stream = entry.Open();
+        stream.Write(content);
     }
 
     private string WriteCorrupt(string relativePath)
@@ -1416,6 +1598,20 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         using var zip = ZipFile.OpenRead(path);
         return zip.Entries.Select(e => e.FullName).ToList();
     }
+
+    private static List<EntrySnapshot> SnapshotEntries(string path)
+    {
+        using var zip = ZipFile.OpenRead(path);
+        return zip.Entries
+            .Select(e =>
+            {
+                using var stream = e.Open();
+                return new EntrySnapshot(e.FullName, e.LastWriteTime.DateTime, e.Length, Convert.ToHexString(SHA256.HashData(stream)));
+            })
+            .ToList();
+    }
+
+    private sealed record EntrySnapshot(string Name, DateTime LastWriteTime, long Length, string Sha256);
 
     private sealed record LogEntry(LogLevel Level, string Template, IReadOnlyDictionary<string, object?> Properties, Exception? Exception);
 

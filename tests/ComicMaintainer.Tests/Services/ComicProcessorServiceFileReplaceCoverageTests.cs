@@ -29,7 +29,6 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
     private const string FallbackFailedError = "Fallback strategy failed for {File}, attempting restore from backup";
     private const string RestoredWarning = "Restored backup file after failed replacement: {File}";
     private const string RestoreFailedError = "Failed to restore backup file: {BackupPath}";
-    private const string LargeEntryWarning = "Skipping large entry {Entry} ({Size} bytes) to prevent memory issues";
 
     // The classifier is private to ComicProcessorService (no InternalsVisibleTo).
     private static readonly Func<int, bool, bool> IsCrossDeviceLinkHResult = typeof(ComicProcessorService)
@@ -359,17 +358,20 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
             return;
         }
 
-        var service = CreateService();
-        var path = WriteBook("Series/large.cbz", includeLargeEntry: true);
-        _logger.On(LargeEntryWarning, _ =>
+        var service = CreateService((call, target) =>
         {
-            File.Delete(path);
-            Directory.CreateDirectory(path);
+            if (call == 1)
+            {
+                File.Delete(target);
+                Directory.CreateDirectory(target);
+            }
         });
+        var path = WriteBook("Series/book.cbz");
 
         var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None);
 
         Assert.False(result);
+        Assert.Equal(1, service.ReplaceCalls);
         var error = Assert.Single(_logger.Entries, e => e.Template == ReplaceFailedError);
         Assert.IsType<UnauthorizedAccessException>(error.Exception);
         Assert.False(_logger.Entries.Any(e => e.Template == RetryWarning));
@@ -432,7 +434,7 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
         }
     }
 
-    private string WriteBook(string relativePath, bool includeLargeEntry = false)
+    private string WriteBook(string relativePath)
     {
         var path = Path.Combine(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -445,17 +447,8 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
             }
 
             var page = zip.CreateEntry("page001.jpg");
-            using (var stream = page.Open())
-            {
-                stream.Write(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
-            }
-
-            if (includeLargeEntry)
-            {
-                var big = zip.CreateEntry("big.bin", CompressionLevel.Fastest);
-                using var stream = big.Open();
-                stream.Write(new byte[(10 * 1024 * 1024) + 1]);
-            }
+            using var stream = page.Open();
+            stream.Write(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
         }
 
         return path;

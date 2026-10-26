@@ -255,29 +255,51 @@ public class SeriesMetadataRefreshJobServiceTests
             && e.Exception is InvalidOperationException));
     }
 
-    [Fact]
-    public async Task RunJob_ProgressBroadcastFaultsMidRun_JobStillReachesATerminalStateWithEndTime()
+    [Theory]
+    [InlineData("running", 0)]   // the start update, sent before the job's try block
+    [InlineData("running", 1)]   // a per-series progress update
+    [InlineData("completed", 2)] // the final update, sent from the job's finally block
+    public async Task RunJob_BroadcastReturnsAFaultedTask_IsLoggedAndTheJobStillCompletesAndRetags(
+        string faultedStatus, int faultedProcessed)
     {
-        // The broadcaster returns a faulted task (rather than throwing) for the first
-        // per-series progress update. Whatever the job does with that failure, it must
-        // not be left looking "running" forever and the cleanup step must still run.
+        // The broadcaster returns a faulted task (rather than throwing). The failure must
+        // be logged and swallowed like a synchronous throw: it must not leave the job
+        // "running", mark it failed, stop the run or skip the cleanup and retag steps.
         _broadcaster
             .Setup(b => b.BroadcastJobUpdateAsync(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Callback<Guid, string, int, int, int, int>((id, status, processed, total, success, errors) =>
+                _broadcasts.Enqueue(new BroadcastCall(id, status, processed, total, success, errors)))
             .Returns<Guid, string, int, int, int, int>((_, status, processed, _, _, _) =>
-                status == "running" && processed == 1
+                status == faultedStatus && processed == faultedProcessed
                     ? Task.FromException(new InvalidOperationException("hub send failed"))
                     : Task.CompletedTask);
         SetupRefresh("Alpha", "success");
         SetupRefresh("Beta", "success");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"), TrackedFile("/library/Beta/c001.cbz", "Beta"));
+        var normalizeJobId = Guid.NewGuid();
+        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(normalizeJobId);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha", "Beta" });
-        var job = await WaitForCleanupAsync(service, jobId);
 
-        Assert.True(job.Status is JobStatus.Completed or JobStatus.Failed, $"Unexpected status {job.Status}");
+        await _logger.WaitForAsync(e => e.Message.Contains($"Metadata refresh job {jobId} queued normalization job {normalizeJobId} for 2 files"));
+        _cache.Verify(c => c.CleanupStaleSiblingRecordsAsync(It.IsAny<CancellationToken>()), Times.Once);
+        var job = service.GetJob(jobId)!;
+        Assert.Equal(JobStatus.Completed, job.Status);
         Assert.NotNull(job.EndTime);
-        Assert.True(job.ProcessedSeries >= 1);
+        Assert.Equal(2, job.ProcessedSeries);
+        Assert.Equal(2, job.Successes);
+        Assert.Equal(0, job.Failures);
+        Assert.Equal(
+            new[] { ("running", 0), ("running", 1), ("running", 2), ("completed", 2) },
+            _broadcasts.Select(b => (b.Status, b.Processed)).ToArray());
+        var logged = Assert.Single(_logger.Entries, e => e.Message.Contains("Failed to broadcast metadata refresh job update"));
+        Assert.Equal(LogLevel.Debug, logged.Level);
+        Assert.Contains(jobId.ToString(), logged.Message);
+        Assert.Equal("hub send failed", Assert.IsType<InvalidOperationException>(logged.Exception).Message);
+        Assert.DoesNotContain(_logger.Entries, e => e.Level >= LogLevel.Warning);
     }
 
     [Fact]

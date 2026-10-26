@@ -262,12 +262,14 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
             sourceJobId, processJobId, matchedPaths.Count);
     }
 
-    private Task BroadcastAsync(MetadataRefreshJob job)
+    // Best-effort: a failed broadcast (thrown or a faulted task) is logged and
+    // never changes the job's outcome.
+    private async Task BroadcastAsync(MetadataRefreshJob job)
     {
-        if (_eventBroadcaster is null) return Task.CompletedTask;
+        if (_eventBroadcaster is null) return;
         try
         {
-            return _eventBroadcaster.BroadcastJobUpdateAsync(
+            await _eventBroadcaster.BroadcastJobUpdateAsync(
                 job.JobId,
                 job.Status.ToString().ToLowerInvariant(),
                 job.ProcessedSeries,
@@ -278,7 +280,6 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to broadcast metadata refresh job update {JobId}", job.JobId);
-            return Task.CompletedTask;
         }
     }
 

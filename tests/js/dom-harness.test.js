@@ -149,6 +149,27 @@ test('inline onclick handlers in the markup call page globals', () => {
     page.close();
 });
 
+test('inline handlers in markup rendered by renderHtml() run as in a browser', () => {
+    const page = loadPage({
+        markup: '<!doctype html><body><div id="host"></div></body>',
+        scripts: [
+            'js/app/templating.js',
+            { code: 'var calls = []; function clicked(id) { calls.push(id); }' }
+        ]
+    });
+    page.run(`renderHtml(document.getElementById('host'),
+        html\`<button id="rendered" onclick="clicked(this.id)">Go</button>\`)`);
+
+    assert.equal(typeof page.$('#rendered').onclick, 'function');
+    page.click('#rendered');
+    // The template cache hands out a fresh copy with live handlers each time.
+    page.run(`appendHtml(document.getElementById('host'),
+        html\`<button id="rendered" onclick="clicked(this.id)">Go</button>\`)`);
+    page.click(page.$$('#rendered')[1]);
+    assert.deepEqual(page.evaluate('calls'), ['rendered', 'rendered']);
+    page.close();
+});
+
 test('mock timers drive page timers while settle() keeps working', async t => {
     t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     const page = loadPage({

@@ -205,6 +205,21 @@ function installBrowserStubs(window, page, options) {
     window.Headers = Headers;
     if (typeof window.structuredClone !== 'function') window.structuredClone = structuredClone;
 
+    // jsdom only compiles inline handler attributes (onclick="...") on
+    // elements created in a document that has a window. renderHtml() and
+    // friends clone <template> content, whose nodes belong to the template's
+    // window-less "inert" document, so the handlers in rendered markup would
+    // never run, though a browser runs them. Cloning nodes of that document
+    // via importNode creates the copies in the page document instead, where
+    // jsdom compiles the handlers as a browser would.
+    const inertTemplateDocument = window.document.createElement('template').content.ownerDocument;
+    const nativeCloneNode = window.Node.prototype.cloneNode;
+    window.Node.prototype.cloneNode = function cloneNode(deep = false) {
+        return this.ownerDocument === inertTemplateDocument
+            ? window.document.importNode(this, deep)
+            : nativeCloneNode.call(this, deep);
+    };
+
     const media = options.media || {};
     window.matchMedia = query => {
         const list = createMediaQueryList(window, query, Boolean(media[query]));

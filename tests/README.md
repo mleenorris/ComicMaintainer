@@ -84,7 +84,9 @@ Unrouted requests answer 404 and are listed in `page.unmatchedRequests`;
 `page.serviceWorkerRegistrations` record what the page did. Redirects and
 reloads are only recorded (the page stays on its document); fragment changes
 are applied and fire `hashchange`. Scripts run with `file:` URLs so Node's
-coverage attributes them to the files under `wwwroot`.
+coverage attributes them to the files under `wwwroot`. Inline handlers in
+markup the app renders with `renderHtml()`/`appendHtml()` run as they would in
+a browser, so `page.click()` on a rendered button calls its `onclick` code.
 
 Tests of the signed-in SPA can use `bootApp()` from `tests/js/support/app.js`,
 which loads `index.html` at a route with a valid session token and the

@@ -619,12 +619,16 @@ public class ComicProcessorServiceTests : IDisposable
 
     private const int JobPollingIntervalMs = 50;
 
-    private async Task<ProcessingJob?> WaitForJobCompletionAsync(Guid jobId, int timeoutMs = 5000)
+    // Returns as soon as the job finishes; the budget only matters when the whole
+    // suite runs in parallel on a busy machine, where a 5 s budget proved too tight.
+    private const int DefaultJobTimeoutMs = 30000;
+
+    private async Task<ProcessingJob?> WaitForJobCompletionAsync(Guid jobId, int timeoutMs = DefaultJobTimeoutMs)
     {
         return await WaitForJobCompletionAsync(_service, jobId, timeoutMs);
     }
 
-    private static async Task<ProcessingJob?> WaitForJobCompletionAsync(ComicProcessorService service, Guid jobId, int timeoutMs = 5000)
+    private static async Task<ProcessingJob?> WaitForJobCompletionAsync(ComicProcessorService service, Guid jobId, int timeoutMs = DefaultJobTimeoutMs)
     {
         using var cts = new CancellationTokenSource(timeoutMs);
         
@@ -1051,7 +1055,7 @@ public class ComicProcessorServiceTests : IDisposable
         var cancelled = _service.CancelJob(jobId);
         
         // Wait for job to finish
-        var job = await WaitForJobCompletionAsync(jobId, 10000);
+        var job = await WaitForJobCompletionAsync(jobId);
 
         // Assert
         Assert.True(cancelled);

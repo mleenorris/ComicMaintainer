@@ -80,9 +80,10 @@ test('Refresh All External Metadata queues a job and follows it in a toast until
         hash: '#/library',
         routes: {
             'POST /api/metadata/refresh-all': { jobId: JOB, totalSeries: 4 },
+            // The API sends the JobStatus name (MetadataRefreshJob.Status).
             [`GET ${jobPath(JOB)}`]: inTurn(
-                { jobId: JOB, status: 'running', totalSeries: 4, processedSeries: 1, successes: 1, notFound: 0, failures: 0, currentSeries: 'Paper Girls' },
-                { jobId: JOB, status: 'completed', totalSeries: 4, processedSeries: 4, successes: 3, notFound: 0, failures: 1, currentSeries: null })
+                { jobId: JOB, status: 'Running', totalSeries: 4, processedSeries: 1, successes: 1, notFound: 0, failures: 0, currentSeries: 'Paper Girls' },
+                { jobId: JOB, status: 'Completed', totalSeries: 4, processedSeries: 4, successes: 3, notFound: 0, failures: 1, currentSeries: null })
         }
     });
     const providerHealth = spyOn(page, 'loadProviderHealth');
@@ -130,6 +131,49 @@ test('Refresh All External Metadata queues a job and follows it in a toast until
 
     await advance(t, page, 6000 - POLL_MS);
     assert.equal(toast(page), null, 'the finished toast goes away 6 s after the job ends');
+});
+
+test('polling stops at every terminal job status, then the library and provider health are refreshed', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const page = await bootSeries({ hash: '#/library' });
+    const providerHealth = spyOn(page, 'loadProviderHealth');
+    const endings = [
+        ['status', 'Completed'],
+        ['status', 'Failed'],
+        ['status', 'Cancelled'],
+        ['status', 'Interrupted'],
+        // PascalCase payloads are understood as well.
+        ['Status', 'Completed'],
+        ['Status', 'Interrupted']
+    ];
+
+    for (const [index, [key, status]] of endings.entries()) {
+        const id = `${JOB.slice(0, -1)}${index}`;
+        const ending = `${key}: ${status}`;
+        page.route('POST /api/metadata/refresh-all', { jobId: id, totalSeries: 2 });
+        page.route(`GET ${jobPath(id)}`, inTurn(
+            { [key]: 'Running', totalSeries: 2, processedSeries: 1 },
+            { [key]: status, totalSeries: 2, processedSeries: 2 }));
+        const refreshes = libraryRefreshes(page);
+        const healthChecks = providerHealth.length;
+
+        await choose(page, 'Refresh All External Metadata');
+        await advance(t, page);
+        assert.equal(toastState(page, id).status, 'running', ending);
+        assert.equal(libraryRefreshes(page), refreshes, ending);
+
+        await advance(t, page);
+        assert.deepEqual(
+            [toastState(page, id).status, toastState(page, id).statusClass, toastState(page, id).done],
+            [status.toLowerCase(), `metadata-refresh-toast-status--${status.toLowerCase()}`, true],
+            ending);
+        assert.equal(libraryRefreshes(page), refreshes + 1, `${ending} reloads the library`);
+        assert.equal(providerHealth.length, healthChecks + 1, `${ending} refreshes the provider health`);
+
+        await advance(t, page);
+        await advance(t, page);
+        assert.equal(polls(page, id), 2, `${ending} stops the polling`);
+    }
 });
 
 test('Match All Unmatched Series runs alongside another job, each in its own toast', async t => {

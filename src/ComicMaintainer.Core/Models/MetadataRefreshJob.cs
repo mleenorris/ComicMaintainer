@@ -1,8 +1,18 @@
+using System.Text.Json.Serialization;
+
 namespace ComicMaintainer.Core.Models;
 
 public class MetadataRefreshJob
 {
     public Guid JobId { get; set; }
+
+    /// <summary>
+    /// Job state, serialized by name ("Queued", "Running", "Completed", "Failed",
+    /// "Cancelled", "Interrupted") rather than as the enum's number, which the
+    /// API otherwise uses for enums: the UI's job poller compares the lower-cased
+    /// name with the terminal job statuses to know when to stop polling.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public JobStatus Status { get; set; }
     public List<string> Series { get; set; } = new();
     public int TotalSeries { get; set; }

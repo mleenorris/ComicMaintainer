@@ -13,6 +13,10 @@ public interface ISeriesMetadataRefreshJobService
     /// </summary>
     Task<Guid> StartAsync(IEnumerable<string> seriesTitles, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// A snapshot of the job, or <c>null</c> when it is unknown. Finished jobs are
+    /// forgotten after a while, so an old finished job is unknown too.
+    /// </summary>
     MetadataRefreshJob? GetJob(Guid jobId);
     IEnumerable<MetadataRefreshJob> GetAllJobs();
 }

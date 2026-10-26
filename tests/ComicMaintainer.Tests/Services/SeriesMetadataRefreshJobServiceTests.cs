@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 
 namespace ComicMaintainer.Tests.Services;
@@ -39,12 +40,14 @@ public class SeriesMetadataRefreshJobServiceTests
     private SeriesMetadataRefreshJobService CreateService(
         bool withBroadcaster = true,
         bool withFileStore = true,
-        bool withProcessor = true) => new(
+        bool withProcessor = true,
+        TimeProvider? timeProvider = null) => new(
             _cache.Object,
             _logger,
             withBroadcaster ? _broadcaster.Object : null,
             withFileStore ? _fileStore.Object : null,
-            withProcessor ? _processor.Object : null);
+            withProcessor ? _processor.Object : null,
+            timeProvider);
 
     private void SetupCleanup(int removed) =>
         _cache.Setup(c => c.CleanupStaleSiblingRecordsAsync(It.IsAny<CancellationToken>()))
@@ -575,6 +578,82 @@ public class SeriesMetadataRefreshJobServiceTests
         Assert.Equal(2, jobs.Count);
         Assert.Equal(new[] { first, second }.OrderBy(id => id), jobs.Select(j => j.JobId).OrderBy(id => id));
         Assert.All(jobs, j => Assert.Equal(JobStatus.Completed, j.Status));
+    }
+
+    private async Task<Guid> RunEmptyJobAsync(SeriesMetadataRefreshJobService service)
+    {
+        var jobId = await service.StartAsync(Array.Empty<string>());
+        await WaitForCleanupAsync(service, jobId);
+        return jobId;
+    }
+
+    [Fact]
+    public async Task StartAsync_ForgetsFinishedJobsOnceTheirRetentionHasPassed()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 5, 1, 12, 0, 0, TimeSpan.Zero));
+        var service = CreateService(withFileStore: false, withProcessor: false, timeProvider: clock);
+
+        var first = await RunEmptyJobAsync(service);
+        var finished = service.GetJob(first)!;
+        Assert.Equal(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc), finished.StartTime);
+        Assert.Equal(finished.StartTime, finished.EndTime);
+
+        clock.Advance(SeriesMetadataRefreshJobService.FinishedJobRetention - TimeSpan.FromSeconds(1));
+        var second = await RunEmptyJobAsync(service);
+        Assert.NotNull(service.GetJob(first));
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        var third = await RunEmptyJobAsync(service);
+        Assert.Null(service.GetJob(first));
+        Assert.Equal(new[] { second, third }.OrderBy(id => id), service.GetAllJobs().Select(j => j.JobId).OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task StartAsync_KeepsRunningJobsAndTimesTheRetentionFromTheEndOfAJob()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 5, 1, 12, 0, 0, TimeSpan.Zero));
+        var refreshStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var refreshResult = new TaskCompletionSource<SeriesMetadataCacheRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _cache.Setup(c => c.RefreshAsync("Alpha", It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                refreshStarted.TrySetResult();
+                return refreshResult.Task;
+            });
+        var service = CreateService(withFileStore: false, withProcessor: false, timeProvider: clock);
+        var running = await service.StartAsync(new[] { "Alpha" });
+        await refreshStarted.Task.WaitAsync(WaitTimeout);
+
+        clock.Advance(TimeSpan.FromDays(1));
+        await RunEmptyJobAsync(service);
+        Assert.Equal(JobStatus.Running, service.GetJob(running)!.Status);
+
+        refreshResult.SetResult(new SeriesMetadataCacheRecord { CanonicalTitle = "Alpha", LookupStatus = "success" });
+        Assert.Equal(JobStatus.Completed, (await WaitForCleanupAsync(service, running)).Status);
+        clock.Advance(SeriesMetadataRefreshJobService.FinishedJobRetention - TimeSpan.FromSeconds(1));
+        await RunEmptyJobAsync(service);
+        Assert.NotNull(service.GetJob(running));
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await RunEmptyJobAsync(service);
+        Assert.Null(service.GetJob(running));
+    }
+
+    [Fact]
+    public async Task StartAsync_KeepsAtMostMaxFinishedJobs_ForgettingTheOldestFirst()
+    {
+        var service = CreateService(withFileStore: false, withProcessor: false, timeProvider: new FakeTimeProvider());
+        var jobIds = new List<Guid>();
+        for (var i = 0; i <= SeriesMetadataRefreshJobService.MaxFinishedJobs; i++)
+        {
+            jobIds.Add(await RunEmptyJobAsync(service));
+        }
+        Assert.Equal(SeriesMetadataRefreshJobService.MaxFinishedJobs + 1, service.GetAllJobs().Count());
+
+        jobIds.Add(await RunEmptyJobAsync(service));
+
+        Assert.Null(service.GetJob(jobIds[0]));
+        Assert.Equal(jobIds.Skip(1).OrderBy(id => id), service.GetAllJobs().Select(j => j.JobId).OrderBy(id => id));
     }
 
     private sealed record BroadcastCall(Guid JobId, string Status, int Processed, int Total, int Success, int Errors);

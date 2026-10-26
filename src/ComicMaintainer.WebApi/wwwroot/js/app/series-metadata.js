@@ -363,8 +363,7 @@
                     }
                     const job = await response.json();
                     renderMetadataRefreshToast(jobId, label, job);
-                    const status = (job.status || '').toString().toLowerCase();
-                    if (isTerminalJobStatus(status)) {
+                    if (isTerminalJobStatus(metadataRefreshJobStatus(job))) {
                         metadataRefreshJobs.delete(jobId);
                         // Final library refresh + provider health update.
                         if (typeof loadSeriesLibrary === 'function') {
@@ -380,6 +379,13 @@
                 }
             };
             setTimeout(tick, intervalMs);
+        }
+
+        // The job's status as the lower-case name isTerminalJobStatus() and the
+        // toast's CSS modifiers use. The API sends the JobStatus name
+        // ("Running", "Completed", ...).
+        function metadataRefreshJobStatus(job) {
+            return (job.status || job.Status || 'queued').toString().toLowerCase();
         }
 
         function renderMetadataRefreshToast(jobId, label, job) {
@@ -401,7 +407,7 @@
             const processed = job.processedSeries || job.ProcessedSeries || 0;
             const successes = job.successes || job.Successes || 0;
             const failures = job.failures || job.Failures || 0;
-            const status = (job.status || job.Status || 'queued').toString().toLowerCase();
+            const status = metadataRefreshJobStatus(job);
             const current = job.currentSeries || job.CurrentSeries || '';
             const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
             renderHtml(toast, html`

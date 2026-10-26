@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
@@ -298,6 +299,28 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         var result = CreateController().GetJob(jobId);
 
         Assert.Same(job, Assert.IsType<OkObjectResult>(result.Result).Value);
+    }
+
+    [Theory]
+    [InlineData(JobStatus.Queued, "Queued")]
+    [InlineData(JobStatus.Running, "Running")]
+    [InlineData(JobStatus.Completed, "Completed")]
+    [InlineData(JobStatus.Failed, "Failed")]
+    [InlineData(JobStatus.Cancelled, "Cancelled")]
+    [InlineData(JobStatus.Interrupted, "Interrupted")]
+    public void GetJob_KnownJob_SendsTheStatusByName(JobStatus status, string expected)
+    {
+        // The UI's job poller lower-cases the status and stops on a terminal one, so it must
+        // be the name, not the enum's number that MVC's web JSON defaults write for enums.
+        var jobId = Guid.NewGuid();
+        _refreshJobs.Setup(r => r.GetJob(jobId)).Returns(new MetadataRefreshJob { JobId = jobId, Status = status, TotalSeries = 3 });
+
+        var value = Assert.IsType<OkObjectResult>(CreateController().GetJob(jobId).Result).Value;
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(expected, json.RootElement.GetProperty("status").GetString());
+        Assert.Equal(3, json.RootElement.GetProperty("totalSeries").GetInt32());
+        Assert.Equal(jobId, json.RootElement.GetProperty("jobId").GetGuid());
     }
 
     // ---- GetProviders -------------------------------------------------------------------

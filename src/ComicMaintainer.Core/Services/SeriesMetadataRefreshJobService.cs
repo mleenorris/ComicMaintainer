@@ -10,29 +10,44 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
 {
     private const int MaxRecentResults = 20;
 
+    /// <summary>How long a finished job can still be read with <see cref="GetJob"/>.</summary>
+    public static readonly TimeSpan FinishedJobRetention = TimeSpan.FromMinutes(30);
+
+    /// <summary>Finished jobs kept, however recent, before the oldest are forgotten.</summary>
+    public const int MaxFinishedJobs = 50;
+
     private readonly ISeriesMetadataCacheService _cache;
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly IFileStoreService? _fileStore;
     private readonly IComicProcessorService? _processor;
     private readonly ILogger<SeriesMetadataRefreshJobService> _logger;
+    private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<Guid, MetadataRefreshJob> _jobs = new();
+
+    // Finished jobs in the order they finished, so the oldest are evicted first.
+    private readonly Queue<(Guid JobId, DateTime EndedAt)> _finishedJobs = new();
+    private readonly object _finishedJobsSync = new();
 
     public SeriesMetadataRefreshJobService(
         ISeriesMetadataCacheService cache,
         ILogger<SeriesMetadataRefreshJobService> logger,
         IEventBroadcaster? eventBroadcaster = null,
         IFileStoreService? fileStore = null,
-        IComicProcessorService? processor = null)
+        IComicProcessorService? processor = null,
+        TimeProvider? timeProvider = null)
     {
         _cache = cache;
         _logger = logger;
         _eventBroadcaster = eventBroadcaster;
         _fileStore = fileStore;
         _processor = processor;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public Task<Guid> StartAsync(IEnumerable<string> seriesTitles, CancellationToken cancellationToken = default)
     {
+        EvictFinishedJobs();
+
         var titles = (seriesTitles ?? Enumerable.Empty<string>())
             .Where(t => !string.IsNullOrWhiteSpace(t))
             .Select(t => t.Trim())
@@ -46,7 +61,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
             Status = JobStatus.Queued,
             Series = titles,
             TotalSeries = titles.Count,
-            StartTime = DateTime.UtcNow
+            StartTime = _timeProvider.GetUtcNow().UtcDateTime
         };
         _jobs[jobId] = job;
 
@@ -59,6 +74,26 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
 
     public IEnumerable<MetadataRefreshJob> GetAllJobs()
         => _jobs.Values.Select(Clone).ToList();
+
+    /// <summary>
+    /// Forgets finished jobs older than <see cref="FinishedJobRetention"/> and the
+    /// oldest finished jobs beyond <see cref="MaxFinishedJobs"/>, so the job table
+    /// doesn't keep every job ever started. Running jobs are never evicted. Runs
+    /// whenever a job is started, the only way the table grows.
+    /// </summary>
+    private void EvictFinishedJobs()
+    {
+        var cutoff = _timeProvider.GetUtcNow().UtcDateTime - FinishedJobRetention;
+        lock (_finishedJobsSync)
+        {
+            while (_finishedJobs.TryPeek(out var oldest)
+                && (_finishedJobs.Count > MaxFinishedJobs || oldest.EndedAt <= cutoff))
+            {
+                _finishedJobs.Dequeue();
+                _jobs.TryRemove(oldest.JobId, out _);
+            }
+        }
+    }
 
     private async Task RunJobAsync(MetadataRefreshJob job, CancellationToken cancellationToken)
     {
@@ -149,7 +184,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                         SeriesTitle = title,
                         Status = outcomeStatus,
                         Source = outcomeSource,
-                        TimestampUtc = DateTime.UtcNow
+                        TimestampUtc = _timeProvider.GetUtcNow().UtcDateTime
                     });
                     while (job.RecentResults.Count > MaxRecentResults)
                     {
@@ -173,7 +208,11 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         }
         finally
         {
-            job.EndTime = DateTime.UtcNow;
+            lock (_finishedJobsSync)
+            {
+                job.EndTime = _timeProvider.GetUtcNow().UtcDateTime;
+                _finishedJobs.Enqueue((job.JobId, job.EndTime.Value));
+            }
             await BroadcastAsync(job);
         }
 

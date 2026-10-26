@@ -19,7 +19,7 @@
             try {
                 const response = await fetch(apiUrl('/api/metadata/refresh-all'), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -47,7 +47,7 @@
             try {
                 const response = await fetch(apiUrl('/api/metadata/match-unmatched'), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -447,6 +447,7 @@
             if (!seriesTitle) return;
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}`), {
+                    headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -740,7 +741,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/preferred-language`), {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin',
                     body: JSON.stringify({ language: value })
                 });
@@ -830,7 +831,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/name`), {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin',
                     body: JSON.stringify({ name: value })
                 });
@@ -909,7 +910,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin',
                     body: JSON.stringify(payload)
                 });
@@ -940,6 +941,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`), {
                     method: 'POST',
+                    headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -992,6 +994,7 @@
             renderHtml(container, html`<p style="color: var(--text-secondary);">Searching...</p>`);
             try {
                 const response = await fetch(apiUrl(`/api/metadata/search?query=${encodeURIComponent(query)}&limit=10`), {
+                    headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -1129,7 +1132,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/apply-match`), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin',
                     body: JSON.stringify({
                         canonicalTitle: result.canonical_title,
@@ -1184,6 +1187,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/external`), {
                     method: 'DELETE',
+                    headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
                 if (response.status === 404) {

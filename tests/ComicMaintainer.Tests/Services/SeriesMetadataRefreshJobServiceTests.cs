@@ -306,6 +306,38 @@ public class SeriesMetadataRefreshJobServiceTests
     }
 
     [Fact]
+    public async Task RunJob_FailsOutsideItsSeriesLookups_IsLoggedAndEndsAsFailedWithoutRetagging()
+    {
+        // A failed lookup only fails its series and a failed broadcast is swallowed, so what's
+        // left for the job-level catch is the job's own bookkeeping failing: here the clock,
+        // while timestamping Alpha's outcome. The job must stop and still end, as failed (end
+        // time, final broadcast, cleanup), instead of being left "running".
+        var clock = new ClockThatFailsOnce();
+        _cache.Setup(c => c.RefreshAsync("Alpha", It.IsAny<CancellationToken>()))
+            .Callback(() => clock.FailTheNextRead())
+            .ReturnsAsync(new SeriesMetadataCacheRecord { CanonicalTitle = "Alpha", LookupStatus = "success" });
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"));
+        var service = CreateService(timeProvider: clock);
+
+        var jobId = await service.StartAsync(new[] { "Alpha", "Beta" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        Assert.Equal(JobStatus.Failed, job.Status);
+        Assert.NotNull(job.EndTime);
+        Assert.Equal(0, job.ProcessedSeries);
+        Assert.Empty(job.RecentResults);
+        var logged = Assert.Single(_logger.Entries, e => e.Level >= LogLevel.Warning);
+        Assert.Equal(LogLevel.Error, logged.Level);
+        Assert.Equal($"Metadata refresh job {jobId} failed", logged.Message);
+        Assert.Equal("clock unavailable", Assert.IsType<InvalidOperationException>(logged.Exception).Message);
+        Assert.Equal(
+            new[] { ("running", 0), ("failed", 0) },
+            _broadcasts.Select(b => (b.Status, b.Processed)).ToArray());
+        _cache.Verify(c => c.RefreshAsync("Beta", It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task RunJob_TokenAlreadyCancelled_CancelsWithoutRefreshingOrRetagging()
     {
         using var cts = new CancellationTokenSource();
@@ -657,6 +689,19 @@ public class SeriesMetadataRefreshJobServiceTests
     }
 
     private sealed record BroadcastCall(Guid JobId, string Status, int Processed, int Total, int Success, int Errors);
+
+    /// <summary>The system clock, except that the first read after <see cref="FailTheNextRead"/> throws.</summary>
+    private sealed class ClockThatFailsOnce : TimeProvider
+    {
+        private int _failNextRead;
+
+        public void FailTheNextRead() => Volatile.Write(ref _failNextRead, 1);
+
+        public override DateTimeOffset GetUtcNow() =>
+            Interlocked.Exchange(ref _failNextRead, 0) == 1
+                ? throw new InvalidOperationException("clock unavailable")
+                : base.GetUtcNow();
+    }
 
     private sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
 

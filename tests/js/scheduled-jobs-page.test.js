@@ -3,8 +3,9 @@
 // The scheduled jobs page (#/jobs, js/app/scheduled-jobs.js) in the booted
 // SPA: opening it, the job cards, loading and its failures, the
 // administrator-only notice and the status refresh while the page is open.
-// Saving and Run now are in scheduled-jobs-actions.test.js, the metadata
-// audit findings in scheduled-jobs-findings.test.js.
+// Saving is in scheduled-jobs-save.test.js, Run now in
+// scheduled-jobs-run.test.js and the metadata audit findings in
+// scheduled-jobs-findings.test.js.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

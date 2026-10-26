@@ -8,6 +8,7 @@
 
 const assert = require('node:assert/strict');
 const { bootApp } = require('./app');
+const { respond } = require('./dom');
 
 // Job ids as JobsController formats Guids (the client only resumes UUIDs).
 const JOB_ID = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
@@ -78,6 +79,28 @@ function scheduledJob(overrides = {}) {
         optionsJson: null,
         ...overrides
     };
+}
+
+// NotFound() as an [ApiController] sends it: problem details without an error message.
+const NOT_FOUND_PROBLEM = {
+    type: 'https://tools.ietf.org/html/rfc9110#section-15.5.5',
+    title: 'Not Found',
+    status: 404,
+    traceId: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00'
+};
+
+// GlobalExceptionHandler's answer to an unhandled exception (production).
+const UNEXPECTED_ERROR = 'The request could not be completed. Quote the reference below when reporting this.';
+function unexpectedError(path, reference) {
+    return respond(500, {
+        type: 'https://datatracker.ietf.org/doc/html/rfc9110#section-15.6.1',
+        title: 'An unexpected error occurred.',
+        status: 500,
+        detail: UNEXPECTED_ERROR,
+        instance: path,
+        correlationId: reference,
+        error: UNEXPECTED_ERROR
+    }, { 'X-Correlation-Id': reference });
 }
 
 // The request loadActiveLibraryView(1, true) sends to reload the series library.
@@ -292,6 +315,14 @@ function selectIssue(page, filePath, checked = true) {
     page.input(checkbox, checked);
 }
 
+// bootJobsApp() on the jobs page (#/jobs) listing `jobs`: GET /api/scheduled-jobs
+// answers `server.jobs`, which a test replaces to change what the next load reads.
+async function openScheduledJobsPage(t, jobs, routes = {}) {
+    const server = { jobs };
+    const page = await bootJobsApp(t, { hash: '#/jobs', routes: { 'GET /api/scheduled-jobs': () => server.jobs, ...routes } });
+    return { page, server };
+}
+
 // A scheduled job's card on the jobs page (#/jobs).
 function jobCard(page, jobKey) {
     const card = page.$$('#scheduledJobsList [data-job-key]').find(element => element.dataset.jobKey === jobKey);
@@ -355,14 +386,14 @@ function editJobField(page, jobKey, field, value) {
     return input;
 }
 
-// Let the page's Date.now() run ahead of the wall clock: the scheduled jobs
-// page times out runs that never start by Date.now(), which mocked timers do
-// not move. advance(ms) moves the clock and the mocked timers together.
+// Freeze the page's Date.now() and move it only with the mocked timers: the
+// scheduled jobs page times out runs that never start by Date.now(), which
+// mocked timers do not move. advance(ms) moves both by `ms`.
 function pageClock(t, page) {
     const { Date } = page.window;
-    const wallClock = Date.now.bind(Date);
+    const start = Date.now();
     let offset = 0;
-    Date.now = () => wallClock() + offset;
+    Date.now = () => start + offset;
     return {
         async advance(ms) {
             offset += ms;
@@ -393,6 +424,9 @@ module.exports = {
     ISSUE_A,
     ISSUE_B,
     scheduledJob,
+    NOT_FOUND_PROBLEM,
+    UNEXPECTED_ERROR,
+    unexpectedError,
     LIBRARY_RELOAD,
     TRACKED_TITLE,
     trackedJob,
@@ -415,6 +449,7 @@ module.exports = {
     chooseIssueAction,
     startTrackedJob,
     selectIssue,
+    openScheduledJobsPage,
     jobCard,
     jobCardKeys,
     jobCardView,

@@ -136,6 +136,76 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         Assert.False(await service.FileExistsAsync(stray));
     }
 
+    [Theory]
+    [InlineData("library2")]
+    [InlineData("library-old")]
+    [InlineData("dupes2")]
+    public async Task AddFileAsync_SiblingFolderSharingARootsPrefix_IsRejected(string sibling)
+    {
+        // Regression: containment was a bare prefix test, so "<root>2/x.cbz" counted as being
+        // inside "<root>".
+        var stray = WriteComic(Directory.CreateDirectory(Path.Combine(_root, sibling)).FullName, "Stray.cbz");
+        var service = CreateService(duplicateDirectory: _dupes);
+
+        await service.AddFileAsync(stray);
+
+        Assert.False(await service.FileExistsAsync(stray));
+        Assert.Null(await FindRowAsync(stray));
+        Assert.True(_logger.Contains(LogLevel.Warning, "Attempted to add file outside allowed directories"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddFileAsync_LibraryConfiguredWithOrWithoutTrailingSeparator_TracksOnlyFilesInside(bool trailingSeparator)
+    {
+        var inside = WriteComic(_library, "Saga 016.cbz");
+        var sibling = WriteComic(Directory.CreateDirectory(_library + "2").FullName, "Saga 016.cbz");
+        var service = CreateService(watchedDirectory: trailingSeparator ? _library + Path.DirectorySeparatorChar : _library);
+
+        await service.AddFileAsync(inside);
+        await service.AddFileAsync(sibling);
+
+        Assert.Equal(inside, Assert.Single(await service.GetAllFilesAsync()).FilePath);
+        Assert.Equal(inside, Assert.Single(await AllRowsAsync()).FilePath);
+    }
+
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("", "/")]
+    [InlineData("/", "")]
+    [InlineData("/", "/")]
+    public async Task AddFileAsync_PathIsTheLibraryRootItself_IsNotReportedAsOutside(string rootSuffix, string pathSuffix)
+    {
+        var service = CreateService(watchedDirectory: _library + rootSuffix);
+
+        await service.AddFileAsync(_library + pathSuffix);
+
+        // The root is a directory, so there is nothing to track, but it is not outside the library.
+        Assert.Empty(await service.GetAllFilesAsync());
+        Assert.False(_logger.Has(LogLevel.Warning));
+    }
+
+    [Fact]
+    public async Task AddFileAsync_FolderDifferingFromTheLibraryOnlyInCase_IsRejectedOnCaseSensitiveFileSystems()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        // Regression: containment ignored case even where "/comics" and "/COMICS" are two
+        // different directories.
+        var stray = WriteComic(Directory.CreateDirectory(Path.Combine(_root, "LIBRARY")).FullName, "Stray.cbz");
+        var service = CreateService();
+
+        await service.AddFileAsync(stray);
+
+        Assert.False(await service.FileExistsAsync(stray));
+        Assert.Null(await FindRowAsync(stray));
+        Assert.True(_logger.Contains(LogLevel.Warning, "Attempted to add file outside allowed directories"));
+    }
+
     [Fact]
     public async Task AddFileAsync_StatusReadFails_KeepsMetadataFromSnapshot()
     {
@@ -730,11 +800,14 @@ public sealed class FileStoreServiceWritesTests : IDisposable
 
     // ---- helpers ------------------------------------------------------------------------
 
-    private FileStoreService CreateService(string duplicateDirectory = "", IEventBroadcaster? broadcaster = null) =>
+    private FileStoreService CreateService(
+        string duplicateDirectory = "",
+        IEventBroadcaster? broadcaster = null,
+        string? watchedDirectory = null) =>
         new(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
-                WatchedDirectory = _library,
+                WatchedDirectory = watchedDirectory ?? _library,
                 DuplicateDirectory = duplicateDirectory,
             }),
             _logger,

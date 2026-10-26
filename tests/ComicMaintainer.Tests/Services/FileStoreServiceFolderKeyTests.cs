@@ -48,4 +48,16 @@ public class FileStoreServiceFolderKeyTests
     {
         Assert.Equal(string.Empty, FileStoreService.ComputeFolderKeyFromDirectory("/library/Sa\0ga", "/library"));
     }
+
+    [Fact]
+    public void FolderKeys_FolderDifferingFromTheWatchedDirectoryOnlyInCase_FollowThePlatformsPathComparison()
+    {
+        // Regression: containment ignored case on every platform, so on a case-sensitive file
+        // system "/Library/Image" counted as inside "/library" and Path.GetRelativePath (which
+        // does honour case there) turned it into the key "../Library/Image".
+        var expected = OperatingSystem.IsWindows() ? "Image" : "/Library/Image";
+
+        Assert.Equal(expected, FileStoreService.ComputeFolderKey("/Library/Image/Saga 001.cbz", "/library"));
+        Assert.Equal(expected, FileStoreService.ComputeFolderKeyFromDirectory("/Library/Image", "/library"));
+    }
 }

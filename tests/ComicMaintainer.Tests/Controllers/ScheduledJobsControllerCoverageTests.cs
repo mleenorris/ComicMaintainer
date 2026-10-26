@@ -225,6 +225,34 @@ public sealed class ScheduledJobsControllerCoverageTests : IAsyncLifetime
         Assert.False(_backup.Executed.Task.IsCompleted);
     }
 
+    [Fact]
+    public async Task Run_WhileTheJobIsAlreadyRunning_IsAcceptedButReportsNothingWasQueued()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _audit.Gate = release.Task;
+        var completed = _hostedLogger.WaitFor("completed");
+        try
+        {
+            var first = await _controller.Run("metadata-audit", CancellationToken.None);
+            await _audit.Executed.Task.WaitAsync(SignalTimeout);
+
+            var second = await _controller.Run("metadata-audit", CancellationToken.None);
+
+            Assert.True(Json(Assert.IsType<AcceptedResult>(first.Result).Value).GetProperty("queued").GetBoolean());
+            var body = Json(Assert.IsType<AcceptedResult>(second.Result).Value);
+            Assert.Equal("metadata-audit", body.GetProperty("jobKey").GetString());
+            Assert.False(body.GetProperty("queued").GetBoolean());
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+
+        await completed.WaitAsync(SignalTimeout);
+        Assert.Equal(1, _audit.Runs);
+        Assert.Equal(ScheduledJobStatus.Success, (await _service.GetAsync("metadata-audit"))!.LastStatus);
+    }
+
     // ----- Metadata audit findings ---------------------------------------
 
     private async Task SeedFindingsAsync()
@@ -318,6 +346,8 @@ public sealed class ScheduledJobsControllerCoverageTests : IAsyncLifetime
 
     private sealed class FakeHandler : IScheduledJobHandler
     {
+        private int _runs;
+
         public FakeHandler(string key, string displayName, bool enabled, int interval, string? optionsJson = null)
         {
             JobKey = key;
@@ -333,10 +363,20 @@ public sealed class ScheduledJobsControllerCoverageTests : IAsyncLifetime
         /// <summary>Completed with the options the run was started with.</summary>
         public TaskCompletionSource<string?> Executed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
+        /// <summary>When set, runs wait for it before finishing.</summary>
+        public Task? Gate { get; set; }
+
+        public int Runs => Volatile.Read(ref _runs);
+
+        public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref _runs);
             Executed.TrySetResult(optionsJson);
-            return Task.FromResult("audited");
+            if (Gate is not null)
+            {
+                await Gate;
+            }
+            return "audited";
         }
     }
 

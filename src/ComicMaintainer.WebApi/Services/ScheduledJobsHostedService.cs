@@ -19,7 +19,8 @@ namespace ComicMaintainer.WebApi.Services;
 /// (enable/disable, change interval, change options) re-arm the timers
 /// without a process restart. Single-flight execution per job is enforced via
 /// a <see cref="SemaphoreSlim"/> dictionary; an external <see cref="RunNowAsync"/>
-/// invocation also flows through the same gate.
+/// invocation also flows through the same gate and reports whether it got
+/// through.
 /// </summary>
 public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
 {
@@ -96,8 +97,10 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// Trigger an immediate run of the named job. The run honors single-flight
-    /// (returns false when a run is already in progress for that key).
+    /// Trigger an immediate run of the named job in the background. The run
+    /// honors single-flight: returns false, without starting anything, when the
+    /// job is unknown or a run is already in progress for that key. Once
+    /// started, the run is not tied to <paramref name="cancellationToken"/>.
     /// </summary>
     public Task<bool> RunNowAsync(string jobKey, CancellationToken cancellationToken = default)
     {
@@ -106,9 +109,25 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         {
             return Task.FromResult(false);
         }
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled<bool>(cancellationToken);
+        }
+
+        // Claim the single-flight slot here so the caller learns whether its
+        // request actually started a run.
+        var slot = _slots.GetOrAdd(jobKey, _ => new JobSlot());
+        if (!slot.SingleFlight.Wait(0))
+        {
+            _logger.LogInformation(
+                "Skipping {JobKey} run because previous run still in progress", LoggingHelper.SanitizeForLog(jobKey));
+            return Task.FromResult(false);
+        }
+
         // Fire-and-forget: the API surface returns 202 and the client polls the
-        // job's last-status field. Failures are logged inside ExecuteJobAsync.
-        _ = Task.Run(() => ExecuteJobAsync(jobKey, fromTimer: false), cancellationToken);
+        // job's last-status field. Failures are logged inside RunClaimedJobAsync,
+        // which also releases the slot.
+        _ = Task.Run(() => RunClaimedJobAsync(handler, jobKey, slot), CancellationToken.None);
         return Task.FromResult(true);
     }
 
@@ -164,7 +183,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         }
 
         slot.Timer = new Timer(
-            _ => _ = ExecuteJobAsync(view.JobKey, fromTimer: true),
+            _ => _ = ExecuteJobAsync(view.JobKey),
             null,
             dueTime,
             interval);
@@ -174,7 +193,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             LoggingHelper.SanitizeForLog(view.JobKey), dueTime.TotalSeconds, view.IntervalMinutes);
     }
 
-    private async Task ExecuteJobAsync(string jobKey, bool fromTimer)
+    private async Task ExecuteJobAsync(string jobKey)
     {
         var handler = _service.GetHandler(jobKey);
         if (handler is null)
@@ -182,24 +201,31 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             return;
         }
         var slot = _slots.GetOrAdd(jobKey, _ => new JobSlot());
-        // jobKey has been validated against the registry above, but it
-        // originates from user input via the controller, so we still scrub
-        // it before sending to the structured logger to avoid log forging.
-        var safeKey = LoggingHelper.SanitizeForLog(jobKey);
 
         // Single-flight: skip overlapping runs rather than queue them up.
         if (!await slot.SingleFlight.WaitAsync(0))
         {
-            _logger.LogInformation("Skipping {JobKey} run because previous run still in progress", safeKey);
-            if (fromTimer)
-            {
-                _metrics?.RecordScheduledJobRun(handler.JobKey, "skipped", TimeSpan.Zero);
-                await _service.RecordCompletionAsync(jobKey, ScheduledJobStatus.Skipped,
-                    "Skipped: previous run still in progress.", durationMs: 0);
-            }
+            _logger.LogInformation(
+                "Skipping {JobKey} run because previous run still in progress", LoggingHelper.SanitizeForLog(jobKey));
+            _metrics?.RecordScheduledJobRun(handler.JobKey, "skipped", TimeSpan.Zero);
+            await _service.RecordCompletionAsync(jobKey, ScheduledJobStatus.Skipped,
+                "Skipped: previous run still in progress.", durationMs: 0);
             return;
         }
 
+        await RunClaimedJobAsync(handler, jobKey, slot);
+    }
+
+    /// <summary>
+    /// Runs the job whose single-flight slot the caller has already claimed and
+    /// releases the slot when done.
+    /// </summary>
+    private async Task RunClaimedJobAsync(IScheduledJobHandler handler, string jobKey, JobSlot slot)
+    {
+        // jobKey has been validated against the registry, but it originates
+        // from user input via the controller, so we still scrub it before
+        // sending to the structured logger to avoid log forging.
+        var safeKey = LoggingHelper.SanitizeForLog(jobKey);
         var token = _shutdownCts?.Token ?? CancellationToken.None;
         var stopwatch = Stopwatch.StartNew();
         try

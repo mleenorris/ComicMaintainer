@@ -179,29 +179,33 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RunNowAsync_WhileARunIsInProgress_SkipsTheOverlappingRun()
+    public async Task RunNowAsync_WhileARunIsInProgress_ReturnsFalseAndSkipsTheOverlappingRun()
     {
         SeedJob(enabled: false);
         var started = NewGate();
         var release = NewGate();
         var handler = new TestJobHandler(JobKey, async (_, _) =>
         {
-            started.TrySetResult();
-            await release.Task;
-            return "first run";
+            if (started.TrySetResult())
+            {
+                await release.Task;
+                return "first run";
+            }
+            return "second run";
         });
         var (hosted, _) = CreateHostedService(handler);
         await hosted.StartAsync(CancellationToken.None);
 
-        await hosted.RunNowAsync(JobKey);
+        var first = await hosted.RunNowAsync(JobKey);
         await started.Task.WaitAsync(SignalTimeout);
-        // The return value is deliberately not asserted: RunNowAsync is documented to return
-        // false while a run is in progress, but it always returns true (reported as a bug).
-        await hosted.RunNowAsync(JobKey.ToUpperInvariant());
-        await _logger.WaitForAsync(e => e.Message.Contains("Skipping", StringComparison.Ordinal));
+        var overlapping = await hosted.RunNowAsync(JobKey.ToUpperInvariant());
 
-        // A manual run that loses the race is dropped: it is not recorded as "Skipped"
-        // and the in-flight run keeps its Running status.
+        // The overlapping request is refused up front, so the caller learns it was not
+        // queued. It is not recorded as "Skipped": the in-flight run keeps its Running status.
+        Assert.True(first);
+        Assert.False(overlapping);
+        Assert.Contains(_logger.Entries, e => e.Message.Contains(
+            $"Skipping {JobKey.ToUpperInvariant()} run because previous run still in progress", StringComparison.Ordinal));
         Assert.Equal(nameof(ScheduledJobStatus.Running), LoadJob().LastStatus);
 
         release.TrySetResult();
@@ -209,6 +213,29 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
 
         Assert.Equal(1, handler.Invocations);
         Assert.Equal(nameof(ScheduledJobStatus.Success), LoadJob().LastStatus);
+
+        // The finished run released the job, so the next request runs it again.
+        Assert.True(await hosted.RunNowAsync(JobKey));
+        await _logger.WaitForAsync(e => e.Message.Contains("second run", StringComparison.Ordinal));
+        Assert.Equal(2, handler.Invocations);
+    }
+
+    [Fact]
+    public async Task RunNowAsync_WithAnAlreadyCancelledToken_StartsNothing()
+    {
+        SeedJob(enabled: false);
+        var handler = new TestJobHandler(JobKey, (_, _) => Task.FromResult("ran"));
+        var (hosted, _) = CreateHostedService(handler);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => hosted.RunNowAsync(JobKey, cancelled.Token));
+
+        // Nothing was started and nothing holds the job: the next request runs it.
+        Assert.Equal(nameof(ScheduledJobStatus.NeverRun), LoadJob().LastStatus);
+        Assert.True(await hosted.RunNowAsync(JobKey));
+        await _logger.WaitForAsync(e => e.Message.Contains("completed in", StringComparison.Ordinal));
+        Assert.Equal(1, handler.Invocations);
     }
 
     [Fact]

@@ -155,8 +155,36 @@ test('a status check still showing the previous run keeps following', async (t) 
     h.assertJobCard(page, 'library-scan', { run: 'Run now', runDisabled: false });
 });
 
+test('Run now while the job is already running follows that run instead', async (t) => {
+    // E.g. a timer run is in progress: the server accepts the request but queues nothing.
+    const before = h.scheduledJob({ lastStatus: 'Running', lastRunUtc: PREVIOUS_RUN, lastDurationMs: 4000 });
+    const { page, server } = await openJobsPage(t, [before], {
+        [`POST ${RUN}`]: respond(202, { jobKey: 'library-scan', queued: false })
+    });
+    h.assertJobCard(page, 'library-scan', { status: 'Running', run: 'Run now', runDisabled: false });
+
+    h.clickJobAction(page, 'library-scan', 'run');
+    await page.settle();
+    assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: 'Library Scan is already running.' }]);
+    h.assertJobCard(page, 'library-scan', { status: 'Running', run: 'Running…', runDisabled: true });
+
+    server.jobs = [{ ...before, lastStatus: 'Success', lastRunUtc: LAST_RUN, lastDurationMs: 61000, lastMessage: 'Scanned 120 files.' }];
+    await h.tick(t, page, 2000);
+    assert.deepEqual(h.takeMessages(page), [{ type: 'success', text: 'Library Scan finished: Scanned 120 files.' }]);
+    h.assertJobCard(page, 'library-scan', { status: 'Success', run: 'Run now', runDisabled: false });
+});
+
+test('an accepted Run now request without a body is taken as started', async (t) => {
+    const { page, server } = await openJobsPage(t, [h.scheduledJob()], { [`POST ${RUN}`]: respond(202) });
+    server.jobs = [h.scheduledJob({ lastStatus: 'Running' })];
+    h.clickJobAction(page, 'library-scan', 'run');
+    await page.settle();
+    assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: 'Library Scan started.' }]);
+    h.assertJobCard(page, 'library-scan', { status: 'Running', run: 'Running…', runDisabled: true });
+});
+
 test('a run that never starts is no longer followed after 30 seconds', async (t) => {
-    // E.g. the server dropped it because a timer run of the job was in progress.
+    // E.g. the server restarted before the accepted run began.
     const before = h.scheduledJob({ lastStatus: 'Success', lastRunUtc: PREVIOUS_RUN, lastDurationMs: 4000 });
     const { page } = await openJobsPage(t, [before], { [`POST ${RUN}`]: ACCEPTED });
     const clock = h.pageClock(t, page);

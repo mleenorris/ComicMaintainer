@@ -41,7 +41,7 @@
         const SCHEDULED_JOBS_IDLE_REFRESH_MS = 30000;
         const SCHEDULED_JOBS_ACTIVE_REFRESH_MS = 2000;
         // A requested run that has neither started nor finished by then (e.g.
-        // skipped because another run was in progress) stops being followed.
+        // the server restarted before it began) stops being followed.
         const SCHEDULED_JOB_RUN_START_TIMEOUT_MS = 30000;
 
         let scheduledJobs = [];
@@ -525,13 +525,15 @@
             scheduledJobRunRequests.set(jobKey, request);
             updateScheduledJobCard(job);
             try {
-                await fetchScheduledJobsApi(`/api/scheduled-jobs/${encodeURIComponent(jobKey)}/run`, { method: 'POST' });
+                const response = await fetchScheduledJobsApi(`/api/scheduled-jobs/${encodeURIComponent(jobKey)}/run`, { method: 'POST' });
+                const result = await response.json().catch(() => null);
                 if (scheduledJobRunRequests.get(jobKey) === request) {
                     request.pending = false;
                     request.requestedAt = Date.now();
                 }
                 updateScheduledJobCard(latestJob());
-                showMessage(`${name} started.`, 'info');
+                // queued: false means a run was already in progress; that run is followed instead.
+                showMessage(result && result.queued === false ? `${name} is already running.` : `${name} started.`, 'info');
                 loadScheduledJobs({ statusOnly: true });
             } catch (error) {
                 if (scheduledJobRunRequests.get(jobKey) === request) scheduledJobRunRequests.delete(jobKey);

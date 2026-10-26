@@ -86,6 +86,17 @@ reloads are only recorded (the page stays on its document); fragment changes
 are applied and fire `hashchange`. Scripts run with `file:` URLs so Node's
 coverage attributes them to the files under `wwwroot`.
 
+Tests of the signed-in SPA can use `bootApp()` from `tests/js/support/app.js`,
+which loads `index.html` at a route with a valid session token and the
+`/api/auth/*` answers already routed (`user: { canModifyLibrary: false,
+canAdminister: false }` boots a read-only user), then waits for the boot:
+
+```js
+const { bootApp } = require('./support/app');
+
+const page = await bootApp({ hash: '#/settings', routes: { 'GET /api/settings': { ... } } });
+```
+
 The standalone pages (`reader.html`, `login.html`, `setup.html`,
 `offline.html`) keep no inline code: each loads its own classic script from
 `wwwroot/js/pages/`, so `loadPage({ html: 'reader.html', url: ... })` runs

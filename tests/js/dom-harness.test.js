@@ -6,13 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadPage, respond, TEST_APP_VERSION } = require('./support/dom');
-
-function jwt(payload) {
-    const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
-    return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(payload)}.signature`;
-}
-
-const validToken = () => jwt({ sub: 'alice', exp: Math.floor(Date.now() / 1000) + 3600 });
+const { bootApp, validToken } = require('./support/app');
 
 test('an unauthenticated visitor is sent to the login page', async () => {
     const page = loadPage({
@@ -68,6 +62,21 @@ test('the SPA boots against the real index.html with a valid session', async () 
     assert.equal(page.fetchCalls.find(c => c.path === '/api/version').headers.authorization.startsWith('Bearer '), true);
     assert.equal(page.eventSources.length, 1);
     assert.deepEqual(page.serviceWorkerRegistrations.map(r => r.url), ['/sw.js']);
+});
+
+test('bootApp signs in at the requested route with the given capabilities', async () => {
+    const admin = await bootApp({ hash: '#/library' });
+    assert.equal(admin.window.location.hash, '#/library');
+    assert.equal(admin.document.body.classList.contains('user-read-only'), false);
+    assert.equal(admin.$('#scheduledJobsMenuItem').hidden, false);
+    assert.deepEqual(admin.navigations, []);
+    assert.deepEqual(admin.errors, []);
+
+    const readOnly = await bootApp({ user: { canModifyLibrary: false, canAdminister: false } });
+    assert.equal(readOnly.window.location.hash, '#/home');
+    assert.equal(readOnly.document.body.classList.contains('user-read-only'), true);
+    assert.equal(readOnly.$('#scheduledJobsMenuItem').hidden, true);
+    assert.equal(readOnly.$('#sidebarJobsBtn').hidden, true);
 });
 
 test('fetch routes match by method, path or pattern and record unmatched calls', async () => {

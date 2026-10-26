@@ -23,8 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Invalid AUTHELIA_TRUSTED_PROXIES entry '…'`. Hostnames are not supported. See
   [Choosing `AUTHELIA_TRUSTED_PROXIES`](docs/AUTHELIA.md#choosing-authelia_trusted_proxies).
   Deployments without Authelia are not affected.
+- **`GET /api/settings` no longer returns the ComicVine API key**, which any signed-in account,
+  read-only ones included, could read. Like the other secrets it is reported only as
+  `comicvine_api_key_set`. `PUT /api/settings/external-series-metadata` keeps the stored key
+  when `comicVineApiKey` is null or omitted (an empty string still clears it), and the settings
+  page gains a "Clear stored API key on save" box. API clients that read `comicvine_api_key`,
+  or that cleared the key by sending the settings back without it, must be updated.
 
 ### Added
+- **`GET /api/files/folders/files`** lists the files directly in the library root, which the
+  per-folder route cannot address (its folder segment would be empty). The Files view uses it
+  to show those files.
 - **Condensed sends can be delivered as AZW3.** Combining issues into one book used to pin
   the format picker to EPUB, so a Kindle could not receive a condensed book in its native
   format. The picker now stays available while a condense mode is selected and offers both
@@ -81,6 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never mixes series, and a send-series request keeps the order the series supplies.
 
 ### Changed
+- **`GET /api/metadata/refresh/job/{id}` returns the status by name** (`"Running"`,
+  `"Completed"`, …) instead of a number, and answers 404 for a job that finished more than 30
+  minutes ago or has 50 newer finished jobs.
+- **`GET /api/settings/filename-format` also returns `default`**, the built-in format.
 - **File sizes above 1 GB are shown in GB/TB.** They were previously reported in megabytes,
   so free disk space read as "84258.8 MB".
 - **Scheduled Jobs is a page of the app, like Settings and the Library.** It used to be a
@@ -96,6 +109,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
+  check for administration read the Authelia settings without that variable, so when the admin
+  groups were set only there (the documented way) every signed-in user who was not ReadOnly,
+  local accounts included, could change settings, reset the database and run scheduled jobs.
+  Only Admin users can now; if your users relied on this, add them to an admin group. The
+  documented `AUTHELIA_EMAIL_HEADER`, `AUTHELIA_NAME_HEADER` and `AUTHELIA_GROUPS_HEADER`
+  variables, which were ignored, are applied too.
+- **The comic reader is confined to the library like the rest of the API.** Its endpoints
+  accepted any path that merely started with the library's (`/comics2`, a folder differing in
+  case) and followed links out of it; reads now use the checked, link-resolved file.
+- **Links can no longer lead out of the library through other links.** A link to a file behind
+  a linked folder, a chain of links, or a `..` inside a link's target was checked as written
+  instead of where it really leads. Link loops, and paths that need more than 40 links, are
+  rejected.
+- **A folder whose name merely starts with the library's no longer counts as inside it.**
+  `/comics2` passed the containment checks for a library at `/comics`, and on Linux so did a
+  folder differing only in case. The checks now compare whole path segments, case-sensitively
+  except on Windows. An empty duplicate or config directory no longer rejects every request
+  that names a file.
+- **The tags and process endpoints check that files are in the library**
+  (`GET`/`PUT /api/files/{path}/tags`, `POST /api/files/{path}/process`,
+  `POST /api/files/process-batch`, `POST /api/files/tags`), like their sibling endpoints. The
+  batch endpoints reject the whole request when any path is outside it, instead of silently
+  skipping it.
+- **Removing metadata is confined to the library**, like writing it already was.
+- **Resetting the database cancels the jobs that are running**, which kept working on the data
+  being deleted; **Reset Filename Format** restores the default instead of "undefined"; and the
+  GitHub token setting is never written to the log.
+- **Editing or removing a comic's metadata no longer deletes its large pages.** Rewriting
+  ComicInfo.xml rebuilt the archive without any entry over 10 MB (or without a name) and then
+  replaced the original, so big pages were lost for good. Archives are now streamed entry by
+  entry with nothing skipped, and if an entry cannot be copied the original is left untouched.
+- **Two simultaneous updates of a newly added file no longer lose one of them**, and renaming a
+  file to its own path no longer deletes its database record.
+- **An unrelated error while replacing a file is retried** instead of being mistaken for a
+  cross-device move and falling back to a non-atomic copy.
+- **Comics whose names contain consecutive dots ("What If...?") are tracked and usable.** They
+  were left out of the library, and every API call naming one was rejected with 400, because
+  the path checks looked for the text `..` rather than a real parent-folder segment.
+- **A rename whose new name cannot be generated is reported as failed**, instead of as an
+  already correctly named file.
+- **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
+- **Cancel in the progress dialog works for password logins** (it sent no credentials), and
+  library-wide actions with nothing to do say so instead of tracking an empty job.
+- **Series metadata works for local (password) logins.** Refresh, match, search, rename,
+  aliases, preferred language, apply match and removing a match sent no session token and
+  failed with 401 unless signed in through Authelia.
+- **Uploading a series image from the series page works**; the request was sent as JSON instead
+  of a file upload and always rejected.
+- **Metadata refresh progress finishes.** The job status was sent as a number, so the progress
+  toast showed a digit, kept polling forever and never ran the final library refresh. Finished
+  refresh jobs are now forgotten after 30 minutes (or once 50 newer ones finished) instead of
+  being kept until restart.
+- **A failed live update no longer marks a metadata refresh as failed** or leaves it "running".
+- **Cancelling a metadata search is no longer reported as a provider failure or a "no match"**:
+  the provider health stays as it was, and the search endpoints stop logging an error and
+  answering 500 when the browser gives up on the request.
+- **First sign-in through Authelia works without `Remote-Email` or `Remote-Name`.** The account
+  gets `<username>@authelia.local` and the username as its name; before, sign-in failed with
+  401.
+- **About 1 in 54 first sign-ins through Authelia no longer fail with 401.** The unused password
+  generated for the new account sometimes lacked a digit, which the password policy requires.
+- **"Run now" on a scheduled job that is already running says so** instead of reporting that the
+  job started; `POST /api/scheduled-jobs/{key}/run` answers `queued: false`.
+- **Database backups and restores work when the connection string is a `file:` URI**; such
+  databases were mistaken for in-memory ones and never backed up.
+- **An error that happens soon after reconnecting is reported**; an error while offline used
+  up the reporting window.
+- **The Files view** shows its empty states instead of "Loading files..." forever, shows the
+  files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
+- **Offline use survives the browser restarting the service worker.** A restarted worker used
+  the wrong cache, and an update activated offline could delete the precache it had just built;
+  runtime caching could also evict the precached app files, and an uncached stylesheet or
+  script requested offline answered with nothing instead of a network error.
+- **The cover-write and email queues can be stopped and started again.** A restart left them
+  unable to accept work and could cancel the new run; nothing in the app restarts them today.
 - **Scheduled job run times are shown in local time.** The API reports them in UTC without a
   time-zone suffix, and the old Scheduled Jobs page read them as local time, so they were off
   by the browser's UTC offset. Saving a job also no longer drops options its card does not

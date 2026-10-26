@@ -655,7 +655,7 @@ public class SettingsController : ControllerBase
         {
             _logger.LogWarning("Database reset requested - this will delete all processing data");
 
-            // Get all active jobs and mark them as cancelled
+            // Cancel all active jobs before the data they work on is deleted.
             var activeJobs = _processorService.GetAllJobs()
                 .Where(j => j.Status == Core.Models.JobStatus.Running || j.Status == Core.Models.JobStatus.Queued)
                 .ToList();
@@ -663,8 +663,9 @@ public class SettingsController : ControllerBase
             foreach (var job in activeJobs)
             {
                 _logger.LogInformation("Cancelling job {JobId} due to reset", job.JobId);
-                // Note: Jobs are cancelled via CancellationToken in their execution contexts
-                // We can only mark them and they will stop on their own
+                // Cooperative: the job stops at its next cancellation check.
+                // CancelJob returns (and logs) false when the job already finished.
+                _processorService.CancelJob(job.JobId);
             }
 
             // Clear all database tables

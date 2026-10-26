@@ -795,6 +795,46 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
+    public async Task ResetDatabase_CancelsEveryActiveJobBeforeClearingTheTables()
+    {
+        await using var db = await SqliteDb.CreateAsync();
+        await using (var seed = await db.Factory.CreateDbContextAsync())
+        {
+            seed.ComicFiles.Add(new ComicFileEntity { FilePath = "/comics/a.cbz", FileName = "a.cbz", Directory = "/comics" });
+            await seed.SaveChangesAsync();
+        }
+
+        var running = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Running };
+        var queued = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Queued };
+        // Finishes between GetAllJobs and CancelJob, so there is nothing left to cancel.
+        var finishedMeanwhile = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Running };
+        var finished = new[] { JobStatus.Completed, JobStatus.Failed, JobStatus.Cancelled, JobStatus.Interrupted }
+            .Select(status => new ProcessingJob { JobId = Guid.NewGuid(), Status = status })
+            .ToList();
+        _processor.Setup(p => p.GetAllJobs()).Returns(new[] { running, queued, finishedMeanwhile }.Concat(finished).ToList());
+
+        var filesLeftWhenCancelled = new Dictionary<Guid, int>();
+        _processor.Setup(p => p.CancelJob(It.IsAny<Guid>()))
+            .Returns((Guid jobId) =>
+            {
+                using var check = db.Factory.CreateDbContext();
+                filesLeftWhenCancelled.Add(jobId, check.ComicFiles.Count());
+                return jobId != finishedMeanwhile.JobId;
+            });
+
+        var result = await CreateController(dbFactory: db.Factory).ResetDatabase();
+
+        Assert.True(OkJson(result).GetProperty("success").GetBoolean());
+        // Every queued or running job was cancelled while its files were still in the database.
+        Assert.Equal(
+            new Dictionary<Guid, int> { [running.JobId] = 1, [queued.JobId] = 1, [finishedMeanwhile.JobId] = 1 },
+            filesLeftWhenCancelled);
+        _processor.Verify(p => p.CancelJob(It.IsAny<Guid>()), Times.Exactly(3));
+        await using var after = await db.Factory.CreateDbContextAsync();
+        Assert.Equal(0, await after.ComicFiles.CountAsync());
+    }
+
+    [Fact]
     public async Task ResetDatabase_BroadcastFailure_IsLoggedButStillSucceeds()
     {
         await using var db = await SqliteDb.CreateAsync();

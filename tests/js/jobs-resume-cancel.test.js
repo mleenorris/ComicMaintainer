@@ -7,6 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
+const { validToken } = require('./support/app');
 const h = require('./support/jobs-helpers');
 
 const { JOB_ID, LIBRARY_RELOAD } = h;
@@ -254,5 +255,49 @@ test('Cancel asks first, then asks the server to cancel the tracked job', async 
     h.assertProgress(page, { title: 'Cancelled - Job was cancelled', cancelVisible: false, closeVisible: true });
     await h.tick(t, page, 2000);
     assert.equal(h.progressView(page).open, false);
+    assert.deepEqual(page.errors, []);
+});
+
+test('Cancel sends the session token, which the server requires to cancel the job', async (t) => {
+    const token = validToken();
+    const job = h.trackedJob();
+    // JobsController is [Authorize] and reads a local login's JWT only from
+    // the Authorization header: without it the cancel is answered 401.
+    const page = await h.bootJobsApp(t, {
+        localStorage: { jwt_token: token },
+        routes: {
+            ...job.routes,
+            [`POST ${JOB_PATH}/cancel`]: call => (call.headers.authorization === `Bearer ${token}` ? { success: true } : respond(401))
+        }
+    });
+    await h.startTrackedJob(page);
+
+    page.click('#progressCancelBtn');
+    await page.settle();
+    const cancels = h.requests(page, 'POST', `${JOB_PATH}/cancel`);
+    assert.equal(cancels.length, 1);
+    assert.equal(cancels[0].headers.authorization, `Bearer ${token}`);
+    assert.equal(h.loginRedirects(page), 0);
+    assert.deepEqual(h.takeMessages(page), [{ type: 'warning', text: 'Batch processing cancelled' }]);
+    h.assertProgress(page, { open: true, title: h.TRACKED_TITLE, cancelVisible: true, closeVisible: false });
+
+    h.jobUpdate(page, 'cancelled', h.progress(1, 4));
+    await h.tick(t, page, 500);
+    h.assertProgress(page, { title: 'Cancelled - Job was cancelled', cancelVisible: false, closeVisible: true });
+    await h.tick(t, page, 2000);
+    assert.equal(h.progressView(page).open, false);
+    assert.deepEqual(page.errors, []);
+});
+
+test('a cancel the server answers 401 sends the user to the login page', async (t) => {
+    const job = h.trackedJob();
+    const page = await h.bootJobsApp(t, { routes: { ...job.routes, [`POST ${JOB_PATH}/cancel`]: respond(401) } });
+    await h.startTrackedJob(page);
+
+    page.click('#progressCancelBtn');
+    await page.settle();
+    assert.equal(h.requests(page, 'POST', `${JOB_PATH}/cancel`).length, 1);
+    assert.equal(h.loginRedirects(page), 1);
+    assert.deepEqual(h.takeMessages(page), []);
     assert.deepEqual(page.errors, []);
 });

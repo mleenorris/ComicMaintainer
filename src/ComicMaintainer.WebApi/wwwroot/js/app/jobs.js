@@ -418,8 +418,11 @@
                 console.log(`[CANCEL] Cancelling job ${currentJobId}...`);
                 
                 const response = await fetch(apiUrl(`/api/jobs/${currentJobId}/cancel`), {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
+                
+                if (handleAuthError(response)) return;
                 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));

@@ -174,18 +174,137 @@ public sealed class LibraryPathValidatorTests : IDisposable
     }
 
     [Fact]
-    public void TryResolveWithin_KeepsACyclicLinkAsWrittenInsteadOfFailing()
+    public void TryResolveWithin_RejectsAFileLinkWhoseTargetGoesThroughADirectoryLinkOutsideTheRoot()
     {
-        // A link cycle cannot be resolved to any target, so it cannot point
-        // anywhere else either; the link path itself is checked.
+        // library/a.cbz -> library/esc/secret.cbz looks contained, but
+        // library/esc -> outside, so the file actually read is outside/secret.cbz.
+        File.WriteAllText(Path.Combine(_outside, "secret.cbz"), "x");
+        Directory.CreateSymbolicLink(Path.Combine(_library, "esc"), _outside);
+        var link = Path.Combine(_library, "a.cbz");
+        File.CreateSymbolicLink(link, Path.Combine(_library, "esc", "secret.cbz"));
+
+        Assert.False(LibraryPathValidator.TryResolveWithin(link, out var resolved, _library));
+        Assert.Equal(string.Empty, resolved);
+        Assert.Equal(Path.Combine(_realOutside, "secret.cbz"), LibraryPathValidator.ResolveRealPath(link));
+    }
+
+    [Fact]
+    public void TryResolveWithin_RejectsChainedRelativeLinksThatEndOutsideTheRoot()
+    {
+        File.WriteAllText(Path.Combine(_outside, "secret.cbz"), "x");
+        Directory.CreateSymbolicLink(Path.Combine(_library, "esc"), _outside);
+        File.CreateSymbolicLink(Path.Combine(_library, "c.cbz"), Path.Combine("esc", "secret.cbz"));
+        var link = Path.Combine(_library, "b.cbz");
+        File.CreateSymbolicLink(link, "c.cbz");
+        var pending = Path.Combine(_library, "pending.cbz");
+        File.CreateSymbolicLink(pending, Path.Combine("esc", "created-later.cbz"));
+
+        Assert.False(LibraryPathValidator.TryResolveWithin(link, out _, _library));
+        Assert.Equal(Path.Combine(_realOutside, "secret.cbz"), LibraryPathValidator.ResolveRealPath(link));
+        Assert.False(LibraryPathValidator.TryResolveWithin(pending, out _, _library));
+        Assert.Equal(Path.Combine(_realOutside, "created-later.cbz"), LibraryPathValidator.ResolveRealPath(pending));
+    }
+
+    [Fact]
+    public void TryResolveWithin_ResolvesDotDotInALinkTargetFromWhereTheLinkReallyLeads()
+    {
+        // The OS applies ".." after following library/deep -> outside/deep, so
+        // "deep/../secret.cbz" is outside/secret.cbz, not library/secret.cbz.
+        var deep = Path.Combine(_outside, "deep");
+        Directory.CreateDirectory(deep);
+        File.WriteAllText(Path.Combine(_outside, "secret.cbz"), "x");
+        Directory.CreateSymbolicLink(Path.Combine(_library, "deep"), deep);
+        var link = Path.Combine(_library, "d.cbz");
+        File.CreateSymbolicLink(link, Path.Combine("deep", "..", "secret.cbz"));
+
+        Assert.False(LibraryPathValidator.TryResolveWithin(link, out _, _library));
+        Assert.Equal(Path.Combine(_realOutside, "secret.cbz"), LibraryPathValidator.ResolveRealPath(link));
+    }
+
+    [Fact]
+    public void TryResolveWithin_ReturnsThePhysicalPathOfLinksThatStayInsideTheRoot()
+    {
+        var series = Path.Combine(_library, "Series");
+        var issue = Path.Combine(series, "Issue 001.cbz");
+        Directory.CreateDirectory(series);
+        Directory.CreateDirectory(Path.Combine(_library, "Other"));
+        File.WriteAllText(issue, "comic");
+        var expected = Path.Combine(_realLibrary, "Series", "Issue 001.cbz");
+        var fileSystemRoot = Path.GetPathRoot(issue)!;
+        Directory.CreateSymbolicLink(Path.Combine(_library, "series-link"), series);
+        var links = new[]
+        {
+            // Absolute target through an inside directory link.
+            (Path.Combine(_library, "absolute.cbz"), Path.Combine(_library, "series-link", "Issue 001.cbz")),
+            // Relative target with "." and ".." segments, chained to the link above.
+            (Path.Combine(_library, "Other", "relative.cbz"), Path.Combine("..", ".", "absolute.cbz")),
+            // ".." above the file system root stays at the root.
+            (Path.Combine(_library, "rooted.cbz"), Path.Combine(fileSystemRoot, "..", Path.GetRelativePath(fileSystemRoot, issue))),
+        };
+
+        foreach (var (link, target) in links)
+        {
+            File.CreateSymbolicLink(link, target);
+
+            Assert.True(LibraryPathValidator.TryResolveWithin(link, out var resolved, _library), link);
+            Assert.Equal(expected, resolved);
+        }
+    }
+
+    [Fact]
+    public void TryResolveWithin_FollowsUpToFortyLinksLikeTheOperatingSystem()
+    {
+        var issue = Path.Combine(_library, "Issue 001.cbz");
+        File.WriteAllText(issue, "comic");
+        File.CreateSymbolicLink(Path.Combine(_library, "hop0"), "Issue 001.cbz");
+        for (var hop = 1; hop <= 40; hop++)
+        {
+            File.CreateSymbolicLink(Path.Combine(_library, $"hop{hop}"), $"hop{hop - 1}");
+        }
+
+        Assert.True(LibraryPathValidator.TryResolveWithin(Path.Combine(_library, "hop39"), out var resolved, _library));
+        Assert.Equal(Path.Combine(_realLibrary, "Issue 001.cbz"), resolved);
+        Assert.False(LibraryPathValidator.TryResolveWithin(Path.Combine(_library, "hop40"), out resolved, _library));
+        Assert.Equal(string.Empty, resolved);
+    }
+
+    [Fact]
+    public void TryResolveWithin_RejectsLinkLoopsInsteadOfHanging()
+    {
+        // A loop never reaches a target, so the OS cannot open it either; it is
+        // rejected rather than checked "as written".
+        var self = Path.Combine(_library, "self");
+        File.CreateSymbolicLink(self, "self");
         var first = Path.Combine(_library, "loop-a");
         var second = Path.Combine(_library, "loop-b");
         File.CreateSymbolicLink(first, second);
         File.CreateSymbolicLink(second, first);
 
-        Assert.Equal(Path.Combine(_realLibrary, "loop-a"), LibraryPathValidator.ResolveRealPath(first));
-        Assert.True(LibraryPathValidator.TryResolveWithin(first, out var resolved, _library));
-        Assert.Equal(Path.Combine(_realLibrary, "loop-a"), resolved);
-        Assert.False(LibraryPathValidator.TryResolveWithin(first, out _, _outside));
+        foreach (var path in new[] { self, first, Path.Combine(first, "child.cbz") })
+        {
+            Assert.False(LibraryPathValidator.TryResolveWithin(path, out var resolved, _library), path);
+            Assert.Equal(string.Empty, resolved);
+            Assert.Throws<IOException>(() => LibraryPathValidator.ResolveRealPath(path));
+        }
+
+        // A looping allowed directory contains nothing.
+        Assert.False(LibraryPathValidator.TryResolveWithin(Path.Combine(_library, "Issue 001.cbz"), out _, first));
+    }
+
+    [Fact]
+    public void ResolveRealPath_LimitsTheTotalNumberOfLinksNotJustTheChainLength()
+    {
+        // Each fan-N link expands to fan-(N+1) twice: no chain is longer than 31
+        // links, but resolving fan-0 fully would follow about 2^31 of them.
+        Directory.CreateDirectory(Path.Combine(_library, "Series"));
+        Directory.CreateSymbolicLink(Path.Combine(_library, "fan-30"), "Series");
+        for (var level = 29; level >= 0; level--)
+        {
+            var next = $"fan-{level + 1}";
+            Directory.CreateSymbolicLink(Path.Combine(_library, $"fan-{level}"), Path.Combine(next, "..", next));
+        }
+
+        Assert.Throws<IOException>(() => LibraryPathValidator.ResolveRealPath(Path.Combine(_library, "fan-0")));
+        Assert.False(LibraryPathValidator.TryResolveWithin(Path.Combine(_library, "fan-0"), out _, _library));
     }
 }

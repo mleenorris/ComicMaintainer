@@ -44,15 +44,15 @@ public class IExternalSeriesMetadataServiceCoverageTests
     }
 
     [Fact]
-    public async Task SearchSeriesAsync_Default_DoesNotCompleteSuccessfully_WhenLookupFails()
+    public async Task SearchSeriesAsync_Default_SurfacesTheLookupFailure()
     {
+        var failure = new HttpRequestException("boom");
         IExternalSeriesMetadataService provider = new LookupOnlyProvider(
-            _ => Task.FromException<ExternalSeriesMetadata?>(new HttpRequestException("boom")));
+            _ => Task.FromException<ExternalSeriesMetadata?>(failure));
 
-        var search = provider.SearchSeriesAsync("Berserk");
+        var thrown = await Assert.ThrowsAsync<HttpRequestException>(() => provider.SearchSeriesAsync("Berserk"));
 
-        await Assert.ThrowsAnyAsync<Exception>(() => search);
-        Assert.False(search.IsCompletedSuccessfully);
+        Assert.Same(failure, thrown);
     }
 
     [Fact]

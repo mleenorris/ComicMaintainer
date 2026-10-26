@@ -16,19 +16,15 @@ public interface IExternalSeriesMetadataService
     /// <summary>
     /// Search the provider for multiple candidate series. Default implementation
     /// falls back to <see cref="LookupSeriesAsync"/> for providers that have not
-    /// been updated yet.
+    /// been updated yet; a failed lookup fails the search with the same exception.
     /// </summary>
-    Task<IReadOnlyList<ExternalSeriesMetadata>> SearchSeriesAsync(
+    async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchSeriesAsync(
         string query,
         int limit = 10,
         CancellationToken cancellationToken = default)
     {
-        return LookupSeriesAsync(query, cancellationToken)
-            .ContinueWith<IReadOnlyList<ExternalSeriesMetadata>>(
-                t => t.Result is null ? Array.Empty<ExternalSeriesMetadata>() : new[] { t.Result },
-                cancellationToken,
-                TaskContinuationOptions.OnlyOnRanToCompletion,
-                TaskScheduler.Default);
+        var result = await LookupSeriesAsync(query, cancellationToken);
+        return result is null ? Array.Empty<ExternalSeriesMetadata>() : new[] { result };
     }
 
     /// <summary>

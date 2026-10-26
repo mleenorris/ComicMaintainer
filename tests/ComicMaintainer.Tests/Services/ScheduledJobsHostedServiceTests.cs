@@ -195,12 +195,13 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
 
         await hosted.RunNowAsync(JobKey);
         await started.Task.WaitAsync(SignalTimeout);
-        var secondQueued = await hosted.RunNowAsync(JobKey.ToUpperInvariant());
+        // The return value is deliberately not asserted: RunNowAsync is documented to return
+        // false while a run is in progress, but it always returns true (reported as a bug).
+        await hosted.RunNowAsync(JobKey.ToUpperInvariant());
         await _logger.WaitForAsync(e => e.Message.Contains("Skipping", StringComparison.Ordinal));
 
-        // A manual run that loses the race is dropped silently: it is not recorded
-        // as "Skipped" and the in-flight run keeps its Running status.
-        Assert.True(secondQueued);
+        // A manual run that loses the race is dropped: it is not recorded as "Skipped"
+        // and the in-flight run keeps its Running status.
         Assert.Equal(nameof(ScheduledJobStatus.Running), LoadJob().LastStatus);
 
         release.TrySetResult();

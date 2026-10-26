@@ -285,6 +285,8 @@ public class AutheliaAuthenticationHandlerTests
 
         var result = await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", "bob")));
 
+        // Email and FullName are deliberately not asserted: the handler's "@authelia.local" and
+        // username fallbacks never apply because a missing header reads as "" (reported as a bug).
         Assert.True(result.Succeeded);
         Assert.NotNull(created);
         Assert.Equal("bob", created!.UserName);

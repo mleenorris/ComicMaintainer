@@ -106,6 +106,41 @@ test('nothing is reported or shown while the browser is offline', async () => {
     assert.ok(consoleLines(page, 'error').includes('Unhandled error: fetch failed while offline'));
 });
 
+test('a failure while offline does not use up the rate limit window: the next one online is reported', async t => {
+    const page = await bootReporting();
+    t.mock.timers.enable({ apis: ['Date'], now: 1700000000000 });
+    // The page has its own Date; make it follow the mocked clock.
+    page.window.Date.now = () => Date.now();
+    const setOnline = online => Object.defineProperty(page.window.navigator, 'onLine', { value: online, configurable: true });
+    const reported = () => reports(page).map(report => report.body.message);
+
+    setOnline(false);
+    throwInPage(page, "new Error('fetch failed while offline')");
+    await page.settle(2);
+    assert.deepEqual(reported(), []);
+    assert.deepEqual(messages(page), []);
+
+    // Back online a second later, a real failure is still reported and shown.
+    t.mock.timers.tick(1000);
+    setOnline(true);
+    throwInPage(page, "new Error('menu is undefined')");
+    await page.settle(2);
+    assert.deepEqual(reported(), ['menu is undefined']);
+    assert.deepEqual(messages(page).map(message => message.text), [BANNER]);
+
+    // The report that was sent opens the window.
+    t.mock.timers.tick(9999);
+    throwInPage(page, "new Error('too soon')");
+    await page.settle(2);
+    assert.deepEqual(reported(), ['menu is undefined']);
+
+    t.mock.timers.tick(1);
+    throwInPage(page, "new Error('next window')");
+    await page.settle(2);
+    assert.deepEqual(reported(), ['menu is undefined', 'next window']);
+    assert.equal(messages(page).length, 2);
+});
+
 test('a report that cannot be delivered is dropped silently', async () => {
     const page = await bootReporting({
         routes: { 'POST /api/client-errors': () => { throw new TypeError('Failed to fetch'); } }

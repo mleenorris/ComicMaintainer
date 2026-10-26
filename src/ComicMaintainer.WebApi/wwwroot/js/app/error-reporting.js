@@ -38,13 +38,15 @@
         function reportUnexpectedError(detail, kind, source) {
             console.error('Unhandled error:', detail);
 
-            const now = Date.now();
-            if (now - lastUnexpectedErrorReport < UNEXPECTED_ERROR_REPORT_INTERVAL_MS) return;
-            lastUnexpectedErrorReport = now;
-
             // Offline is already explained by its own banner; reporting the
             // resulting fetch failures on top of it is just noise.
             if (!navigator.onLine) return;
+
+            // Only a report that is actually sent opens the window, so a
+            // failure while offline cannot hide the first one after reconnecting.
+            const now = Date.now();
+            if (now - lastUnexpectedErrorReport < UNEXPECTED_ERROR_REPORT_INTERVAL_MS) return;
+            lastUnexpectedErrorReport = now;
 
             sendClientErrorReport(detail, kind, source);
 

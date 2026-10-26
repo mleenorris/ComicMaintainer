@@ -259,44 +259,14 @@ async function pressEscape(page) {
     await page.settle(2);
 }
 
-function resolve(page, target) {
+/**
+ * Dispatches a keydown for `key` on `target` (an element or a selector), as a
+ * key press on the focused element would. Returns the event, so a test can
+ * check whether the page called preventDefault().
+ */
+function pressKey(page, target, key) {
     const element = typeof target === 'string' ? page.$(target) : target;
     if (!element) throw new Error(`No element: ${target}`);
-    return element;
-}
-
-/**
- * Makes the inline on* attributes of `element` and its ancestors live.
- *
- * The app renders through renderHtml(), which clones <template> content.
- * jsdom only turns an on* attribute into a handler when the attribute is set
- * on a node of a scripted document, so cloned nodes keep inert handlers
- * (browsers compile them lazily and do run them). Re-setting each attribute
- * once the node is in the page makes jsdom compile it; doing it again is a
- * no-op, so this is safe on markup from index.html too.
- */
-function activateInlineHandlers(element) {
-    for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
-        for (const { name, value } of [...node.attributes]) {
-            if (name.startsWith('on')) node.setAttribute(name, value);
-        }
-    }
-    return element;
-}
-
-/** page.click() for rendered markup: runs the inline handlers a browser would. */
-function clickUi(page, target) {
-    return page.click(activateInlineHandlers(resolve(page, target)));
-}
-
-/** page.input() for rendered markup (runs inline oninput/onchange handlers). */
-function inputUi(page, target, value) {
-    return page.input(activateInlineHandlers(resolve(page, target)), value);
-}
-
-/** Dispatches a keydown for `key` on `target`, as a key press would. */
-function keydownUi(page, target, key) {
-    const element = activateInlineHandlers(resolve(page, target));
     const event = new page.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
     element.dispatchEvent(event);
     return event;
@@ -308,8 +278,8 @@ function clickIssueAction(page, filePath, label) {
     if (!card) throw new Error(`No issue card for ${filePath}`);
     const item = [...card.querySelectorAll('.dropdown-item')].find(button => button.textContent.trim() === label);
     if (!item) throw new Error(`No "${label}" action for ${filePath}`);
-    clickUi(page, card.querySelector('.dropdown-toggle'));
-    return clickUi(page, item);
+    page.click(card.querySelector('.dropdown-toggle'));
+    return page.click(item);
 }
 
 /** Clicks an item of the series page's Actions menu. */
@@ -318,8 +288,8 @@ function clickSeriesAction(page, label) {
     if (!menu) throw new Error('No series actions menu');
     const item = [...menu.querySelectorAll('.dropdown-item')].find(button => button.textContent.trim() === label);
     if (!item) throw new Error(`No "${label}" series action`);
-    clickUi(page, menu.querySelector('.dropdown-toggle'));
-    return clickUi(page, item);
+    page.click(menu.querySelector('.dropdown-toggle'));
+    return page.click(item);
 }
 
 /** Finds a button by its visible text inside `root` (an element or a selector). */
@@ -370,10 +340,7 @@ module.exports = {
     captureDownloads,
     isModalOpen,
     pressEscape,
-    activateInlineHandlers,
-    clickUi,
-    inputUi,
-    keydownUi,
+    pressKey,
     clickIssueAction,
     clickSeriesAction,
     buttonByText,

@@ -18,7 +18,6 @@ const {
     bootSeriesPage,
     messages,
     isModalOpen,
-    clickUi,
     clickIssueAction,
     clickSeriesAction,
     buttonByText,
@@ -250,14 +249,14 @@ test('a plan that does not fit warns, blocks Send and still offers every book as
     assert.equal(plan.more, 'Show more (2 left)');
     assert.ok(sendDisabled(page));
 
-    clickUi(page, buttonByText(page, '#emailCondenseBookListMore', 'Show more (2 left)'));
+    page.click(buttonByText(page, '#emailCondenseBookListMore', 'Show more (2 left)'));
     plan = planState(page);
     assert.equal(plan.books.length, 12);
     assert.equal(plan.books[11], 'Saga #56 · 1 issue · ~40.0 MB · too large to email');
     assert.equal(plan.more, null);
 
     // The oversized book at the end of the list can still be built.
-    clickUi(page, page.$$('#emailCondenseBookList button')[11]);
+    page.click(page.$$('#emailCondenseBookList button')[11]);
     await page.settle();
     assert.deepEqual(callsTo(page, 'POST', '/api/email/condense-builds').map(call => call.body),
         [{ ...SERIES_PLAN, bookIndex: 11 }]);

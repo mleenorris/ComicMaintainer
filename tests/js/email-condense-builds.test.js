@@ -20,7 +20,6 @@ const {
     recordMessages,
     captureDownloads,
     isModalOpen,
-    clickUi,
     clickSeriesAction,
     buttonByText,
     callsTo
@@ -68,7 +67,7 @@ async function tick(t, page, ms = POLL_MS) {
 async function startBuild(page) {
     page.input('#emailCondenseModeSelect', 'count');
     await page.settle();
-    clickUi(page, buttonByText(page, '#emailCondenseBookList', 'Download'));
+    page.click(buttonByText(page, '#emailCondenseBookList', 'Download'));
     await page.settle();
 }
 
@@ -259,7 +258,7 @@ test('a completed AZW3 build found later downloads on request under its own exte
     });
     const downloads = captureDownloads(page);
 
-    clickUi(page, rowButton(page, 'Saga Omnibus', 'Download'));
+    page.click(rowButton(page, 'Saga Omnibus', 'Download'));
     await page.settle();
 
     assert.deepEqual(downloads.map(entry => entry.download), ['Saga Omnibus.azw3']);
@@ -275,18 +274,18 @@ test('download failures are shown, and only those without a response are reporte
     const download = 'GET /api/email/condense-builds/b/download';
 
     page.route(download, respond(409, { error: 'The built book is no longer available; build it again.' }));
-    clickUi(page, rowButton(page, 'Saga', 'Download'));
+    page.click(rowButton(page, 'Saga', 'Download'));
     await page.settle();
     page.route(download, respond(500, 'Internal Server Error'));
-    clickUi(page, rowButton(page, 'Saga', 'Download'));
+    page.click(rowButton(page, 'Saga', 'Download'));
     await page.settle();
     page.route(download, respond(404, { message: 'Build not found' }));
-    clickUi(page, rowButton(page, 'Saga', 'Download'));
+    page.click(rowButton(page, 'Saga', 'Download'));
     await page.settle();
     assert.deepEqual(clientErrorReports(page), [], 'the server already knows about HTTP errors');
 
     page.route(download, () => { throw new TypeError('Failed to fetch'); });
-    clickUi(page, rowButton(page, 'Saga', 'Download'));
+    page.click(rowButton(page, 'Saga', 'Download'));
     await page.settle();
 
     assert.deepEqual(shown.slice(-4), [
@@ -304,7 +303,7 @@ test('download failures are shown, and only those without a response are reporte
     // An expired session goes to the login page instead.
     page.route(download, 401);
     const before = shown.length;
-    clickUi(page, rowButton(page, 'Saga', 'Download'));
+    page.click(rowButton(page, 'Saga', 'Download'));
     await page.settle();
     assert.ok(page.navigations.some(navigation => navigation.url.endsWith('/login.html')));
     assert.equal(shown.length, before);
@@ -321,12 +320,12 @@ test('a build that cannot be started is reported, unless the server answered', a
     });
 
     page.route('POST /api/email/condense-builds', () => { throw new TypeError('Failed to fetch'); });
-    clickUi(page, buttonByText(page, '#emailCondenseBookList', 'Download'));
+    page.click(buttonByText(page, '#emailCondenseBookList', 'Download'));
     await page.settle();
     assert.deepEqual(shown.at(-1), { text: 'Failed to start the condensed book build: Failed to fetch', type: 'error' });
 
     page.route('POST /api/email/condense-builds', respond(409, { error: 'A build of this book is already running.' }));
-    clickUi(page, buttonByText(page, '#emailCondenseBookList', 'Download'));
+    page.click(buttonByText(page, '#emailCondenseBookList', 'Download'));
     await page.settle();
     assert.deepEqual(shown.at(-1), {
         text: 'Failed to start the condensed book build: A build of this book is already running.',
@@ -373,7 +372,7 @@ test('Cancel stops a build at once and Dismiss forgets it', async t => {
     const opened = polls(page);
 
     page.route(BUILDS, { builds: [condenseBuild({ build_id: 'run/1', status: 'cancelled' })] });
-    clickUi(page, rowButton(page, 'Saga #1-5', 'Cancel'));
+    page.click(rowButton(page, 'Saga #1-5', 'Cancel'));
     await page.settle();
 
     assert.equal(callsTo(page, 'POST', '/api/email/condense-builds/run%2F1/cancel').length, 1);
@@ -383,7 +382,7 @@ test('Cancel stops a build at once and Dismiss forgets it', async t => {
     await tick(t, page);
     assert.equal(polls(page), opened + 1, 'the pending poll was replaced and nothing is left to follow');
 
-    clickUi(page, rowButton(page, 'Saga #1-5', 'Dismiss'));
+    page.click(rowButton(page, 'Saga #1-5', 'Dismiss'));
     await page.settle();
     assert.equal(callsTo(page, 'DELETE', '/api/email/condense-builds/run%2F1').length, 1);
     assert.equal(buildRows(page), null);
@@ -403,7 +402,7 @@ test('Cancel during a poll does not start a second one', async t => {
     await tick(t, page);
     assert.equal(polls(page), opened + 1);
 
-    clickUi(page, rowButton(page, 'Saga #1-5', 'Cancel'));
+    page.click(rowButton(page, 'Saga #1-5', 'Cancel'));
     await page.settle();
     assert.equal(callsTo(page, 'POST', '/api/email/condense-builds/build-1/cancel').length, 1);
     assert.equal(polls(page), opened + 1, 'the poll in flight reports the outcome');
@@ -427,9 +426,9 @@ test('cancel and dismiss failures leave the build in place', async t => {
         }
     });
 
-    clickUi(page, rowButton(page, 'Running book', 'Cancel'));
+    page.click(rowButton(page, 'Running book', 'Cancel'));
     await page.settle();
-    clickUi(page, rowButton(page, 'Failed book', 'Dismiss'));
+    page.click(rowButton(page, 'Failed book', 'Dismiss'));
     await page.settle();
 
     assert.deepEqual(shown.slice(-2), [
@@ -469,7 +468,7 @@ test('pressing Download again for the same book follows the one build the server
     await startBuild(page);
 
     page.route('POST /api/email/condense-builds', condenseBuild({ progress: { completed_pages: 12, total_pages: 40, percentage: 30 } }));
-    clickUi(page, buttonByText(page, '#emailCondenseBookList', 'Download'));
+    page.click(buttonByText(page, '#emailCondenseBookList', 'Download'));
     await page.settle();
 
     assert.equal(callsTo(page, 'POST', '/api/email/condense-builds').length, 2);

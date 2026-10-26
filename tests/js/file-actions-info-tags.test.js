@@ -14,7 +14,6 @@ const {
     messageTexts,
     isModalOpen,
     pressEscape,
-    inputUi,
     clickIssueAction,
     encodedPath,
     callsTo
@@ -331,7 +330,7 @@ test('Update on a selection opens the batch editor and sends the filled tags', a
     page.run('batchUpdateTags()');
     assert.ok(!isModalOpen(page, 'batchModal'), 'nothing selected');
 
-    for (const box of page.$$('.series-issue-card input[type="checkbox"]')) inputUi(page, box, true);
+    for (const box of page.$$('.series-issue-card input[type="checkbox"]')) page.input(box, true);
     assert.ok(!page.$('#batchUpdateBtn').disabled);
     page.click('#batchUpdateBtn');
     assert.ok(isModalOpen(page, 'batchModal'));

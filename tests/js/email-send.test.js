@@ -19,8 +19,6 @@ const {
     messageTexts,
     isModalOpen,
     pressEscape,
-    clickUi,
-    inputUi,
     clickIssueAction,
     clickSeriesAction,
     buttonByText,
@@ -138,7 +136,7 @@ test('Email Selected sends the checked issues and lists what the server skipped'
     });
     t.after(() => page.close());
     assert.ok(page.$('#emailSelectedItem').disabled);
-    for (const box of page.$$('.series-issue-card input[type="checkbox"]')) inputUi(page, box, true);
+    for (const box of page.$$('.series-issue-card input[type="checkbox"]')) page.input(box, true);
     assert.ok(!page.$('#emailSelectedItem').disabled);
 
     page.click('#emailSelectedItem');
@@ -273,7 +271,7 @@ test('without saved devices the dialog offers to add one', async t => {
     assert.deepEqual(messageTexts(page, 'error'), ['Choose an ereader device.']);
     assert.equal(callsTo(page, 'POST', '/api/email/send').length, 0);
 
-    clickUi(page, buttonByText(page, '#emailSendNoDevices', 'Add Ereader Device'));
+    page.click(buttonByText(page, '#emailSendNoDevices', 'Add Ereader Device'));
     await page.settle();
     assert.ok(!isModalOpen(page, 'emailSendModal'));
     assert.ok(isModalOpen(page, 'emailDevicesModal'));
@@ -357,10 +355,10 @@ test('Email Selected waits for a series that is still loading its files', async 
     });
     t.after(() => page.close());
 
-    clickUi(page, '.series-select-box[data-series-id="saga"]');
+    page.click('.series-select-box[data-series-id="saga"]');
     await page.settle();
     assert.ok(!page.$('#seriesSelectionEmailBtn').disabled);
-    clickUi(page, '.series-select-box[data-series-id="paper-girls"]');
+    page.click('.series-select-box[data-series-id="paper-girls"]');
     await page.settle();
     assert.ok(page.$('#seriesSelectionEmailBtn').disabled, 'the series toolbar waits for the files');
     assert.deepEqual(callsTo(page, 'GET', '/api/files/series/paper-girls/issues').map(call => call.query), [{ per_page: '-1', filter: 'all' }]);

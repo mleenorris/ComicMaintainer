@@ -19,7 +19,6 @@ const {
     messages,
     isModalOpen,
     pressEscape,
-    clickUi,
     clickSeriesAction,
     buttonByText,
     callsTo
@@ -275,7 +274,7 @@ test('Delete removes a subscription and reloads the list, or reports why it coul
     });
 
     page.route('GET /api/email/subscriptions', { subscriptions: [emailSubscription({ id: 8, deviceName: 'Kobo', deviceEmail: 'me@kobo.com' })] });
-    clickUi(page, page.$$('#emailSubscriptionsList button')[0]);
+    page.click(page.$$('#emailSubscriptionsList button')[0]);
     await page.settle();
 
     assert.equal(callsTo(page, 'DELETE', '/api/email/subscriptions/7').length, 1);
@@ -283,7 +282,7 @@ test('Delete removes a subscription and reloads the list, or reports why it coul
     assert.deepEqual(callsTo(page, 'GET', '/api/email/subscriptions').at(-1).query, { series: 'Saga' });
     assert.deepEqual(listRows(page, '#emailSubscriptionsList'), [['Kobo · EPUB · Enabled', 'me@kobo.com']]);
 
-    clickUi(page, page.$$('#emailSubscriptionsList button')[0]);
+    page.click(page.$$('#emailSubscriptionsList button')[0]);
     await page.settle();
     assert.equal(callsTo(page, 'DELETE', '/api/email/subscriptions/8').length, 1);
     assert.deepEqual(messages(page).at(-1), { text: 'Failed to delete auto-send subscription: Subscription not found', type: 'error' });

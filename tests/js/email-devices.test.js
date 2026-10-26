@@ -16,7 +16,6 @@ const {
     messageTexts,
     isModalOpen,
     pressEscape,
-    clickUi,
     buttonByText,
     answerConfirms,
     callsTo
@@ -209,10 +208,10 @@ test('Edit fills the form with the device and Save sends a PUT', async t => {
     t.after(() => page.close());
     await page.run('openEmailDevicesModal()');
 
-    clickUi(page, cardButton(page, 'Tablet', 'Edit'));
+    page.click(cardButton(page, 'Tablet', 'Edit'));
     assert.deepEqual(formValues(page), { id: '3', title: 'Edit Device', name: 'Tablet', address: 'tab@example.com', format: 'original' });
 
-    clickUi(page, cardButton(page, 'Kindle', 'Edit'));
+    page.click(cardButton(page, 'Kindle', 'Edit'));
     assert.deepEqual(formValues(page), { id: '1', title: 'Edit Device', name: 'Kindle', address: 'reader@kindle.com', format: 'azw3' });
 
     page.run("editEmailDevice('404')");
@@ -233,7 +232,7 @@ test('Clear empties the form', async t => {
     const page = await bootPage({ routes: { 'GET /api/email/devices': { devices: [KINDLE] } } });
     t.after(() => page.close());
     await page.run('openEmailDevicesModal()');
-    clickUi(page, cardButton(page, 'Kindle', 'Edit'));
+    page.click(cardButton(page, 'Kindle', 'Edit'));
 
     page.click(buttonByText(page, '#emailDevicesModal .modal-footer', 'Clear'));
 
@@ -255,12 +254,12 @@ test('Delete asks first and removes the device when confirmed', async t => {
     await page.run('openEmailDevicesModal()');
     answerConfirms(page, false, true);
 
-    clickUi(page, cardButton(page, 'Kindle', 'Delete'));
+    page.click(cardButton(page, 'Kindle', 'Delete'));
     await page.settle();
     assert.deepEqual(page.dialogs, [{ kind: 'confirm', message: 'Delete this ereader device?' }]);
     assert.equal(callsTo(page, 'DELETE', '/api/email/devices/1').length, 0);
 
-    clickUi(page, cardButton(page, 'Kindle', 'Delete'));
+    page.click(cardButton(page, 'Kindle', 'Delete'));
     await page.settle();
 
     assert.equal(callsTo(page, 'DELETE', '/api/email/devices/1').length, 1);
@@ -278,7 +277,7 @@ test('a failed delete is reported and the list is kept', async t => {
     t.after(() => page.close());
     await page.run('openEmailDevicesModal()');
 
-    clickUi(page, cardButton(page, 'Kindle', 'Delete'));
+    page.click(cardButton(page, 'Kindle', 'Delete'));
     await page.settle();
 
     assert.deepEqual(messageTexts(page, 'error'), ['Failed to delete ereader device: Device not found']);
@@ -295,16 +294,16 @@ test('Send Test Email queues a test message and reports failures', async t => {
     t.after(() => page.close());
     await page.run('openEmailDevicesModal()');
 
-    clickUi(page, cardButton(page, 'Kindle', 'Send Test Email'));
+    page.click(cardButton(page, 'Kindle', 'Send Test Email'));
     await page.settle();
     assert.deepEqual(messages(page), [{ text: 'Test email queued.', type: 'success' }]);
     assert.equal(callsTo(page, 'POST', '/api/email/devices/1/test').length, 1);
 
     page.route('POST /api/email/devices/1/test', respond(404, { error: 'Device not found' }));
-    clickUi(page, cardButton(page, 'Kindle', 'Send Test Email'));
+    page.click(cardButton(page, 'Kindle', 'Send Test Email'));
     await page.settle();
     page.route('POST /api/email/devices/1/test', () => { throw new TypeError('Failed to fetch'); });
-    clickUi(page, cardButton(page, 'Kindle', 'Send Test Email'));
+    page.click(cardButton(page, 'Kindle', 'Send Test Email'));
     await page.settle();
 
     assert.deepEqual(messageTexts(page, 'error'), [

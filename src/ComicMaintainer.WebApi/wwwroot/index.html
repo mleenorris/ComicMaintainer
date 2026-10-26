@@ -443,7 +443,7 @@
                                 <button class="action-dropdown-item" onclick="processAllFilesAsync(); closeAllActionDropdowns();">
                                     <svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Process All
                                 </button>
-                                <button class="action-dropdown-item" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
+                                <button class="action-dropdown-item" id="processUnmarkedItem" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
                                     <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> Process Unmarked
                                 </button>
                                 <button class="action-dropdown-item" id="processSelectedItem" onclick="processSelectedFilesAsync(); closeAllActionDropdowns();" disabled>
@@ -464,7 +464,7 @@
                             <button class="action-dropdown-item" onclick="renameAllFiles(); closeAllActionDropdowns();">
                                 <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename All
                             </button>
-                            <button class="action-dropdown-item" onclick="renameUnmarkedFiles(); closeAllActionDropdowns();">
+                            <button class="action-dropdown-item" id="renameUnmarkedItem" onclick="renameUnmarkedFiles(); closeAllActionDropdowns();">
                                 <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename Unmarked
                             </button>
                             <button class="action-dropdown-item" id="renameSelectedItem" onclick="renameSelectedFiles(); closeAllActionDropdowns();" disabled>
@@ -482,7 +482,7 @@
                             <button class="action-dropdown-item" onclick="normalizeAllFiles(); closeAllActionDropdowns();">
                                 <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize All
                             </button>
-                            <button class="action-dropdown-item" onclick="normalizeUnmarkedFiles(); closeAllActionDropdowns();">
+                            <button class="action-dropdown-item" id="normalizeUnmarkedItem" onclick="normalizeUnmarkedFiles(); closeAllActionDropdowns();">
                                 <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize Unmarked
                             </button>
                             <button class="action-dropdown-item" id="normalizeSelectedItem" onclick="normalizeSelectedFiles(); closeAllActionDropdowns();" disabled>

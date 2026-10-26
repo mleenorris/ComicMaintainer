@@ -388,23 +388,16 @@
         }
         
         function updateButtonVisibility() {
-            // Get all unmarked-related buttons
-            const processUnmarkedBtn = document.querySelector('button[onclick="processUnmarkedFiles()"]');
-            const renameUnmarkedBtn = document.querySelector('button[onclick="renameUnmarkedFiles()"]');
-            const normalizeUnmarkedBtn = document.querySelector('button[onclick="normalizeUnmarkedFiles()"]');
-            const filterUnmarkedBtn = document.getElementById('filterUnmarked');
-            const controlsWrapper = document.querySelector('.controls-wrapper');
-
-            // Show or hide buttons based on whether there are unmarked files
-            const hasUnmarkedFiles = unmarkedCount > 0;
-            const displayStyle = hasUnmarkedFiles ? '' : 'none';
-            
-            if (processUnmarkedBtn) processUnmarkedBtn.style.display = displayStyle;
-            if (renameUnmarkedBtn) renameUnmarkedBtn.style.display = displayStyle;
-            if (normalizeUnmarkedBtn) normalizeUnmarkedBtn.style.display = displayStyle;
-            if (filterUnmarkedBtn) filterUnmarkedBtn.style.display = displayStyle;
+            // The "… Unmarked" actions have nothing to act on without unmarked
+            // files, so they are shown only while there are some.
+            const displayStyle = unmarkedCount > 0 ? '' : 'none';
+            for (const id of ['processUnmarkedItem', 'renameUnmarkedItem', 'normalizeUnmarkedItem']) {
+                const item = document.getElementById(id);
+                if (item) item.style.display = displayStyle;
+            }
             // The processing controls are always available (inside the Library
             // Health dropdown); only their dropdown collapse state hides them.
+            const controlsWrapper = document.querySelector('.controls-wrapper');
             if (controlsWrapper) controlsWrapper.style.display = '';
         }
         

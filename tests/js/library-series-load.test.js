@@ -333,27 +333,31 @@ test('saved filter and sort preferences are restored and the list reloaded with 
     assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
 });
 
-test('the unmarked-file buttons follow the unmarked count of the last load', async () => {
+test('the "… Unmarked" actions show only while the library has unmarked files', async () => {
     let unmarked = 0;
     const all = makeSeriesList(1);
     const page = await bootLibrary({
         routes: { 'GET /api/files/series': call => seriesPages(all, { unmarked_count: unmarked })(call) }
     });
-    // Legacy markup these selectors were written for.
-    page.$('.controls-wrapper').insertAdjacentHTML('beforeend', `
-        <button id="legacyProcess" onclick="processUnmarkedFiles()">Process</button>
-        <button id="legacyRename" onclick="renameUnmarkedFiles()">Rename</button>
-        <button id="legacyNormalize" onclick="normalizeUnmarkedFiles()">Normalize</button>
-        <button id="filterUnmarked">Unmarked</button>`);
-    const displays = () => ['#legacyProcess', '#legacyRename', '#legacyNormalize', '#filterUnmarked']
-        .map(selector => page.$(selector).style.display);
+    const items = ['#processUnmarkedItem', '#renameUnmarkedItem', '#normalizeUnmarkedItem'];
+    const displays = () => items.map(selector => page.$(selector).style.display);
+    assert.deepEqual(items.map(selector => page.$(selector).textContent.trim()),
+        ['Process Unmarked', 'Rename Unmarked', 'Normalize Unmarked']);
 
     await page.run('loadSeriesLibrary()');
-    assert.deepEqual(displays(), ['none', 'none', 'none', 'none']);
+    assert.deepEqual(displays(), ['none', 'none', 'none']);
+    assert.equal(page.$('#processDropdown .action-dropdown-item').style.display, '', '"Process All" stays');
 
     unmarked = 4;
     await page.run('loadSeriesLibrary()');
-    assert.deepEqual(displays(), ['', '', '', '']);
+    assert.deepEqual(displays(), ['', '', '']);
     assert.equal(page.evaluate('unmarkedCount'), 4);
     assert.equal(page.$('.controls-wrapper').style.display, '');
+
+    // Without one of them, the others still follow the count.
+    page.$('#renameUnmarkedItem').remove();
+    unmarked = 0;
+    await page.run('loadSeriesLibrary()');
+    assert.deepEqual(['#processUnmarkedItem', '#normalizeUnmarkedItem'].map(selector => page.$(selector).style.display),
+        ['none', 'none']);
 });

@@ -73,6 +73,10 @@ public sealed class FilesControllerMetadataTests : IDisposable
 
     private string InRoot(params string[] parts) => Path.Combine(new[] { _root }.Concat(parts).ToArray());
 
+    // Path theories use "{root}" for the watched directory, e.g. to build a
+    // sibling directory that shares its name prefix.
+    private string Expand(string path) => path.Replace("{root}", _root);
+
     private string CreateRealFile(string name)
     {
         Directory.CreateDirectory(_root);
@@ -617,6 +621,18 @@ public sealed class FilesControllerMetadataTests : IDisposable
         _processor.VerifyNoOtherCalls();
     }
 
+    [Theory]
+    [InlineData(OutsidePath)]
+    [InlineData("../../etc/passwd")]
+    [InlineData("{root}-private/Saga 001.cbz")]
+    public async Task GetFileTags_PathOutsideWatchedDirectory_ReturnsBadRequest(string path)
+    {
+        var result = await CreateController().GetFileTags(Encode(Expand(path)));
+
+        AssertStatus(result.Result, 400, "File path is outside the allowed directory");
+        _processor.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task GetFileTags_ProcessorThrows_Returns500()
     {
@@ -637,6 +653,19 @@ public sealed class FilesControllerMetadataTests : IDisposable
 
         AssertStatus(result, 400, "Invalid file path");
         _processor.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(OutsidePath)]
+    [InlineData("../../etc/passwd")]
+    [InlineData("{root}-private/Saga 001.cbz")]
+    public async Task UpdateFileTags_PathOutsideWatchedDirectory_ReturnsBadRequest(string path)
+    {
+        var result = await CreateController(_broadcaster.Object).UpdateFileTags(Encode(Expand(path)), new ComicMetadata { Series = "Saga" });
+
+        AssertStatus(result, 400, "File path is outside the allowed directory");
+        _processor.VerifyNoOtherCalls();
+        _broadcaster.VerifyNoOtherCalls();
     }
 
     [Fact]

@@ -1126,7 +1126,7 @@ public class FilesControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        var filePaths = new List<string> { "/test/file1.cbz", "/test/file2.cbz" };
+        var filePaths = new List<string> { Path.Combine(Path.GetTempPath(), "file1.cbz"), Path.Combine(Path.GetTempPath(), "file2.cbz") };
         _mockProcessor.Setup(p => p.ProcessFilesAsync(filePaths, It.IsAny<CancellationToken>()))
             .ReturnsAsync(jobId);
 
@@ -1146,7 +1146,7 @@ public class FilesControllerTests
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
         // Act
-        var result = await _controller.ProcessBatch(new List<string> { "/test/file.cbz" });
+        var result = await _controller.ProcessBatch(new List<string> { Path.Combine(Path.GetTempPath(), "file.cbz") });
 
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
@@ -1170,7 +1170,7 @@ public class FilesControllerTests
     public async Task GetFileTags_WithValidPath_ReturnsOkWithMetadata()
     {
         // Arrange
-        var filePath = "/test/file.cbz";
+        var filePath = Path.Combine(Path.GetTempPath(), "file.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Batman", Issue = "12" };
         _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
@@ -1189,7 +1189,7 @@ public class FilesControllerTests
     public async Task GetFileTags_WhenMetadataNotFound_ReturnsNotFound()
     {
         // Arrange
-        var filePath = "/test/file.cbz";
+        var filePath = Path.Combine(Path.GetTempPath(), "file.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
             .ReturnsAsync((ComicMetadata?)null);
@@ -1205,7 +1205,7 @@ public class FilesControllerTests
     public async Task UpdateFileTags_WithValidData_ReturnsOk()
     {
         // Arrange
-        var filePath = "/test/file.cbz";
+        var filePath = Path.Combine(Path.GetTempPath(), "file.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Superman", Issue = "5" };
         _mockProcessor.Setup(p => p.UpdateMetadataAsync(filePath, metadata, It.IsAny<CancellationToken>()))
@@ -1222,7 +1222,7 @@ public class FilesControllerTests
     public async Task UpdateFileTags_WhenUpdateFails_ReturnsBadRequest()
     {
         // Arrange
-        var filePath = "/test/file.cbz";
+        var filePath = Path.Combine(Path.GetTempPath(), "file.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Superman" };
         _mockProcessor.Setup(p => p.UpdateMetadataAsync(filePath, metadata, It.IsAny<CancellationToken>()))
@@ -1240,7 +1240,7 @@ public class FilesControllerTests
     public async Task GetFileTags_WithPathContainingSlashes_ReturnsOkWithMetadata()
     {
         // Arrange
-        var filePath = "/comics/Marvel/Spider-Man/issue001.cbz";
+        var filePath = Path.Combine(Path.GetTempPath(), "comics", "Marvel", "Spider-Man", "issue001.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Spider-Man", Issue = "1" };
         _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
@@ -1260,7 +1260,7 @@ public class FilesControllerTests
     public async Task UpdateFileTags_WithPathContainingSlashes_ReturnsOk()
     {
         // Arrange
-        var filePath = "/comics/DC/Batman/issue050.cbz";
+        var filePath = Path.Combine(Path.GetTempPath(), "comics", "DC", "Batman", "issue050.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Batman", Issue = "50" };
         _mockProcessor.Setup(p => p.UpdateMetadataAsync(filePath, metadata, It.IsAny<CancellationToken>()))

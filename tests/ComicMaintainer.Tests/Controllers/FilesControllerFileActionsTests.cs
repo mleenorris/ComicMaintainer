@@ -41,6 +41,10 @@ public sealed class FilesControllerFileActionsTests
 
     private string InRoot(params string[] parts) => Path.Combine(new[] { _root }.Concat(parts).ToArray());
 
+    // Path theories use "{root}" for the watched directory, e.g. to build a
+    // sibling directory that shares its name prefix.
+    private string Expand(string path) => path.Replace("{root}", _root);
+
     private static string Encode(string path) =>
         Convert.ToBase64String(Encoding.UTF8.GetBytes(path)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
@@ -198,6 +202,43 @@ public sealed class FilesControllerFileActionsTests
         _processor.VerifyNoOtherCalls();
     }
 
+    // ---------------------------------------------------------------- ProcessBatch
+
+    [Theory]
+    [InlineData(OutsidePath)]
+    [InlineData("../../etc/passwd")]
+    [InlineData("{root}-private/Saga 001.cbz")]
+    public async Task ProcessBatch_PathOutsideWatchedDirectory_RejectsTheWholeBatch(string path)
+    {
+        var result = await _controller.ProcessBatch(new List<string> { InRoot("Saga 001.cbz"), Expand(path) });
+
+        AssertStatus(result.Result, 400, "One or more file paths are outside the allowed directory");
+        _processor.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ProcessBatch_LeavesBlankEntriesToTheBatchJob()
+    {
+        var jobId = Guid.NewGuid();
+        var files = new List<string> { InRoot("Saga 001.cbz"), "", "  ", null!, InRoot("Saga", "Saga 002.cbz") };
+        _processor.Setup(p => p.ProcessFilesAsync(files, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
+
+        var result = await _controller.ProcessBatch(files);
+
+        Assert.Equal(jobId, Prop(Assert.IsType<OkObjectResult>(result.Result).Value, "jobId"));
+    }
+
+    [Fact]
+    public async Task ProcessBatch_NullList_IsLeftToTheBatchJob()
+    {
+        var jobId = Guid.NewGuid();
+        _processor.Setup(p => p.ProcessFilesAsync(null!, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
+
+        var result = await _controller.ProcessBatch(null!);
+
+        Assert.Equal(jobId, Prop(Assert.IsType<OkObjectResult>(result.Result).Value, "jobId"));
+    }
+
     // ------------------------------------------------------------------ UpdateTags
 
     [Fact]
@@ -217,6 +258,22 @@ public sealed class FilesControllerFileActionsTests
         Assert.IsType<OkResult>(result);
         _processor.Verify(p => p.UpdateMetadataAsync(first, metadata, It.IsAny<CancellationToken>()), Times.Once);
         _processor.Verify(p => p.UpdateMetadataAsync(second, metadata, It.IsAny<CancellationToken>()), Times.Once);
+        _processor.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(OutsidePath)]
+    [InlineData("../../etc/passwd")]
+    [InlineData("{root}-private/Saga 001.cbz")]
+    public async Task UpdateTags_PathOutsideWatchedDirectory_RejectsTheWholeRequestAndUpdatesNothing(string path)
+    {
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { InRoot("Saga 001.cbz"), "", Expand(path) },
+            Metadata = new ComicMetadata { Series = "Saga" }
+        });
+
+        AssertStatus(result, 400, "One or more file paths are outside the allowed directory");
         _processor.VerifyNoOtherCalls();
     }
 
@@ -255,6 +312,30 @@ public sealed class FilesControllerFileActionsTests
 
         AssertStatus(result, 400, "Invalid file path");
         _processor.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(OutsidePath)]
+    [InlineData("../../etc/passwd")]
+    [InlineData("{root}-private/Saga 001.cbz")]
+    public async Task ProcessFileByEncodedPath_PathOutsideWatchedDirectory_ReturnsBadRequest(string path)
+    {
+        var result = await _controller.ProcessFileByEncodedPath(Encode(Expand(path)), forceReprocess: true);
+
+        AssertStatus(result, 400, "File path is outside the allowed directory");
+        _processor.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ProcessFileByEncodedPath_ProcessingFails_ReturnsBadRequest()
+    {
+        var path = InRoot("Saga", "Saga 001.cbz");
+        _processor.Setup(p => p.ProcessFileAsync(path, false, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var result = await _controller.ProcessFileByEncodedPath(Encode(path));
+
+        AssertStatus(result, 400, "Failed to process file");
+        _processor.Verify(p => p.ProcessFileAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

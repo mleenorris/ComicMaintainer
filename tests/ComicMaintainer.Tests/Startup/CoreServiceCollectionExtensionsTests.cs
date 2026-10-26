@@ -78,9 +78,55 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     [InlineData("Data Source=:MEMORY:;Pooling=True")]
     [InlineData("Data Source=library;Mode=Memory;Cache=Shared")]
     [InlineData("Data Source='file:library?mode=memory&cache=shared'")]
+    [InlineData("Data Source=file::memory:")]
+    [InlineData("Data Source='file::memory:?cache=shared'")]
+    [InlineData("Data Source=file:/config/library.db;Mode=Memory")]
+    [InlineData("Data Source='file:/config/library.db?mode=rwc&mode=memory'")]
+    [InlineData("Data Source='file:/config/library.db?vfs=memdb'")]
+    // Parameters are percent-decoded, and SQLite ignores the rest of a value after %00.
+    [InlineData("Data Source='file:/config/library.db?%6Dode=%6Demory'")]
+    [InlineData("Data Source='file:/config/library.db?mode=memory%00x'")]
+    // An empty file name is a temporary database that SQLite deletes when it is closed.
+    [InlineData("Data Source=file:")]
+    [InlineData("Data Source='file:?cache=shared'")]
+    [InlineData("Data Source=file://localhost")]
+    // SQLite refuses to open a URI naming another host.
+    [InlineData("Data Source=file://server/config/library.db")]
     public void ResolveSqliteDatabasePath_ReturnsNullWhenThereIsNoDatabaseFile(string? connectionString)
     {
         Assert.Null(ResolveSqliteDatabasePath(connectionString));
+    }
+
+    [Theory]
+    [InlineData("Data Source=file:/config/library.db?cache=shared", "/config/library.db")]
+    [InlineData("Data Source=file:///config/library.db", "/config/library.db")]
+    [InlineData("Data Source='file://localhost/config/library.db?mode=rwc#fragment';Pooling=True", "/config/library.db")]
+    [InlineData("Data Source=file:/config/my%20library%23%3F.db", "/config/my library#?.db")]
+    [InlineData("Data Source=file:data/library.db?cache=private", "data/library.db")]
+    [InlineData("Data Source=file:/config/library.db%00.bak", "/config/library.db")]
+    [InlineData("Data Source='file:/config/library.db?psow&cache=shared'", "/config/library.db")]
+    // As in SQLite, parameter names and values are case-sensitive and the last mode wins.
+    [InlineData("Data Source=file:/config/library.db?MODE=memory", "/config/library.db")]
+    [InlineData("Data Source='file:/config/library.db?mode=memory&mode=rwc'", "/config/library.db")]
+    // SQLite only reads a lower-case "file:" prefix as a URI.
+    [InlineData("Data Source=FILE:library.db", "FILE:library.db")]
+    public void ResolveSqliteDatabasePath_ResolvesAFileUriToTheFileItNames(string connectionString, string expectedPath)
+    {
+        Assert.Equal(Path.GetFullPath(expectedPath), ResolveSqliteDatabasePath(connectionString));
+    }
+
+    [Fact]
+    public void ResolveSqliteDatabasePath_ReadsAFileUriPathAsSqliteDoesOnThisSystem()
+    {
+        // SQLite on Windows drops the "/" in front of a drive letter; elsewhere "C:" is a directory name.
+        Assert.Equal(
+            OperatingSystem.IsWindows() ? @"C:\config\library.db" : "/C:/config/library.db",
+            ResolveSqliteDatabasePath("Data Source=file:///C:/config/library.db"));
+
+        // An empty authority followed by "//": the same file on Unix, a UNC path on Windows.
+        Assert.Equal(
+            Path.GetFullPath("//config/library.db"),
+            ResolveSqliteDatabasePath("Data Source=file:////config/library.db"));
     }
 
     [Fact]
@@ -160,6 +206,21 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
 
         Assert.DoesNotContain(services, d => d.ServiceType == typeof(IDatabaseBackupService));
         Assert.Contains(services, d => d.ServiceType == typeof(IDbContextFactory<ComicMaintainerDbContext>));
+    }
+
+    [Fact]
+    public void AddComicMaintainerData_WithAFileUriConnectionString_BacksUpTheFileItNames()
+    {
+        var databasePath = Path.Combine(_root, "library.db");
+
+        using var provider = BuildDataServices(
+            ("AppSettings:ConfigDirectory", _root),
+            ("ConnectionStrings:DefaultConnection", $"Data Source=file:{databasePath}?cache=shared"));
+
+        var backups = provider.GetRequiredService<IDatabaseBackupService>();
+        Assert.False(backups.IsRestorePending);
+        File.WriteAllText(DatabaseBackupService.GetPendingRestorePath(databasePath), string.Empty);
+        Assert.True(backups.IsRestorePending);
     }
 
     [Fact]

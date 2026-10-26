@@ -134,8 +134,9 @@ internal static class CoreServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Absolute path of the SQLite database file named by <paramref name="connectionString"/>,
-    /// or null for in-memory/shared-memory databases (which cannot be backed up).
+    /// Absolute path of the SQLite database file named by <paramref name="connectionString"/>
+    /// (a plain path or a <c>file:</c> URI), or null for in-memory/shared-memory and
+    /// temporary databases (which cannot be backed up).
     /// </summary>
     internal static string? ResolveSqliteDatabasePath(string? connectionString)
     {
@@ -146,15 +147,97 @@ internal static class CoreServiceCollectionExtensions
 
         var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString);
         var dataSource = builder.DataSource;
-        if (string.IsNullOrWhiteSpace(dataSource)
-            || builder.Mode == Microsoft.Data.Sqlite.SqliteOpenMode.Memory
-            || dataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase)
-            || dataSource.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        if (builder.Mode == Microsoft.Data.Sqlite.SqliteOpenMode.Memory)
         {
             return null;
         }
 
-        return Path.GetFullPath(dataSource);
+        // SQLite only reads a data source starting with a lower-case "file:" as a URI.
+        var path = dataSource.StartsWith("file:", StringComparison.Ordinal)
+            ? ResolveSqliteUriPath(dataSource)
+            : dataSource;
+        if (string.IsNullOrWhiteSpace(path)
+            || path.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return Path.GetFullPath(path);
+    }
+
+    /// <summary>
+    /// The file name in a SQLite URI filename (https://sqlite.org/uri.html), decoded the way
+    /// SQLite does; null when the URI opens an in-memory database or names another host.
+    /// </summary>
+    private static string? ResolveSqliteUriPath(string uri)
+    {
+        var rest = uri["file:".Length..];
+        if (rest.StartsWith("//", StringComparison.Ordinal))
+        {
+            // SQLite refuses any authority other than none or "localhost".
+            var pathStart = rest.IndexOf('/', 2);
+            var authority = pathStart < 0 ? rest[2..] : rest[2..pathStart];
+            if (authority.Length > 0 && authority != "localhost")
+            {
+                return null;
+            }
+
+            rest = pathStart < 0 ? string.Empty : rest[pathStart..];
+        }
+
+        var fragmentStart = rest.IndexOf('#');
+        if (fragmentStart >= 0)
+        {
+            rest = rest[..fragmentStart];
+        }
+
+        var queryStart = rest.IndexOf('?');
+        if (queryStart >= 0)
+        {
+            // Parameter names and values are case-sensitive; the last one of a name wins.
+            string? mode = null;
+            string? vfs = null;
+            foreach (var parameter in rest[(queryStart + 1)..].Split('&'))
+            {
+                var separator = parameter.IndexOf('=');
+                var name = DecodeSqliteUriPart(separator < 0 ? parameter : parameter[..separator]);
+                var value = separator < 0 ? string.Empty : DecodeSqliteUriPart(parameter[(separator + 1)..]);
+                if (name == "mode")
+                {
+                    mode = value;
+                }
+                else if (name == "vfs")
+                {
+                    vfs = value;
+                }
+            }
+
+            if (mode == "memory" || vfs == "memdb")
+            {
+                return null;
+            }
+
+            rest = rest[..queryStart];
+        }
+
+        var path = DecodeSqliteUriPart(rest);
+
+        // SQLite on Windows drops the "/" in front of a drive letter (file:///C:/data/library.db).
+        // On other systems a "/" in front of an absolute path is redundant ("//data" is "/data").
+        if (path.StartsWith('/') && Path.IsPathFullyQualified(path.AsSpan(1)))
+        {
+            path = path[1..];
+        }
+
+        return path;
+    }
+
+    // Percent-decodes like SQLite, which ignores the rest of a part after "%00".
+    private static string DecodeSqliteUriPart(string part)
+    {
+        var decoded = Uri.UnescapeDataString(part);
+        var end = decoded.IndexOf('\0');
+        return end < 0 ? decoded : decoded[..end];
     }
 
     public static IServiceCollection AddComicMaintainerCore(this IServiceCollection services)

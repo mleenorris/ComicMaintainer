@@ -57,6 +57,7 @@ documentation that still describes how the project works today.
 
 - [SECURITY_SCANNING.md](SECURITY_SCANNING.md) - Automated security scanning
 - [CODEQL_CONFIGURATION.md](CODEQL_CONFIGURATION.md) - CodeQL setup
+- [COPILOT_AUTOFIX.md](COPILOT_AUTOFIX.md) - Copilot fixes for CodeQL alerts
 - [SECURITY_TEST_PLAN.md](SECURITY_TEST_PLAN.md) - Security test plan
 
 For the main project documentation, see [README.md](../README.md) in the root directory. For

@@ -98,6 +98,13 @@ Both jobs use the `security-and-quality` query suite, which includes:
 3. Filter by branch, language, or severity as needed
 4. Click on individual alerts for detailed information and remediation guidance
 
+## Copilot Autofix
+
+Copilot suggests fixes for new alerts in pull requests, and the
+`codeql-agentic-autofix.yml` workflow assigns existing alerts on `dotnet` to
+Copilot, which opens draft pull requests with fixes. See
+[COPILOT_AUTOFIX.md](COPILOT_AUTOFIX.md) for setup and costs.
+
 ## Important Notes
 
 ### Requirements Files
@@ -127,3 +134,7 @@ When adding new branches with different languages:
 2. Configure appropriate language matrix
 3. Add conditional logic based on branch name
 4. Update this documentation
+
+If you rename or move the workflow, also update `workflows:` and
+`CODEQL_WORKFLOW_PATH` in `.github/workflows/codeql-agentic-autofix.yml`, which
+runs after each scan.

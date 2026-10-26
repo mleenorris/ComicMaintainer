@@ -49,8 +49,7 @@ test('the SPA boots against the real index.html with a valid session', async () 
     const page = loadPage({
         localStorage: { jwt_token: validToken(), username: 'alice' },
         routes: {
-            'GET /api/auth/status': { autheliaEnabled: false, isAuthenticated: false },
-            'GET /api/version': { version: '9.9.9' }
+            'GET /api/auth/status': { autheliaEnabled: false, isAuthenticated: false }
         }
     });
     await page.settle();
@@ -59,7 +58,7 @@ test('the SPA boots against the real index.html with a valid session', async () 
     assert.equal(page.window.location.hash, '#/home');
     assert.equal(page.$('#sidebarUsername').textContent, 'alice');
     assert.ok(page.fetchCalls.some(c => c.path === '/api/files/series'));
-    assert.equal(page.fetchCalls.find(c => c.path === '/api/version').headers.authorization.startsWith('Bearer '), true);
+    assert.equal(page.fetchCalls.find(c => c.path === '/api/auth/user').headers.authorization.startsWith('Bearer '), true);
     assert.equal(page.eventSources.length, 1);
     assert.deepEqual(page.serviceWorkerRegistrations.map(r => r.url), ['/sw.js']);
 });

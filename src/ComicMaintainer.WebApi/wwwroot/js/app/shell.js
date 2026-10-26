@@ -1,4 +1,4 @@
-        // ComicMaintainer SPA — app shell: library health dashboard, mobile view, viewport resize, header search, theme, capabilities, version, connectivity.
+        // ComicMaintainer SPA — app shell: library health dashboard, mobile view, viewport resize, header search, theme, capabilities, connectivity.
         //
         // Classic (non-module) script: its top-level declarations are globals
         // shared with the other app scripts and with inline onclick handlers.
@@ -466,26 +466,6 @@
             // Scheduled jobs are administrator-only (see the entry points
             // above); anyone else who reaches the page gets a notice instead.
             applyScheduledJobsCapabilities();
-        }
-
-        // Fetch and display version
-        async function loadVersion() {
-            try {
-                const response = await fetch(apiUrl('/api/version'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                const versionElement = document.getElementById('appVersion');
-                if (versionElement && data.version) {
-                    versionElement.textContent = `v${data.version}`;
-                }
-            } catch (error) {
-                console.error('Error loading version:', error);
-            }
         }
 
         // =================================================================

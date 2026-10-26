@@ -71,7 +71,7 @@ test('booting with an expired token clears the session and goes to the login pag
     for (const key of ['jwt_token', 'username', 'authelia_authenticated', 'client_cache_session_id']) {
         assert.equal(page.window.localStorage.getItem(key), null, key);
     }
-    assert.equal(requests(page, 'GET', '/api/version').length, 0);
+    assert.equal(requests(page, 'GET', '/api/auth/user').length, 0);
 });
 
 test('an Authelia session is remembered and uses cookies plus an SSE token instead of a JWT', async () => {
@@ -89,9 +89,9 @@ test('an Authelia session is remembered and uses cookies plus an SSE token inste
     assert.equal(page.$('#sidebarUsername').textContent, 'bob');
     assert.equal(page.$('#sidebarUser').hidden, false);
 
-    const version = requests(page, 'GET', '/api/version')[0];
-    assert.equal(version.headers.authorization, undefined);
-    assert.equal(version.headers['x-client-session'], storage.getItem('client_cache_session_id'));
+    const user = requests(page, 'GET', '/api/auth/user')[0];
+    assert.equal(user.headers.authorization, undefined);
+    assert.equal(user.headers['x-client-session'], storage.getItem('client_cache_session_id'));
 
     const tokenCall = requests(page, 'GET', '/api/auth/sse-token')[0];
     assert.equal(tokenCall.init.credentials, 'include');

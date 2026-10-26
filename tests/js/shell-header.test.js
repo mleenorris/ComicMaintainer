@@ -1,7 +1,7 @@
 'use strict';
 
 // js/app/shell.js — header search, theme, the signed-in user's capabilities,
-// the version label, the offline banner and the active-job lookup.
+// the offline banner and the active-job lookup.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -213,28 +213,16 @@ test('applying capabilities tolerates missing markup', async () => {
     assert.deepEqual(page.errors, []);
 });
 
-test('the version label shows the server version when the page has one', async () => {
-    const withLabel = window => window.document.body.insertAdjacentHTML('afterbegin', '<span id="appVersion"></span>');
+test('the boot does not fetch the version, which only the About dialog shows', async () => {
+    const page = await boot();
 
-    const page = await boot({ beforeScripts: withLabel });
-    assert.equal(page.$('#appVersion').textContent, 'v9.8.7');
-    assert.equal(requests(page, 'GET', '/api/version').length, 1);
-
-    const noVersion = await boot({ beforeScripts: withLabel, routes: { 'GET /api/version': { platform: 'linux' } } });
-    assert.equal(noVersion.$('#appVersion').textContent, '');
-
-    const failed = await boot({ beforeScripts: withLabel, routes: { 'GET /api/version': 500 } });
-    assert.equal(failed.$('#appVersion').textContent, '');
-    assert.ok(consoleLines(failed, 'error').includes('Error loading version: HTTP error! status: 500'));
-
-    const expired = await boot({ beforeScripts: withLabel, routes: { 'GET /api/version': 401 } });
-    assert.ok(wentToLogin(expired));
-
-    // index.html itself has no #appVersion element (the About page shows the
-    // version instead), so loading it changes nothing.
-    const production = await boot();
-    assert.equal(production.$('#appVersion'), null);
-    assert.ok(!consoleLines(production, 'error').some(line => line.startsWith('Error loading version')));
+    // index.html has no header version label (the About dialog's #aboutVersion
+    // is filled by openAboutModal(), see settings-maintenance.test.js).
+    assert.equal(page.$('#appVersion'), null);
+    assert.ok(page.$('#aboutModal #aboutVersion'));
+    assert.equal(requests(page, 'GET', '/api/version').length, 0);
+    assert.ok(!consoleLines(page, 'error').some(line => line.startsWith('Error loading version')));
+    assert.deepEqual(page.errors, []);
 });
 
 function setOnline(page, online) {

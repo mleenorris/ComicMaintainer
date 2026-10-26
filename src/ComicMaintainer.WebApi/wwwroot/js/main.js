@@ -44,7 +44,6 @@
                 }
             }
             
-            loadVersion();
             loadCurrentUser();
             
             // Initialize SSE connection for real-time updates

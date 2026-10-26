@@ -415,6 +415,36 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_SameOldAndNewPath_IsANoOpThatKeepsTheEntry()
+    {
+        // Regression: the destination lookup found the source row itself, so the "merge onto
+        // the existing destination row" path deleted the only row for the file.
+        var path = WriteComic(_library, "Saga 017.cbz");
+        await SeedAsync(Row(path, renamed: true, normalized: true, configure: e =>
+        {
+            e.Metadata = new ComicMetadata { Series = "Saga", Issue = "17" };
+            e.CreatedAt = Jan2020;
+        }));
+        var service = CreateService(broadcaster: _broadcaster.Object);
+        await service.InitializeFromDatabaseAsync();
+        var before = service.ChangeVersion;
+
+        await service.UpdateFilePathAsync(path, path);
+
+        Assert.Equal(before, service.ChangeVersion);
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Never);
+        var row = Assert.Single(await AllRowsAsync());
+        Assert.Equal(path, row.FilePath);
+        Assert.True(row.IsRenamed && row.IsNormalized);
+        Assert.Equal("Saga", row.Metadata?.Series);
+        Assert.Equal(Jan2020, row.CreatedAt);
+        var file = Assert.Single(await service.GetAllFilesAsync());
+        Assert.Equal(path, file.FilePath);
+        Assert.True(file.IsProcessed);
+        Assert.False(_logger.Has(LogLevel.Error));
+    }
+
+    [Fact]
     public async Task UpdateFilePathAsync_DuplicateFile_MovesDuplicateMarkerToNewPath()
     {
         var oldPath = Path.Combine(_library, "Dupe.cbz");

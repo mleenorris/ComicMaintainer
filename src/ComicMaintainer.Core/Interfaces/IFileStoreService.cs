@@ -130,7 +130,8 @@ public interface IFileStoreService
     /// <summary>
     /// Update the tracked file path from oldPath to newPath, preserving all processing state
     /// (IsRenamed, IsNormalized, IsDuplicate, IsRead, Metadata).  Used when a file is renamed
-    /// so the database record follows the file without resetting its status.
+    /// so the database record follows the file without resetting its status. Identical paths
+    /// are a no-op.
     /// </summary>
     /// <param name="broadcastUpdate">
     /// When true (default) a file list update event is broadcast after a successful update.

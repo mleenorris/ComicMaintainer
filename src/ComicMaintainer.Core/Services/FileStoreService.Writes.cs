@@ -230,6 +230,14 @@ public partial class FileStoreService
             return;
         }
 
+        // Moving a file onto itself changes nothing. Without this guard the new-path lookup
+        // below finds the old-path row itself and the merge path deletes it.
+        if (string.Equals(oldPath, newPath, StringComparison.Ordinal))
+        {
+            _logger.LogDebug("Old and new paths are identical, nothing to update: {FilePath}", SanitizeForLogging(newPath));
+            return;
+        }
+
         // Compute file metadata once and reuse in both the in-memory and database updates.
         var fileInfo = File.Exists(newPath) ? new FileInfo(newPath) : null;
 

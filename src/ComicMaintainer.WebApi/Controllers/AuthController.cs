@@ -136,7 +136,7 @@ public class AuthController : ControllerBase
         if (!await _authService.IsSetupRequiredAsync()
             && !(await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister)).Succeeded)
         {
-            return Forbid();
+            return User.Identity?.IsAuthenticated == true ? Forbid() : Challenge();
         }
 
         // Validate input

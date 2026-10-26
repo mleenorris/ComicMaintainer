@@ -310,9 +310,31 @@ public class AuthControllerTests
     }
 
     [Fact]
-    public async Task SetupAdmin_WhenSetupIsCompleteAndUserIsNotAdmin_ReturnsForbid()
+    public async Task SetupAdmin_WhenSetupIsCompleteAndUserIsUnauthenticated_ReturnsChallenge()
     {
         SetupEmptyUserContext();
+        _mockAuthService
+            .Setup(s => s.IsSetupRequiredAsync())
+            .ReturnsAsync(false);
+        _mockAuthorizationService
+            .Setup(s => s.AuthorizeAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<object?>(),
+                AuthorizationPolicies.CanAdminister))
+            .ReturnsAsync(AuthorizationResult.Failed());
+
+        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null));
+
+        Assert.IsType<ChallengeResult>(result);
+        _mockAuthService.Verify(
+            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SetupAdmin_WhenSetupIsCompleteAndUserIsNotAdmin_ReturnsForbid()
+    {
+        SetupAuthenticatedUser("user-id-123", roles: new[] { "User" });
         _mockAuthService
             .Setup(s => s.IsSetupRequiredAsync())
             .ReturnsAsync(false);

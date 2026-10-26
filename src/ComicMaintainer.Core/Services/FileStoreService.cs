@@ -105,15 +105,10 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
     {
         try
         {
-            // Get the full path to resolve any relative paths
+            // GetFullPath collapses every "." and ".." segment, so traversal out of the library
+            // ends up outside both roots and is rejected by the containment checks below. Names
+            // that merely contain consecutive dots ("What If...?") are legitimate comics.
             var fullPath = Path.GetFullPath(filePath);
-            
-            // Check for path traversal attempts
-            if (fullPath.Contains(".."))
-            {
-                _logger.LogWarning("Path traversal attempt detected: {FilePath}", SanitizeForLogging(filePath));
-                return false;
-            }
 
             // Ensure path is within allowed directories
             var watchedDir = Path.GetFullPath(_settings.CurrentValue.WatchedDirectory);

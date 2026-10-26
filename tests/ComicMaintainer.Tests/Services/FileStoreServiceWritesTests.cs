@@ -76,6 +76,39 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         Assert.True(_logger.Contains(LogLevel.Warning, "Attempted to add file outside allowed directories"));
     }
 
+    [Theory]
+    [InlineData("", "Batman... Again 001.cbz")]
+    [InlineData("", "What If..Vol 1.cbz")]
+    [InlineData("...And Justice for All", "Issue 001.cbz")]
+    public async Task AddFileAsync_PathWithConsecutiveDotsInsideLibrary_IsTracked(string folder, string name)
+    {
+        // Regression: a ".." substring check ran after Path.GetFullPath had already collapsed
+        // every real ".." segment, so it only ever rejected legitimate names such as
+        // "What If...?" and those comics never made it into the library.
+        var path = WriteComic(Directory.CreateDirectory(Path.Combine(_library, folder)).FullName, name);
+        var service = CreateService();
+
+        await service.AddFileAsync(path);
+
+        Assert.True(await service.FileExistsAsync(path));
+        Assert.NotNull(await FindRowAsync(path));
+        Assert.False(_logger.Has(LogLevel.Warning));
+    }
+
+    [Fact]
+    public async Task AddFileAsync_PathTraversingOutOfTheLibrary_IsRejected()
+    {
+        WriteComic(_outside, "Stray.cbz");
+        var traversal = Path.Combine(_library, "..", "outside", "Stray.cbz");
+        var service = CreateService();
+
+        await service.AddFileAsync(traversal);
+
+        Assert.Empty(await service.GetAllFilesAsync());
+        Assert.Empty(await AllRowsAsync());
+        Assert.True(_logger.Contains(LogLevel.Warning, "Attempted to add file outside allowed directories"));
+    }
+
     [Fact]
     public async Task AddFileAsync_EmptyPath_IsRejectedWithoutThrowing()
     {
@@ -240,6 +273,42 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         Assert.False(await service.FileExistsAsync(target));
         Assert.NotNull(await FindRowAsync(oldPath));
         Assert.True(_logger.Contains(LogLevel.Warning, "outside allowed directories"));
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_TargetTraversingOutOfTheLibrary_LeavesEntryUntouched()
+    {
+        var oldPath = Path.Combine(_library, "Old.cbz");
+        await SeedAsync(Row(oldPath));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+        var target = Path.Combine(_library, "..", "outside", "New.cbz");
+
+        await service.UpdateFilePathAsync(oldPath, target);
+
+        Assert.Equal(oldPath, Assert.Single(await service.GetAllFilesAsync()).FilePath);
+        Assert.Equal(oldPath, Assert.Single(await AllRowsAsync()).FilePath);
+        Assert.True(_logger.Contains(LogLevel.Warning, "outside allowed directories"));
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_TargetNameWithConsecutiveDots_MovesTheEntry()
+    {
+        var oldPath = Path.Combine(_library, "What If 001.cbz");
+        await SeedAsync(Row(oldPath, renamed: true, normalized: true));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+        var newPath = WriteComic(_library, "What If... 001.cbz");
+
+        await service.UpdateFilePathAsync(oldPath, newPath);
+
+        var file = Assert.Single(await service.GetAllFilesAsync());
+        Assert.Equal(newPath, file.FilePath);
+        Assert.True(file.IsProcessed);
+        var row = Assert.Single(await AllRowsAsync());
+        Assert.Equal(newPath, row.FilePath);
+        Assert.True(row.IsRenamed && row.IsNormalized);
+        Assert.False(_logger.Has(LogLevel.Warning));
     }
 
     [Fact]

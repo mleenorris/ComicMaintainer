@@ -105,6 +105,42 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
         Assert.False(_logger.Has(LogLevel.Error));
     }
 
+    [Theory]
+    [InlineData(Flag.Duplicate)]
+    [InlineData(Flag.Renamed)]
+    [InlineData(Flag.Normalized)]
+    public async Task MarkFlag_UntrackedFileNameWithConsecutiveDots_CreatesRowWithThatFlagSet(Flag flag)
+    {
+        // Regression: a ".." substring check rejected legitimate names such as "What If...?",
+        // so no row was ever created for them and the flag was silently dropped.
+        var path = WriteComic(_library, "What If... 001.cbz");
+        var service = CreateService();
+
+        await MarkAsync(service, flag, path, true);
+
+        var row = await FindRowAsync(path);
+        Assert.NotNull(row);
+        Assert.True(Read(row, flag));
+        Assert.False(_logger.Has(LogLevel.Warning));
+    }
+
+    [Theory]
+    [InlineData(Flag.Duplicate)]
+    [InlineData(Flag.Renamed)]
+    [InlineData(Flag.Normalized)]
+    public async Task MarkFlag_PathTraversingOutOfTheLibrary_DoesNotCreateRow(Flag flag)
+    {
+        var stray = WriteComic(_outside, "Stray.cbz");
+        var traversal = Path.Combine(_library, "..", "outside", "Stray.cbz");
+        var service = CreateService();
+
+        await MarkAsync(service, flag, traversal, true);
+
+        Assert.Null(await FindRowAsync(traversal));
+        Assert.Null(await FindRowAsync(stray));
+        Assert.False(_logger.Has(LogLevel.Error));
+    }
+
     [Fact]
     public async Task MarkFileDuplicateAsync_FileNotOnDiskYet_IsAppliedWhenTheFileIsAdded()
     {

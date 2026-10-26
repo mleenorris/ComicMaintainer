@@ -77,10 +77,10 @@ Page-level tests load a real page from `wwwroot` with `loadPage()` from
 ```js
 const { loadPage, respond } = require('./support/dom');
 
-test('shows the version', async () => {
+test('reports a busy server', async () => {
     const page = loadPage({                       // index.html by default
         localStorage: { jwt_token: token },       // signed-in session
-        routes: { 'GET /api/version': { version: '1.2.3' } }
+        routes: { 'GET /api/preferences': {} }
     });
     await page.settle();                          // let boot-time fetches resolve
     page.route('POST /api/jobs', respond(409, { error: 'busy' }));

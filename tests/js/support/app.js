@@ -4,9 +4,8 @@
 // each area's tests only route the requests they are about.
 //
 // initializeApp() (js/main.js) checks the session, then requests
-// /api/version, /api/auth/user, /api/preferences, /api/active-job,
-// /api/files/counts, /api/files/series, /api/watcher/status and the current
-// route's data (e.g. /api/overview for #/home, /api/settings for #/settings).
+// /api/auth/user, /api/preferences, /api/active-job, /api/files/counts,
+// /api/files/series, /api/watcher/status and the current route's data (e.g. /api/overview for #/home, /api/settings for #/settings).
 // Unrouted requests answer 404, which the boot tolerates; bootRoutes() only
 // answers the session checks.
 

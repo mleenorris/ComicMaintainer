@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -296,6 +297,13 @@ public class AuthControllerTests
     [Fact]
     public async Task SetupAdmin_WhenSetupIsRequired_CreatesInitialAdmin()
     {
+        SetupEmptyUserContext();
+        _mockAuthorizationService
+            .Setup(s => s.AuthorizeAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<object?>(),
+                It.IsAny<string>()))
+            .ReturnsAsync(AuthorizationResult.Failed());
         _mockAuthService
             .Setup(s => s.IsSetupRequiredAsync())
             .ReturnsAsync(true);
@@ -307,6 +315,12 @@ public class AuthControllerTests
 
         Assert.IsType<OkObjectResult>(result);
         _mockAuthService.Verify(s => s.SetupAdminAsync("admin", "Password123!", null), Times.Once);
+        _mockAuthorizationService.Verify(
+            s => s.AuthorizeAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<object?>(),
+                It.IsAny<string>()),
+            Times.Never);
     }
 
     [Fact]

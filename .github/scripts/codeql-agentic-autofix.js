@@ -190,7 +190,8 @@ async function assign(client, repo, alert, core) {
 }
 
 function cell(value) {
-    return String(value ?? '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
+    // Escape backslashes as well as pipes; otherwise "a\|b" renders as "a|b" (CodeQL js/incomplete-sanitization).
+    return String(value ?? '').replace(/[\r\n]+/g, ' ').replace(/[\\|]/g, '\\$&');
 }
 
 function link(alert) {

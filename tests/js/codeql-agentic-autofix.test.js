@@ -302,8 +302,8 @@ test('renderSummary escapes table cells and explains a paused run', () => {
         dryRunReason: null,
         openCount: 1,
         plan: { ...plan, selected: [alert], slots: 1 },
-        results: [{ alert, outcome: 'failed', message: 'line one\nline | two' }]
+        results: [{ alert, outcome: 'failed', message: 'one\r\ntwo\rthree | four \\| five' }]
     });
     assert.match(markdown, /`odd\\\|rule`/);
-    assert.match(markdown, /❌ line one line \\\| two \|$/m);
+    assert.ok(markdown.includes(String.raw`❌ one two three \| four \\\| five |`), markdown);
 });

@@ -152,6 +152,48 @@ function seriesIssue(overrides = {}) {
     };
 }
 
+// A folder of a GET /api/files/combinable-folders group (CombinableFolderDto).
+function combinableFolder(overrides = {}) {
+    return {
+        directory: '/comics/Saga',
+        fileCount: 12,
+        totalSize: 1.5 * 1024 * 1024,
+        newestFileAddedAt: '2024-03-01T12:00:00Z',
+        oldestFileAddedAt: '2023-01-15T12:00:00Z',
+        newestFileModifiedAt: '2024-03-01T12:00:00Z',
+        sampleFileNames: ['Saga 001.cbz', 'Saga 002.cbz'],
+        isSuggested: true,
+        ...overrides
+    };
+}
+
+// A group of GET /api/files/combinable-folders → { groups: [...] }
+// (CombinableFolderGroupDto): folders that hold the same series and volume.
+function combinableGroup(overrides = {}) {
+    return {
+        groupKey: 'saga',
+        seriesName: 'Saga',
+        volume: null,
+        totalFileCount: 13,
+        suggestedDestinationDirectory: '/comics/Saga',
+        suggestionReason: 'Contains the most recently added file (2024-03-01).',
+        folders: [
+            combinableFolder(),
+            combinableFolder({
+                directory: '/comics/Saga (2012)',
+                fileCount: 1,
+                totalSize: 900,
+                newestFileAddedAt: '2022-06-01T12:00:00Z',
+                oldestFileAddedAt: '2022-06-01T12:00:00Z',
+                newestFileModifiedAt: '2022-06-01T12:00:00Z',
+                sampleFileNames: ['Saga 003.cbz'],
+                isSuggested: false
+            })
+        ],
+        ...overrides
+    };
+}
+
 /**
  * bootApp() plus the stylesheet rule that hides closed modals.
  *
@@ -332,6 +374,8 @@ module.exports = {
     emailSubscription,
     seriesSummary,
     seriesIssue,
+    combinableFolder,
+    combinableGroup,
     bootPage,
     bootSeriesPage,
     messages,

@@ -105,11 +105,11 @@ public partial class FileStoreService
 
             if (entity == null)
             {
+                // Create new entity
+                var newEntity = CreateFileEntity(filePath);
                 try
                 {
-                    // Create new entity
-                    entity = CreateFileEntity(filePath);
-                    dbContext.ComicFiles.Add(entity);
+                    dbContext.ComicFiles.Add(newEntity);
                     await dbContext.SaveChangesAsync(cancellationToken);
                     MarkChanged();
                     _logger.LogDebug("Added new file to database: {FilePath}", SanitizeForLogging(filePath));
@@ -120,6 +120,8 @@ public partial class FileStoreService
                     // Race condition: entity was created by another thread between our check and insert
                     // Retry by fetching and updating the existing entity
                     _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                    // Stop tracking the failed insert, otherwise the retry's SaveChanges re-inserts it.
+                    dbContext.Entry(newEntity).State = EntityState.Detached;
                     entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
                     if (entity != null)
                     {

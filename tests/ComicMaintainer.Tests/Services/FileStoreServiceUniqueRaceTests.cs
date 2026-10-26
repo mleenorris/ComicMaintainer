@@ -66,13 +66,8 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
         }
     }
 
-    // NOTE: the file-row races below only assert invariants. The retry inside each
-    // UNIQUE-constraint handler re-saves the same DbContext while the failed insert is still
-    // tracked as Added, so the retry itself collides again and the update intended for the
-    // winning row is lost (reported as a production bug). The invariants hold either way.
-
     [Fact]
-    public async Task AddFileAsync_RowInsertedConcurrently_KeepsASingleRowWithTheOtherWritersState()
+    public async Task AddFileAsync_RowInsertedConcurrently_UpdatesTheWinningRowAndKeepsItsState()
     {
         var path = WriteComic("Saga 001.cbz");
         var service = CreateService();
@@ -81,9 +76,14 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
         await service.AddFileAsync(path);
 
         Assert.True(_logger.Contains(LogLevel.Debug, "File entity already exists (race condition)"));
+        // Regression: the retry re-saved the context with the failed insert still tracked, so it
+        // collided again and the update was lost with an Error log.
+        Assert.True(_logger.Contains(LogLevel.Debug, "Updated existing file in database after retry"));
+        Assert.False(_logger.Has(LogLevel.Error));
         var row = Assert.Single(await FileRowsAsync(path));
         Assert.True(row.IsRenamed);
         Assert.True(row.IsNormalized);
+        Assert.Equal(new FileInfo(path).Length, row.FileSize);
         Assert.True(await service.FileExistsAsync(path));
     }
 
@@ -91,7 +91,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     [InlineData(Flag.Duplicate)]
     [InlineData(Flag.Renamed)]
     [InlineData(Flag.Normalized)]
-    public async Task MarkFlag_RowInsertedConcurrently_KeepsASingleRow(Flag flag)
+    public async Task MarkFlag_RowInsertedConcurrently_SetsTheFlagOnTheWinningRow(Flag flag)
     {
         var path = WriteComic("Saga 002.cbz");
         var service = CreateService();
@@ -105,7 +105,14 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
         });
 
         Assert.True(_logger.Contains(LogLevel.Debug, "File entity already exists (race condition)"));
-        Assert.Single(await FileRowsAsync(path));
+        // Regression: the retry re-saved the context with the failed insert still tracked, so it
+        // collided again and the flag was lost with an Error log.
+        Assert.True(_logger.Contains(LogLevel.Debug, "after retry"));
+        Assert.False(_logger.Has(LogLevel.Error));
+        var row = Assert.Single(await FileRowsAsync(path));
+        Assert.Equal(flag == Flag.Duplicate, row.IsDuplicate);
+        Assert.Equal(flag == Flag.Renamed, row.IsRenamed);
+        Assert.Equal(flag == Flag.Normalized, row.IsNormalized);
     }
 
     [Fact]

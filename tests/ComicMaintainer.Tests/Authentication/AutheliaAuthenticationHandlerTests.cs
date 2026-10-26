@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using ComicMaintainer.Core.Configuration;
@@ -9,6 +10,8 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -22,8 +25,9 @@ namespace ComicMaintainer.Tests.Authentication;
 public class AutheliaAuthenticationHandlerTests
 {
     private const string SchemeName = "Authelia";
+    private const string PasswordSymbols = "!@#$%^&*";
     private const string PasswordAlphabet =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" + PasswordSymbols;
 
     private readonly Mock<UserManager<ApplicationUser>> _userManager;
     private readonly Mock<RoleManager<ApplicationRole>> _roleManager;
@@ -227,6 +231,9 @@ public class AutheliaAuthenticationHandlerTests
         Assert.True(result.Succeeded);
         Assert.Equal(existing.Id, result.Principal!.FindFirstValue(ClaimTypes.NameIdentifier));
         Assert.Equal("alice", result.Principal.FindFirstValue(ClaimTypes.Name));
+        // Neither a stored email nor a Remote-Email header: the claim falls back to "<user>@authelia.local".
+        Assert.Equal("alice@authelia.local", result.Principal.FindFirstValue(ClaimTypes.Email));
+        Assert.Null(existing.Email);
         _userManager.Verify(u => u.UpdateAsync(It.IsAny<ApplicationUser>()), Times.Never);
     }
 
@@ -273,8 +280,11 @@ public class AutheliaAuthenticationHandlerTests
         Assert.Equal(new[] { "User" }, result.Principal.FindAll(ClaimTypes.Role).Select(c => c.Value));
     }
 
-    [Fact]
-    public async Task Authenticate_UnknownUserWithoutOptionalHeaders_IsStillProvisioned()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Authenticate_UnknownUserWithoutOptionalHeaders_IsProvisionedWithTheFallbackEmailAndName(string? optionalHeaderValue)
     {
         ApplicationUser? created = null;
         _userManager.Setup(u => u.FindByNameAsync("bob")).ReturnsAsync((ApplicationUser?)null);
@@ -282,17 +292,73 @@ public class AutheliaAuthenticationHandlerTests
             .Setup(u => u.CreateAsync(It.IsAny<ApplicationUser>(), It.IsAny<string>()))
             .Callback((ApplicationUser user, string _) => created = user)
             .ReturnsAsync(IdentityResult.Success);
+        var context = optionalHeaderValue is null
+            ? CreateContext(("Remote-User", "bob"))
+            : CreateContext(("Remote-User", "bob"), ("Remote-Email", optionalHeaderValue), ("Remote-Name", optionalHeaderValue));
 
-        var result = await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", "bob")));
+        var result = await AuthenticateAsync(Enabled(), context);
 
-        // Email and FullName are deliberately not asserted: the handler's "@authelia.local" and
-        // username fallbacks never apply because a missing header reads as "" (reported as a bug).
+        // A missing or blank Remote-Email/Remote-Name counts as absent: the account gets a non-empty
+        // placeholder address (Identity requires a unique email) and the username as its name.
         Assert.True(result.Succeeded);
         Assert.NotNull(created);
         Assert.Equal("bob", created!.UserName);
+        Assert.Equal("bob@authelia.local", created.Email);
+        Assert.Equal("bob", created.FullName);
         Assert.True(created.EmailConfirmed);
         Assert.Equal("bob", result.Principal!.Identity!.Name);
+        Assert.Equal("bob@authelia.local", result.Principal.FindFirstValue(ClaimTypes.Email));
         Assert.Equal(new[] { "User" }, result.Principal.FindAll(ClaimTypes.Role).Select(c => c.Value));
+    }
+
+    [Fact]
+    public async Task Authenticate_ProvisioningPasswords_AlwaysSatisfyTheAppPasswordPolicy()
+    {
+        var policy = AppPasswordPolicy();
+        Assert.True(policy.RequireDigit && policy.RequireLowercase && policy.RequireUppercase);
+
+        // The old generator (32 × byte % 70) left out every digit in ~1.85% of the passwords, which
+        // Identity rejected; 1000 provisioned users would have hit that with near certainty.
+        var passwords = await ProvisionUsersAsync(policy, count: 1000);
+
+        Assert.All(passwords, password =>
+        {
+            Assert.True(password.Length >= Math.Max(32, policy.RequiredLength), password);
+            Assert.True(password.Any(char.IsAsciiLetterUpper), $"no upper-case letter in {password}");
+            Assert.True(password.Any(char.IsAsciiLetterLower), $"no lower-case letter in {password}");
+            Assert.True(password.Any(char.IsAsciiDigit), $"no digit in {password}");
+            Assert.True(password.Any(PasswordSymbols.Contains), $"no symbol in {password}");
+            Assert.All(password, ch => Assert.Contains(ch, PasswordAlphabet));
+        });
+        Assert.Equal(passwords.Count, passwords.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Theory]
+    [InlineData(6, 1)]      // Identity's defaults, which also require a symbol
+    [InlineData(64, 1)]     // longer than the generator's usual 32 characters
+    [InlineData(8, 70)]     // every character of the alphabet
+    [InlineData(100, 50)]
+    public async Task Authenticate_ProvisioningPasswords_SatisfyStricterPasswordPolicies(int requiredLength, int requiredUniqueChars)
+    {
+        var policy = new PasswordOptions
+        {
+            RequireDigit = true,
+            RequireLowercase = true,
+            RequireUppercase = true,
+            RequireNonAlphanumeric = true,
+            RequiredLength = requiredLength,
+            RequiredUniqueChars = requiredUniqueChars,
+        };
+
+        var passwords = await ProvisionUsersAsync(policy, count: 200);
+
+        Assert.All(passwords, password =>
+        {
+            Assert.True(password.Length >= Math.Max(32, requiredLength), password);
+            Assert.True(password.Distinct().Count() >= requiredUniqueChars, password);
+            Assert.True(password.Any(PasswordSymbols.Contains), $"no symbol in {password}");
+            Assert.All(password, ch => Assert.Contains(ch, PasswordAlphabet));
+        });
     }
 
     [Fact]
@@ -494,5 +560,51 @@ public class AutheliaAuthenticationHandlerTests
     {
         var handler = await CreateHandlerAsync(settings, context);
         return await handler.AuthenticateAsync();
+    }
+
+    /// <summary>
+    /// Signs in <paramref name="count"/> unknown users, with <c>CreateAsync</c> validating each generated
+    /// password against <paramref name="policy"/> through Identity's own <see cref="PasswordValidator{TUser}"/>
+    /// (as the real <see cref="UserManager{TUser}"/> does), and returns the generated passwords.
+    /// </summary>
+    private async Task<List<string>> ProvisionUsersAsync(PasswordOptions policy, int count)
+    {
+        _userManager.Object.Options = new IdentityOptions { Password = policy };
+        var validator = new PasswordValidator<ApplicationUser>();
+        var passwords = new List<string>();
+        _userManager.Setup(u => u.FindByNameAsync(It.IsAny<string>())).ReturnsAsync((ApplicationUser?)null);
+        _userManager
+            .Setup(u => u.CreateAsync(It.IsAny<ApplicationUser>(), It.IsAny<string>()))
+            .Returns((ApplicationUser user, string password) =>
+            {
+                passwords.Add(password);
+                return validator.ValidateAsync(_userManager.Object, user, password);
+            });
+
+        for (var i = 0; i < count; i++)
+        {
+            var result = await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", $"user{i}")));
+            Assert.True(result.Succeeded, $"Identity rejected the generated password '{passwords.LastOrDefault()}'");
+        }
+
+        Assert.Equal(count, passwords.Count);
+        return passwords;
+    }
+
+    /// <summary>The password policy the app configures (internal <c>AuthServiceCollectionExtensions</c>).</summary>
+    private static PasswordOptions AppPasswordPolicy()
+    {
+        var addComicMaintainerAuth = typeof(Program).Assembly
+            .GetType("ComicMaintainer.WebApi.Startup.AuthServiceCollectionExtensions", throwOnError: true)!
+            .GetMethod("AddComicMaintainerAuth", BindingFlags.Static | BindingFlags.Public)!
+            .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection([new KeyValuePair<string, string?>("JwtSettings:Secret", new string('s', 64))])
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        addComicMaintainerAuth(services, configuration);
+        using var provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IOptions<IdentityOptions>>().Value.Password;
     }
 }

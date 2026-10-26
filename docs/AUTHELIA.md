@@ -20,8 +20,8 @@ When Authelia is enabled:
 3. **Authentication**: If not authenticated, Authelia prompts for login
 4. **Header Injection**: Once authenticated, Authelia adds user information headers:
    - `Remote-User`: Username
-   - `Remote-Email`: User's email address
-   - `Remote-Name`: User's display name
+   - `Remote-Email`: User's email address (optional; a new account without it gets `<username>@authelia.local`)
+   - `Remote-Name`: User's display name (optional; defaults to the username)
    - `Remote-Groups`: Comma-separated list of groups
 5. **Application Access**: ComicMaintainer reads these headers and creates/updates user accounts automatically.
    It only accepts them on connections from the reverse proxy, whose addresses you list in `AUTHELIA_TRUSTED_PROXIES`.

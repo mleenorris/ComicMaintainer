@@ -14,8 +14,9 @@ namespace ComicMaintainer.Tests.Integration;
 /// <summary>
 /// End-to-end checks of Authelia forward authentication in the real pipeline: the scheme registered by
 /// <c>AddComicMaintainerAuth</c> when <c>AutheliaSettings:Enabled</c> is on, the handler resolved from the
-/// app's container, the authorization policies and the auth endpoints. Accounts are created up front, so
-/// these tests exercise the sign-in of known users rather than first-time provisioning.
+/// app's container, the authorization policies and the auth endpoints. Most accounts are created up front
+/// to exercise the sign-in of known users; first-time provisioning goes through the real Identity
+/// validators (unique email, password policy).
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixture<AutheliaAuthenticationHandlerIntegrationTests.AutheliaHost>
@@ -87,6 +88,36 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
         var saved = await _host.FindUserAsync(user.Id);
         Assert.Equal(newEmail, saved.Email);
         Assert.Equal("Renamed Reader", saved.FullName);
+    }
+
+    [Fact]
+    public async Task FirstSignInWithoutForwardedEmailOrName_ProvisionsTheAccountWithFallbacks()
+    {
+        var name = "authelia-new-" + Guid.NewGuid().ToString("N")[..12];
+        Action<HttpRequestHeaders> onlyUserAndGroups = headers =>
+        {
+            headers.Add("Remote-User", name);
+            headers.Add("Remote-Groups", "users");
+        };
+
+        var (status, body) = await GetAsync("/api/auth/user", onlyUserAndGroups);
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(name, body.GetProperty("username").GetString());
+        Assert.Equal(name + "@authelia.local", body.GetProperty("email").GetString());
+        Assert.Equal(["User"], Roles(body));
+        var userId = body.GetProperty("userId").GetString()!;
+        var saved = await _host.FindUserAsync(userId);
+        Assert.Equal(name, saved.UserName);
+        Assert.Equal(name + "@authelia.local", saved.Email);
+        Assert.Equal(name, saved.FullName);
+        Assert.Equal(["User"], await _host.GetRolesAsync(userId));
+
+        // The next request signs the provisioned account in rather than creating another one.
+        var (againStatus, again) = await GetAsync("/api/auth/user", onlyUserAndGroups);
+
+        Assert.Equal(HttpStatusCode.OK, againStatus);
+        Assert.Equal(userId, again.GetProperty("userId").GetString());
     }
 
     [Fact]

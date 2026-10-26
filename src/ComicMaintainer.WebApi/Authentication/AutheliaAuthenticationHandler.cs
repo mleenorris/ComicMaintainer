@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Encodings.Web;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
@@ -15,6 +16,18 @@ namespace ComicMaintainer.WebApi.Authentication;
 /// </summary>
 public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthenticationOptions>
 {
+    // Upper case, lower case, digits and non-alphanumerics: every class Identity's
+    // password validator can require.
+    private static readonly string[] PasswordCharacterClasses =
+    [
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "abcdefghijklmnopqrstuvwxyz",
+        "0123456789",
+        "!@#$%^&*",
+    ];
+
+    private static readonly string PasswordAlphabet = string.Concat(PasswordCharacterClasses);
+
     private readonly AutheliaSettings _autheliaSettings;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly RoleManager<ApplicationRole> _roleManager;
@@ -73,13 +86,14 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
 
         _logger.LogInformation("Authenticating user via Authelia: {Username}", username);
 
-        // Get optional headers
+        // Get optional headers. A missing header reads as "" rather than null, so blank
+        // values are treated as absent to let the email/name fallbacks below apply.
         Request.Headers.TryGetValue(_autheliaSettings.EmailHeader, out var emailValues);
         Request.Headers.TryGetValue(_autheliaSettings.NameHeader, out var nameValues);
         Request.Headers.TryGetValue(_autheliaSettings.GroupsHeader, out var groupsValues);
 
-        var email = emailValues.ToString();
-        var displayName = nameValues.ToString();
+        var email = NullIfBlank(emailValues.ToString());
+        var displayName = NullIfBlank(nameValues.ToString());
         var groups = groupsValues.ToString();
 
         // Ensure user exists in the database
@@ -198,7 +212,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             };
 
             // Generate a random password (won't be used since Authelia handles auth)
-            var randomPassword = GenerateRandomPassword();
+            var randomPassword = GenerateRandomPassword(_userManager.Options.Password);
             var result = await _userManager.CreateAsync(user, randomPassword);
 
             if (!result.Succeeded)
@@ -269,24 +283,33 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         _logger.LogInformation("Assigned role {Role} to Authelia user: {Username}", targetRole, user.UserName);
     }
 
-    private static string GenerateRandomPassword()
+    private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>
+    /// A random password that satisfies <paramref name="policy"/>. It is never used to sign in,
+    /// but Identity validates it when the account is created, so it holds at least one character
+    /// of every class Identity can require, enough distinct characters and at least 32 characters
+    /// (more if the policy requires it). Characters are drawn and shuffled with
+    /// <see cref="RandomNumberGenerator"/>, without modulo bias.
+    /// </summary>
+    private static string GenerateRandomPassword(PasswordOptions policy)
     {
-        // Generate a secure random password (won't be used but required for user creation)
-        // Using RandomNumberGenerator for cryptographic randomness
-        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-        var password = new char[32];
-        var randomBytes = new byte[32];
-        
-        using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
+        var uniqueChars = Math.Clamp(policy.RequiredUniqueChars, 0, PasswordAlphabet.Length);
+        var length = Math.Max(32, Math.Max(policy.RequiredLength, uniqueChars + PasswordCharacterClasses.Length));
+        var password = new char[length];
+
+        var distinct = PasswordAlphabet.ToCharArray();
+        RandomNumberGenerator.Shuffle(distinct.AsSpan());
+        distinct.AsSpan(0, uniqueChars).CopyTo(password);
+
+        var next = uniqueChars;
+        foreach (var characterClass in PasswordCharacterClasses)
         {
-            rng.GetBytes(randomBytes);
+            password[next++] = characterClass[RandomNumberGenerator.GetInt32(characterClass.Length)];
         }
-        
-        for (int i = 0; i < 32; i++)
-        {
-            password[i] = chars[randomBytes[i] % chars.Length];
-        }
-        
+
+        RandomNumberGenerator.GetItems(PasswordAlphabet.AsSpan(), password.AsSpan(next));
+        RandomNumberGenerator.Shuffle(password.AsSpan());
         return new string(password);
     }
 }

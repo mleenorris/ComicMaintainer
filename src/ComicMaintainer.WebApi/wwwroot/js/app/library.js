@@ -339,6 +339,11 @@
                     }
                 }
 
+                // The list has arrived: stop counting as loading before drawing
+                // it, or an empty result would be drawn as "Loading files..."
+                // (finally{} clears the flag only after this render) instead
+                // of its empty state.
+                folderLoading = false;
                 renderFileList();
                 updateButtonVisibility();
                 ensureScrollObserver();

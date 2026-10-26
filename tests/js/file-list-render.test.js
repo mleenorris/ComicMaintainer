@@ -13,6 +13,8 @@ const {
     makeFile,
     encodeFolder,
     folderFilesMatcher,
+    folderPages,
+    bootLibrary,
     bootFilesView,
     folderCalls,
     folderFileCalls,
@@ -41,6 +43,50 @@ async function expandFolder(page, path) {
 }
 
 const rowNames = page => page.$$('#fileList .file-item .file-name').map(element => element.title);
+
+/** Counts renderFileList() calls from now on; returns a reader for the count. */
+function countRenders(page) {
+    page.run(`(() => {
+        const render = renderFileList;
+        window.fileListRenders = 0;
+        renderFileList = function () { window.fileListRenders++; return render.apply(this, arguments); };
+    })()`);
+    return () => page.evaluate('window.fileListRenders');
+}
+
+/**
+ * Records what is drawn into #fileList from now on, one entry per element
+ * added: 'loading', 'header', 'folder' or an empty state's heading.
+ */
+function recordDrawn(page) {
+    const drawn = [];
+    const kind = node => node.matches('.loading') ? 'loading'
+        : node.matches('.file-list-header') ? 'header'
+            : node.matches('.folder-section') ? 'folder'
+                : node.querySelector('h2')?.textContent ?? node.className;
+    new page.window.MutationObserver(records => {
+        for (const record of records) {
+            for (const node of record.addedNodes) {
+                if (node.nodeType === 1 && node.id !== 'libraryScrollSentinel') drawn.push(kind(node));
+            }
+        }
+    }).observe(page.$('#fileList'), { childList: true });
+    return drawn;
+}
+
+/**
+ * Boot the library, then switch to the Files view with `folders` listed
+ * (as bootFilesView does) while counting renders and recording the drawing.
+ */
+async function openFilesViewWatched(folders) {
+    const page = await bootLibrary({ routes: { 'GET /api/files/folders': folderPages(folders) } });
+    const renders = countRenders(page);
+    const drawn = recordDrawn(page);
+    page.run("libraryViewMode = 'files'");
+    await page.run('loadActiveLibraryView()');
+    await page.settle();
+    return { page, renders, drawn };
+}
 
 test('the Files view lists each folder collapsed, under the list header', async () => {
     const page = await bootFilesView({ folders: [makeFolder('Batman'), makeFolder('Saga', { file_count: 1 })] });
@@ -243,13 +289,10 @@ test('folder paths and file paths are encoded and split like the server expects'
 
 // ── Empty, loading and error states ───────────────────────────────────────
 
-test('an empty library says so, and a filtered one that nothing matches', async () => {
+test('an empty library says so once it has loaded, and so does a filter that nothing matches', async () => {
     const page = await bootFilesView();
-    // loadFolders() draws its result while it still counts as loading, so an
-    // empty result keeps showing "Loading files..." (reported as a suspected
-    // bug); the empty states appear on the next redraw.
-    page.run('renderFileList()');
 
+    assert.equal(page.$('#fileList .loading'), null, 'the loading placeholder is gone');
     assert.equal(page.$('#fileList .empty-state h2').textContent, 'No comic files found');
     assert.equal(page.$('#fileList').lastElementChild.id, 'libraryScrollSentinel');
     assert.equal(page.$('#selectInfo').textContent, 'No files selected');
@@ -257,17 +300,59 @@ test('an empty library says so, and a filtered one that nothing matches', async 
     page.click('#headerFilterMenu [data-filter="duplicates"]');
     await page.settle();
     assert.equal(folderCalls(page).at(-1).query.filter, 'duplicates');
-    page.run('renderFileList()');
 
+    assert.equal(page.$('#fileList .loading'), null);
     assert.equal(page.$('#fileList .empty-state h2').textContent, 'No matching files found');
 });
 
 test('a folder list answer without folders counts as an empty library', async () => {
     const page = await bootFilesView({ routes: { 'GET /api/files/folders': {} } });
-    page.run('renderFileList()'); // see the empty-library test above
 
     assert.equal(page.$('#fileList .empty-state h2').textContent, 'No comic files found');
     assert.deepEqual(messages(page).filter(m => m.type === 'error'), []);
+});
+
+test('a filter or search that matches none of the listed folders replaces them with its empty state', async t => {
+    const all = [makeFolder('Batman'), makeFolder('Saga')];
+    const page = await bootFilesView({
+        routes: { 'GET /api/files/folders': call => folderPages(call.query.filter || call.query.search ? [] : all)(call) }
+    });
+    assert.deepEqual(folderSections(page).map(section => section.path), ['Batman', 'Saga']);
+
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    assert.equal(folderCalls(page).at(-1).query.filter, 'unmarked');
+    assert.deepEqual(folderSections(page), []);
+    assert.equal(page.$('#fileList .loading'), null);
+    assert.equal(page.$('#fileList .empty-state h2').textContent, 'No matching files found');
+
+    page.click('#headerFilterMenu [data-filter="all"]');
+    await page.settle();
+    assert.deepEqual(folderSections(page).map(section => section.path), ['Batman', 'Saga']);
+
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    page.input('#headerSearchInput', 'zzz');
+    t.mock.timers.tick(300);
+    await page.settle();
+    assert.equal(folderCalls(page).at(-1).query.search, 'zzz');
+    assert.deepEqual(folderSections(page), []);
+    assert.equal(page.$('#fileList .empty-state h2').textContent, 'No matching files found');
+});
+
+test('a loaded folder list is drawn once, with no loading or empty state in between', async () => {
+    const { page, renders, drawn } = await openFilesViewWatched([makeFolder('Batman'), makeFolder('Saga')]);
+
+    assert.equal(renders(), 1);
+    assert.deepEqual(drawn, ['header', 'folder', 'folder']);
+    assert.deepEqual(folderSections(page).map(section => section.path), ['Batman', 'Saga']);
+});
+
+test('an empty folder list is drawn once, straight as its empty state', async () => {
+    const { page, renders, drawn } = await openFilesViewWatched([]);
+
+    assert.equal(renders(), 1);
+    assert.deepEqual(drawn, ['No comic files found']);
+    assert.equal(page.$('#fileList .loading'), null);
 });
 
 test('a list emptied by a reload in flight shows its loading state when redrawn', async () => {

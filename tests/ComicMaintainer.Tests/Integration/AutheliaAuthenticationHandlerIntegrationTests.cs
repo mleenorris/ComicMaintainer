@@ -187,8 +187,8 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
         headers.Add("Remote-Groups", groups);
     };
 
-    private static string?[] Roles(JsonElement body) =>
-        body.GetProperty("roles").EnumerateArray().Select(role => role.GetString()).ToArray();
+    private static string[] Roles(JsonElement body) =>
+        body.GetProperty("roles").EnumerateArray().Select(role => role.GetString()!).ToArray();
 
     /// <summary>One app instance with Authelia enabled, on its own temp directories and SQLite database.</summary>
     public sealed class AutheliaHost : IAsyncLifetime

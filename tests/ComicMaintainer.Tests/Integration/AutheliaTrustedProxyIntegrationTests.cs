@@ -74,7 +74,7 @@ public sealed class AutheliaTrustedProxyIntegrationTests : IClassFixture<Autheli
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(user.UserName, body.GetProperty("username").GetString());
         Assert.Equal("jwt", body.GetProperty("authMethod").GetString());
-        Assert.Equal(["User"], body.GetProperty("roles").EnumerateArray().Select(role => role.GetString()).ToArray());
+        Assert.Equal(["User"], body.GetProperty("roles").EnumerateArray().Select(role => role.GetString()!).ToArray());
         Assert.False(body.GetProperty("canAdminister").GetBoolean());
         Assert.Empty(await _host.GetRolesAsync(victim.Id));
     }

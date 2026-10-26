@@ -150,7 +150,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
             .Callback(new InvocationAction(invocation =>
-                terminated.TrySetResult((invocation.Arguments[2].ToString()!, (Exception?)invocation.Arguments[3]))));
+                terminated.TrySetResult((invocation.Arguments[2]!.ToString()!, (Exception?)invocation.Arguments[3]))));
         _writer
             .Setup(w => w.RemoveAsync("broken", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("remove failed"));
@@ -301,7 +301,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             l => l.Log(
                 level,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains(messageFragment)),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString()!.Contains(messageFragment)),
                 It.Is<Exception?>(e => exception == null || ReferenceEquals(e, exception)),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times);

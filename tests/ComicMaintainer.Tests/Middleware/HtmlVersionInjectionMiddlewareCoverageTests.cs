@@ -83,7 +83,7 @@ public class HtmlVersionInjectionMiddlewareCoverageTests : IDisposable
             l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString()!.StartsWith("Failed to resolve HTML path:")),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString()!.StartsWith("Failed to resolve HTML path:")),
                 It.IsAny<ArgumentException>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

@@ -25,7 +25,7 @@ public class DatabaseCleanupHostedServiceCoverageTests
             l => l.Log(
                 level,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString() == message),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString() == message),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times);

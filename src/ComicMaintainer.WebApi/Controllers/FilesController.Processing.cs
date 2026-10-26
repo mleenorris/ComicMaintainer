@@ -40,7 +40,7 @@ public partial class FilesController
         try
         {
             // Validate every path the batch job would process (it skips blank entries itself)
-            foreach (var filePath in filePaths ?? [])
+            foreach (var filePath in filePaths)
             {
                 if (!string.IsNullOrWhiteSpace(filePath) && !IsPathSafe(filePath))
                 {

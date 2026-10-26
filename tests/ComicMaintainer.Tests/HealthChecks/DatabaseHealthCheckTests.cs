@@ -73,7 +73,7 @@ public class DatabaseHealthCheckTests : IDisposable
             l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString() == "Database readiness check failed."),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString() == "Database readiness check failed."),
                 failure,
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

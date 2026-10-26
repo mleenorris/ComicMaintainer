@@ -39,7 +39,7 @@ public class GlobalExceptionHandlerTests
             l => l.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString() == "Unhandled exception for POST /api/files/process (correlation id corr-123)"),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString() == "Unhandled exception for POST /api/files/process (correlation id corr-123)"),
                 exception,
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

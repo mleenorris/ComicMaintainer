@@ -71,7 +71,7 @@ public class ProcessingHistoryServiceCoverageTests : IAsyncLifetime
             x => x.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("Error adding processing history entry")),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString()!.Contains("Error adding processing history entry")),
                 It.Is<Exception>(e => e is DbUpdateException),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

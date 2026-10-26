@@ -202,11 +202,11 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
         var warning = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
         Assert.Equal("MangaDex lookup failed for Solo Leveling", warning.Message);
-        Assert.IsAssignableFrom<System.Text.Json.JsonException>(warning.Exception);
+        var exception = Assert.IsAssignableFrom<System.Text.Json.JsonException>(warning.Exception);
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
         var health = await service.CheckHealthAsync();
         Assert.Equal(1, health.FailureCount);
-        Assert.Equal(warning.Exception.Message, health.LastError);
+        Assert.Equal(exception.Message, health.LastError);
     }
 
     [Theory]

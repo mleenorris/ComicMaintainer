@@ -82,7 +82,7 @@ public class SettingsControllerCoverageTests
             l => l.Log(
                 level,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains(fragment)),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString()!.Contains(fragment)),
                 It.Is<Exception?>(e => exception == null || ReferenceEquals(e, exception)),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times);

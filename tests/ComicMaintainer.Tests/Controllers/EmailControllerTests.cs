@@ -735,7 +735,7 @@ public sealed class EmailControllerTests : IDisposable
         _logger.Verify(l => l.Log(
             LogLevel.Warning,
             It.IsAny<EventId>(),
-            It.Is<It.IsAnyType>((state, _) => state.ToString() == "Failed to clean up the condensed book work directory"),
+            It.Is<It.IsAnyType>((state, _) => state!.ToString() == "Failed to clean up the condensed book work directory"),
             It.Is<Exception?>(ex => ex is IOException),
             (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()), Times.Once);
     }

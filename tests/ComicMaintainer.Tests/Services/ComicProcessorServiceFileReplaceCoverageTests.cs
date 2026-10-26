@@ -194,7 +194,7 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
         Assert.False(File.Exists(backup));
         Assert.True(_logger.Has(LogLevel.Warning, CrossDeviceWarning));
         Assert.True(_logger.Has(LogLevel.Information, FallbackSucceeded));
-        Assert.False(_logger.Entries.Any(e => e.Template == RetryWarning));
+        Assert.DoesNotContain(_logger.Entries, e => e.Template == RetryWarning);
         Assert.Equal(1, service.ReplaceCalls);
         Assert.Empty(TempFiles());
     }
@@ -296,7 +296,7 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
         Assert.Equal("New", SeriesOf(path));
         var retry = Assert.Single(_logger.Entries, e => e.Template == RetryWarning);
         Assert.Same(fileExists, retry.Exception);
-        Assert.False(_logger.Entries.Any(e => e.Template == CrossDeviceWarning));
+        Assert.DoesNotContain(_logger.Entries, e => e.Template == CrossDeviceWarning);
         Assert.Equal(2, service.ReplaceCalls);
         Assert.False(File.Exists(path + ".backup"));
         Assert.Empty(TempFiles());
@@ -322,7 +322,7 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
         Assert.Equal("New", SeriesOf(path));
         var retry = Assert.Single(_logger.Entries, e => e.Template == RetryWarning);
         Assert.Contains("cross-device", retry.Exception!.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(_logger.Entries.Any(e => e.Template == CrossDeviceWarning));
+        Assert.DoesNotContain(_logger.Entries, e => e.Template == CrossDeviceWarning);
         Assert.False(File.Exists(backup));
         Assert.Empty(TempFiles());
     }
@@ -374,7 +374,7 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
         Assert.Equal(1, service.ReplaceCalls);
         var error = Assert.Single(_logger.Entries, e => e.Template == ReplaceFailedError);
         Assert.IsType<UnauthorizedAccessException>(error.Exception);
-        Assert.False(_logger.Entries.Any(e => e.Template == RetryWarning));
+        Assert.DoesNotContain(_logger.Entries, e => e.Template == RetryWarning);
         Assert.True(Directory.Exists(path));
         Assert.Empty(TempFiles());
     }

@@ -52,7 +52,7 @@ public class EventsControllerCoverageTests
         _logger.Verify(l => l.Log(
             LogLevel.Debug,
             It.IsAny<EventId>(),
-            It.Is<It.IsAnyType>((state, _) => state.ToString()!.StartsWith("SSE client disconnected")),
+            It.Is<It.IsAnyType>((state, _) => state!.ToString()!.StartsWith("SSE client disconnected")),
             It.IsAny<Exception?>(),
             (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()), Times.Once);
 

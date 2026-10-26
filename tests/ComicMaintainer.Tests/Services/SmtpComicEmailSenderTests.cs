@@ -107,7 +107,7 @@ public class SmtpComicEmailSenderTests : IDisposable
         Assert.Equal("comics@example.com", from.Address);
         Assert.Equal("kindle@example.com", Assert.Single(mime.To.Mailboxes).Address);
         Assert.Equal("Series 001", mime.Subject);
-        Assert.Equal("Enjoy!", mime.TextBody.Trim());
+        Assert.Equal("Enjoy!", mime.TextBody?.Trim());
 
         var part = Assert.IsType<MimePart>(Assert.Single(mime.Attachments));
         Assert.Equal("Series 001.cbz", part.FileName);
@@ -169,7 +169,7 @@ public class SmtpComicEmailSenderTests : IDisposable
 
         var mime = await server.Message.WaitAsync(Timeout);
         Assert.Empty(mime.Attachments);
-        Assert.Equal("It works", mime.TextBody.Trim());
+        Assert.Equal("It works", mime.TextBody?.Trim());
         Assert.Null(server.AuthPayload);
         Assert.DoesNotContain(server.Commands, c => c.StartsWith("AUTH", StringComparison.OrdinalIgnoreCase));
     }
@@ -230,6 +230,7 @@ public class SmtpComicEmailSenderTests : IDisposable
     private static byte[] Decode(MimePart part)
     {
         using var buffer = new MemoryStream();
+        Assert.NotNull(part.Content);
         part.Content.DecodeTo(buffer);
         return buffer.ToArray();
     }

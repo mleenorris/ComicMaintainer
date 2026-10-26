@@ -228,17 +228,6 @@ public sealed class FilesControllerFileActionsTests
         Assert.Equal(jobId, Prop(Assert.IsType<OkObjectResult>(result.Result).Value, "jobId"));
     }
 
-    [Fact]
-    public async Task ProcessBatch_NullList_IsLeftToTheBatchJob()
-    {
-        var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.ProcessFilesAsync(null!, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
-
-        var result = await _controller.ProcessBatch(null!);
-
-        Assert.Equal(jobId, Prop(Assert.IsType<OkObjectResult>(result.Result).Value, "jobId"));
-    }
-
     // ------------------------------------------------------------------ UpdateTags
 
     [Fact]

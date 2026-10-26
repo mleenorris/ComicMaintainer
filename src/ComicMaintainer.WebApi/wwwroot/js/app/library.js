@@ -741,8 +741,12 @@
             }
         }
 
+        // Accepts a single container or an array of containers; pass every
+        // newly added node in one call so the fallback batching below caps
+        // concurrent loads across all of them.
         async function hydrateProtectedImages(container = document) {
-            const images = container.querySelectorAll('[data-protected-image]');
+            const roots = Array.isArray(container) ? container : [container];
+            const images = roots.flatMap(root => Array.from(root.querySelectorAll('[data-protected-image]')));
             // Fast path: if the cover token is already cached, set it
             // immediately so the user sees instant re-renders for issues
             // they've already scrolled past. Uncached covers go through the
@@ -837,7 +841,7 @@
             if (!source) return false;
             const added = Array.from(source.children);
             container.append(...added);
-            added.forEach(node => hydrateProtectedImages(node));
+            hydrateProtectedImages(added);
             syncSeriesSelectionControls();
             updateSelectInfo();
             return true;

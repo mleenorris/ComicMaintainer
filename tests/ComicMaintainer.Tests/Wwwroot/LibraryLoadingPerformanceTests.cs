@@ -48,7 +48,13 @@ public class LibraryLoadingPerformanceTests
             RegexOptions.Singleline);
         Assert.True(append.Success, "Expected to find appendSeriesLibraryItems.");
         Assert.Contains("appendHtml(", append.Value);
-        Assert.Contains("hydrateProtectedImages(node)", append.Value);
+        // Hydrate the appended cards as one batch so the no-IntersectionObserver
+        // fallback keeps its eight-concurrent-load limit across the whole page.
+        Assert.Contains("hydrateProtectedImages(added);", append.Value);
+        Assert.DoesNotContain("added.forEach", append.Value);
+        Assert.Contains(
+            "const roots = Array.isArray(container) ? container : [container];",
+            ExtractFunction(contents, "hydrateProtectedImages"));
         Assert.Contains("syncSeriesSelectionControls();", append.Value);
         Assert.DoesNotContain("renderSeriesLibrary()", append.Value);
 

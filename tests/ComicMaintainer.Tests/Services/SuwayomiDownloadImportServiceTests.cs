@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -51,15 +52,31 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         }
     }
 
-    private SuwayomiDownloadImportService CreateService()
+    private SuwayomiDownloadImportService CreateService(ILogger<SuwayomiDownloadImportService>? logger = null)
     {
         var monitor = new Mock<IOptionsMonitor<AppSettings>>();
         monitor.Setup(m => m.CurrentValue).Returns(_settings);
         return new SuwayomiDownloadImportService(
             monitor.Object,
             _seriesLibrary.Object,
-            NullLogger<SuwayomiDownloadImportService>.Instance,
+            logger ?? NullLogger<SuwayomiDownloadImportService>.Instance,
             _time);
+    }
+
+    /// <summary>Runs an action whenever a message containing a given text is logged.</summary>
+    private sealed class HookLogger(string text, Action onLogged) : ILogger<SuwayomiDownloadImportService>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (formatter(state, exception).Contains(text, StringComparison.Ordinal))
+            {
+                onLogged();
+            }
+        }
     }
 
     private void SetupLibrary(IEnumerable<SeriesSummaryDto> series, IEnumerable<SeriesFoldersResult> folders)
@@ -586,6 +603,38 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Empty(Directory.GetFiles(destinationFolder, ".tmp_*"));
         Assert.Empty(Directory.GetFiles(destinationFolder, "*.suwayomi-import"));
         Assert.False(File.Exists(PendingMovesPath));
+        foreach (var attempt in Enumerable.Range(1, 1000))
+        {
+            var name = attempt == 1 ? "Chapter 1.cbz" : $"Chapter 1 ({attempt}).cbz";
+            Assert.Equal($"existing file {attempt}", File.ReadAllText(Path.Combine(destinationFolder, name)));
+        }
+    }
+
+    [Fact]
+    public async Task ImportAsync_KeepsTheStagedChapterWhenItsDownloadIsRecreatedDuringRollback()
+    {
+        var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "original chapter");
+        var destinationFolder = Directory.CreateDirectory(Path.Combine(_library, "Solo Leveling")).FullName;
+        foreach (var attempt in Enumerable.Range(1, 1000))
+        {
+            var name = attempt == 1 ? "Chapter 1.cbz" : $"Chapter 1 ({attempt}).cbz";
+            File.WriteAllText(Path.Combine(destinationFolder, name), $"existing file {attempt}");
+        }
+
+        byte[] newDownload = [0x50, 0x4b, 0x03, 0x04];
+        var logger = new HookLogger(
+            "returning it to the downloads folder",
+            () => File.WriteAllBytes(source, newDownload));
+
+        var result = await CreateService(logger).ImportAsync();
+
+        Assert.Equal(1, result.Failed);
+        Assert.False(result.PermissionDenied);
+        Assert.Equal(newDownload, File.ReadAllBytes(source));
+        var staging = Assert.Single(Directory.GetFiles(destinationFolder, ".tmp_*.suwayomi-import"));
+        Assert.Equal("original chapter", ReadPage(staging));
+        Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(source)!, ".tmp_*"));
         foreach (var attempt in Enumerable.Range(1, 1000))
         {
             var name = attempt == 1 ? "Chapter 1.cbz" : $"Chapter 1 ({attempt}).cbz";

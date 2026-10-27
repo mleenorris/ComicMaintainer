@@ -600,7 +600,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                     var stagedCopyArchive = ProbeArchive(stagingPath, extension);
                     if (stagedCopyArchive == ArchiveState.Complete)
                     {
-                        return RestoreStagedFile(stagingPath, sourcePath, extension) == MoveOutcome.PermissionDenied
+                        return RestoreStagedFile(stagingPath, sourcePath, extension, replaceSource: false) == MoveOutcome.PermissionDenied
                             ? MoveOutcome.PermissionDenied
                             : MoveOutcome.Failed;
                     }
@@ -696,7 +696,11 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
         if (restorePath is not null)
         {
-            if (RestoreStagedFile(stagingPath, restorePath, extension) == MoveOutcome.PermissionDenied)
+            _logger.LogWarning(
+                "Could not publish imported Suwayomi chapter {File} in {Folder}; returning it to the downloads folder",
+                LoggingHelper.SanitizeForLog(fileName),
+                LoggingHelper.SanitizeForLog(targetFolder));
+            if (RestoreStagedFile(stagingPath, restorePath, extension, replaceSource: false) == MoveOutcome.PermissionDenied)
             {
                 outcome = MoveOutcome.PermissionDenied;
             }
@@ -705,7 +709,14 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         return outcome;
     }
 
-    private MoveOutcome RestoreStagedFile(string stagingPath, string sourcePath, string extension)
+    /// <summary>
+    /// Returns a staged chapter to <paramref name="sourcePath"/> through a
+    /// verified temporary copy and an atomic rename. Only recovery of a settled
+    /// partial download passes <paramref name="replaceSource"/>; otherwise a
+    /// download Suwayomi recreated meanwhile is never replaced, and the staged
+    /// chapter and its journal entry stay for a later run.
+    /// </summary>
+    private MoveOutcome RestoreStagedFile(string stagingPath, string sourcePath, string extension, bool replaceSource)
     {
         var sourceFolder = Path.GetDirectoryName(sourcePath);
         if (string.IsNullOrEmpty(sourceFolder))
@@ -728,9 +739,18 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                     : MoveOutcome.Failed;
             }
 
-            File.Move(temporaryPath, sourcePath, overwrite: true);
+            File.Move(temporaryPath, sourcePath, overwrite: replaceSource);
             File.Delete(stagingPath);
             return MoveOutcome.Moved;
+        }
+        catch (IOException ex) when (!replaceSource && GetFilePathState(sourcePath) == FilePathState.Present)
+        {
+            _logger.LogWarning(
+                ex,
+                "Suwayomi chapter {File} was downloaded again before it could be restored; leaving the staged chapter at {StagingPath} for recovery",
+                LoggingHelper.SanitizePathForLog(sourcePath),
+                LoggingHelper.SanitizeForLog(stagingPath));
+            return MoveOutcome.Failed;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -892,7 +912,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
             if (sourceState == FilePathState.Present)
             {
-                var restoreOutcome = RestoreStagedFile(stagingPath, sourcePath!, Path.GetExtension(sourceName));
+                var restoreOutcome = RestoreStagedFile(stagingPath, sourcePath!, Path.GetExtension(sourceName), replaceSource: true);
                 if (GetFilePathState(stagingPath) == FilePathState.Missing)
                 {
                     run.PendingMoves.Remove(move);

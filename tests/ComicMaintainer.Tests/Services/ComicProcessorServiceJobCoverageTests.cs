@@ -271,6 +271,32 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task CancelJob_JobFinishesBetweenLookupAndCancel_ReturnsFalseInsteadOfThrowing()
+    {
+        // Regression test for #862: the job disposed its token source after CancelJob had looked
+        // it up, so Cancel() threw ObjectDisposedException and the API answered 500.
+        var service = CreateService();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (jobId, jobToken) = await StartHeldJobAsync(service, release.Task);
+        _logger.OnLog = entry =>
+        {
+            if (entry.Template == "Cancelling job: {JobId}")
+            {
+                // CancelJob holds the token source now; let the job finish and dispose it first.
+                release.TrySetResult();
+                WaitUntilDisposed(jobToken);
+            }
+        };
+
+        var cancelled = service.CancelJob(jobId);
+
+        Assert.False(cancelled);
+        Assert.True(_logger.Has(LogLevel.Warning, "Cannot cancel job {JobId}: no active cancellation token found"));
+        var job = await WaitForJobAsync(service, jobId);
+        Assert.Equal(JobStatus.Completed, job.Status);
+    }
+
+    [Fact]
     public async Task RunCustomBatchJobAsync_CallerTokenAlreadyCancelled_EndsCancelledWithoutRunningAnything()
     {
         var service = CreateService();
@@ -338,6 +364,49 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task Dispose_JobFinishesWhileJobsAreBeingCancelled_DoesNotThrowAndCancelsTheRest()
+    {
+        // Regression test for #862: Dispose cancels every token source it listed, and a job that
+        // finished in the meantime has already disposed its own.
+        var service = CreateService();
+        var (blockedJobId, blockedItemToken) = await StartBlockedJobAsync(service);
+        var releases = new[]
+        {
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+        var heldJobIds = new Guid[2];
+        var heldJobTokens = new CancellationToken[2];
+        var cancelledHeldJobs = new ConcurrentQueue<int>();
+
+        // Dispose lists the jobs in no particular order, so whichever held job it cancels first
+        // finishes the other one before Dispose gets to it.
+        void FinishOtherHeldJob(int cancelled)
+        {
+            cancelledHeldJobs.Enqueue(cancelled);
+            var other = 1 - cancelled;
+            releases[other].TrySetResult();
+            WaitUntilDisposed(heldJobTokens[other]);
+        }
+
+        for (var i = 0; i < 2; i++)
+        {
+            var index = i;
+            (heldJobIds[i], heldJobTokens[i]) = await StartHeldJobAsync(
+                service, releases[i].Task, onCancelled: () => FinishOtherHeldJob(index));
+        }
+
+        var error = Record.Exception(() => service.Dispose());
+
+        Assert.Null(error);
+        var cancelledFirst = Assert.Single(cancelledHeldJobs);
+        Assert.Equal(JobStatus.Cancelled, (await WaitForJobAsync(service, heldJobIds[cancelledFirst])).Status);
+        Assert.Equal(JobStatus.Completed, (await WaitForJobAsync(service, heldJobIds[1 - cancelledFirst])).Status);
+        Assert.True(blockedItemToken.IsCancellationRequested);
+        Assert.Equal(JobStatus.Cancelled, (await WaitForJobAsync(service, blockedJobId)).Status);
+    }
+
+    [Fact]
     public async Task JobStateStore_PersistsStatusTransitionsThroughCompletion()
     {
         var saved = new ConcurrentQueue<JobStatus>();
@@ -385,6 +454,58 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
             "Blocking failed");
         var itemToken = await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
         return (jobId, itemToken);
+    }
+
+    /// <summary>
+    /// Starts a job that waits in its post-loop hook until <paramref name="release"/> completes or
+    /// the job is cancelled, and returns the job's own cancellation token.
+    /// </summary>
+    private async Task<(Guid JobId, CancellationToken JobToken)> StartHeldJobAsync(
+        ComicProcessorService service,
+        Task release,
+        Action? onCancelled = null)
+    {
+        var held = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var jobId = await service.RunCustomBatchJobAsync(
+            "HeldOp",
+            new[] { "only-item" },
+            (_, _) => Task.FromResult(true),
+            "Held failed",
+            async token =>
+            {
+                if (onCancelled != null)
+                {
+                    token.Register(onCancelled);
+                }
+
+                held.TrySetResult(token);
+                await release.WaitAsync(token);
+            });
+        var jobToken = await held.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        return (jobId, jobToken);
+    }
+
+    /// <summary>
+    /// Blocks until the job has disposed its token source, the last thing its finally block does.
+    /// </summary>
+    private static void WaitUntilDisposed(CancellationToken jobToken)
+    {
+        // Reading WaitHandle is how a token reports that its source has been disposed.
+        var disposed = SpinWait.SpinUntil(
+            () =>
+            {
+                try
+                {
+                    _ = jobToken.WaitHandle;
+                    return false;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return true;
+                }
+            },
+            TimeSpan.FromSeconds(30));
+        Assert.True(disposed, "The job never disposed its cancellation token source.");
     }
 
     private ComicProcessorService CreateService(IJobStateStore? jobStateStore = null)
@@ -491,6 +612,12 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     {
         public ConcurrentQueue<LogEntry> Entries { get; } = new();
 
+        /// <summary>
+        /// Runs inside each log call, on the logging thread, so a test can pause the service at
+        /// the point where it logs.
+        /// </summary>
+        public Action<LogEntry>? OnLog { get; set; }
+
         public bool Has(LogLevel level, string template) =>
             Entries.Any(e => e.Level == level && e.Template == template);
 
@@ -517,7 +644,9 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
                 }
             }
 
-            Entries.Enqueue(new LogEntry(logLevel, template, properties, exception));
+            var entry = new LogEntry(logLevel, template, properties, exception);
+            Entries.Enqueue(entry);
+            OnLog?.Invoke(entry);
         }
 
         private sealed class NoopScope : IDisposable

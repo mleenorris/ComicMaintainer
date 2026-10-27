@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -27,6 +28,12 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     private readonly Mock<IComicEmailSender> _sender = new();
     private readonly Mock<IEpubConversionService> _epub = new();
     private readonly Mock<ISeriesMetadataCacheService> _seriesCache = new();
+    /// <summary>
+    /// Shared so every test reuses one EF Core service provider; tests in a
+    /// class run one at a time and only one arms it.
+    /// </summary>
+    private static readonly PendingDeliveryLoadGate PendingLoadGate = new();
+
     private readonly FakeTimeProvider _time = new(Start);
     private readonly CancellationTokenSource _applicationStopping = new();
     private readonly ComicEmailService _service;
@@ -38,19 +45,19 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
 
     public ComicEmailServiceCancellationAndRateLimitTests()
     {
-        _watchedDir = Path.Combine(Path.GetTempPath(), $"email-cancel-tests-{Guid.NewGuid():N}");
+        _watchedDir = Path.Join(Path.GetTempPath(), $"email-cancel-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_watchedDir);
 
         var dbName = $"TestDb_{Guid.NewGuid()}";
         var services = new ServiceCollection();
-        services.AddDbContextFactory<ComicMaintainerDbContext>(opt => opt.UseInMemoryDatabase(dbName));
+        services.AddDbContextFactory<ComicMaintainerDbContext>(opt => opt.UseInMemoryDatabase(dbName).AddInterceptors(PendingLoadGate));
         _dbFactory = services.BuildServiceProvider().GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
 
         _settings = new AppSettings
         {
             WatchedDirectory = _watchedDir,
-            DuplicateDirectory = Path.Combine(_watchedDir, "..", "duplicates-none"),
-            TempFileDirectory = Path.Combine(_watchedDir, "temp"),
+            DuplicateDirectory = Path.Join(_watchedDir, "..", "duplicates-none"),
+            TempFileDirectory = Path.Join(_watchedDir, "temp"),
             EmailMaxAttachmentMegabytes = 25,
             SmtpHost = "smtp.example.com",
             EmailFromAddress = "library@example.com"
@@ -245,6 +252,34 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(finished.Id)).Status);
         Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(inProgress.Id)).Status);
         Assert.Equal(EmailDeliveryStatus.Cancelled, (await GetDeliveryAsync(queued.Id)).Status);
+    }
+
+    [Fact]
+    public async Task CancelPendingDeliveriesAsync_DoesNotOverwriteADeliveryThatFinishesWhileCancelling()
+    {
+        var sending = BlockSending();
+        var delivery = await QueueAsync("Series - Chapter 0001.cbz");
+
+        var processing = Task.Run(() => _service.ProcessDeliveryAsync(delivery.Id));
+        await sending.Started.Task.WaitAsync(Patience);
+
+        // Hold the bulk cancel just after it has read the delivery as pending.
+        PendingLoadGate.Arm(delivery.Id);
+        var cancelling = Task.Run(() => _service.CancelPendingDeliveriesAsync());
+        await PendingLoadGate.Reached.Task.WaitAsync(Patience);
+
+        // Let the message go out and give the processor time to finish.
+        sending.Release.TrySetResult();
+        await WaitUntilAsync(() => GetDeliveryAsync(delivery.Id).GetAwaiter().GetResult().Status == EmailDeliveryStatus.Sent);
+        await Task.WhenAny(processing, Task.Delay(TimeSpan.FromMilliseconds(200)));
+
+        PendingLoadGate.Release();
+        var result = await cancelling.WaitAsync(Patience);
+        await processing.WaitAsync(Patience);
+
+        Assert.Equal(new EmailDeliveryBulkCancelResult(Cancelled: 0, Stopping: 0, Sending: 1), result);
+        Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(delivery.Id)).Status);
+        Assert.Equal(1, SendCount);
     }
 
     [Fact]
@@ -495,6 +530,41 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(delivery.Id)).Status);
     }
 
+    /// <summary>
+    /// Once armed, blocks the first query that reads the given delivery while
+    /// it is still pending until released.
+    /// </summary>
+    private sealed class PendingDeliveryLoadGate : IMaterializationInterceptor
+    {
+        private readonly ManualResetEventSlim _release = new(false);
+        private int _deliveryId;
+
+        public TaskCompletionSource Reached { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Arm(int deliveryId)
+        {
+            _release.Reset();
+            Reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Volatile.Write(ref _deliveryId, deliveryId);
+        }
+
+        public void Release() => _release.Set();
+
+        public object InitializedInstance(MaterializationInterceptionData materializationData, object entity)
+        {
+            if (entity is ComicEmailDeliveryEntity delivery &&
+                delivery.Status == EmailDeliveryStatus.Pending &&
+                delivery.Id != 0 &&
+                Interlocked.CompareExchange(ref _deliveryId, 0, delivery.Id) == delivery.Id)
+            {
+                Reached.TrySetResult();
+                _release.Wait(Patience);
+            }
+
+            return entity;
+        }
+    }
+
     /// <summary>A background step a test holds open: it signals when it starts and waits to be released.</summary>
     private sealed record BlockedStep(TaskCompletionSource Started, TaskCompletionSource Release);
 
@@ -528,7 +598,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
                 }
 
                 Directory.CreateDirectory(outDir);
-                var book = Path.Combine(outDir, Path.GetFileNameWithoutExtension(source) + ".epub");
+                var book = Path.Join(outDir, Path.GetFileNameWithoutExtension(source) + ".epub");
                 await File.WriteAllTextAsync(book, "epub-bytes", CancellationToken.None);
                 return book;
             });
@@ -644,7 +714,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         {
             db.ComicEmailDeliveries.Add(new ComicEmailDeliveryEntity
             {
-                FilePath = Path.Combine(_watchedDir, $"Earlier {Guid.NewGuid():N}.cbz"),
+                FilePath = Path.Join(_watchedDir, $"Earlier {Guid.NewGuid():N}.cbz"),
                 DeviceId = deviceId,
                 DeviceName = "Reader original",
                 DeviceEmail = "original@kindle.com",
@@ -659,7 +729,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
 
     private string CreateComic(string fileName)
     {
-        var path = Path.Combine(_watchedDir, fileName);
+        var path = Path.Join(_watchedDir, fileName);
         File.WriteAllBytes(path, new byte[16]);
         return path;
     }

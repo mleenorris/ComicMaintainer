@@ -997,8 +997,19 @@ public class ComicEmailService : IComicEmailService
         {
             // Removed only after the outcome has been saved, so a cancel
             // request that no longer finds the delivery in flight reads its
-            // final status from the database.
-            _inFlight.TryRemove(new KeyValuePair<int, InFlightDelivery>(deliveryId, inFlight));
+            // final status from the database. Taken under the state lock so a
+            // bulk cancel that has already loaded this row as pending still
+            // finds it in flight instead of overwriting the saved outcome.
+            await _deliveryStateLock.WaitAsync(CancellationToken.None);
+            try
+            {
+                _inFlight.TryRemove(new KeyValuePair<int, InFlightDelivery>(deliveryId, inFlight));
+            }
+            finally
+            {
+                _deliveryStateLock.Release();
+            }
+
             inFlight.Complete();
         }
     }

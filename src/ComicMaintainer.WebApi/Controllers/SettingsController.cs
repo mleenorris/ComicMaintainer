@@ -908,7 +908,7 @@ public class SettingsController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
             _logger.LogError(ex, "Failed to update email rate limit");
             return StatusCode(500, new { error = "Failed to update email rate limit" });

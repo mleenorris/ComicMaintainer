@@ -134,6 +134,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   batch endpoints reject the whole request when any path is outside it, instead of silently
   skipping it.
 - **Removing metadata is confined to the library**, like writing it already was.
+- **Reading series metadata is confined to the library**, like reading a comic's other metadata
+  already was.
+- **Processing a file renames the file that was checked.** The rename used the path as given,
+  so a folder on it replaced by a link during processing could redirect the rename outside the
+  library. It now moves the checked, link-resolved file, and skips the rename if a folder on
+  that path has been replaced by a link since the check.
 - **Resetting the database cancels the jobs that are running**, which kept working on the data
   being deleted; **Reset Filename Format** restores the default instead of "undefined"; and the
   GitHub token setting is never written to the log.

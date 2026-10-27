@@ -52,10 +52,13 @@ public partial class ComicProcessorService
     {
         try
         {
-            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+            if (!TryResolveAllowedPath(filePath, out var resolvedPath))
                 return Task.FromResult<SeriesMetadata?>(null);
 
-            using var archive = ArchiveFactory.OpenArchive(filePath);
+            if (!File.Exists(resolvedPath) || !IsComicArchive(resolvedPath))
+                return Task.FromResult<SeriesMetadata?>(null);
+
+            using var archive = ArchiveFactory.OpenArchive(resolvedPath);
             var comicInfoEntry = archive.Entries.FirstOrDefault(e =>
                 e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
 

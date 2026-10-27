@@ -402,6 +402,37 @@ test('without IntersectionObserver covers load eagerly, eight at a time', async 
     assert.deepEqual(coverCalls(page).map(call => call.query.filePath), makeSeriesList(10).map(series => series.cover_file_path));
 });
 
+test('without IntersectionObserver a cover that failed to load waits for the next hydration', async t => {
+    const answers = [];
+    const page = await bootWithCovers(makeSeriesList(1), () => {
+        const answer = deferred();
+        answers.push(answer);
+        return answer.promise;
+    }, { globals: { IntersectionObserver: undefined } });
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const [cover] = covers(page);
+
+    answers[0].resolve(503);
+    await page.settle();
+    t.mock.timers.tick(250);
+    await page.settle();
+    answers[1].resolve(503);
+    await page.settle();
+    assert.equal(cover.dataset.protectedImageLoaded, undefined);
+
+    t.mock.timers.tick(10 * 60 * 1000);
+    await page.settle();
+    assert.equal(coverCalls(page).length, 2);
+    assert.deepEqual(page.errors, []);
+
+    page.run('hydrateProtectedImages()');
+    await page.settle();
+    assert.equal(coverCalls(page).length, 3);
+    answers[2].resolve(imageResponse());
+    await page.settle();
+    assert.ok(cover.src.startsWith('blob:'));
+});
+
 test('cover tokens resolve to API paths or the cover endpoint', async () => {
     const page = await bootLibrary();
 

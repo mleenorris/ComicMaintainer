@@ -2152,6 +2152,49 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NormalizeFileAsync_WithoutAnInjectedResolver_UsesSeriesNameResolverRules()
+    {
+        // A service built without an ISeriesNameResolver gets the standard SeriesNameResolver,
+        // not a separate in-process copy. Only the resolver falls back to GetByTitleAsync, so
+        // the user-selected name on a record known under an alias proves which one ran.
+        var filePath = CreateLocalizedComicArchive("Saga Deluxe", "Saga Deluxe", "1");
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+
+        var cache = new Mock<ISeriesMetadataCacheService>();
+        cache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+        cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        cache.Setup(c => c.GetByTitleAsync("Saga Deluxe", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord
+            {
+                NormalizedKey = "saga",
+                CanonicalTitle = "Saga",
+                SeriesName = "Saga",
+                UserAliases = new List<string> { "Saga Deluxe" },
+            });
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: cache.Object);
+
+        Assert.True(await service.ProcessFileAsync(filePath));
+
+        var updated = await service.GetMetadataAsync(filePath);
+        Assert.NotNull(updated);
+        Assert.Equal("Saga", updated!.Series);
+        _mockExternalSeriesMetadata.Verify(
+            s => s.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_WithDecimalIssueNumber_RenamesCorrectly()
     {
         // Arrange - Create a comic file with decimal issue number

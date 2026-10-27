@@ -8,6 +8,11 @@ namespace ComicMaintainer.Core.Models;
 /// </summary>
 public class FileDto
 {
+    /// <summary>
+    /// The file's full, absolute path, despite the name. It is the file's identity: the
+    /// front end sends it back unchanged to the path-based endpoints. The JSON name is
+    /// kept for API compatibility.
+    /// </summary>
     [JsonPropertyName("relative_path")]
     public string RelativePath { get; set; } = string.Empty;
 
@@ -42,6 +47,7 @@ public class FileDto
     {
         return new FileDto
         {
+            // "relative_path" carries the full path; see RelativePath.
             RelativePath = file.FilePath,
             Name = file.FileName,
             Size = file.FileSize,

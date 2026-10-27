@@ -87,6 +87,7 @@ public partial class FileStoreService
 
     private static FileDto ToFileDto(FileProjection p) => new()
     {
+        // "relative_path" carries the full path; see FileDto.RelativePath.
         RelativePath = p.FilePath,
         Name = p.FileName,
         Size = p.FileSize,

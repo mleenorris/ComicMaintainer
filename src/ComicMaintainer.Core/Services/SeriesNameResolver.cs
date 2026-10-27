@@ -8,10 +8,9 @@ using Microsoft.Extensions.Options;
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Default implementation of <see cref="ISeriesNameResolver"/>. Mirrors the
-/// resolution logic previously embedded in
-/// <c>ComicProcessorService.ResolveNormalizedSeriesAsync</c> so the
-/// normalize pipeline, audit handlers, and diagnostic endpoint produce the
+/// Default implementation of <see cref="ISeriesNameResolver"/>. The normalize
+/// pipeline (<c>ComicProcessorService.ResolveNormalizedSeriesAsync</c>), audit
+/// handlers, and diagnostic endpoint all delegate here, so they produce the
 /// same expected series for any given file.
 /// </summary>
 public class SeriesNameResolver : ISeriesNameResolver

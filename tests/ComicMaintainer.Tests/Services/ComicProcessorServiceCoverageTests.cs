@@ -826,9 +826,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         Assert.True(result);
         Assert.True(File.Exists(path));
-        Assert.True(_logger.Has(LogLevel.Warning, "Failed to consult series metadata cache for user-selected name {SeriesName}"));
-        Assert.True(_logger.Has(LogLevel.Warning, "Failed to consult series metadata cache for matched title {SeriesName}"));
-        Assert.True(_logger.Has(LogLevel.Warning, "Failed to consult series metadata cache for cleared-status check on {SeriesName}"));
+        Assert.True(_logger.Has(LogLevel.Warning, "Failed to consult cache for user-selected name {SeriesName}"));
+        Assert.True(_logger.Has(LogLevel.Warning, "Failed to consult cache for matched title {SeriesName}"));
+        Assert.True(_logger.Has(LogLevel.Warning, "Failed to consult cache for cleared-status check on {SeriesName}"));
         Assert.True(_logger.Has(LogLevel.Debug, "Failed to stamp series-metadata version on {FilePath}"));
         _fileStore.Verify(f => f.MarkFileNormalizedAsync(path, true, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(f => f.MarkFileRenamedAsync(path, true, It.IsAny<CancellationToken>()), Times.Once);
@@ -1399,15 +1399,19 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         IComicEmailService? email = null,
         ComicMaintainerMetrics? metrics = null)
     {
+        var settings = new TestOptionsMonitor<AppSettings>(_settings);
+
+        // Series resolution goes through the real SeriesNameResolver, logging to the same
+        // logger, so its warnings can be asserted alongside the processor's.
         var service = new ComicProcessorService(
-            new TestOptionsMonitor<AppSettings>(_settings),
+            settings,
             _logger,
             _fileStore.Object,
             _history.Object,
             eventBroadcaster: _broadcaster.Object,
             externalSeriesMetadata: external,
             seriesMetadataCache: cache,
-            seriesNameResolver: resolver,
+            seriesNameResolver: resolver ?? new SeriesNameResolver(settings, _logger, cache, external),
             comicEmail: email,
             metrics: metrics);
         _services.Add(service);
@@ -1643,7 +1647,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
     private sealed record LogEntry(LogLevel Level, string Template, IReadOnlyDictionary<string, object?> Properties, Exception? Exception);
 
-    private sealed class HookLogger : ILogger<ComicProcessorService>
+    private sealed class HookLogger : ILogger<ComicProcessorService>, ILogger<SeriesNameResolver>
     {
         private readonly ConcurrentDictionary<string, Action<LogEntry>> _hooks = new();
 

@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Encodings.Web;
@@ -27,6 +28,10 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     ];
 
     private static readonly string PasswordAlphabet = string.Concat(PasswordCharacterClasses);
+
+    // Domain of the placeholder email given to a user the proxy sends no email for.
+    private const string FallbackEmailDomain = "authelia.local";
+    private static readonly EmailAddressAttribute EmailValidator = new();
 
     private readonly AutheliaSettings _autheliaSettings;
     private readonly UserManager<ApplicationUser> _userManager;
@@ -109,7 +114,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         {
             new(ClaimTypes.NameIdentifier, user.Id),
             new(ClaimTypes.Name, username),  // Always use the username from Authelia header
-            new(ClaimTypes.Email, user.Email ?? email ?? $"{username}@authelia.local"),
+            new(ClaimTypes.Email, user.Email ?? email ?? FallbackEmail(username)),
             new("auth_method", "authelia")
         };
 
@@ -205,7 +210,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             user = new ApplicationUser
             {
                 UserName = username,
-                Email = email ?? $"{username}@authelia.local",
+                Email = email ?? FallbackEmail(username),
                 FullName = displayName ?? username,
                 EmailConfirmed = true, // Authelia handles email verification
                 IsActive = true
@@ -284,6 +289,20 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     }
 
     private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>
+    /// The email of a user the proxy sends no email for. Identity only creates an account whose email it
+    /// accepts as an address and no other account has (<c>RequireUniqueEmail</c>), so this is the username
+    /// itself when it is an address, such as <c>alice@corp.example</c>, and otherwise
+    /// <c>&lt;username&gt;@authelia.local</c> with every '@' of the username replaced by '='. A username
+    /// cannot contain '=' (Identity's default <c>AllowedUserNameCharacters</c>) and is never used as is
+    /// at <c>authelia.local</c>, so no two usernames get the same email.
+    /// </summary>
+    private static string FallbackEmail(string username) =>
+        EmailValidator.IsValid(username)
+            && !username.EndsWith("@" + FallbackEmailDomain, StringComparison.OrdinalIgnoreCase)
+            ? username
+            : $"{username.Replace('@', '=')}@{FallbackEmailDomain}";
 
     /// <summary>
     /// A random password that satisfies <paramref name="policy"/>. It is never used to sign in,

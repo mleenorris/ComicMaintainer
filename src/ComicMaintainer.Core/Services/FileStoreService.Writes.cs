@@ -291,10 +291,6 @@ public partial class FileStoreService
                 var newEntity = await dbContext.ComicFiles
                     .FirstOrDefaultAsync(e => e.FilePath == newPath, cancellationToken);
 
-                // Set once the old-path row turns out to have been deleted by a concurrent
-                // writer, so the merge below must not try to delete it again.
-                var oldRowDeleted = false;
-
                 if (newEntity == null)
                 {
                     // Rename the existing row in-place to preserve all columns (including IsRenamed, IsNormalized, etc.)
@@ -411,8 +407,7 @@ public partial class FileStoreService
                     {
                         await dbContext.SaveChangesAsync(cancellationToken);
                     }
-                    catch (DbUpdateConcurrencyException ex) when (!oldRowDeleted &&
-                                                                  ex.Entries.All(e => e.State == EntityState.Deleted))
+                    catch (DbUpdateConcurrencyException ex) when (ex.Entries.All(e => e.State == EntityState.Deleted))
                     {
                         // Race condition: the old-path row was deleted concurrently (e.g. by the
                         // watcher) after it was loaded, so its delete matched no row and rolled
@@ -420,7 +415,6 @@ public partial class FileStoreService
                         // merged state onto the new-path row on its own.
                         foreach (var entry in ex.Entries)
                             entry.State = EntityState.Detached;
-                        oldRowDeleted = true;
 
                         await dbContext.SaveChangesAsync(cancellationToken);
                         _logger.LogDebug("Old path row was deleted concurrently during merge: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));

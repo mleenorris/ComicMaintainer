@@ -42,6 +42,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     private readonly List<DateTimeOffset> _sendTimes = new();
     private readonly string _watchedDir;
     private readonly AppSettings _settings;
+    private Task? _processing;
 
     public ComicEmailServiceCancellationAndRateLimitTests()
     {
@@ -280,6 +281,37 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         Assert.Equal(new EmailDeliveryBulkCancelResult(Cancelled: 0, Stopping: 0, Sending: 1), result);
         Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(delivery.Id)).Status);
         Assert.Equal(1, SendCount);
+    }
+
+    [Fact]
+    public async Task CancelDeliveryAsync_CancelsADeliveryLeftPendingByShutdownWhileCancelling()
+    {
+        var delivery = await StartRateLimitedDeliveryAsync();
+
+        var cancelling = await HoldCancelWhileShutdownLeavesTheDeliveryPendingAsync(
+            delivery.Id,
+            () => _service.CancelDeliveryAsync(delivery.Id));
+
+        var result = await cancelling.WaitAsync(Patience);
+        Assert.Equal(EmailDeliveryCancelOutcome.Cancelled, result.Outcome);
+        Assert.Equal(EmailDeliveryStatus.Cancelled, result.Delivery?.Status);
+        Assert.Equal(EmailDeliveryStatus.Cancelled, (await GetDeliveryAsync(delivery.Id)).Status);
+        Assert.Equal(0, SendCount);
+    }
+
+    [Fact]
+    public async Task CancelPendingDeliveriesAsync_CancelsADeliveryLeftPendingByShutdownWhileCancelling()
+    {
+        var delivery = await StartRateLimitedDeliveryAsync();
+
+        var cancelling = await HoldCancelWhileShutdownLeavesTheDeliveryPendingAsync(
+            delivery.Id,
+            () => _service.CancelPendingDeliveriesAsync());
+
+        var result = await cancelling.WaitAsync(Patience);
+        Assert.Equal(new EmailDeliveryBulkCancelResult(Cancelled: 1, Stopping: 0, Sending: 0), result);
+        Assert.Equal(EmailDeliveryStatus.Cancelled, (await GetDeliveryAsync(delivery.Id)).Status);
+        Assert.Equal(0, SendCount);
     }
 
     [Fact]
@@ -641,6 +673,40 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     }
 
     private int SendCount => SendTimes.Count;
+
+    /// <summary>Queues a delivery and starts processing it; it waits for the rate limit.</summary>
+    private async Task<ComicEmailDeliveryDto> StartRateLimitedDeliveryAsync()
+    {
+        _settings.EmailMinSecondsBetweenSends = 3600;
+        await SeedDeliveriesAsync(EmailDeliveryStatus.Sent, Start.AddMinutes(-1));
+        var delivery = await QueueAsync("Series - Chapter 0001.cbz");
+
+        _processing = Task.Run(() => _service.ProcessDeliveryAsync(delivery.Id));
+        await WaitUntilAsync(() => _service.RateLimitedUntil is not null);
+        return delivery;
+    }
+
+    /// <summary>
+    /// Holds <paramref name="cancel"/> just after it has read the delivery as
+    /// pending and in flight, lets shutdown make the processor leave it
+    /// pending, then lets the cancel go on while the processor finishes.
+    /// </summary>
+    private async Task<Task<T>> HoldCancelWhileShutdownLeavesTheDeliveryPendingAsync<T>(int deliveryId, Func<Task<T>> cancel)
+    {
+        PendingLoadGate.Arm(deliveryId);
+        var cancelling = Task.Run(cancel);
+        await PendingLoadGate.Reached.Task.WaitAsync(Patience);
+
+        // The processor gives up waiting for the limit without saving anything,
+        // then waits for the state lock the cancel holds to finish.
+        await _applicationStopping.CancelAsync();
+        await WaitUntilAsync(() => _service.RateLimitedUntil is null);
+        await Task.Delay(TimeSpan.FromMilliseconds(200));
+
+        PendingLoadGate.Release();
+        await _processing!.WaitAsync(Patience);
+        return cancelling;
+    }
 
     /// <summary>
     /// Moves the clock forward in steps until <paramref name="condition"/>

@@ -1256,51 +1256,37 @@ public class ComicEmailService : IComicEmailService
         int deliveryId,
         CancellationToken cancellationToken = default)
     {
-        InFlightDelivery? inFlight;
-        await _deliveryStateLock.WaitAsync(cancellationToken);
-        try
+        var (direct, inFlight) = await CancelUnclaimedDeliveryAsync(deliveryId, cancellationToken);
+        if (inFlight is null)
         {
-            if (!_inFlight.TryGetValue(deliveryId, out inFlight))
-            {
-                // Not claimed by the processor, and it cannot be claimed while
-                // the lock is held: the row can be changed directly.
-                await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-                var delivery = await db.ComicEmailDeliveries.FirstOrDefaultAsync(d => d.Id == deliveryId, cancellationToken);
-                if (delivery is null)
-                {
-                    return new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.NotFound, null);
-                }
-
-                if (!string.Equals(delivery.Status, EmailDeliveryStatus.Pending, StringComparison.Ordinal))
-                {
-                    return new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.AlreadyFinished, ToDto(delivery));
-                }
-
-                delivery.Status = EmailDeliveryStatus.Cancelled;
-                delivery.ErrorMessage = null;
-                await db.SaveChangesAsync(cancellationToken);
-
-                _logger.LogInformation(
-                    "Cancelled pending email delivery {DeliveryId} of {FilePath}",
-                    delivery.Id,
-                    LoggingHelper.SanitizePathForLog(delivery.FilePath));
-                return new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.Cancelled, ToDto(delivery));
-            }
-        }
-        finally
-        {
-            _deliveryStateLock.Release();
+            return direct!;
         }
 
-        if (!inFlight.TryRequestCancel())
+        var request = inFlight.TryRequestCancel();
+        if (request == InFlightCancelRequest.Sending)
         {
             return new EmailDeliveryCancelResult(
                 EmailDeliveryCancelOutcome.Sending,
                 await GetDeliveryDtoAsync(deliveryId, cancellationToken));
         }
 
-        _logger.LogInformation("Stopping email delivery {DeliveryId}, which is being prepared", deliveryId);
-        await WaitForInFlightAsync(new[] { inFlight }, cancellationToken);
+        if (request == InFlightCancelRequest.Requested)
+        {
+            _logger.LogInformation("Stopping email delivery {DeliveryId}, which is being prepared", deliveryId);
+            await WaitForInFlightAsync(new[] { inFlight }, cancellationToken);
+        }
+
+        if (inFlight.Completion.IsCompleted)
+        {
+            // The processor has finished with it. A delivery it left pending —
+            // on shutdown, possibly after accepting this request — is no
+            // longer being worked on and is cancelled directly.
+            var (reconciled, _) = await CancelUnclaimedDeliveryAsync(deliveryId, cancellationToken);
+            if (reconciled?.Outcome == EmailDeliveryCancelOutcome.Cancelled)
+            {
+                return reconciled;
+            }
+        }
 
         var latest = await GetDeliveryDtoAsync(deliveryId, cancellationToken);
         if (latest is null)
@@ -1319,6 +1305,126 @@ public class ComicEmailService : IComicEmailService
 
     public async Task<EmailDeliveryBulkCancelResult> CancelPendingDeliveriesAsync(CancellationToken cancellationToken = default)
     {
+        var (cancelled, claimed) = await CancelUnclaimedPendingDeliveriesAsync(null, cancellationToken);
+
+        var requests = claimed
+            .Select(c => (c.Id, c.Delivery, Request: c.Delivery.TryRequestCancel()))
+            .ToList();
+        var stopping = requests
+            .Where(r => r.Request == InFlightCancelRequest.Requested)
+            .Select(r => r.Delivery)
+            .ToList();
+        if (stopping.Count > 0)
+        {
+            await WaitForInFlightAsync(stopping, cancellationToken);
+        }
+
+        var sending = 0;
+        var finishedIds = new List<int>();
+        var outcomeIds = new List<int>();
+        foreach (var (id, inFlight, request) in requests)
+        {
+            if (request == InFlightCancelRequest.Sending)
+            {
+                sending++;
+                continue;
+            }
+
+            outcomeIds.Add(id);
+            if (inFlight.Completion.IsCompleted)
+            {
+                finishedIds.Add(id);
+            }
+        }
+
+        // The processor has finished with these. Any it left pending — on
+        // shutdown, possibly after accepting this request — are no longer
+        // being worked on and are cancelled directly.
+        if (finishedIds.Count > 0)
+        {
+            await CancelUnclaimedPendingDeliveriesAsync(finishedIds, cancellationToken);
+        }
+
+        var stillStopping = 0;
+        if (outcomeIds.Count > 0)
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+            var statuses = await db.ComicEmailDeliveries
+                .AsNoTracking()
+                .Where(d => outcomeIds.Contains(d.Id))
+                .Select(d => d.Status)
+                .ToListAsync(cancellationToken);
+            cancelled += statuses.Count(s => s == EmailDeliveryStatus.Cancelled);
+            stillStopping = statuses.Count(s => s == EmailDeliveryStatus.Pending);
+        }
+
+        _logger.LogInformation(
+            "Cancelled {Cancelled} pending email deliveries ({Stopping} still stopping, {Sending} already being sent)",
+            cancelled,
+            stillStopping,
+            sending);
+        return new EmailDeliveryBulkCancelResult(cancelled, stillStopping, sending);
+    }
+
+    /// <summary>
+    /// Cancels the delivery directly when the processor is not working on it.
+    /// Runs under the state lock, so the processor can neither claim it nor
+    /// finish with it meanwhile.
+    /// </summary>
+    /// <returns>
+    /// The result, or the delivery the processor is working on (and no
+    /// result) when it is in flight.
+    /// </returns>
+    private async Task<(EmailDeliveryCancelResult? Result, InFlightDelivery? InFlight)> CancelUnclaimedDeliveryAsync(
+        int deliveryId,
+        CancellationToken cancellationToken)
+    {
+        await _deliveryStateLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+            var delivery = await db.ComicEmailDeliveries.FirstOrDefaultAsync(d => d.Id == deliveryId, cancellationToken);
+            if (delivery is null)
+            {
+                return (new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.NotFound, null), null);
+            }
+
+            if (!string.Equals(delivery.Status, EmailDeliveryStatus.Pending, StringComparison.Ordinal))
+            {
+                return (new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.AlreadyFinished, ToDto(delivery)), null);
+            }
+
+            if (_inFlight.TryGetValue(deliveryId, out var inFlight))
+            {
+                return (null, inFlight);
+            }
+
+            delivery.Status = EmailDeliveryStatus.Cancelled;
+            delivery.ErrorMessage = null;
+            await db.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Cancelled pending email delivery {DeliveryId} of {FilePath}",
+                delivery.Id,
+                LoggingHelper.SanitizePathForLog(delivery.FilePath));
+            return (new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.Cancelled, ToDto(delivery)), null);
+        }
+        finally
+        {
+            _deliveryStateLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Cancels pending deliveries the processor is not working on, under the
+    /// state lock so none can be claimed or finished meanwhile.
+    /// </summary>
+    /// <param name="ids">Deliveries to consider; null for every pending one.</param>
+    /// <returns>How many were cancelled, and those the processor is working on.</returns>
+    private async Task<(int Cancelled, List<(int Id, InFlightDelivery Delivery)> Claimed)> CancelUnclaimedPendingDeliveriesAsync(
+        List<int>? ids,
+        CancellationToken cancellationToken)
+    {
         var cancelled = 0;
         var claimed = new List<(int Id, InFlightDelivery Delivery)>();
 
@@ -1326,11 +1432,13 @@ public class ComicEmailService : IComicEmailService
         try
         {
             await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-            var pending = await db.ComicEmailDeliveries
-                .Where(d => d.Status == EmailDeliveryStatus.Pending)
-                .ToListAsync(cancellationToken);
+            var query = db.ComicEmailDeliveries.Where(d => d.Status == EmailDeliveryStatus.Pending);
+            if (ids is not null)
+            {
+                query = query.Where(d => ids.Contains(d.Id));
+            }
 
-            foreach (var delivery in pending)
+            foreach (var delivery in await query.ToListAsync(cancellationToken))
             {
                 if (_inFlight.TryGetValue(delivery.Id, out var inFlight))
                 {
@@ -1353,43 +1461,7 @@ public class ComicEmailService : IComicEmailService
             _deliveryStateLock.Release();
         }
 
-        var sending = 0;
-        var stoppingIds = new List<int>();
-        var stopping = new List<InFlightDelivery>();
-        foreach (var (id, inFlight) in claimed)
-        {
-            if (inFlight.TryRequestCancel())
-            {
-                stoppingIds.Add(id);
-                stopping.Add(inFlight);
-            }
-            else
-            {
-                sending++;
-            }
-        }
-
-        var stillStopping = 0;
-        if (stopping.Count > 0)
-        {
-            await WaitForInFlightAsync(stopping, cancellationToken);
-
-            await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-            var statuses = await db.ComicEmailDeliveries
-                .AsNoTracking()
-                .Where(d => stoppingIds.Contains(d.Id))
-                .Select(d => d.Status)
-                .ToListAsync(cancellationToken);
-            cancelled += statuses.Count(s => s == EmailDeliveryStatus.Cancelled);
-            stillStopping = statuses.Count(s => s == EmailDeliveryStatus.Pending);
-        }
-
-        _logger.LogInformation(
-            "Cancelled {Cancelled} pending email deliveries ({Stopping} still stopping, {Sending} already being sent)",
-            cancelled,
-            stillStopping,
-            sending);
-        return new EmailDeliveryBulkCancelResult(cancelled, stillStopping, sending);
+        return (cancelled, claimed);
     }
 
     /// <summary>
@@ -1745,6 +1817,19 @@ public class ComicEmailService : IComicEmailService
         entity.SentAt,
         Math.Max(1, DeserializeCondensedPaths(entity.CondensedFilePaths).Count));
 
+    /// <summary>What became of a request to stop an in-flight delivery.</summary>
+    private enum InFlightCancelRequest
+    {
+        /// <summary>The processor was asked to stop.</summary>
+        Requested,
+
+        /// <summary>The message is already being sent and cannot be recalled.</summary>
+        Sending,
+
+        /// <summary>The processor has already finished with the delivery.</summary>
+        Finished,
+    }
+
     /// <summary>
     /// A delivery the processor is working on. Cancellation is only possible
     /// while it is being prepared (waiting for a rate-limit slot or being
@@ -1757,6 +1842,7 @@ public class ComicEmailService : IComicEmailService
         private const int Preparing = 0;
         private const int CancelRequestedState = 1;
         private const int SendingState = 2;
+        private const int FinishedState = 3;
 
         // Never disposed: a cancel request may still reach it after the
         // processor has finished, and it owns no timer or wait handle.
@@ -1766,31 +1852,29 @@ public class ComicEmailService : IComicEmailService
 
         public CancellationToken Token => _cancellation.Token;
 
-        /// <summary>Completes once the processor has saved the outcome.</summary>
+        /// <summary>Completes once the processor has finished with the delivery.</summary>
         public Task Completion => _completion.Task;
 
         public bool CancelRequested => Volatile.Read(ref _state) == CancelRequestedState;
 
-        /// <summary>
-        /// Asks the processor to stop. False when the message is already being
-        /// sent.
-        /// </summary>
-        public bool TryRequestCancel()
+        /// <summary>Asks the processor to stop.</summary>
+        public InFlightCancelRequest TryRequestCancel()
         {
             var previous = Interlocked.CompareExchange(ref _state, CancelRequestedState, Preparing);
-            if (previous == SendingState)
+            switch (previous)
             {
-                return false;
+                case Preparing:
+                    // Callbacks run on the thread pool rather than inline on the
+                    // caller's thread.
+                    _ = _cancellation.CancelAsync();
+                    return InFlightCancelRequest.Requested;
+                case CancelRequestedState:
+                    return InFlightCancelRequest.Requested;
+                case SendingState:
+                    return InFlightCancelRequest.Sending;
+                default:
+                    return InFlightCancelRequest.Finished;
             }
-
-            if (previous == Preparing)
-            {
-                // Callbacks run on the thread pool rather than inline on the
-                // caller's thread.
-                _ = _cancellation.CancelAsync();
-            }
-
-            return true;
         }
 
         /// <summary>
@@ -1799,6 +1883,13 @@ public class ComicEmailService : IComicEmailService
         public bool TryBeginSending()
             => Interlocked.CompareExchange(ref _state, SendingState, Preparing) != CancelRequestedState;
 
-        public void Complete() => _completion.TrySetResult();
+        public void Complete()
+        {
+            // Completion first, so a request that finds the delivery finished
+            // also finds Completion done. Only a delivery that was neither
+            // cancelled nor sent changes state.
+            _completion.TrySetResult();
+            Interlocked.CompareExchange(ref _state, FinishedState, Preparing);
+        }
     }
 }

@@ -304,6 +304,8 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             // Auto-send dedupe looks up "was this file already delivered to this device".
             entity.HasIndex(e => new { e.FilePath, e.DeviceId, e.Status });
             entity.HasIndex(e => e.CreatedAt);
+            // Rate-limit checks look up the most recent sent deliveries before every send.
+            entity.HasIndex(e => new { e.Status, e.SentAt });
         });
 
         // Configure ErrorReportEntity

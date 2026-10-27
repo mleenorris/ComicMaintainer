@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const { respond, plain } = require('./support/dom');
 const { bootApp, deferred } = require('./support/app');
 const {
-    MB, settingsResponse, settingsRoutes, bootSettings, messages, lastMessage, clearMessages, callsTo
+    settingsResponse, settingsRoutes, bootSettings, messages, lastMessage, clearMessages, callsTo
 } = require('./support/settings-helpers');
 
 const networkError = () => {

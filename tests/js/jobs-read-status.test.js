@@ -20,7 +20,7 @@ for (const { label, read, filePath } of [
 ]) {
     const word = read ? 'read' : 'unread';
     test(`the issue menu's ${label} updates that issue and reloads the series`, async (t) => {
-        let answer = () => ({ success: true });
+        let answer = _call => ({ success: true });
         const readPath = `/api/files/${b64(filePath)}/read`;
         const page = await h.bootSeriesDetail(t, {
             issues: [h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B, { read: true })],
@@ -82,7 +82,7 @@ for (const { label, read, call, itemId, confirmTail } of [
 ]) {
     const word = read ? 'read' : 'unread';
     test(`${label} updates every selected issue`, async (t) => {
-        let answer = () => ({ success: true });
+        let answer = _call => ({ success: true });
         const page = await h.bootSeriesDetail(t, { routes: { 'POST /api/files/read-batch': c => answer(c) } });
         const sent = () => h.requests(page, 'POST', '/api/files/read-batch');
         const choose = () => h.chooseMenuItem(page, 'markDropdown', label);
@@ -148,8 +148,8 @@ for (const { label, read, confirm } of [
 ]) {
     const word = read ? 'read' : 'unread';
     test(`${label} lists every library file and updates them all`, async (t) => {
-        let listAnswer = () => ({ files: [{ relative_path: ISSUE_A }, { relative_path: ISSUE_B }], total_files: 2 });
-        let batchAnswer = () => ({ success: true });
+        let listAnswer = _call => ({ files: [{ relative_path: ISSUE_A }, { relative_path: ISSUE_B }], total_files: 2 });
+        let batchAnswer = _call => ({ success: true });
         const page = await h.bootJobsApp(t, {
             routes: {
                 'GET /api/files': c => listAnswer(c),

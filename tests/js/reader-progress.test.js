@@ -154,7 +154,7 @@ test('reading progress safely queues and clears special property names', async (
     let server = 503;
     const page = await openReader({
         file: '__proto__',
-        series: { ['__proto__']: 10 },
+        series: Object.fromEntries([['__proto__', 10]]),
         progress: 4,
         localStorage: { [QUEUE_KEY]: JSON.stringify([['constructor', { page: 7, updatedAt: 1 }]]) },
         routes: { 'POST /api/ComicReader/progress': () => server }

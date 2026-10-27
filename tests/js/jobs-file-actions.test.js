@@ -69,7 +69,7 @@ const SINGLE_FILE_JOBS = [
 
 for (const action of SINGLE_FILE_JOBS) {
     test(`the issue menu's ${action.label} starts a job for that file`, async (t) => {
-        let answer = () => action.accepted;
+        let answer = _call => action.accepted;
         const page = await h.bootSeriesDetail(t, {
             routes: {
                 [action.route]: call => answer(call),
@@ -168,7 +168,7 @@ const DIRECT_FILE_ACTIONS = [
 
 for (const action of DIRECT_FILE_ACTIONS) {
     test(`the issue menu's ${action.label} acts on that file and refreshes the library`, async (t) => {
-        let answer = () => undefined;
+        let answer = _call => undefined;
         const page = await h.bootSeriesDetail(t, { routes: { [`DELETE ${action.path}`]: call => answer(call) } });
         const sent = () => h.requests(page, 'DELETE', action.path);
         const refreshes = () => h.requests(page, 'GET', /^\/api\/files\/series\?offset=0&limit=60&refresh=true$/);

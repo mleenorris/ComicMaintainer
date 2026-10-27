@@ -43,7 +43,7 @@ test('the stream is opened with the stored session token once the session is ver
     const token = `${validToken().split('.').slice(0, 2).join('.')}.sig+/=`;
     const page = await boot({ localStorage: { jwt_token: token } });
     assert.equal(page.eventSources.length, 1);
-    assert.equal(page.eventSources[0].url, `/api/events/stream?access_token=${token.replace('+/=', '%2B%2F%3D')}`);
+    assert.equal(page.eventSources[0].url, `/api/events/stream?access_token=${encodeURIComponent(token)}`);
     const logs = consoleLines(page, 'log');
     assert.ok(logs.includes('SSE: Authentication mode - JWT'));
     assert.ok(logs.includes('SSE: Existing token - Present'));

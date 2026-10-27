@@ -179,12 +179,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   up the reporting window.
 - **The Files view** shows its empty states instead of "Loading files..." forever, shows the
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
+  Changing the filter, search or sort while the root's files load no longer shows the older
+  answer.
 - **Offline use survives the browser restarting the service worker.** A restarted worker used
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or
   script requested offline answered with nothing instead of a network error.
 - **The cover-write and email queues can be stopped and started again.** A restart left them
   unable to accept work and could cancel the new run; nothing in the app restarts them today.
+  A new run also waits for every earlier run still draining, so deliveries and archive
+  rewrites never overlap.
 - **Scheduled job run times are shown in local time.** The API reports them in UTC without a
   time-zone suffix, and the old Scheduled Jobs page read them as local time, so they were off
   by the browser's UTC offset. Saving a job also no longer drops options its card does not

@@ -531,7 +531,9 @@
         async function ensureFolderLoaded(dir, force = false) {
             const existing = folderFiles.get(dir);
             if (!force && existing && existing.status === 'loaded') return;
-            if (existing && existing.status === 'loading') return existing.promise;
+            // A forced load is for a changed filter, search or sort, so it
+            // supersedes a request still in flight instead of joining it.
+            if (!force && existing && existing.status === 'loading') return existing.promise;
 
             // The root folder's path is empty, and an empty path segment
             // (folders//files) routes nowhere, so the root has its own URL.
@@ -545,28 +547,35 @@
             if (sortDirection !== 'asc') params.push(`direction=${encodeURIComponent(sortDirection)}`);
             if (params.length) url += '?' + params.join('&');
 
-            const fetchPromise = (async () => {
+            const entry = { status: 'loading', files: [], promise: null };
+            folderFiles.set(dir, entry);
+            entry.promise = (async () => {
+                let result;
                 try {
                     const response = await fetch(url, { headers: getAuthHeaders() });
                     if (handleAuthError(response)) {
-                        folderFiles.set(dir, { status: 'error', files: [] });
-                        return;
-                    }
-                    if (!response.ok) {
+                        result = { status: 'error', files: [] };
+                    } else if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
+                    } else {
+                        const data = await response.json();
+                        result = { status: 'loaded', files: data.files || [] };
                     }
-                    const data = await response.json();
-                    folderFiles.set(dir, { status: 'loaded', files: data.files || [] });
                 } catch (err) {
-                    folderFiles.set(dir, { status: 'error', files: [] });
-                } finally {
-                    renderFileList();
+                    result = { status: 'error', files: [] };
                 }
+                // A newer request for this folder has taken over: an older
+                // answer must not overwrite the latest one, so wait for it.
+                const current = folderFiles.get(dir);
+                if (current && current !== entry) {
+                    return current.promise;
+                }
+                folderFiles.set(dir, result);
+                renderFileList();
             })();
 
-            folderFiles.set(dir, { status: 'loading', files: [], promise: fetchPromise });
             renderFileList();
-            return fetchPromise;
+            return entry.promise;
         }
 
         function ensureScrollObserver() {

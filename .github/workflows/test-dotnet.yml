@@ -111,9 +111,12 @@ jobs:
         path: code-coverage-results.md
 
     - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v7
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       if: github.event_name == 'push'
       with:
+        # `files` adds to the reports Codecov discovers; keep discovery to
+        # TestResults so the JavaScript LCOV report is not flagged as .NET.
+        directory: ./TestResults
         files: ./TestResults/**/coverage.cobertura.xml
         flags: dotnet-unit
         fail_ci_if_error: false
@@ -122,10 +125,12 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
     - name: Upload JavaScript coverage to Codecov
-      uses: codecov/codecov-action@v7
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       if: github.event_name == 'push'
       with:
         files: ./coverage/lcov.info
+        # Upload only the LCOV report; discovery would also find the .NET reports.
+        disable_search: true
         flags: javascript
         fail_ci_if_error: false
         verbose: true
@@ -181,7 +186,7 @@ jobs:
         if-no-files-found: warn
 
     - name: Upload integration coverage to Codecov
-      uses: codecov/codecov-action@v7
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       if: github.event_name == 'push'
       with:
         files: ./TestResults/**/coverage.cobertura.xml

@@ -342,7 +342,7 @@ function installBrowserStubs(window, page, options) {
     }
 }
 
-const SCRIPT_TAG = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+const SCRIPT_TAG = /<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi;
 
 /**
  * Disable the page's <script> elements (jsdom would otherwise run them without

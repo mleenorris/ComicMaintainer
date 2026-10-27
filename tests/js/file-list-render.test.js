@@ -274,6 +274,33 @@ test('the library root\'s files follow the filter, even once loaded', async () =
     assert.deepEqual(rowNames(page), ['Todo.cbz']);
 });
 
+test('a filter change while the library root\'s files load supersedes that request', async () => {
+    const gate = deferred();
+    const files = [makeFile('Done.cbz', { processed: true }), makeFile('Todo.cbz')];
+    const page = await bootFilesView({
+        folders: [makeFolder('', { file_count: 2 })],
+        routes: {
+            'GET /api/files/folders/files': async call => {
+                if (call.query.filter !== 'unmarked') await gate.promise;
+                return { path: '', files: files.filter(file => call.query.filter !== 'unmarked' || !file.processed) };
+            }
+        }
+    });
+    assert.equal(page.$('#fileList .folder-loading').textContent.trim(), 'Loading files...');
+
+    // Switch to Unmarked before the unfiltered answer arrives.
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+
+    assert.deepEqual(callsTo(page, '/api/files/folders/files').at(-1).query, { filter: 'unmarked' });
+    assert.deepEqual(rowNames(page), ['Todo.cbz']);
+
+    // The older, unfiltered answer arriving late must not replace it.
+    gate.resolve();
+    await page.settle();
+    assert.deepEqual(rowNames(page), ['Todo.cbz']);
+});
+
 test('the library root\'s files that fail to load offer a retry', async () => {
     let failure = 500;
     const page = await bootFilesView({

@@ -96,7 +96,7 @@ const SELECTED_ACTIONS = [
 
 for (const action of SELECTED_ACTIONS) {
     test(`${action.name} starts a job for the selected issues`, async (t) => {
-        let answer = () => ({ job_id: h.JOB_ID, total_items: 2 });
+        let answer = _call => ({ job_id: h.JOB_ID, total_items: 2 });
         const page = await h.bootSeriesDetail(t, {
             routes: {
                 [`POST ${action.path}`]: call => answer(call),
@@ -187,7 +187,7 @@ for (const action of SELECTED_ACTIONS) {
 }
 
 test('Delete deletes the selected issues in a background job', async (t) => {
-    let answer = () => ({ job_id: h.JOB_ID, jobId: h.JOB_ID, total_items: 2, totalItems: 2 });
+    let answer = _call => ({ job_id: h.JOB_ID, jobId: h.JOB_ID, total_items: 2, totalItems: 2 });
     const page = await h.bootSeriesDetail(t, {
         routes: {
             'POST /api/jobs/delete-selected': call => answer(call),
@@ -277,7 +277,7 @@ test('Delete deletes the selected issues in a background job', async (t) => {
 });
 
 test('Clear Processed Status clears the flags of the selected issues', async (t) => {
-    let answer = () => ({ cleared: 1, requested: 2 });
+    let answer = _call => ({ cleared: 1, requested: 2 });
     const page = await h.bootSeriesDetail(t, {
         routes: { 'POST /api/status/clear-selected': call => answer(call) }
     });

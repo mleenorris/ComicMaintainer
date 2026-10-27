@@ -133,7 +133,7 @@ const JOB_AFTER_START = h.jobStatus({
 
 for (const action of LIBRARY_ACTIONS) {
     test(`${action.name} confirms, starts the job and tracks it in the progress modal`, async (t) => {
-        let answer = () => ({ job_id: h.JOB_ID, total_items: 4 });
+        let answer = _call => ({ job_id: h.JOB_ID, total_items: 4 });
         const page = await h.bootJobsApp(t, {
             routes: {
                 [`POST ${action.path}`]: call => answer(call),
@@ -276,7 +276,7 @@ test('a start answered without a real job id is not tracked either', async (t) =
 });
 
 test('Remove Metadata All sends JSON with the session cookie and handles empty and single-file libraries', async (t) => {
-    let answer = () => ({ job_id: h.JOB_ID, total_items: 0 });
+    let answer = _call => ({ job_id: h.JOB_ID, total_items: 0 });
     const page = await h.bootJobsApp(t, {
         routes: {
             'POST /api/jobs/remove-metadata-all': call => answer(call),

@@ -9,7 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
 const {
-    bootSeries, seriesCard, issue, issuesBody, lastMessage, callsTo, text, seriesAction, libraryRefreshes, answerConfirm
+    bootSeries, seriesCard, issue, issuesBody, lastMessage, callsTo, text, seriesAction, libraryRefreshes
 } = require('./support/series-helpers');
 
 const JOB = '0b9d4c51-7e2a-4f38-9c61-5a8e2d7f3b40';

@@ -425,7 +425,7 @@ test('backup actions answered with 401 or 403 show no error toast', async () => 
         const redirects = page.navigations.length;
         page.route(route, 401);
         await act(page, action);
-        assert.deepEqual(errors(page), [], `401 ${route}`);
+        assert.deepEqual(errors(), [], `401 ${route}`);
         assert.equal(page.navigations.length, redirects + 1, `401 ${route} redirects`);
         assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
         assert.deepEqual(visibility(page), { section: true, nav: true, pending: false });
@@ -437,7 +437,7 @@ test('backup actions answered with 401 or 403 show no error toast', async () => 
         page.route(route, respond(403, { error: 'Forbidden' }));
         const log = await act(page, action);
         assert.deepEqual(log, [`${route.split(' ')[0]} ${route.split(' ')[1]}`], `403 ${route}`);
-        assert.deepEqual(errors(page), [], `403 ${route}`);
+        assert.deepEqual(errors(), [], `403 ${route}`);
         assert.deepEqual(visibility(page), { section: false, nav: false, pending: false });
     }
 });

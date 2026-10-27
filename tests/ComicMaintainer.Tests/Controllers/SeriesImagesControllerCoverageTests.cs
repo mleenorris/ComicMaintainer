@@ -37,12 +37,23 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
-    private SeriesImagesController CreateController(string? ifNoneMatch = null)
+    private SeriesImagesController CreateController(
+        string? ifNoneMatch = null,
+        string? ifMatch = null,
+        string? ifUnmodifiedSince = null)
     {
         var http = new DefaultHttpContext();
         if (ifNoneMatch is not null)
         {
             http.Request.Headers[HeaderNames.IfNoneMatch] = ifNoneMatch;
+        }
+        if (ifMatch is not null)
+        {
+            http.Request.Headers[HeaderNames.IfMatch] = ifMatch;
+        }
+        if (ifUnmodifiedSince is not null)
+        {
+            http.Request.Headers[HeaderNames.IfUnmodifiedSince] = ifUnmodifiedSince;
         }
 
         return new SeriesImagesController(
@@ -263,6 +274,38 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         Assert.Equal(StatusCodes.Status200OK, http.Response.StatusCode);
         Assert.Equal(PngSignature, body.ToArray());
         Assert.Equal(ExpectedEtag(path), http.Response.Headers[HeaderNames.ETag].ToString());
+    }
+
+    [Fact]
+    public async Task Get_FailedIfMatchWithIfNoneMatchStar_Returns412()
+    {
+        var path = WriteImage();
+        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
+        var controller = CreateController(ifNoneMatch: "*", ifMatch: "\"stale\"");
+        controller.HttpContext.Response.Body = new MemoryStream();
+
+        var result = Assert.IsType<PhysicalFileResult>(await controller.Get("batman", CancellationToken.None));
+        await new PhysicalFileResultExecutor(NullLoggerFactory.Instance).ExecuteAsync(controller.ControllerContext, result);
+
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, controller.HttpContext.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_FailedIfUnmodifiedSinceWithMatchingIfNoneMatch_Returns412()
+    {
+        var path = WriteImage();
+        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
+        var controller = CreateController(
+            ifNoneMatch: ExpectedEtag(path),
+            ifUnmodifiedSince: HeaderUtilities.FormatDate(File.GetLastWriteTimeUtc(path).AddSeconds(-1)));
+        controller.HttpContext.Response.Body = new MemoryStream();
+
+        var result = Assert.IsType<PhysicalFileResult>(await controller.Get("batman", CancellationToken.None));
+        await new PhysicalFileResultExecutor(NullLoggerFactory.Instance).ExecuteAsync(controller.ControllerContext, result);
+
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, controller.HttpContext.Response.StatusCode);
     }
 
     [Fact]

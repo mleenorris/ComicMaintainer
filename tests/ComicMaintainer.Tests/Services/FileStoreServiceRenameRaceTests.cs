@@ -170,6 +170,37 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_OldPathRowWithoutMetadataDeletedDuringSave_KeepsLastWriteAt()
+    {
+        // The merge only copies LastWriteAt alongside metadata, so a row restored without it
+        // would lose the stamp for good when the moved file has no metadata yet.
+        await _service.AddFileAsync(OldPath);
+        await _service.MarkFileNormalizedAsync(OldPath, true);
+        var lastWriteAt = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        await using (var seed = await _factory.CreateDbContextAsync())
+        {
+            var row = await seed.ComicFiles.SingleAsync(e => e.FilePath == OldPath);
+            Assert.Null(row.Metadata);
+            row.LastWriteAt = lastWriteAt;
+            await seed.SaveChangesAsync();
+        }
+
+        File.Move(OldPath, NewPath);
+
+        _interceptor.BeforeNextSave = () => _service.RemoveFileAsync(OldPath);
+
+        // Act
+        await _service.UpdateFilePathAsync(OldPath, NewPath);
+
+        Assert.Null(_interceptor.BeforeNextSave);
+        await using var db = await _factory.CreateDbContextAsync();
+        Assert.False(await db.ComicFiles.AnyAsync(e => e.FilePath == OldPath));
+        var moved = Assert.Single(await db.ComicFiles.Where(e => e.FilePath == NewPath).ToListAsync());
+        Assert.True(moved.IsNormalized);
+        Assert.Equal(lastWriteAt, moved.LastWriteAt);
+    }
+
+    [Fact]
     public async Task UpdateFilePathAsync_OldPathRowDeletedDuringMerge_KeepsMergedRow()
     {
         // With a stub row already at the new path, the old row's state is merged onto the

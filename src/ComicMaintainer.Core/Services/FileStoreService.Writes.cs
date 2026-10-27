@@ -291,6 +291,10 @@ public partial class FileStoreService
                 var newEntity = await dbContext.ComicFiles
                     .FirstOrDefaultAsync(e => e.FilePath == newPath, cancellationToken);
 
+                // Set once the old-path row turns out to have been deleted by a concurrent
+                // writer, so the merge below must not try to delete it again.
+                var oldRowDeleted = false;
+
                 if (newEntity == null)
                 {
                     // Rename the existing row in-place to preserve all columns (including IsRenamed, IsNormalized, etc.)
@@ -349,7 +353,7 @@ public partial class FileStoreService
                         oldRowDeleted = true;
                         newEntity = await FindOrRestoreMovedRowAsync(dbContext, entity, cancellationToken);
 
-                        _logger.LogDebug("Old path row was deleted concurrently, restoring it at the new path: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+                        _logger.LogDebug("Old path row was deleted concurrently, adopting or restoring the new-path row: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
                     }
                 }
 
@@ -456,9 +460,13 @@ public partial class FileStoreService
         }
     }
 
+    // SQLite extended result codes (SQLITE_CONSTRAINT_UNIQUE / SQLITE_CONSTRAINT_PRIMARYKEY).
+    private const int SqliteConstraintUnique = 2067;
+    private const int SqliteConstraintPrimaryKey = 1555;
+
     /// <summary>
     /// Returns the tracked row at the path <paramref name="movedEntity"/> was being renamed to,
-    /// inserting a bare one when the old-path row was deleted concurrently and no other writer
+    /// inserting a copy of it when the old-path row was deleted concurrently and no other writer
     /// has put a row there yet. <paramref name="movedEntity"/> already holds the new path's
     /// file details; the caller merges its processing state onto the returned row.
     /// </summary>
@@ -473,6 +481,9 @@ public partial class FileStoreService
         if (existing != null)
             return existing;
 
+        // Carry the moved row's processing state, timestamps and metadata on the restored row
+        // from its first save, so a concurrent reader never caches default flags for it and
+        // nothing (e.g. LastWriteAt without metadata) depends on the later merge to survive.
         var restored = new ComicFileEntity
         {
             FilePath = newPath,
@@ -480,6 +491,18 @@ public partial class FileStoreService
             Directory = movedEntity.Directory,
             FileSize = movedEntity.FileSize,
             LastModified = movedEntity.LastModified,
+            IsProcessed = movedEntity.IsProcessed,
+            IsRenamed = movedEntity.IsRenamed,
+            IsNormalized = movedEntity.IsNormalized,
+            IsDuplicate = movedEntity.IsDuplicate,
+            IsRead = movedEntity.IsRead,
+            Metadata = movedEntity.Metadata?.Clone(),
+            SeriesMetadataVersion = movedEntity.SeriesMetadataVersion,
+            MetadataVersion = movedEntity.MetadataVersion,
+            WrittenMetadataVersion = movedEntity.WrittenMetadataVersion,
+            LastDbEditAt = movedEntity.LastDbEditAt,
+            LastWriteAt = movedEntity.LastWriteAt,
+            MetadataSource = movedEntity.MetadataSource,
             CreatedAt = movedEntity.CreatedAt,
             UpdatedAt = DateTime.UtcNow
         };
@@ -491,10 +514,12 @@ public partial class FileStoreService
             MarkChanged();
             return restored;
         }
-        catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
-                                            sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+        catch (DbUpdateException ex) when (ex.GetBaseException() is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
+                                            sqliteEx.SqliteExtendedErrorCode is SqliteConstraintUnique or SqliteConstraintPrimaryKey)
         {
             // Another writer (e.g. the watcher) inserted the new-path row meanwhile; merge onto it.
+            if (restored.Metadata != null)
+                dbContext.Entry(restored.Metadata).State = EntityState.Detached;
             dbContext.Entry(restored).State = EntityState.Detached;
             var winner = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == newPath, cancellationToken);

@@ -226,9 +226,11 @@ is encoded as for `GET`, and the body takes the fields of the `GET` response.
 ```
 
 Returns `200` with an empty body. The metadata replaces the file's `ComicInfo.xml`
-rather than being merged into it: every field the body leaves out or sets to `null` is
-removed. Elements the API does not model, such as `<Genre>` or `<Penciller>`, are
-always dropped, even when you send back exactly what `GET` returned.
+rather than being merged into it: every field the body leaves out is removed, as is
+every text or number field set to `null`. `authors` and `tags` cannot be `null` (that
+is rejected with a `400` validation error); send `[]` or leave them out to clear them.
+Elements the API does not model, such as `<Genre>` or `<Penciller>`, are always
+dropped, even when you send back exactly what `GET` returned.
 
 `400` for the same path errors as `GET`, and `400` (`Failed to update tags`) when the
 file does not exist or is not a comic archive.
@@ -485,8 +487,7 @@ A negative padding is not saved; the response is `500` with
 ### GET /api/settings/watcher-enable-rename
 ### GET /api/settings/watcher-enable-normalize
 
-Whether the file watcher automatically renames, or normalizes the metadata of, new
-and changed files.
+Whether processing renames files, or normalizes their metadata.
 
 **Response:**
 ```json
@@ -498,8 +499,11 @@ and changed files.
 ### PUT /api/settings/watcher-enable-rename
 ### PUT /api/settings/watcher-enable-normalize
 
-Turn automatic renaming or normalizing on or off. With both off, the watcher still
-tracks files but processes none of them automatically.
+Turn renaming or normalizing on or off. Despite the names, these settings apply to every
+processing run, including files processed on request and processing jobs, not only to
+the watcher: with a step off, processing skips it but still marks the file as renamed or
+normalized. With both off, the watcher still tracks files but processes none of them
+automatically.
 
 **Request Body:**
 ```json

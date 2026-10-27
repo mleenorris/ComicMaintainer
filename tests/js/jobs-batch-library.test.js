@@ -123,12 +123,16 @@ const LIBRARY_ACTIONS = [
     }
 ];
 
-// GET /api/jobs/{id} right after the start: one file done, the next one in progress.
+// GET /api/jobs/{id} right after the start: one file done, the next one in
+// progress and the rest still to do.
 const JOB_AFTER_START = h.jobStatus({
     total_items: 4,
     processed_items: 1,
     current_file: 'Comics/Batman/Batman 002.cbz',
-    results: [{ file: 'Comics/Batman/Batman 001.cbz', success: true, error: null }]
+    results: [
+        { file: 'Comics/Batman/Batman 001.cbz', success: true, error: null },
+        ...['002', '003', '004'].map(issue => ({ file: `Comics/Batman/Batman ${issue}.cbz`, success: false, error: null }))
+    ]
 });
 
 for (const action of LIBRARY_ACTIONS) {

@@ -3,10 +3,11 @@
 // The batch-job progress modal (js/app/jobs.js) as server events drive it:
 // job_updated counts, file_processed rows, the four ways a job ends, the
 // minimized header indicator, catching up after the event stream reconnects
-// and the leave-page warning.
+// and the leave-page warning; and the one job it follows at a time (#846).
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { deferred } = require('./support/app');
 const { respond } = require('./support/dom');
 const h = require('./support/jobs-helpers');
 
@@ -459,6 +460,48 @@ test('a reconnected event stream catches up on the tracked job', async (t) => {
     assert.deepEqual(page.errors, []);
 });
 
+test('files the job has not reached yet are counted neither as succeeded nor as failed', async (t) => {
+    // #846: the job's status lists every one of its files, the ones still to
+    // do as neither succeeded nor failed, and the modal counted them as failed.
+    const files = ['001', '002', '003', '004'].map(issue => `Comics/Batman/Batman ${issue}.cbz`);
+    const toDo = file => ({ file, success: false, error: null });
+    const job = h.trackedJob(h.jobStatus({ current_file: files[0], results: files.map(toDo) }));
+    const page = await h.bootJobsApp(t, { routes: job.routes });
+
+    // Just started: nothing has failed.
+    await h.startTrackedJob(page);
+    h.assertProgress(page, {
+        title: TRACKED_TITLE,
+        text: '0 / 4 files',
+        processed: '0',
+        succeeded: '0',
+        failed: '0',
+        currentFile: 'Latest update: Batman 001.cbz',
+        resultsCount: '0 results',
+        emptyResults: true
+    });
+
+    // Caught up after the event stream reconnects: one file succeeded, one
+    // failed and two are still to do.
+    job.poll.answer = () => h.jobStatus({
+        processed_items: 1,
+        failed_items: 1,
+        current_file: files[2],
+        results: [finished(files[0], true), finished(files[1], false, 'Corrupt archive'), toDo(files[2]), toDo(files[3])]
+    });
+    page.eventSources.at(-1).emit('open');
+    await page.settle();
+    h.assertProgress(page, {
+        title: `${TRACKED_TITLE} - 1 succeeded, 1 failed`,
+        text: '2 / 4 files',
+        processed: '2',
+        succeeded: '1',
+        failed: '1',
+        resultsCount: '2 results'
+    });
+    assert.deepEqual(page.errors, []);
+});
+
 test('a bare job status still updates the modal, and a signed-out poll goes to the login page', async (t) => {
     const job = h.trackedJob({ job_id: JOB_ID, status: 'running' });
     const page = await h.bootJobsApp(t, { routes: job.routes });
@@ -516,6 +559,215 @@ test('a completion reported twice still leaves one finished, then closed, modal'
     h.assertProgress(page, { open: true, title: 'Completed! All 4 items processed (4 succeeded, 0 failed)', closeVisible: true, cancelVisible: false });
     await h.tick(t, page, 1000);
     h.assertProgress(page, { open: false, indicatorVisible: false });
+    assert.deepEqual(page.errors, []);
+});
+
+// The next job the tests start: Rename Unmarked (one confirm(), no force
+// prompt) started as OTHER_JOB_ID over 3 files.
+const NEXT_TITLE = 'Renaming Unmarked Files...';
+const nextJobRoutes = (start = { job_id: h.OTHER_JOB_ID, total_items: 3 }) => ({
+    'POST /api/jobs/rename-unmarked': start,
+    [`GET /api/jobs/${h.OTHER_JOB_ID}`]: h.jobStatus({ job_id: h.OTHER_JOB_ID, total_items: 3 })
+});
+
+test('the finish of a cancelled job leaves alone the progress of a job started just after it', async (t) => {
+    // #846: the cancelled job's pending finish retitled the next job's modal,
+    // stopped following that job and closed its progress 2 s later.
+    const job = h.trackedJob();
+    const start = deferred();
+    const page = await h.bootJobsApp(t, { routes: { ...job.routes, ...nextJobRoutes(() => start.promise) } });
+    const reloads = () => h.requests(page, 'GET', LIBRARY_RELOAD).length;
+    await h.startTrackedJob(page);
+    h.jobUpdate(page, 'cancelled', h.progress(1, 4));
+    await h.tick(t, page, 500);
+    h.assertProgress(page, { open: true, title: 'Cancelled - Job was cancelled', closeVisible: true });
+
+    // The next job is started before the cancelled job's progress closes,
+    // and the server takes its time to start it.
+    h.chooseMenuItem(page, 'renameDropdown', 'Rename Unmarked');
+    await page.settle();
+    assert.equal(h.takeConfirms(page).length, 1);
+    await h.tick(t, page, 2000);
+    h.assertProgress(page, h.startingProgress('Starting async renaming...'));
+
+    start.resolve({ job_id: h.OTHER_JOB_ID, total_items: 3 });
+    await page.settle();
+    h.assertProgress(page, { open: true, title: NEXT_TITLE, text: '0 / 3 files', cancelVisible: true, closeVisible: false });
+
+    // The modal follows the new job only, until it ends.
+    h.jobUpdate(page, 'running', h.progress(1, 3), h.OTHER_JOB_ID);
+    h.jobUpdate(page, 'cancelled', h.progress(1, 4));
+    await h.tick(t, page, 5000);
+    h.assertProgress(page, { open: true, title: NEXT_TITLE, text: '1 / 3 files', cancelVisible: true, closeVisible: false });
+
+    const reloadsBefore = reloads();
+    h.jobUpdate(page, 'completed', h.progress(3, 3), h.OTHER_JOB_ID);
+    await h.tick(t, page, 500);
+    h.assertProgress(page, { open: true, title: 'Completed! All 3 items processed (3 succeeded, 0 failed)', closeVisible: true });
+    assert.equal(reloads(), reloadsBefore + 1, 'its completion reloads the library');
+    await h.tick(t, page, 1000);
+    h.assertProgress(page, { open: false, indicatorVisible: false });
+    assert.deepEqual(page.errors, []);
+});
+
+test("a completed job's library reload doesn't close the progress of a job started meanwhile", async (t) => {
+    // #846: the completed job closed the modal 1 s after its library reload,
+    // whichever job the modal was following by then.
+    const job = h.trackedJob();
+    let heldReload = null;
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            ...job.routes,
+            ...nextJobRoutes(),
+            'GET /api/files/series': () => (heldReload ? heldReload.promise : h.quietRoutes()['GET /api/files/series'])
+        }
+    });
+    await h.startTrackedJob(page);
+
+    const reload = deferred();
+    heldReload = reload;
+    h.jobUpdate(page, 'completed', h.progress(4, 4));
+    await h.tick(t, page, 500);
+    h.assertProgress(page, { open: true, title: 'Completed! All 4 items processed (4 succeeded, 0 failed)', closeVisible: true });
+
+    h.chooseMenuItem(page, 'renameDropdown', 'Rename Unmarked');
+    await page.settle();
+    assert.equal(h.takeConfirms(page).length, 1);
+    h.assertProgress(page, { open: true, title: NEXT_TITLE, text: '0 / 3 files', cancelVisible: true, closeVisible: false });
+
+    heldReload = null;
+    reload.resolve(h.quietRoutes()['GET /api/files/series']);
+    await page.settle();
+    await h.tick(t, page, 5000);
+    h.assertProgress(page, { open: true, title: NEXT_TITLE, cancelVisible: true, closeVisible: false });
+    h.jobUpdate(page, 'running', h.progress(2, 3), h.OTHER_JOB_ID);
+    h.assertProgress(page, { text: '2 / 3 files' });
+    assert.deepEqual(page.errors, []);
+});
+
+const REFUSED = { type: 'warning', text: 'Another job is still running. Wait for it to finish, or cancel it, before starting a new one.' };
+
+test("a job can't be started while another one is followed, whose progress stays as it was", async (t) => {
+    // #846: starting a second job took the shared progress modal over, and
+    // closed it (with the running job's Cancel) when the start found nothing.
+    const job = h.trackedJob();
+    const page = await h.bootJobsApp(t, {
+        routes: { ...job.routes, ...nextJobRoutes(), [`POST /api/jobs/${JOB_ID}/cancel`]: { success: true } }
+    });
+    const renameStarts = () => h.requests(page, 'POST', '/api/jobs/rename-unmarked').length;
+    const tryRenameUnmarked = async () => {
+        h.chooseMenuItem(page, 'renameDropdown', 'Rename Unmarked');
+        await page.settle();
+    };
+    await h.startTrackedJob(page);
+    h.jobUpdate(page, 'running', h.progress(1, 4));
+    page.click('#progressModal .close-btn');
+    const running = h.progressView(page);
+    assert.equal(running.indicatorText, '1 / 4 files (25%)');
+
+    await tryRenameUnmarked();
+    assert.deepEqual(h.takeConfirms(page), [], 'nothing is asked');
+    assert.deepEqual(h.takeMessages(page), [REFUSED]);
+    assert.equal(renameStarts(), 0, 'nothing is started');
+    assert.deepEqual(h.progressView(page), running);
+
+    // The running job is still followed, and can still be cancelled.
+    h.jobUpdate(page, 'running', h.progress(2, 4));
+    h.assertProgress(page, { open: false, indicatorVisible: true, indicatorText: '2 / 4 files (50%)' });
+    page.click('#progressIndicator');
+    page.click('#progressCancelBtn');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), ['Are you sure you want to cancel the current batch processing job?']);
+    assert.equal(h.requests(page, 'POST', `/api/jobs/${JOB_ID}/cancel`).length, 1);
+    h.takeMessages(page);
+
+    // Starting is refused until the job's end has been handled...
+    h.jobUpdate(page, 'cancelled', h.progress(2, 4));
+    await tryRenameUnmarked();
+    assert.deepEqual(h.takeMessages(page), [REFUSED]);
+    assert.equal(renameStarts(), 0);
+
+    // ...and then allowed.
+    await h.tick(t, page, 500);
+    await tryRenameUnmarked();
+    assert.equal(h.takeConfirms(page).length, 1);
+    assert.equal(renameStarts(), 1);
+    h.assertProgress(page, { open: true, title: NEXT_TITLE, text: '0 / 3 files', cancelVisible: true });
+    assert.deepEqual(page.errors, []);
+});
+
+// Every action that starts a job followed in the progress modal, as the page calls it.
+const JOB_STARTERS = [
+    'processAllFiles()',
+    'processAllFilesAsync()',
+    'processUnmarkedFiles()',
+    'renameAllFiles()',
+    'renameUnmarkedFiles()',
+    'normalizeAllFiles()',
+    'normalizeUnmarkedFiles()',
+    'removeMetadataAll()',
+    'processSelectedFiles()',
+    'processSelectedFilesAsync()',
+    'renameSelectedFiles()',
+    'normalizeSelectedFiles()',
+    'removeMetadataSelected()',
+    'deleteSelectedFiles()',
+    `processSingleFile(${JSON.stringify(ISSUE_A)})`,
+    `renameSingleFile(${JSON.stringify(ISSUE_A)})`,
+    `normalizeSingleFile(${JSON.stringify(ISSUE_A)})`,
+    'deleteAllDuplicates()',
+    'confirmCombineFolders()',
+    'saveTags()',
+    'saveBatchTags()',
+    'updateAllSeriesCovers()',
+    'updateSelectedSeriesCovers()',
+    "updateSeriesCoversDirect('Batman')"
+];
+
+test('every action that starts a job is refused while another one is followed', async (t) => {
+    const job = h.trackedJob();
+    const page = await h.bootSeriesDetail(t, { routes: job.routes });
+    const posts = () => page.fetchCalls.filter(call => call.method !== 'GET').length;
+    await h.startTrackedJob(page);
+    h.jobUpdate(page, 'running', h.progress(1, 4));
+
+    // What each action needs to get as far as starting its job: selected
+    // issues, duplicates to delete, folders to combine, open tag editors.
+    h.selectIssue(page, ISSUE_A);
+    h.selectIssue(page, ISSUE_B);
+    page.run(`
+        duplicateReviewFiles = [{ relative_path: ${JSON.stringify(ISSUE_A)} }];
+        combineFolderGroups = [{ groupKey: 'batman', folders: [{ directory: 'Batman' }, { directory: 'Batman (2016)' }] }];
+        combineFolderIndex = 0;
+        combineFolderSelectedDestination = 'Batman (2016)';
+        currentEditFile = ${JSON.stringify(ISSUE_A)};
+    `);
+    page.$('#tagModal').classList.add('active');
+    page.input('#title', 'Year One');
+    page.run('batchUpdateTags()');
+    page.input('#batch_series', 'Batman');
+    const running = h.progressView(page);
+    const postsBefore = posts();
+
+    for (const starter of JOB_STARTERS) {
+        page.run(starter);
+        await page.settle();
+        assert.deepEqual(h.takeConfirms(page), [], `${starter} asks nothing`);
+        assert.deepEqual(h.takeMessages(page), [REFUSED], `${starter} is refused`);
+        assert.equal(posts(), postsBefore, `${starter} sends nothing`);
+        assert.deepEqual(h.progressView(page), running, `${starter} leaves the running job's progress alone`);
+    }
+
+    // The tag editors stay open with their edits...
+    assert.equal(page.$('#tagModal').classList.contains('active'), true);
+    assert.equal(page.run('currentEditFile'), ISSUE_A);
+    assert.equal(page.$('#title').value, 'Year One');
+    assert.equal(page.$('#batchModal').classList.contains('active'), true);
+    assert.equal(page.$('#batch_series').value, 'Batman');
+    // ...and the running job is still the one followed.
+    h.jobUpdate(page, 'running', h.progress(2, 4));
+    h.assertProgress(page, { open: true, title: TRACKED_TITLE, text: '2 / 4 files', cancelVisible: true });
+    assert.equal(page.run('currentJobId'), JOB_ID);
     assert.deepEqual(page.errors, []);
 });
 

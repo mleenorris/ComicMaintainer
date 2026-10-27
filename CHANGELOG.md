@@ -212,6 +212,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated for the new account sometimes lacked a digit, which the password policy requires.
 - **"Run now" on a scheduled job that is already running says so** instead of reporting that the
   job started; `POST /api/scheduled-jobs/{key}/run` answers `queued: false`.
+- **A scheduled job is no longer reported as skipped while its run is still going.** When the
+  schedule came due during a run (typically a long **Run now**), the card switched to "Skipped"
+  with a 0 ms duration, Run now was enabled again and the page announced "Library Scan: Skipped:
+  Skipped: previous run still in progress."; the run's own result was then never announced. The
+  skipped run is now only logged and counted (`outcome="skipped"` in
+  `comicmaintainer_scheduled_job_runs_total`), and the job's next run moves on by one interval.
 - **Database backups and restores work when the connection string is a `file:` URI**; such
   databases were mistaken for in-memory ones and never backed up.
 - **An error that happens soon after reconnecting is reported**; an error while offline used

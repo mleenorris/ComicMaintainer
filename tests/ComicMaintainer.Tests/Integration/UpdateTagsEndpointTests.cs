@@ -73,7 +73,13 @@ public sealed class UpdateTagsEndpointTests : IDisposable
             Directory.CreateDirectory(directory!);
         }
 
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new ConfiguredWebApplicationFactory(overrides);
+    }
+
+    private sealed class ConfiguredWebApplicationFactory(IReadOnlyDictionary<string, string?> overrides)
+        : WebApplicationFactory<Program>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
             foreach (var (key, value) in overrides)
@@ -84,7 +90,7 @@ public sealed class UpdateTagsEndpointTests : IDisposable
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(overrides));
             builder.ConfigureTestServices(services =>
                 services.AddSingleton<IAuthorizationMiddlewareResultHandler, AllowAllAuthorizationHandler>());
-        });
+        }
     }
 
     private sealed class AllowAllAuthorizationHandler : IAuthorizationMiddlewareResultHandler

@@ -310,10 +310,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The ⋮ action menu stays on screen in very narrow windows, and closes when you leave the
   page.** In a window 200 CSS px wide or less (for example at 400 % zoom) the menu was placed
   past the left edge of the screen, cutting off the start of every item; it now stays at least
-  10 px inside the left edge and is never wider than the window allows. An open menu also
-  stayed over the next page — still acting on the previous page's issue — when the page
-  changed without a click (browser Back/Forward, the mouse back button, swipe-back, or the
-  `g h` / `g l` / `g s` / `g j` shortcuts); it now closes whenever the page changes.
+  10 px inside both edges of the window, narrowing (and wrapping long labels) when the window
+  is too narrow for it. An open menu also stayed over the next page — still acting on the
+  previous page's issue — when the page changed without a click (browser Back/Forward, the
+  mouse back button, swipe-back, or the `g h` / `g l` / `g s` / `g j` shortcuts); it now
+  closes whenever the page changes.
 
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The

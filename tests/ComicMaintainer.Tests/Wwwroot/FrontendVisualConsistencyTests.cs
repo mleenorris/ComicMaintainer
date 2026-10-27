@@ -148,7 +148,10 @@ public class FrontendVisualConsistencyTests
         // toggleDropdown() keeps the action menu 10px inside both edges of the
         // viewport, which only works while the menu fits. In a window 200 CSS px
         // wide (400% zoom) the start of its items was cut off on the left.
-        Assert.Contains("max-width: calc(100vw - 20px)", RuleBody(css, @"\.dropdown-menu"));
+        var menu = RuleBody(css, @"\.dropdown-menu");
+        Assert.Contains("max-width: calc(100vw - 20px)", menu);
+        // A min-width wins over a smaller max-width, so it must give way too.
+        Assert.Contains("min-width: min(150px, calc(100vw - 20px))", menu);
     }
 
     [Fact]

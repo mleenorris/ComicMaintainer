@@ -38,6 +38,10 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     // watcher's rescans, Library Scan, folder combining) sees a staged file.
     private const string StagingExtension = ".suwayomi-import";
 
+    // A rollback's verified copy beside the download, named after its staged
+    // file so recovery can reclaim one an interrupted rollback left behind.
+    private const string RestoreExtension = ".suwayomi-restore";
+
     // Staged moves not yet published, kept in the config folder so a chapter
     // staged when the process stopped is published on the next run.
     private const string PendingMovesFileName = "suwayomi-import-pending.json";
@@ -312,6 +316,13 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             var file = new FileInfo(archive);
             if (!file.Exists)
             {
+                continue;
+            }
+
+            if (run.HeldSources.Contains(archive))
+            {
+                // A staged copy of this download is still pending; importing
+                // it again would publish the chapter twice.
                 continue;
             }
 
@@ -724,13 +735,11 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             return MoveOutcome.Failed;
         }
 
-        var temporaryPath = Path.Combine(
-            sourceFolder,
-            StagingPrefix + Guid.NewGuid().ToString("N") + ".suwayomi-restore");
+        var temporaryPath = RestorePathFor(stagingPath, sourcePath);
         try
         {
             Directory.CreateDirectory(sourceFolder);
-            File.Copy(stagingPath, temporaryPath);
+            File.Copy(stagingPath, temporaryPath, overwrite: true);
             var archiveState = ProbeArchive(temporaryPath, extension);
             if (archiveState != ArchiveState.Complete)
             {
@@ -766,6 +775,16 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             TryDeleteFile(temporaryPath);
         }
     }
+
+    /// <summary>
+    /// The temporary file a rollback of <paramref name="stagingPath"/> copies
+    /// into beside <paramref name="sourcePath"/>. Derived from the staged
+    /// file's unique name, so recovery can find one left by a stopped process.
+    /// </summary>
+    private static string RestorePathFor(string stagingPath, string sourcePath)
+        => Path.Combine(
+            Path.GetDirectoryName(sourcePath) ?? string.Empty,
+            Path.GetFileNameWithoutExtension(stagingPath) + RestoreExtension);
 
     /// <summary>
     /// Finishes the moves a previous run staged but never published, e.g.
@@ -813,6 +832,21 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             }
 
             var stagingPath = Path.Combine(confinedFolder, stagingName);
+
+            // The download only goes back where this run imports from.
+            string? sourcePath = TryResolvePath(move.SourcePath, out var resolvedSource)
+                && IsInside(resolvedSource, run.DownloadsRoot)
+                && !PathsEqual(resolvedSource, run.DownloadsRoot)
+                    ? resolvedSource
+                    : null;
+
+            if (sourcePath is not null)
+            {
+                // A rollback stopped mid-copy leaves its temporary copy behind;
+                // the staged file is still the complete chapter, so drop it.
+                TryDeleteFile(RestorePathFor(stagingPath, sourcePath));
+            }
+
             var stagingState = GetFilePathState(stagingPath);
             if (stagingState == FilePathState.Missing)
             {
@@ -835,13 +869,6 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 run.Result.Unreadable++;
                 continue;
             }
-
-            // The download only goes back where this run imports from.
-            string? sourcePath = TryResolvePath(move.SourcePath, out var resolvedSource)
-                && IsInside(resolvedSource, run.DownloadsRoot)
-                && !PathsEqual(resolvedSource, run.DownloadsRoot)
-                    ? resolvedSource
-                    : null;
 
             var sourceState = sourcePath is null ? FilePathState.Missing : GetFilePathState(sourcePath);
             if (sourceState == FilePathState.PermissionDenied)
@@ -874,10 +901,24 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 {
                     // The original is still intact, so discard the staged
                     // duplicate only after verifying that original.
-                    TryDeleteFile(stagingPath);
+                    TryDeleteFile(stagingPath, out var deleteError);
                     if (GetFilePathState(stagingPath) == FilePathState.Missing)
                     {
                         run.PendingMoves.Remove(move);
+                        continue;
+                    }
+
+                    // The download stays held back from this run's imports
+                    // while its duplicate remains, or both would be published.
+                    _logger.LogWarning(
+                        deleteError,
+                        "Could not remove staged duplicate {File} of a Suwayomi download still in place; not importing the download until it is removed",
+                        LoggingHelper.SanitizePathForLog(stagingPath));
+                    run.Result.Failed++;
+                    if (deleteError is UnauthorizedAccessException)
+                    {
+                        run.Result.PermissionDenied = true;
+                        break;
                     }
 
                     continue;
@@ -890,6 +931,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                     _logger.LogInformation(
                         "Leaving staged Suwayomi chapter {File} for recovery while its download is still being written",
                         LoggingHelper.SanitizePathForLog(stagingPath));
+                    run.Result.StillDownloading++;
                     continue;
                 }
             }
@@ -960,6 +1002,15 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         {
             run.Result.Failed++;
             run.Result.PermissionDenied = true;
+        }
+
+        // A download whose staged copy is still pending is left to recovery.
+        foreach (var move in run.PendingMoves)
+        {
+            if (TryResolvePath(move.SourcePath, out var heldSource))
+            {
+                run.HeldSources.Add(heldSource);
+            }
         }
 
         error = null;
@@ -1049,15 +1100,21 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         }
     }
 
-    private static void TryDeleteFile(string path)
+    private static void TryDeleteFile(string path) => TryDeleteFile(path, out _);
+
+    private static bool TryDeleteFile(string path, out Exception? error)
     {
+        error = null;
         try
         {
             File.Delete(path);
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Best effort: nothing more can be done about a stray staging file.
+            // Best effort: the caller decides whether a leftover file matters.
+            error = ex;
+            return false;
         }
     }
 
@@ -1299,6 +1356,10 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
         /// <summary>Library series by normalized title; loaded on first use.</summary>
         public LibraryIndex? Library { get; set; }
+
+        /// <summary>Downloads whose staged copy is still pending, so not imported afresh.</summary>
+        public HashSet<string> HeldSources { get; } = new(
+            PathComparison == StringComparison.Ordinal ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
 
         /// <summary>Downloads sub-folders this pass moved chapters out of.</summary>
         public HashSet<string> EmptiedFolders { get; } = new(StringComparer.Ordinal);

@@ -583,6 +583,62 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportAsync_ReclaimsTheCopyOfAnInterruptedRollback()
+    {
+        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var staging = WriteCbz(
+            Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"),
+            "complete staged archive");
+        WritePendingMove(staging, source);
+        var restoreCopy = Path.Combine(
+            Directory.CreateDirectory(Path.GetDirectoryName(source)!).FullName,
+            ".tmp_0123456789abcdef.suwayomi-restore");
+        File.WriteAllBytes(restoreCopy, [0x50, 0x4b, 0x03, 0x04]);
+
+        var result = await CreateService().ImportAsync();
+
+        var destination = Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz");
+        Assert.Single(result.Imported);
+        Assert.Equal("complete staged archive", ReadPage(destination));
+        Assert.False(File.Exists(restoreCopy));
+        Assert.False(File.Exists(staging));
+        Assert.False(File.Exists(PendingMovesPath));
+        Assert.False(Directory.Exists(Path.Combine(_downloads, "Source")));
+    }
+
+    [Fact]
+    public async Task ImportAsync_DoesNotImportADownloadWhoseStagedDuplicateCannotBeRemoved()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return; // File modes are not enforced there.
+        }
+
+        var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "original chapter");
+        var stagingFolder = Directory.CreateDirectory(Path.Combine(_library, "Read-only")).FullName;
+        var staging = WriteCbz(Path.Combine(stagingFolder, ".tmp_0123456789abcdef.suwayomi-import"), "staged copy");
+        WritePendingMove(staging, source);
+        File.SetUnixFileMode(stagingFolder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            var result = await CreateService().ImportAsync();
+
+            Assert.Empty(result.Imported);
+            Assert.True(result.PermissionDenied);
+            Assert.Equal(1, result.Failed);
+            Assert.Equal("original chapter", ReadPage(source));
+            Assert.Equal("staged copy", ReadPage(staging));
+            Assert.Single(Directory.GetFiles(stagingFolder));
+            Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+            Assert.False(Directory.Exists(Path.Combine(_library, "Solo Leveling")));
+        }
+        finally
+        {
+            File.SetUnixFileMode(stagingFolder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
     public async Task ImportAsync_RestoresTheSourceWhenAllDestinationNamesAreOccupied()
     {
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "original chapter");

@@ -31,6 +31,19 @@ const SAVE_STEPS = {
 
 const SAVED_MESSAGE = 'Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.';
 
+// How a failure message names each group, in SAVE_STEPS order.
+const GROUP_NAMES = [
+    'filename format', 'log max size', 'issue number padding', 'database cleanup interval',
+    'external metadata settings', 'series image limits', 'email settings', 'Suwayomi settings',
+    'error reporting settings'
+];
+
+// The end of a failure message once `attempted` steps were sent (the last one failed).
+function savedBefore(attempted) {
+    const saved = GROUP_NAMES.slice(0, attempted - 1);
+    return saved.length ? `Only these settings were saved: ${saved.join(', ')}.` : 'No other settings were saved.';
+}
+
 // Route every save step to success (as SettingsController answers), then apply
 // per-step overrides; routes added later win.
 function routeSaveSteps(page, overrides = {}) {
@@ -307,6 +320,7 @@ const INVALID_FORMS = [
     ['blank filename format', { filenameFormat: '   ' }, 'Filename format cannot be empty'],
     ['missing log size', { logMaxSize: '' }, 'Log max size must be a positive number'],
     ['zero log size', { logMaxSize: '0' }, 'Log max size must be a positive number'],
+    ['log size above the server limit', { logMaxSize: '2048' }, 'Log max size must be 2047 MB or less'],
     ['missing padding', { issueNumberPadding: '' }, 'Issue number padding must be 0 or greater'],
     ['negative padding', { issueNumberPadding: '-1' }, 'Issue number padding must be 0 or greater'],
     ['missing cleanup interval', { dbCleanupInterval: '' }, 'Database cleanup interval must be 0 or greater'],
@@ -322,7 +336,16 @@ const INVALID_FORMS = [
     ['SMTP port 0', { smtpPort: '0' }, 'SMTP port must be between 1 and 65535'],
     ['SMTP port above 65535', { smtpPort: '70000' }, 'SMTP port must be between 1 and 65535'],
     ['zero attachment size', { emailMaxAttachmentMb: '0' }, 'Max email attachment size must be a positive number'],
-    ['negative attachment size', { emailMaxAttachmentMb: '-5' }, 'Max email attachment size must be a positive number']
+    ['negative attachment size', { emailMaxAttachmentMb: '-5' }, 'Max email attachment size must be a positive number'],
+    ['attachment size above the server limit', { emailMaxAttachmentMb: '201' }, 'Max email attachment size must be 200 MB or less'],
+    ['negative issues per day', { errorReportingMaxPerDay: '-1' }, 'Maximum issues per day must be between 0 and 100'],
+    ['more than 100 issues per day', { errorReportingMaxPerDay: '101' }, 'Maximum issues per day must be between 0 and 100'],
+    ['negative recurrence interval', { errorReportingDedupeHours: '-1' }, 'Recurrence comment interval must be between 1 and 720 hours'],
+    ['recurrence interval above 720 hours', { errorReportingDedupeHours: '721' },
+        'Recurrence comment interval must be between 1 and 720 hours'],
+    // One bad value among other edits: nothing is half-saved.
+    ['log size too large alongside other edits', { filenameFormat: '{series} - {issue}', logMaxSize: '3000', issueNumberPadding: '4' },
+        'Log max size must be 2047 MB or less']
 ];
 
 test('invalid values are rejected before anything is saved', async t => {
@@ -342,59 +365,72 @@ test('invalid values are rejected before anything is saved', async t => {
     }
 });
 
-// [description, failing step, response, expected message, steps attempted]
+// [description, failing step, response, start of the expected message, steps attempted]
+// The message then says which groups were saved before the failure (savedBefore).
 const FAILED_SAVES = [
     ['filename format rejected', 'format', respond(500, { error: 'Failed to update filename format' }),
-        'Failed to save settings: HTTP error! status: 500', 1],
+        'Failed to save filename format: Failed to update filename format.', 1],
     ['filename format refused with a reason', 'format', { success: false, error: 'Unknown placeholder {foo}' },
-        'Unknown placeholder {foo}', 1],
-    ['filename format refused', 'format', { success: false }, 'Failed to save filename format', 1],
+        'Failed to save filename format: Unknown placeholder {foo}.', 1],
+    ['filename format refused', 'format', { success: false }, 'Failed to save filename format.', 1],
     ['log size rejected', 'log', respond(400, { error: 'MaxMB must be between 1 and 2047' }),
-        'Failed to save settings: HTTP error! status: 400', 2],
-    ['log size refused with a reason', 'log', { success: false, error: 'Too large' }, 'Too large', 2],
-    ['log size refused', 'log', { success: false }, 'Failed to save log max size', 2],
-    ['padding rejected', 'padding', 503, 'Failed to save settings: HTTP error! status: 503', 3],
-    ['padding refused with a reason', 'padding', { success: false, error: 'Padding too wide' }, 'Padding too wide', 3],
-    ['padding refused', 'padding', { success: false }, 'Failed to save issue number padding', 3],
-    ['cleanup interval rejected', 'cleanup', 500, 'Failed to save settings: HTTP error! status: 500', 4],
-    ['cleanup interval refused with a reason', 'cleanup', { success: false, error: 'Interval too long' }, 'Interval too long', 4],
-    ['cleanup interval refused', 'cleanup', { success: false }, 'Failed to save database cleanup interval', 4],
-    ['metadata rejected', 'metadata', 500, 'Failed to save settings: HTTP error! status: 500', 5],
-    ['metadata refused with a reason', 'metadata', { success: false, error: 'Bad ComicVine URL' }, 'Bad ComicVine URL', 5],
-    ['metadata refused', 'metadata', { success: false }, 'Failed to save external metadata settings', 5],
+        'Failed to save log max size: MaxMB must be between 1 and 2047.', 2],
+    ['log size refused with a reason', 'log', { success: false, error: 'Too large' }, 'Failed to save log max size: Too large.', 2],
+    ['log size refused', 'log', { success: false }, 'Failed to save log max size.', 2],
+    ['padding rejected', 'padding', 503, 'Failed to save issue number padding: HTTP error! status: 503.', 3],
+    ['padding refused with a reason', 'padding', { success: false, error: 'Padding too wide' },
+        'Failed to save issue number padding: Padding too wide.', 3],
+    ['padding refused', 'padding', { success: false }, 'Failed to save issue number padding.', 3],
+    ['cleanup interval rejected', 'cleanup', 500, 'Failed to save database cleanup interval: HTTP error! status: 500.', 4],
+    ['cleanup interval failed with a non-JSON body', 'cleanup', respond(504, 'Gateway Timeout'),
+        'Failed to save database cleanup interval: HTTP error! status: 504.', 4],
+    ['cleanup interval refused with a reason', 'cleanup', { success: false, error: 'Interval too long' },
+        'Failed to save database cleanup interval: Interval too long.', 4],
+    ['cleanup interval refused', 'cleanup', { success: false }, 'Failed to save database cleanup interval.', 4],
+    ['metadata rejected', 'metadata', 500, 'Failed to save external metadata settings: HTTP error! status: 500.', 5],
+    ['metadata failed with an HTML error page', 'metadata',
+        respond(502, '<html><body><h1>502 Bad Gateway</h1></body></html>', { 'Content-Type': 'text/html' }),
+        'Failed to save external metadata settings: HTTP error! status: 502.', 5],
+    ['metadata refused with a reason', 'metadata', { success: false, error: 'Bad ComicVine URL' },
+        'Failed to save external metadata settings: Bad ComicVine URL.', 5],
+    ['metadata refused', 'metadata', { success: false }, 'Failed to save external metadata settings.', 5],
     ['image limits rejected with a reason', 'images',
         respond(400, { error: 'Max download size must be greater than or equal to max stored size' }),
-        'Failed to save series image limits: Max download size must be greater than or equal to max stored size', 6],
+        'Failed to save series image limits: Max download size must be greater than or equal to max stored size.', 6],
     ['image limits rejected without a reason', 'images', respond(400, {}),
-        'Failed to save series image limits: HTTP error! status: 400', 6],
+        'Failed to save series image limits: HTTP error! status: 400.', 6],
     ['image limits failed with a non-JSON body', 'images', respond(500, 'Internal Server Error'),
-        'Failed to save series image limits: HTTP error! status: 500', 6],
-    ['image limits refused with a reason', 'images', { success: false, error: 'Dimension too large' }, 'Dimension too large', 6],
-    ['image limits refused', 'images', { success: false }, 'Failed to save series image limits', 6],
+        'Failed to save series image limits: HTTP error! status: 500.', 6],
+    ['image limits refused with a reason', 'images', { success: false, error: 'Dimension too large' },
+        'Failed to save series image limits: Dimension too large.', 6],
+    ['image limits refused', 'images', { success: false }, 'Failed to save series image limits.', 6],
     ['email rejected with an error', 'email', respond(400, { error: 'SmtpPort must be between 1 and 65535' }),
-        'Failed to save email settings: SmtpPort must be between 1 and 65535', 7],
+        'Failed to save email settings: SmtpPort must be between 1 and 65535.', 7],
     ['email rejected with a message', 'email', respond(500, { message: 'Could not persist settings' }),
-        'Failed to save email settings: Could not persist settings', 7],
+        'Failed to save email settings: Could not persist settings.', 7],
     ['email failed with a non-JSON body', 'email', respond(502, 'Bad gateway'),
-        'Failed to save email settings: HTTP error! status: 502', 7],
+        'Failed to save email settings: HTTP error! status: 502.', 7],
     ['email rejected without a reason', 'email', respond(500, {}),
-        'Failed to save email settings: HTTP error! status: 500', 7],
+        'Failed to save email settings: HTTP error! status: 500.', 7],
     ['Suwayomi rejected with an error', 'suwayomi', respond(400, { error: 'Base URL must be an absolute http(s) URL' }),
-        'Failed to save Suwayomi settings: Base URL must be an absolute http(s) URL', 8],
+        'Failed to save Suwayomi settings: Base URL must be an absolute http(s) URL.', 8],
+    ['Suwayomi rejected with a full sentence', 'suwayomi', respond(400, { error: 'A base URL is required when Suwayomi is enabled.' }),
+        'Failed to save Suwayomi settings: A base URL is required when Suwayomi is enabled.', 8],
     ['Suwayomi rejected with a message', 'suwayomi', respond(500, { message: 'Storage failure' }),
-        'Failed to save Suwayomi settings: Storage failure', 8],
+        'Failed to save Suwayomi settings: Storage failure.', 8],
     ['Suwayomi failed with a non-JSON body', 'suwayomi', respond(502, 'Bad gateway'),
-        'Failed to save Suwayomi settings: HTTP error! status: 502', 8],
+        'Failed to save Suwayomi settings: HTTP error! status: 502.', 8],
     ['error reporting rejected with an error', 'errorReporting', respond(400, { error: 'MaxIssuesPerDay must be between 0 and 100' }),
-        'Failed to save error reporting settings: MaxIssuesPerDay must be between 0 and 100', 9],
+        'Failed to save error reporting settings: MaxIssuesPerDay must be between 0 and 100.', 9],
     ['error reporting rejected with a message', 'errorReporting', respond(500, { message: 'Storage failure' }),
-        'Failed to save error reporting settings: Storage failure', 9],
+        'Failed to save error reporting settings: Storage failure.', 9],
     ['error reporting failed with a non-JSON body', 'errorReporting', respond(500, 'oops'),
-        'Failed to save error reporting settings: HTTP error! status: 500', 9],
-    ['network failure', 'format', networkError, 'Failed to save settings: Failed to fetch', 1]
+        'Failed to save error reporting settings: HTTP error! status: 500.', 9],
+    ['network failure', 'format', networkError, 'Failed to save filename format: Failed to fetch.', 1],
+    ['network failure part-way', 'images', networkError, 'Failed to save series image limits: Failed to fetch.', 6]
 ];
 
-test('a failed step stops the save and says which group failed', async t => {
+test('a failed step stops the save and says which group failed and which were saved', async t => {
     const page = await bootSettings();
     const steps = Object.values(SAVE_STEPS);
 
@@ -404,27 +440,88 @@ test('a failed step stops the save and says which group failed', async t => {
 
             const since = await save(page);
 
-            assert.deepEqual(messages(page), [{ type: 'error', text: expected }]);
+            assert.deepEqual(messages(page), [{ type: 'error', text: `${expected} ${savedBefore(attempted)}` }]);
             assert.deepEqual(saveRequests(page, since), steps.slice(0, attempted));
             assert.equal(callsTo(page, 'GET /api/settings', since).length, 0, 'the form is not reloaded');
         });
     }
 });
 
-test('an expired session while saving the email, Suwayomi or error reporting group redirects to login', async t => {
+test('after a partial save the page shows what was saved and keeps the edits for another try', async () => {
+    const page = await bootSettings();
+    page.input('#filenameFormat', '{series} - {issue}');
+    page.input('#issueNumberPadding', '4');
+    page.input('#smtpPassword', 'new smtp secret');
+    page.input('#emailFromAddress', 'comics@');
+
+    // A rejected format is not shown as the current one.
+    routeSaveSteps(page, { format: respond(400, { error: 'Unknown placeholder {foo}' }) });
+    await save(page);
+    assert.equal(page.$('#currentFormat').textContent, '{series} v{volume} #{issue}');
+
+    // Only the server knows the address is invalid, so the groups before it are saved.
+    routeSaveSteps(page, { email: respond(400, { error: "'comics@' is not a valid email address (Parameter 'fromAddress')" }) });
+    const since = await save(page);
+
+    assert.deepEqual(messages(page), [{
+        type: 'error',
+        text: "Failed to save email settings: 'comics@' is not a valid email address (Parameter 'fromAddress'). " +
+            'Only these settings were saved: filename format, log max size, issue number padding, ' +
+            'database cleanup interval, external metadata settings, series image limits.'
+    }]);
+    assert.deepEqual(saveRequests(page, since), Object.values(SAVE_STEPS).slice(0, 7));
+    assert.equal(page.$('#currentFormat').textContent, '{series} - {issue}', 'the saved format is now the current one');
+    assert.equal(callsTo(page, 'GET /api/settings', since).length, 0, 'the form is not reloaded');
+    assert.equal(page.$('#filenameFormat').value, '{series} - {issue}');
+    assert.equal(page.$('#issueNumberPadding').value, '4');
+    assert.equal(page.$('#smtpPassword').value, 'new smtp secret');
+    assert.equal(page.$('#emailFromAddress').value, 'comics@');
+
+    // Fixing the address and saving again sends everything, the typed secret included.
+    routeSaveSteps(page);
+    page.input('#emailFromAddress', 'comics@example.org');
+    const retry = await save(page);
+
+    assert.deepEqual(saveRequests(page, retry), Object.values(SAVE_STEPS));
+    assert.equal(body(page, 'email', retry).emailFromAddress, 'comics@example.org');
+    assert.equal(body(page, 'email', retry).smtpPassword, 'new smtp secret');
+    assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
+    assert.equal(callsTo(page, 'GET /api/settings', retry).length, 1, 'the saved settings are reloaded');
+});
+
+test('values at the server limits are saved', async () => {
+    const page = await bootSettings();
+    routeSaveSteps(page);
+    assert.equal(page.$('#logMaxSize').max, '2047', "the input's limit matches the server's");
+    assert.equal(page.$('#emailMaxAttachmentMb').max, '200', "the input's limit matches the server's");
+    page.input('#logMaxSize', '2047');
+    page.input('#emailMaxAttachmentMb', '200');
+    page.input('#errorReportingMaxPerDay', '100');
+    page.input('#errorReportingDedupeHours', '720');
+
+    const since = await save(page);
+
+    assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
+    assert.equal(body(page, 'log', since).maxMB, 2047);
+    assert.equal(body(page, 'email', since).emailMaxAttachmentMb, 200);
+    assert.equal(body(page, 'errorReporting', since).maxIssuesPerDay, 100);
+    assert.equal(body(page, 'errorReporting', since).dedupeWindowHours, 720);
+});
+
+test('an expired session while saving any group redirects to login', async t => {
     const page = await bootSettings();
     const token = page.window.localStorage.getItem('jwt_token');
     const steps = Object.values(SAVE_STEPS);
 
-    for (const [step, attempted] of [['email', 7], ['suwayomi', 8], ['errorReporting', 9]]) {
+    for (const [index, step] of Object.keys(SAVE_STEPS).entries()) {
         await t.test(step, async () => {
             page.window.localStorage.setItem('jwt_token', token);
-            routeSaveSteps(page, { [step]: 401 });
+            routeSaveSteps(page, { [step]: respond(401, { error: 'Unauthorized' }) });
             const navigations = page.navigations.length;
 
             const since = await save(page);
 
-            assert.deepEqual(saveRequests(page, since), steps.slice(0, attempted));
+            assert.deepEqual(saveRequests(page, since), steps.slice(0, index + 1));
             assert.deepEqual(messages(page), []);
             assert.equal(page.navigations.length, navigations + 1);
             assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');

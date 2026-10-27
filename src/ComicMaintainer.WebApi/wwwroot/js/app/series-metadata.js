@@ -10,7 +10,19 @@
         // External Series Metadata (manual refresh + alias management)
         // ====================================================================
 
-        let manageSeriesState = { seriesTitle: '', record: null };
+        let manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false };
+
+        // Keep a record a Manage Names request sent back. The other controls
+        // save straight away but alias edits wait for Save, so once the list
+        // has been edited it replaces the stored one in the record: Save then
+        // persists the list the modal shows.
+        function setManageSeriesRecord(record) {
+            const current = manageSeriesState.record;
+            if (manageSeriesState.aliasesEdited && current && record) {
+                record.user_aliases = current.user_aliases || [];
+            }
+            manageSeriesState.record = record;
+        }
 
         async function refreshAllExternalMetadata() {
             if (!confirm('Queue an external metadata refresh for every series in the library? Lookups happen in the background and progress is reported as a job.')) {
@@ -425,7 +437,7 @@
         }
 
         async function openManageSeriesNamesModal(seriesTitle) {
-            manageSeriesState = { seriesTitle, record: null };
+            manageSeriesState = { seriesTitle, record: null, aliasesEdited: false };
             document.getElementById('manageSeriesTitle').textContent = seriesTitle;
             document.getElementById('manageSeriesProviderAliases').textContent = 'Loading...';
             document.getElementById('manageSeriesProviderSource').textContent = '';
@@ -445,7 +457,7 @@
 
         function closeManageSeriesNamesModal() {
             document.getElementById('manageSeriesNamesModal').classList.remove('active');
-            manageSeriesState = { seriesTitle: '', record: null };
+            manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false };
         }
 
         async function loadManageSeriesRecord() {
@@ -462,6 +474,7 @@
                 }
                 const record = await response.json();
                 manageSeriesState.record = record;
+                manageSeriesState.aliasesEdited = false;
                 const prefSelect = document.getElementById('manageSeriesPreferredLanguage');
                 if (prefSelect) {
                     prefSelect.value = record.preferred_language || '';
@@ -537,7 +550,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesImage(record);
                 showMessage('Series image updated', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
@@ -569,7 +582,7 @@
                 }
                 if (response.ok) {
                     const updated = await response.json();
-                    manageSeriesState.record = updated;
+                    setManageSeriesRecord(updated);
                     renderManageSeriesImage(updated);
                 }
                 showMessage('Series image cleared', 'success');
@@ -694,7 +707,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesImage(record);
                 showMessage('Series image updated from provider', 'success');
                 closeFetchSeriesImageFromProvider();
@@ -762,7 +775,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 showMessage(value ? `Preferred language set to ${value}` : 'Preferred language cleared', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
@@ -855,7 +868,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 populateManageSeriesNameOptions(record);
                 renderManageSeriesUserAliases(record);
                 showMessage(value ? `Series name set to "${value}"` : 'Series name set to automatic', 'success');
@@ -894,6 +907,7 @@
             if (!current.some(a => a.toLowerCase() === value.toLowerCase())) {
                 current.push(value);
                 manageSeriesState.record.user_aliases = current;
+                manageSeriesState.aliasesEdited = true;
                 renderManageSeriesUserAliases(manageSeriesState.record);
                 // Surface the new alias as a selectable "Series Name" option so
                 // it can immediately be picked as the sticky series name.
@@ -906,25 +920,29 @@
             if (!manageSeriesState.record) return;
             const current = manageSeriesState.record.user_aliases || [];
             manageSeriesState.record.user_aliases = current.filter(a => a.toLowerCase() !== alias.toLowerCase());
+            manageSeriesState.aliasesEdited = true;
             renderManageSeriesUserAliases(manageSeriesState.record);
             // Keep the "Series Name" dropdown in sync with the alias list.
             populateManageSeriesNameOptions(manageSeriesState.record);
         }
 
+        // PUT an alias list as the series' user aliases, replacing the stored
+        // ones. Resolves to whether the server accepted it.
+        async function putManageSeriesUserAliases(seriesTitle, aliases) {
+            const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                credentials: 'same-origin',
+                body: JSON.stringify({ aliases })
+            });
+            return response.ok;
+        }
+
         async function saveManageSeriesNames() {
             const { seriesTitle, record } = manageSeriesState;
             if (!seriesTitle || !record) return;
-            const payload = {
-                aliases: record.user_aliases || []
-            };
             try {
-                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    credentials: 'same-origin',
-                    body: JSON.stringify(payload)
-                });
-                if (!response.ok) {
+                if (!(await putManageSeriesUserAliases(seriesTitle, record.user_aliases || []))) {
                     showMessage('Failed to save series names', 'error');
                     return;
                 }
@@ -959,7 +977,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
@@ -1108,6 +1126,7 @@
                 addIfNew(result.canonical_title);
             }
             manageSeriesState.record.user_aliases = current;
+            manageSeriesState.aliasesEdited = true;
             renderManageSeriesUserAliases(manageSeriesState.record);
             populateManageSeriesNameOptions(manageSeriesState.record);
             if (mode === 'canonical' && result.canonical_title) {
@@ -1120,9 +1139,34 @@
                         select.appendChild(opt);
                     }
                     select.value = result.canonical_title;
-                    saveManageSeriesName();
+                    saveAdoptedSeriesNames();
                 }
             }
+        }
+
+        // Adopt as Canonical pins the series name, which saves straight away,
+        // so the aliases it adopted are saved first instead of waiting for
+        // Save. If they can't be saved the stored name is kept as well, and
+        // the adopted aliases stay listed for Save.
+        async function saveAdoptedSeriesNames() {
+            const state = manageSeriesState;
+            const { seriesTitle, record } = state;
+            if (!seriesTitle || !record) return;
+            let saved = false;
+            try {
+                saved = await putManageSeriesUserAliases(seriesTitle, record.user_aliases || []);
+            } catch (err) {
+                console.error('saveAdoptedSeriesNames failed', err);
+            }
+            // The modal was closed or reopened meanwhile: leave the name alone.
+            if (state !== manageSeriesState) return;
+            if (!saved) {
+                showMessage('Failed to save series names', 'error');
+                const select = document.getElementById('manageSeriesName');
+                if (select) select.value = (state.record && state.record.series_name) || '';
+                return;
+            }
+            await saveManageSeriesName();
         }
 
         // Mark one of the candidates returned by /search as the *correct*
@@ -1166,7 +1210,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
@@ -1209,7 +1253,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);

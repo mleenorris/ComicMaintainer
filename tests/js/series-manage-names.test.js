@@ -451,6 +451,65 @@ test('failing to save the aliases keeps the modal open', async () => {
     assert.equal(libraryRefreshes(page), refreshes);
 });
 
+test('unsaved alias edits survive a preferred-language change and are what Save persists (#848)', async () => {
+    const page = await bootSeries();
+    await openManageNames(page, metadataRecord({ user_aliases: ['My Saga', 'Old Saga'] }));
+    // The server answers with the stored aliases: it has not seen the edits.
+    page.route(`PUT ${RECORD}/preferred-language`, call => metadataRecord({
+        preferred_language: call.body.language,
+        user_aliases: ['My Saga', 'Old Saga']
+    }));
+
+    addAlias(page, 'New Saga');
+    page.click(removeButton(page, 'Old Saga'));
+    page.input(languageSelect(page), 'ko');
+    await page.settle();
+
+    assert.deepEqual(lastMessage(page), { text: 'Preferred language set to ko', type: 'success' });
+    assert.deepEqual(userAliases(page), ['My Saga', 'New Saga']);
+
+    page.route(`PUT ${RECORD}/aliases`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    await press(page, 'Save');
+    assert.deepEqual(callsTo(page, `${RECORD}/aliases`, 'PUT')[0].body, { aliases: ['My Saga', 'New Saga'] });
+    assert.deepEqual(lastMessage(page), { text: 'Series names saved', type: 'success' });
+});
+
+test('picking a name, refreshing or clearing external metadata keeps unsaved alias edits (#848)', async () => {
+    const page = await bootSeries();
+    const stored = { aliases: ['Saga Comic'], user_aliases: ['My Saga', 'Old Saga'] };
+    await openManageNames(page, metadataRecord(stored));
+    page.route(`PUT ${RECORD}/name`, call => metadataRecord({
+        ...stored,
+        series_name: call.body.name,
+        resolved_series_name: call.body.name
+    }));
+    page.route('POST /api/metadata/refresh/Saga', metadataRecord({ ...stored, lookup_status: 'success' }));
+    page.route(`DELETE ${RECORD}/external`, metadataRecord({ user_aliases: stored.user_aliases }));
+    answerConfirm(page, true);
+    const edited = ['My Saga', 'New Saga'];
+
+    addAlias(page, 'New Saga');
+    page.click(removeButton(page, 'Old Saga'));
+
+    page.input(nameSelect(page), 'Saga Comic');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { text: 'Series name set to "Saga Comic"', type: 'success' });
+    assert.deepEqual(userAliases(page), edited, 'after picking a name');
+
+    await press(page, 'Refresh from Provider');
+    assert.deepEqual(lastMessage(page), { text: 'Metadata refreshed', type: 'success' });
+    assert.deepEqual(userAliases(page), edited, 'after a refresh');
+
+    await press(page, 'Clear External Metadata');
+    assert.deepEqual(lastMessage(page), { text: 'External metadata cleared', type: 'success' });
+    assert.deepEqual(userAliases(page), edited, 'after clearing the external metadata');
+    assert.deepEqual(optionValues(nameSelect(page)), ['', 'Saga', ...edited]);
+
+    page.route(`PUT ${RECORD}/aliases`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    await press(page, 'Save');
+    assert.deepEqual(callsTo(page, `${RECORD}/aliases`, 'PUT')[0].body, { aliases: edited });
+});
+
 test('Refresh from Provider reloads the provider names, image and lookup status', async () => {
     const page = await bootSeries();
     await openManageNames(page, metadataRecord({ user_aliases: ['My Saga'] }));

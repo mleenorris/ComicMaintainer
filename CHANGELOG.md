@@ -163,6 +163,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refresh jobs are now forgotten after 30 minutes (or once 50 newer ones finished) instead of
   being kept until restart.
 - **A failed live update no longer marks a metadata refresh as failed** or leaves it "running".
+- **A metadata refresh no longer stops when the browser's connection closes.** Refresh all,
+  Match unmatched, and selected, folder and queued single-series refreshes ran on the request's
+  cancellation token, which the web server reuses for later requests on the same connection and
+  cancels when that connection closes. Closing the browser or an idle proxy connection could end
+  the job as Cancelled partway, without re-tagging the files. Refresh jobs now run to completion
+  and stop only when the application shuts down.
 - **Cancelling a metadata search is no longer reported as a provider failure or a "no match"**:
   the provider health stays as it was, and the search endpoints stop logging an error and
   answering 500 when the browser gives up on the request.

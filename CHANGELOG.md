@@ -159,6 +159,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.
+- **Deleting selected files clears the selection on the page at once.** The selection bar kept
+  saying "N files selected" with its batch actions enabled, and the boxes stayed ticked, until a
+  live update redrew the library — never, if the job was cancelled before it deleted a file or
+  the event stream was down — and those actions then failed with "No files selected".
 - **Series metadata works for local (password) logins.** Refresh, match, search, rename,
   aliases, preferred language, apply match and removing a match sent no session token and
   failed with 401 unless signed in through Authelia.

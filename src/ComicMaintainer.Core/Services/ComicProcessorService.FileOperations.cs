@@ -229,4 +229,27 @@ public partial class ComicProcessorService
             out resolvedPath,
             _settings.WatchedDirectory,
             _settings.DuplicateDirectory);
+
+    /// <summary>
+    /// Like <see cref="TryResolveAllowedPath"/>, but returns the physical path of the
+    /// directory entry itself: only the directories leading to it are resolved, so
+    /// deleting the result removes a link rather than the file it points to.
+    /// </summary>
+    private bool TryResolveAllowedEntry(string filePath, out string entryPath)
+    {
+        entryPath = string.Empty;
+        if (!TryResolveAllowedPath(filePath, out _))
+            return false;
+
+        var fullPath = Path.GetFullPath(filePath);
+        if (!LibraryPathValidator.TryResolveWithin(
+                Path.GetDirectoryName(fullPath),
+                out var directory,
+                _settings.WatchedDirectory,
+                _settings.DuplicateDirectory))
+            return false;
+
+        entryPath = Path.Join(directory, Path.GetFileName(fullPath));
+        return true;
+    }
 }

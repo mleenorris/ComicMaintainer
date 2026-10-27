@@ -177,6 +177,7 @@ printf '%s' '/comics/Batman/Batman #001.cbz' | base64 | tr -d '\n=' | tr '+/' '-
 
 ```python
 import base64
+path = '/comics/Batman/Batman #001.cbz'
 encoded = base64.urlsafe_b64encode(path.encode()).decode().rstrip('=')
 ```
 

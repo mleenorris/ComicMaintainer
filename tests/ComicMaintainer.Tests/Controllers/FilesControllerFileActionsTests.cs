@@ -230,12 +230,16 @@ public sealed class FilesControllerFileActionsTests
 
     // ------------------------------------------------------------------ UpdateTags
 
+    private static IEnumerable<string> Failed(object? value) =>
+        Assert.IsAssignableFrom<IEnumerable<string>>(Prop(value, "failed"));
+
     [Fact]
     public async Task UpdateTags_SkipsBlankEntriesAndUpdatesTheRest()
     {
         var first = InRoot("Saga 001.cbz");
         var second = InRoot("Saga 002.cbz");
         var metadata = new ComicMetadata { Series = "Saga" };
+        _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), metadata, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var request = new FilesController.UpdateTagsRequest
         {
             Files = new List<string> { first, "", null!, second },
@@ -248,6 +252,60 @@ public sealed class FilesControllerFileActionsTests
         _processor.Verify(p => p.UpdateMetadataAsync(first, metadata, It.IsAny<CancellationToken>()), Times.Once);
         _processor.Verify(p => p.UpdateMetadataAsync(second, metadata, It.IsAny<CancellationToken>()), Times.Once);
         _processor.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateTags_NoFilesToUpdate_ReturnsOk()
+    {
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { "", null! }
+        });
+
+        Assert.IsType<OkResult>(result);
+        _processor.VerifyNoOtherCalls();
+    }
+
+    // The processor answers false for a file it could not write: missing, not a
+    // comic archive, or unreadable.
+    [Fact]
+    public async Task UpdateTags_NoFileCouldBeUpdated_ReturnsBadRequestListingTheFiles()
+    {
+        var missing = InRoot("Missing 001.cbz");
+        var notAnArchive = InRoot("Notes.txt");
+        _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { missing, "", notAnArchive },
+            Metadata = new ComicMetadata { Series = "X" }
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("Failed to update tags", Prop(badRequest.Value, "error"));
+        Assert.Equal(new[] { missing, notAnArchive }, Failed(badRequest.Value));
+    }
+
+    [Fact]
+    public async Task UpdateTags_SomeFilesCouldNotBeUpdated_Returns207ListingThoseAndUpdatesTheRest()
+    {
+        var missing = InRoot("Missing 001.cbz");
+        var updated = InRoot("Saga 002.cbz");
+        var metadata = new ComicMetadata { Series = "Saga" };
+        _processor.Setup(p => p.UpdateMetadataAsync(missing, metadata, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _processor.Setup(p => p.UpdateMetadataAsync(updated, metadata, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { missing, updated },
+            Metadata = metadata
+        });
+
+        var multiStatus = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(207, multiStatus.StatusCode);
+        Assert.Equal(new[] { missing }, Failed(multiStatus.Value));
+        _processor.Verify(p => p.UpdateMetadataAsync(updated, metadata, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]

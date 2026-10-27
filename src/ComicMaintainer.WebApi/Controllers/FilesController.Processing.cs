@@ -77,14 +77,25 @@ public partial class FilesController
                 }
             }
 
+            var attempted = 0;
+            var failed = new List<string>();
             foreach (var file in request.Files)
             {
                 if (!string.IsNullOrEmpty(file))
                 {
-                    await _processor.UpdateMetadataAsync(file, request.Metadata);
+                    attempted++;
+                    if (!await _processor.UpdateMetadataAsync(file, request.Metadata))
+                        failed.Add(file);
                 }
             }
-            return Ok();
+
+            // The processor answers false, having logged why, for a file it could not
+            // write: missing, not a comic archive, or unreadable.
+            if (failed.Count == 0)
+                return Ok();
+            if (failed.Count == attempted)
+                return BadRequest(new { error = "Failed to update tags", failed });
+            return StatusCode(StatusCodes.Status207MultiStatus, new { failed });
         }
         catch (Exception ex)
         {

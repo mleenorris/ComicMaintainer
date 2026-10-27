@@ -69,14 +69,13 @@ docker run -d \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ASPNETCORE_URLS` | http://+:5000 | Server URLs |
+| `ASPNETCORE_URLS` | http://+:5000 | Server URLs. To use another port, change the host side of the port mapping (`-p 8080:5000`) instead; the container health check probes port 5000 |
 | `WATCHED_DIR` | /watched_dir | Directory to watch for comics |
 | `DUPLICATE_DIR` | /duplicates | Directory for duplicate files |
 | `CONFIG_DIR` | /Config | Configuration and database directory |
 | `PUID` | 99 | User ID for file operations (dynamically created) |
 | `PGID` | 100 | Group ID for file operations (dynamically created) |
-| `MAX_WORKERS` | 4 | Maximum concurrent workers |
-| `DB_CACHE_SIZE_MB` | 64 | Database cache size |
+| `AppSettings__MaxWorkers` | 4 | Files processed in parallel (read at startup) |
 | `JWT_SECRET` | *required* | JWT signing key (32+ chars) |
 | `ADMIN_USERNAME` | admin | Default admin username |
 | `ADMIN_EMAIL` | admin@local | Default admin email |

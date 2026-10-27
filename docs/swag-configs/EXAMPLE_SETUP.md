@@ -57,8 +57,6 @@ services:
       - CONFIG_DIR=/Config
       - PUID=1000
       - PGID=1000
-      - MAX_WORKERS=4
-      - DB_CACHE_SIZE_MB=64
       # No BASE_PATH needed for subdomain setup
       # Add BASE_PATH=/comics for subfolder setup
     volumes:
@@ -304,19 +302,13 @@ tar -czf backup-comicmaintainer-${DATE}.tar.gz \
 
 For large libraries (>5000 files):
 
-**1. Increase database cache:**
+**1. Increase workers:**
 ```yaml
 environment:
-  - DB_CACHE_SIZE_MB=128  # Increase from default 64
+  - AppSettings__MaxWorkers=8  # Increase from default 4
 ```
 
-**2. Increase workers:**
-```yaml
-environment:
-  - MAX_WORKERS=8  # Increase from default 4
-```
-
-**3. Enable HTTP/2 (already enabled in SWAG by default)**
+**2. Enable HTTP/2 (already enabled in SWAG by default)**
 
 ## Security Recommendations
 

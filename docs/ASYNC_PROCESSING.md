@@ -187,7 +187,7 @@ These can still be used if needed, but the async endpoints are recommended for b
 ## Deployment Architecture
 
 The application uses:
-- **Multiple Gunicorn worker processes** (default: 2, configurable via `GUNICORN_WORKERS` env var)
+- **Multiple Gunicorn worker processes** in the Python version (the .NET version runs a single process)
 - **4 ThreadPoolExecutor threads per worker** (configurable) - Provides concurrent file processing
 - **SQLite database** - Shared job state storage across all worker processes
 
@@ -199,28 +199,19 @@ Job state is stored in a SQLite database (`/app/cache/jobs.db`), which enables:
 
 ## Configuration
 
-### Adjusting Gunicorn Workers
+### Web Server Workers
 
-To change the number of Gunicorn worker processes, set the `GUNICORN_WORKERS` environment variable:
-
-```bash
-export GUNICORN_WORKERS=4  # Default is 2
-```
-
-**Recommendations:**
-- For small libraries: 1-2 workers
-- For medium libraries: 2-4 workers  
-- For large libraries with high traffic: 4-8 workers
+The .NET version runs a single web server process, so there is nothing to tune; the Python version's `GUNICORN_WORKERS` is not read.
 
 ### Adjusting Thread Pool Size
 
-The number of concurrent workers can be configured using the `MAX_WORKERS` environment variable:
+The number of files processed concurrently can be configured using the `AppSettings__MaxWorkers` environment variable (read at startup):
 
 ```bash
 docker run -d \
   -v <host_dir_to_watch>:/watched_dir \
   -e WATCHED_DIR=/watched_dir \
-  -e MAX_WORKERS=8 \
+  -e AppSettings__MaxWorkers=8 \
   -p 5000:5000 \
   iceburn1/comictagger-watcher:latest
 ```

@@ -177,18 +177,17 @@ docker run -d \
   -v /path/to/config:/Config \
   -v /etc/letsencrypt:/certs:ro \
   -e WATCHED_DIR=/watched_dir \
-  -e WEB_PORT=443 \
   -e SSL_CERTFILE=/certs/live/your-domain.com/fullchain.pem \
   -e SSL_KEYFILE=/certs/live/your-domain.com/privkey.pem \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
-  -p 443:443 \
+  -p 443:5000 \
   iceburn1/comictagger-watcher:latest
 ```
 
 Access at: `https://your-domain.com` (no port number needed)
 
-**Note**: Running on port 443 may require root privileges on the host system, or you can use Docker's port mapping from a high port to 443.
+**Note**: The application still listens on port 5000 inside the container; the `-p 443:5000` port mapping publishes it on port 443 of the host. Binding a host port below 1024 may require root privileges on the host system.
 
 ## Reverse Proxy HTTPS
 

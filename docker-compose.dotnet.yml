@@ -14,13 +14,13 @@ services:
       - CONFIG_DIR=/Config
       - PUID=${PUID:-99}
       - PGID=${PGID:-100}
-      - MAX_WORKERS=4
-      - DB_CACHE_SIZE_MB=64
       - JWT_SECRET=${JWT_SECRET:-ChangeThisToASecureRandomString-MustBeAtLeast32CharactersLong!!}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@comicmaintainer.local}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Admin123!}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5000,https://localhost:5000}
+      # Other settings take an AppSettings__<Setting> variable (see README "Configuration"):
+      # - AppSettings__MaxWorkers=4                  # files processed in parallel (read at startup)
       # Optional operational features (see README "Monitoring, backups & API docs"):
       # - TELEMETRY__PROMETHEUSENABLED=true          # expose Prometheus metrics at /metrics
       # - TELEMETRY__METRICSTOKEN=change-me          # require "Authorization: Bearer <token>" on /metrics

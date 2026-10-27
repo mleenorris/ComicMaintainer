@@ -66,7 +66,8 @@ public class ServiceWorkerControllerTests : IDisposable
         var tests = new ServiceWorkerControllerTests();
         File.WriteAllText(Path.Combine(tests._tempDirectory, "sw.js"), "// Service Worker");
 
-        tests.Dispose();
+        // xUnit only disposes test classes that implement IDisposable.
+        Assert.IsAssignableFrom<IDisposable>(tests).Dispose();
 
         Assert.False(Directory.Exists(tests._tempDirectory));
     }

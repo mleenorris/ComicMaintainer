@@ -69,7 +69,8 @@ public class FileStoreServiceTests : IDisposable
         var tests = new FileStoreServiceTests();
         File.WriteAllText(Path.Combine(tests._testDirectory, "test.cbz"), "test content");
 
-        tests.Dispose();
+        // xUnit only disposes test classes that implement IDisposable.
+        Assert.IsAssignableFrom<IDisposable>(tests).Dispose();
 
         Assert.False(Directory.Exists(tests._testDirectory));
     }

@@ -68,7 +68,6 @@ test('renders the series header, synopsis and one card per issue', async () => {
 
     assert.equal(text(panel.querySelector('.series-detail-selection-meta')), '3 issues in this series');
     assert.equal(panel.querySelector('.series-detail-missing-banner'), null, 'nothing is missing');
-    assert.equal(panel.querySelector('#seriesIssuesSentinel'), null, 'everything is loaded');
     assert.equal(text(panel.querySelector('.series-detail-actions .btn-primary')), 'Read First Issue');
     assert.deepEqual(page.errors, []);
 });
@@ -196,7 +195,7 @@ test('a failed issue load offers a Retry that refetches the issues', async () =>
     await page.settle();
     const calls = callsTo(page, ISSUES, 'GET');
     assert.equal(calls.length, 2);
-    assert.deepEqual(calls[1].query, { per_page: '-1', page: '1' });
+    assert.deepEqual(calls[1].query, { per_page: '-1' });
     assert.equal(issueCards(page).length, 3);
     assert.equal(page.$('#seriesDetailPanel .empty-state'), null);
 });
@@ -237,14 +236,14 @@ test('a header filter that hides every issue offers to clear the filter', async 
     page.click('#headerFilterMenu [data-filter="unmarked"]');
     await page.settle();
     const filtered = callsTo(page, ISSUES).at(-1);
-    assert.deepEqual(filtered.query, { per_page: '-1', page: '1', filter: 'unmarked' });
+    assert.deepEqual(filtered.query, { per_page: '-1', filter: 'unmarked' });
     const empty = page.$('#seriesDetailPanel .empty-state');
     assert.equal(text(empty.querySelector('p')), 'No issues in this series match the current filter.');
     assert.equal(page.window.location.hash, '#/series/saga', 'the filter keeps the series open');
 
     page.click(empty.querySelector('button'));
     await page.settle();
-    assert.deepEqual(callsTo(page, ISSUES).at(-1).query, { per_page: '-1', page: '1' });
+    assert.deepEqual(callsTo(page, ISSUES).at(-1).query, { per_page: '-1' });
     assert.equal(issueCards(page).length, 3);
 });
 

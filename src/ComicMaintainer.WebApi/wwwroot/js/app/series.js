@@ -14,7 +14,6 @@
         }
 
         function closeSeriesDetail() {
-            disconnectSeriesIssuesObserver();
             currentSeriesDetailId = null;
             currentSeriesDetailTitleKeys = null;
             currentSeriesDetailSeries = null;
@@ -93,53 +92,33 @@
         }
 
         // The entire issue list of a series is loaded in a single request
-        // (per_page=-1 instructs the API to return all issues at once). The
-        // file lists now load quickly enough that incremental/lazy paging is
-        // no longer needed. SERIES_ISSUES_PAGE_SIZE is retained only as the
-        // cache entry's default perPage placeholder.
-        const SERIES_ISSUES_PAGE_SIZE = 100;
-        // Sentinel per_page value sent to the API to request every issue.
+        // (per_page=-1 instructs the API to return all issues at once), so
+        // the client does no paging.
         const SERIES_ISSUES_LOAD_ALL = -1;
 
-        async function loadSeriesIssues(seriesId, force = false, page = 1) {
+        async function loadSeriesIssues(seriesId, force = false) {
             if (!seriesId) return;
             if (force) {
                 seriesIssuesCache.delete(seriesId);
             }
             const existing = seriesIssuesCache.get(seriesId);
-            // First page already loaded and not forced — render and exit.
-            if (!force && page === 1 && existing && !existing.error && existing.issues.length > 0) {
+            // Already loaded and not forced — render and exit.
+            if (!force && existing && !existing.error && existing.issues.length > 0) {
                 renderSeriesDetail(seriesId);
                 return;
             }
-            // Subsequent page already loaded — nothing to do.
-            if (existing && !existing.error && existing.loadedPages && existing.loadedPages.has(page)) {
-                return;
-            }
-            // Another request is already loading this exact page.
-            if (existing && existing.loadingPages && existing.loadingPages.has(page)) {
+            // Already loaded (with no issues), or another request is loading it.
+            if (existing && !existing.error && (existing.loaded || existing.loading)) {
                 return;
             }
 
-            // Prime the cache entry so concurrent callers don't fan out.
-            let entry = existing;
-            if (!entry || entry.error) {
-                entry = {
-                    issues: [],
-                    total: 0,
-                    totalPages: 1,
-                    perPage: SERIES_ISSUES_PAGE_SIZE,
-                    loadedPages: new Set(),
-                    loadingPages: new Set(),
-                    allLoaded: false,
-                    error: false
-                };
-                seriesIssuesCache.set(seriesId, entry);
-            }
-            entry.loadingPages.add(page);
+            // Prime the cache entry so concurrent callers don't fan out. A
+            // failed entry is replaced, so a retry starts from scratch.
+            const entry = { issues: [], total: 0, loaded: false, loading: true, error: false };
+            seriesIssuesCache.set(seriesId, entry);
 
             try {
-                let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=${page}`);
+                let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}`);
                 if (filterMode !== 'all') {
                     url += `&filter=${encodeURIComponent(filterMode)}`;
                 }
@@ -151,33 +130,11 @@
                     entry.error = true;
                 } else {
                     const data = await response.json();
-                    const pageIssues = Array.isArray(data.issues) ? data.issues : [];
-                    if (page === 1) {
-                        entry.issues = pageIssues.slice();
-                    } else {
-                        // De-dupe by file_path in case the same file appears
-                        // across pages (e.g. concurrent file-store mutations).
-                        const seen = new Set(entry.issues.map(i => i.file_path));
-                        for (const issue of pageIssues) {
-                            if (!seen.has(issue.file_path)) {
-                                entry.issues.push(issue);
-                                seen.add(issue.file_path);
-                            }
-                        }
-                    }
+                    entry.issues = Array.isArray(data.issues) ? data.issues : [];
                     entry.total = typeof data.issue_count === 'number'
                         ? data.issue_count
                         : entry.issues.length;
-                    entry.totalPages = typeof data.total_pages === 'number' && data.total_pages > 0
-                        ? data.total_pages
-                        : 1;
-                    entry.perPage = typeof data.per_page === 'number' && data.per_page > 0
-                        ? data.per_page
-                        : SERIES_ISSUES_PAGE_SIZE;
-                    entry.loadedPages.add(page);
-                    entry.allLoaded = entry.loadedPages.size >= entry.totalPages
-                        || entry.issues.length >= entry.total;
-                    entry.error = false;
+                    entry.loaded = true;
                     // Refresh the cached series metadata snapshot from the
                     // response so the detail view can render correctly even
                     // when the active filter excludes this series from the
@@ -205,109 +162,13 @@
                 console.error('loadSeriesIssues failed', err);
                 entry.error = true;
             } finally {
-                entry.loadingPages.delete(page);
+                entry.loading = false;
             }
 
             // Re-render only if the user is still on this series.
             if (currentSeriesDetailId === seriesId) {
-                if (page === 1 || entry.error) {
-                    renderSeriesDetail(seriesId);
-                } else {
-                    appendSeriesIssuePage(seriesId, page);
-                }
-            }
-        }
-
-        // Re-renders the issue grid contents from the cache after a new page
-        // has been appended to it. Re-rendering the full grid (rather than
-        // appending only the new page's items) preserves correct ordering
-        // and missing-issue placeholders without re-sorting the DOM in place.
-        // The surrounding panel and header are left untouched. Cover images
-        // already hydrated stay cached in `protectedImageUrls` and rebind
-        // instantly; only the freshly-added covers go through a fetch.
-        function appendSeriesIssuePage(seriesId, page) {
-            if (currentSeriesDetailId !== seriesId) return;
-            const panel = document.getElementById('seriesDetailPanel');
-            const grid = panel && panel.querySelector('.series-issues-grid');
-            const cached = seriesIssuesCache.get(seriesId);
-            if (!panel || !grid || !cached) {
                 renderSeriesDetail(seriesId);
-                return;
             }
-            const gridItems = buildSeriesIssuesGridItems(cached.issues);
-            const allLoaded = cached.allLoaded;
-            // Close any open action menu first so a menu that was portaled to
-            // <body> is restored before its host card is replaced below.
-            closeAllDropdowns();
-            renderHtml(grid, html`
-                ${rawHtml(gridItems.map(renderSeriesIssueGridItemHtml).join(''))}
-                ${!allLoaded ? html`<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : ''}
-            `);
-            // Update the "showing N of M" counter in the selection bar.
-            const metaSpan = panel.querySelector('.series-detail-selection-meta');
-            if (metaSpan) {
-                const total = typeof cached.total === 'number' && cached.total > 0
-                    ? cached.total
-                    : cached.issues.length;
-                metaSpan.textContent = `${total} issue${total === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${cached.issues.length}` : ''}`;
-            }
-            hydrateProtectedImages(grid);
-            updateSelectInfo();
-            updateSelectAllCheckbox();
-            setupSeriesIssuesSentinel(seriesId);
-        }
-
-        // IntersectionObserver wiring for infinite scroll. When the sentinel
-        // at the bottom of the issues grid becomes visible (or near visible
-        // via the rootMargin), kick off the next page's fetch. Disconnects
-        // automatically when no more pages remain.
-        let seriesIssuesObserver = null;
-        function disconnectSeriesIssuesObserver() {
-            if (seriesIssuesObserver) {
-                try { seriesIssuesObserver.disconnect(); } catch (_) {}
-                seriesIssuesObserver = null;
-            }
-        }
-        function setupSeriesIssuesSentinel(seriesId) {
-            disconnectSeriesIssuesObserver();
-            const sentinel = document.getElementById('seriesIssuesSentinel');
-            if (!sentinel) return;
-            const cached = seriesIssuesCache.get(seriesId);
-            if (!cached || cached.allLoaded) return;
-            if (typeof IntersectionObserver === 'undefined') {
-                // Fallback: eagerly fetch all remaining pages on environments
-                // without IntersectionObserver support.
-                (async () => {
-                    while (true) {
-                        const entry = seriesIssuesCache.get(seriesId);
-                        if (!entry || entry.allLoaded || entry.error) break;
-                        if (currentSeriesDetailId !== seriesId) break;
-                        const nextPage = entry.loadedPages.size + 1;
-                        await loadSeriesIssues(seriesId, false, nextPage);
-                    }
-                })();
-                return;
-            }
-            seriesIssuesObserver = new IntersectionObserver(entries => {
-                for (const entry of entries) {
-                    if (!entry.isIntersecting) continue;
-                    const current = seriesIssuesCache.get(seriesId);
-                    if (!current || current.allLoaded || current.error) {
-                        disconnectSeriesIssuesObserver();
-                        return;
-                    }
-                    if (currentSeriesDetailId !== seriesId) {
-                        disconnectSeriesIssuesObserver();
-                        return;
-                    }
-                    const nextPage = current.loadedPages.size + 1;
-                    if (current.loadingPages && current.loadingPages.has(nextPage)) {
-                        return;
-                    }
-                    loadSeriesIssues(seriesId, false, nextPage);
-                }
-            }, { rootMargin: '400px 0px' });
-            seriesIssuesObserver.observe(sentinel);
         }
 
         // Parse a free-form issue identifier into a positive integer when it
@@ -774,15 +635,13 @@
 
             const cached = seriesIssuesCache.get(seriesId);
             const issues = cached ? cached.issues : [];
-            // Use the backend-reported total (issue_count / cached.total) so
-            // counts reflect the full series even before all pages have
-            // streamed in via the infinite-scroll loader.
+            // Prefer the backend-reported total (issue_count / cached.total);
+            // until it arrives, fall back to the library card's count.
             const issueCount = cached && typeof cached.total === 'number' && cached.total > 0
                 ? cached.total
                 : (series.issue_count || issues.length || 0);
-            const issuesLoading = !cached || (issues.length === 0 && !cached.error && (!cached.loadedPages || cached.loadedPages.size === 0));
-            const issuesFailed = cached && cached.error && issues.length === 0;
-            const allLoaded = cached ? cached.allLoaded : false;
+            const issuesLoading = !cached || (!cached.loaded && !cached.error);
+            const issuesFailed = cached && cached.error;
             const selectableIssuePaths = issues
                 .map(issue => issue.file_path)
                 .filter(path => typeof path === 'string' && path.length > 0);
@@ -850,7 +709,7 @@
                                        ${allIssuesSelected ? rawHtml('checked') : ''}>
                                 <span>Select all issues</span>
                             </label>
-                            <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${issues.length}` : ''}</span>
+                            <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series</span>
                             <button type="button" class="btn btn-small" data-requires-write onclick="openEmailSendModalForSelected()">${uiIcon('mail')} Email Selected</button>
                         </div>
                         ${rawHtml(renderMissingIssuesBanner(issues, series))}
@@ -870,7 +729,6 @@
                     ` : html`
                         <div class="series-issues-grid">
                             ${rawHtml(gridItems.map(renderSeriesIssueGridItemHtml).join(''))}
-                            ${!allLoaded ? html`<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : ''}
                         </div>
                     `}
                 </div>
@@ -884,5 +742,4 @@
             updateSelectAllCheckbox();
             updateLibraryViewLayout();
             hydrateProtectedImages(fileList);
-            setupSeriesIssuesSentinel(seriesId);
         }

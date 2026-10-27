@@ -41,7 +41,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     private SeriesImagesController CreateController(
         string? ifNoneMatch = null,
         string? ifMatch = null,
-        string? ifUnmodifiedSince = null)
+        string? ifUnmodifiedSince = null,
+        string? ifModifiedSince = null)
     {
         var http = new DefaultHttpContext();
         if (ifNoneMatch is not null)
@@ -55,6 +56,10 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         if (ifUnmodifiedSince is not null)
         {
             http.Request.Headers[HeaderNames.IfUnmodifiedSince] = ifUnmodifiedSince;
+        }
+        if (ifModifiedSince is not null)
+        {
+            http.Request.Headers[HeaderNames.IfModifiedSince] = ifModifiedSince;
         }
 
         return new SeriesImagesController(
@@ -192,7 +197,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     [Theory]
     [InlineData("downloaded")]
     [InlineData("USER")]
-    public async Task Get_CachedImage_StreamsPhysicalFileWithValidators(string status)
+    public async Task Get_CachedImage_StreamsFileWithValidators(string status)
     {
         var path = WriteImage();
         _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>()))
@@ -202,11 +207,16 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
 
         var result = await controller.Get("batman", CancellationToken.None);
 
-        var file = Assert.IsType<PhysicalFileResult>(result);
-        Assert.Equal(path, file.FileName);
+        var file = Assert.IsType<FileStreamResult>(result);
+        await using var stream = file.FileStream;
+        Assert.Equal(path, ((FileStream)stream).Name);
         Assert.Equal("image/png", file.ContentType);
         Assert.False(file.EnableRangeProcessing);
+        // The action decides the preconditions itself, so the file result must not re-evaluate them.
+        Assert.Null(file.EntityTag);
+        Assert.Null(file.LastModified);
         Assert.Equal(ExpectedEtag(path), controller.Response.Headers[HeaderNames.ETag].ToString());
+        Assert.Equal(HeaderUtilities.FormatDate(File.GetLastWriteTimeUtc(path)), controller.Response.Headers[HeaderNames.LastModified].ToString());
         Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
     }
 
@@ -249,7 +259,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
 
         var result = await controller.Get("batman", CancellationToken.None);
 
-        Assert.IsType<PhysicalFileResult>(result);
+        await using var stream = Assert.IsType<FileStreamResult>(result).FileStream;
         Assert.Equal(ExpectedEtag(path), controller.Response.Headers[HeaderNames.ETag].ToString());
         Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
     }
@@ -260,21 +270,16 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         // Regression: the file result had no ETag, so ASP.NET Core judged a browser's
         // revalidation by If-Modified-Since alone and answered a tag that no longer matched
         // with 304. If-None-Match takes precedence over If-Modified-Since (RFC 9110 §13.1.3).
-        var path = WriteImage();
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
-        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
-        var controller = CreateController(ifNoneMatch: "\"0-0\"");
-        var http = controller.HttpContext;
-        http.Request.Headers[HeaderNames.IfModifiedSince] = HeaderUtilities.FormatDate(File.GetLastWriteTimeUtc(path));
-        var body = new MemoryStream();
-        http.Response.Body = body;
+        var controller = CreateServingController(
+            out var path,
+            ifNoneMatch: _ => "\"0-0\"",
+            ifModifiedSince: p => HttpDate(p, 0));
 
-        var result = Assert.IsType<PhysicalFileResult>(await controller.Get("batman", CancellationToken.None));
-        await new PhysicalFileResultExecutor(NullLoggerFactory.Instance).ExecuteAsync(controller.ControllerContext, result);
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
 
-        Assert.Equal(StatusCodes.Status200OK, http.Response.StatusCode);
-        Assert.Equal(PngSignature, body.ToArray());
-        Assert.Equal(ExpectedEtag(path), http.Response.Headers[HeaderNames.ETag].ToString());
+        Assert.Equal(StatusCodes.Status200OK, status);
+        Assert.Equal(PngSignature, ((MemoryStream)controller.HttpContext.Response.Body).ToArray());
+        Assert.Equal(ExpectedEtag(path), controller.HttpContext.Response.Headers[HeaderNames.ETag].ToString());
     }
 
     /// <summary>
@@ -287,7 +292,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         var http = controller.HttpContext;
         http.RequestServices = new ServiceCollection()
             .AddLogging()
-            .AddSingleton<IActionResultExecutor<PhysicalFileResult>>(new PhysicalFileResultExecutor(NullLoggerFactory.Instance))
+            .AddSingleton<IActionResultExecutor<FileStreamResult>>(new FileStreamResultExecutor(NullLoggerFactory.Instance))
             .BuildServiceProvider();
         http.Response.Body = new MemoryStream();
         await result.ExecuteResultAsync(controller.ControllerContext);
@@ -298,7 +303,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         out string path,
         Func<string, string?>? ifNoneMatch = null,
         Func<string, string?>? ifMatch = null,
-        Func<string, string?>? ifUnmodifiedSince = null)
+        Func<string, string?>? ifUnmodifiedSince = null,
+        Func<string, string?>? ifModifiedSince = null)
     {
         var imagePath = WriteImage();
         path = imagePath;
@@ -307,10 +313,11 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         return CreateController(
             ifNoneMatch?.Invoke(imagePath),
             ifMatch?.Invoke(imagePath),
-            ifUnmodifiedSince?.Invoke(imagePath));
+            ifUnmodifiedSince?.Invoke(imagePath),
+            ifModifiedSince?.Invoke(imagePath));
     }
 
-    private static string UnmodifiedSince(string path, int offsetSeconds) =>
+    private static string HttpDate(string path, int offsetSeconds) =>
         HeaderUtilities.FormatDate(File.GetLastWriteTimeUtc(path).AddSeconds(offsetSeconds));
 
     [Fact]
@@ -340,7 +347,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         var controller = CreateServingController(
             out _,
             ifNoneMatch: ExpectedEtag,
-            ifUnmodifiedSince: p => UnmodifiedSince(p, -1));
+            ifUnmodifiedSince: p => HttpDate(p, -1));
 
         var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
 
@@ -377,7 +384,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         var controller = CreateServingController(
             out _,
             ifNoneMatch: ExpectedEtag,
-            ifUnmodifiedSince: p => UnmodifiedSince(p, offsetSeconds));
+            ifUnmodifiedSince: p => HttpDate(p, offsetSeconds));
 
         var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
 
@@ -394,6 +401,79 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
 
         Assert.Equal(StatusCodes.Status200OK, status);
         Assert.Equal(PngSignature, ((MemoryStream)controller.HttpContext.Response.Body).ToArray());
+    }
+
+    [Fact]
+    public async Task Get_FailedPrecondition_DoesNotCarryTheImageCachingHeaders()
+    {
+        // A 412 is an error, so it keeps the API-wide no-store instead of the image's max-age.
+        var controller = CreateServingController(out _, ifMatch: _ => "\"stale\"");
+
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, status);
+        Assert.False(controller.Response.Headers.ContainsKey(HeaderNames.CacheControl));
+        Assert.False(controller.Response.Headers.ContainsKey(HeaderNames.ETag));
+    }
+
+    [Fact]
+    public async Task Get_PassingIfMatchWithFailingIfUnmodifiedSince_ServesTheImage()
+    {
+        // If-Unmodified-Since is ignored when If-Match is present (RFC 9110 §13.1.4); ASP.NET
+        // Core's file executor applied both and answered 412.
+        var controller = CreateServingController(
+            out _,
+            ifMatch: ExpectedEtag,
+            ifUnmodifiedSince: p => HttpDate(p, -1));
+
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status200OK, status);
+        Assert.Equal(PngSignature, ((MemoryStream)controller.HttpContext.Response.Body).ToArray());
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(false, 60)]
+    [InlineData(true, 0)]
+    public async Task Get_MatchingIfModifiedSinceWithoutIfNoneMatch_Returns304(bool withIfMatch, int offsetSeconds)
+    {
+        // A passing If-Match made ASP.NET Core's file executor answer 200 instead of 304.
+        var controller = CreateServingController(
+            out var path,
+            ifMatch: withIfMatch ? ExpectedEtag : null,
+            ifModifiedSince: p => HttpDate(p, offsetSeconds));
+
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status304NotModified, status);
+        Assert.Equal(0, controller.HttpContext.Response.Body.Length);
+        Assert.Equal(ExpectedEtag(path), controller.Response.Headers[HeaderNames.ETag].ToString());
+        Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
+    }
+
+    [Fact]
+    public async Task Get_OlderIfModifiedSince_ServesTheImage()
+    {
+        var controller = CreateServingController(out _, ifModifiedSince: p => HttpDate(p, -1));
+
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status200OK, status);
+        Assert.Equal(PngSignature, ((MemoryStream)controller.HttpContext.Response.Body).ToArray());
+    }
+
+    [Fact]
+    public async Task Get_ImageDeletedAfterResolving_ReturnsNotFound()
+    {
+        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(Path.Combine(_dir, "gone.png"));
+        var controller = CreateController();
+
+        var result = await controller.Get("batman", CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result);
+        Assert.False(controller.Response.Headers.ContainsKey(HeaderNames.CacheControl));
     }
 
     [Fact]

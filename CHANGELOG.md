@@ -165,6 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoint uses. The 304 repeats the `Cache-Control: private, max-age=300` of the full response
   instead of the API-wide `no-store`, which told browsers not to keep the image, and a tag that
   no longer matches gets the current image even when `If-Modified-Since` still matches.
+  `If-Match`, `If-Unmodified-Since` and `If-Modified-Since` are applied in RFC 9110 order, and a
+  412 keeps `no-store` instead of the image's `max-age`.
 - **Metadata refresh progress finishes.** The job status was sent as a number, so the progress
   toast showed a digit, kept polling forever and never ran the final library refresh. Finished
   refresh jobs are now forgotten after 30 minutes (or once 50 newer ones finished) instead of

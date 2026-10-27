@@ -202,14 +202,15 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         }
         var slot = _slots.GetOrAdd(jobKey, _ => new JobSlot());
 
-        // Single-flight: skip overlapping runs rather than queue them up.
+        // Single-flight: skip overlapping runs rather than queue them up. The
+        // run in progress keeps its status and records its own result, so the
+        // skipped run is only logged and counted, and the next run moves on.
         if (!await slot.SingleFlight.WaitAsync(0))
         {
             _logger.LogInformation(
                 "Skipping {JobKey} run because previous run still in progress", LoggingHelper.SanitizeForLog(jobKey));
             _metrics?.RecordScheduledJobRun(handler.JobKey, "skipped", TimeSpan.Zero);
-            await _service.RecordCompletionAsync(jobKey, ScheduledJobStatus.Skipped,
-                "Skipped: previous run still in progress.", durationMs: 0);
+            await _service.AdvanceNextRunAsync(jobKey);
             return;
         }
 

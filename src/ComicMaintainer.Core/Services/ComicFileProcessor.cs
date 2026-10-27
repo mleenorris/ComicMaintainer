@@ -158,11 +158,15 @@ public class ComicFileProcessor
         try
         {
             var issueStr = issueNumber;
-            if (float.TryParse(issueStr, out var issueFloat))
+            // ComicInfo numbers always use "." as the decimal separator, so parse and format
+            // them culture-invariantly; under e.g. de-DE "5.5" would otherwise be read as 55.
+            if (float.TryParse(issueStr, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var issueFloat))
             {
                 var integer = (int)issueFloat;
                 var formatString = $"D{padding}";
-                issueFormatted = integer.ToString(formatString);
+                issueFormatted = integer.ToString(formatString, System.Globalization.CultureInfo.InvariantCulture);
+                var integerNoPad = integer.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
                 // Check if there's a decimal part
                 if (issueStr.Contains('.'))
@@ -171,17 +175,17 @@ public class ComicFileProcessor
                     var decimalPart = parts[1].TrimEnd('0');
                     if (!string.IsNullOrEmpty(decimalPart))
                     {
-                        issueFormatted = $"{integer.ToString(formatString)}.{decimalPart}";
-                        issueNoPad = $"{integer}.{decimalPart}";
+                        issueFormatted = $"{issueFormatted}.{decimalPart}";
+                        issueNoPad = $"{integerNoPad}.{decimalPart}";
                     }
                     else
                     {
-                        issueNoPad = integer.ToString();
+                        issueNoPad = integerNoPad;
                     }
                 }
                 else
                 {
-                    issueNoPad = integer.ToString();
+                    issueNoPad = integerNoPad;
                 }
             }
             else

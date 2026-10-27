@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -1030,6 +1031,36 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(1, job.ProcessedFiles);
         Assert.True(File.Exists(Path.Combine(_library, series, expectedName)), $"expected {expectedName}");
         Assert.True(_logger.Has(LogLevel.Warning,
+            "Chapter number '{Chapter}' would be lost from filename during rename of {OriginalPath}; appending it to preserve the chapter."));
+    }
+
+    // Regression test for issue #843: under de-DE (decimal ",", thousands "."), "5.5" used to be
+    // renamed "S - Chapter 0055.5 - Chapter 0005.5.cbz" and "5.0" "S - Chapter 0050 - Chapter 0005.cbz";
+    // under fr-FR the number was left unpadded ("S - Chapter 5.5.cbz").
+    [Theory]
+    [InlineData("de-DE", "5.5", "S - Chapter 0005.5.cbz")]
+    [InlineData("de-DE", "5.0", "S - Chapter 0005.cbz")]
+    [InlineData("fr-FR", "5.5", "S - Chapter 0005.5.cbz")]
+    public async Task RenameFilesAsync_UnderCommaDecimalCulture_KeepsIssueNumber_Issue843(
+        string culture, string issue, string expectedName)
+    {
+        var service = CreateService();
+        var path = WriteCbz("S/orig.cbz", Xml("S", issue, title: null));
+        var previous = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = new CultureInfo(culture);
+        ProcessingJob job;
+        try
+        {
+            job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(new[] { expectedName }, Directory.GetFiles(Path.Combine(_library, "S")).Select(Path.GetFileName));
+        Assert.False(_logger.Has(LogLevel.Warning,
             "Chapter number '{Chapter}' would be lost from filename during rename of {OriginalPath}; appending it to preserve the chapter."));
     }
 

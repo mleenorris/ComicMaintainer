@@ -150,6 +150,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the path checks looked for the text `..` rather than a real parent-folder segment.
 - **A rename whose new name cannot be generated is reported as failed**, instead of as an
   already correctly named file.
+- **Renaming keeps decimal chapter numbers whatever the server's language.** The issue number
+  was read using the server's number format, so with a language that writes decimals with a
+  comma (German, Spanish, Italian, Dutch, Brazilian Portuguese, Turkish, … set through `LANG` or
+  `LC_ALL`, or the operating system outside Docker), chapter 5.5 was named
+  "S - Chapter 0055.5 - Chapter 0005.5" and 5.0 "S - Chapter 0050 - Chapter 0005"; with French,
+  the number was not padded. The default container was not affected. A "." is now always the
+  decimal point, as in the rest of the app. A comma is no longer read as a thousands
+  separator: a Number of "1,000" or "1,5" is kept as written, like other non-numeric values
+  such as "Extra", instead of becoming chapter 1000 or 15.
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.

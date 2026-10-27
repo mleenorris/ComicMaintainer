@@ -33,8 +33,10 @@ namespace ComicMaintainer.Core.Services;
 ///   <item><b>Modified-file reprocess</b> — opt-in via
 ///     <c>reprocessModified</c>: tracked files whose on-disk size or
 ///     last-write time differs from the stored stats (beyond a ~2s
-///     tolerance) are force-normalized, and their stored stats are refreshed
-///     afterwards so our own metadata writes don't retrigger them.</item>
+///     tolerance) are force-normalized. Stored stats are refreshed only
+///     for files the job normalized successfully, so our own metadata
+///     writes don't retrigger them while a failed re-normalize is retried
+///     by the next scan.</item>
 /// </list>
 ///
 /// The handler is disabled by default in this step so existing
@@ -215,8 +217,8 @@ public class LibraryScanJobHandler : IScheduledJobHandler
 
         // Pass 4 (opt-in): files modified on disk since they were last
         // tracked (size or last-write time differs from the stored stats),
-        // e.g. replaced by an external tool. Refresh the stored stats and
-        // force a re-normalize.
+        // e.g. replaced by an external tool. Force a re-normalize; the
+        // stored stats are refreshed only once it succeeds (see below).
         var modifiedToFix = new List<string>();
         if (options.ReprocessModified && diskPaths is not null)
         {
@@ -234,7 +236,6 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             {
                 _logger.LogInformation("Library scan: {Count} tracked file(s) changed on disk; re-normalizing",
                     modifiedToFix.Count);
-                await RefreshStatsSafeAsync(modifiedToFix, cancellationToken);
             }
         }
 
@@ -247,14 +248,17 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         // use NormalizeFilesAsync with forceReprocess=true so the
         // IsProcessed gate doesn't short-circuit them.
         var newProcessedSummary = await ProcessNewFilesAndWaitAsync(newPaths, cancellationToken);
-        var staleProcessedSummary = await NormalizeFilesAndWaitAsync(staleToFix, "stale", cancellationToken);
-        var modifiedProcessedSummary = await NormalizeFilesAndWaitAsync(modifiedToFix, "modified", cancellationToken);
+        var (staleProcessedSummary, _) = await NormalizeFilesAndWaitAsync(staleToFix, "stale", cancellationToken);
+        var (modifiedProcessedSummary, modifiedSucceeded) = await NormalizeFilesAndWaitAsync(modifiedToFix, "modified", cancellationToken);
 
         // Our own metadata writes change size/mtime; re-sync the stored
-        // stats so the next scan doesn't see them as modified again.
-        if (modifiedToFix.Count > 0)
+        // stats so the next scan doesn't see them as modified again. Only
+        // files the job normalized successfully are re-synced: a file that
+        // couldn't be queued, failed, or sat in a failed or cancelled job
+        // keeps its old stats, so the next scan detects and retries it.
+        if (modifiedSucceeded.Count > 0)
         {
-            await RefreshStatsSafeAsync(modifiedToFix, cancellationToken);
+            await RefreshStatsSafeAsync(modifiedSucceeded, cancellationToken);
         }
 
         var modifiedPart = options.ReprocessModified ? $", {modifiedCount} modified reprocessed" : string.Empty;
@@ -321,12 +325,13 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             _logger.LogWarning(ex, "Library scan: failed to queue {Count} added file(s)", files.Count);
             return " [added: queue failed]";
         }
-        return await WaitForJobAsync(jobId, files.Count, "added", cancellationToken);
+        return (await WaitForJobAsync(jobId, files.Count, "added", cancellationToken)).Summary;
     }
 
-    private async Task<string> NormalizeFilesAndWaitAsync(IReadOnlyList<string> files, string label, CancellationToken cancellationToken)
+    private async Task<(string Summary, IReadOnlyList<string> Succeeded)> NormalizeFilesAndWaitAsync(
+        IReadOnlyList<string> files, string label, CancellationToken cancellationToken)
     {
-        if (files.Count == 0) return string.Empty;
+        if (files.Count == 0) return (string.Empty, Array.Empty<string>());
         Guid jobId;
         try
         {
@@ -335,12 +340,13 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Library scan: failed to queue {Count} {Label} file(s)", files.Count, label);
-            return $" [{label}: queue failed]";
+            return ($" [{label}: queue failed]", Array.Empty<string>());
         }
-        return await WaitForJobAsync(jobId, files.Count, label, cancellationToken);
+        var (summary, job) = await WaitForJobAsync(jobId, files.Count, label, cancellationToken);
+        return (summary, SucceededFiles(files, job));
     }
 
-    private async Task<string> WaitForJobAsync(Guid jobId, int requested, string label, CancellationToken cancellationToken)
+    private async Task<(string Summary, ProcessingJob? Job)> WaitForJobAsync(Guid jobId, int requested, string label, CancellationToken cancellationToken)
     {
         ProcessingJob? job = null;
         while (!cancellationToken.IsCancellationRequested)
@@ -350,9 +356,24 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             if (job.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled) break;
             await Task.Delay(PollInterval, cancellationToken);
         }
-        return job is null
+        var summary = job is null
             ? $" [{label}: queued (job record evicted)]"
             : $" [{label}: {job.ProcessedFiles}/{requested} ok, {job.FailedFiles} failed]";
+        return (summary, job);
+    }
+
+    /// <summary>
+    /// The files a finished job processed successfully. Only a
+    /// <see cref="JobStatus.Completed"/> job is known to have attempted every
+    /// file, recording each failure in <see cref="ProcessingJob.Errors"/>
+    /// under the path it was given. A failed, cancelled, unfinished or
+    /// evicted job doesn't say which files went through, so none count.
+    /// </summary>
+    private static IReadOnlyList<string> SucceededFiles(IReadOnlyList<string> files, ProcessingJob? job)
+    {
+        if (job is not { Status: JobStatus.Completed }) return Array.Empty<string>();
+        var failed = new HashSet<string>(job.Errors.Keys, StringComparer.OrdinalIgnoreCase);
+        return files.Where(f => !failed.Contains(f)).ToList();
     }
 
     private static LibraryScanOptions ParseOptions(string? optionsJson)

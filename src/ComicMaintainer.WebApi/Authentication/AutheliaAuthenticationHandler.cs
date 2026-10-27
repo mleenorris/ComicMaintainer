@@ -31,6 +31,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
 
     // Domain of the placeholder email given to a user the proxy sends no email for.
     private const string FallbackEmailDomain = "authelia.local";
+    private static readonly EmailAddressAttribute EmailValidator = new();
 
     private readonly AutheliaSettings _autheliaSettings;
     private readonly UserManager<ApplicationUser> _userManager;
@@ -298,7 +299,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     /// at <c>authelia.local</c>, so no two usernames get the same email.
     /// </summary>
     private static string FallbackEmail(string username) =>
-        new EmailAddressAttribute().IsValid(username)
+        EmailValidator.IsValid(username)
             && !username.EndsWith("@" + FallbackEmailDomain, StringComparison.OrdinalIgnoreCase)
             ? username
             : $"{username.Replace('@', '=')}@{FallbackEmailDomain}";

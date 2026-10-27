@@ -296,6 +296,7 @@ test('Delete clears the selection on the page at once, even if the job is cancel
     });
     const NOTHING_SELECTED = { info: 'No files selected', deleteEnabled: false, updateEnabled: false, selectAll: false, ticked: 0, highlighted: 0 };
     const grid = page.$('#seriesDetailPanel .series-issues-grid');
+    assert.ok(grid);
 
     h.selectIssue(page, ISSUE_A);
     h.selectIssue(page, ISSUE_B);

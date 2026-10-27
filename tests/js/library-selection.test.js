@@ -409,6 +409,7 @@ test('deleting the selected series clears the selection on the page at once', as
     await page.settle();
     assert.equal(page.$('#selectInfo').textContent, '2 series · 4 files selected');
     const grid = page.$('#fileList .series-grid');
+    assert.ok(grid);
 
     page.click('#deleteSelectedBtn');
     await page.settle();

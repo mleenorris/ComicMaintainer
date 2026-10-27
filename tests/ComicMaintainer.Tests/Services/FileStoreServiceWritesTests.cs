@@ -626,7 +626,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     {
         // The watcher can see a move as a delete plus a create and drop the old row before the
         // move reaches the database, so the moved entry is re-added from the in-memory snapshot.
-        var oldPath = Path.Combine(_library, "Old.cbz");
+        var oldPath = Path.Join(_library, "Old.cbz");
         await SeedAsync(Row(oldPath, renamed: true, normalized: true, configure: e => e.CreatedAt = Jan2020));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();

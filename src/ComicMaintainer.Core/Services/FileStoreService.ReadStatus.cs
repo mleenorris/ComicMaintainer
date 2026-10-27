@@ -204,7 +204,7 @@ public partial class FileStoreService
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-            await SaveUserReadStatusAsync(dbContext, userId, filePath, status =>
+            await UpsertUserReadStatusAsync(dbContext, userId, filePath, status =>
             {
                 status.IsRead = read;
                 status.LastReadDate = read ? DateTime.UtcNow : status.LastReadDate;
@@ -320,7 +320,7 @@ public partial class FileStoreService
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-            await SaveUserReadStatusAsync(dbContext, userId, filePath, status =>
+            await UpsertUserReadStatusAsync(dbContext, userId, filePath, status =>
             {
                 status.CurrentPage = currentPage;
                 status.LastReadDate = DateTime.UtcNow;
@@ -373,7 +373,7 @@ public partial class FileStoreService
     /// together for a comic whose first page shown is its last, so a finished comic stayed
     /// unread or its saved page went back to 1.
     /// </remarks>
-    private async Task SaveUserReadStatusAsync(
+    private async Task UpsertUserReadStatusAsync(
         ComicMaintainerDbContext dbContext,
         string userId,
         string filePath,

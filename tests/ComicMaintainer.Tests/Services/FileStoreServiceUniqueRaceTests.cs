@@ -166,7 +166,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     {
         // The web reader posts progress and mark-read together when the page it shows is the
         // last one, so for a comic opened for the first time both insert the first status row.
-        var path = Path.Combine(_library, "Saga 008.cbz");
+        var path = Path.Join(_library, "Saga 008.cbz");
         var service = CreateService("alice");
         _interceptor.BeforeNextSave = () => InsertStatusRowAsync("alice", path, isRead: true, page: 1);
 
@@ -183,7 +183,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     [Fact]
     public async Task MarkFileReadAsync_ProgressSavedConcurrently_KeepsTheSavedPage()
     {
-        var path = Path.Combine(_library, "Saga 009.cbz");
+        var path = Path.Join(_library, "Saga 009.cbz");
         var service = CreateService("alice");
         _interceptor.BeforeNextSave = () => InsertStatusRowAsync("alice", path, isRead: false, page: 9);
 

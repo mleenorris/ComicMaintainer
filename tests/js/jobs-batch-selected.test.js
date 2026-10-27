@@ -282,8 +282,10 @@ test('Delete deletes the selected issues in a background job', async (t) => {
 test('Clear Processed Status clears the flags of the selected issues', async (t) => {
     let answer = _call => ({ cleared: 1, requested: 2 });
     let issues = [h.seriesIssue(ISSUE_A, { duplicate: true }), h.seriesIssue(ISSUE_B)];
+    let unmarked = 0;
     const page = await h.bootSeriesDetail(t, {
         routes: {
+            'GET /api/files/series': () => ({ series: [], total_series: 0, unmarked_count: unmarked }),
             'GET /api/files/series/s1/issues': () => h.seriesIssues(issues),
             'POST /api/status/clear-selected': call => answer(call)
         }
@@ -320,12 +322,19 @@ test('Clear Processed Status clears the flags of the selected issues', async (t)
 
     // The server reports how many of the requested files had flags to clear.
     // The open series then reloads its issues in place, so their badges show
-    // the cleared flags; the selection stays for processing them again.
+    // the cleared flags; the selection stays for processing them again. The
+    // library behind the series reloads too, so the "… Unmarked" actions and
+    // the library health counts take in the cleared files.
     issues = [h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)];
+    unmarked = 2;
+    const unmarkedItems = () => ['processUnmarkedItem', 'renameUnmarkedItem', 'normalizeUnmarkedItem']
+        .map(id => page.$(`#${id}`).style.display);
     const issueLoads = () => h.requests(page, 'GET', '/api/files/series/s1/issues').length;
     const healthLoads = () => h.requests(page, 'GET', '/api/files/counts').length;
     const loadsBefore = issueLoads();
+    const healthBefore = healthLoads();
     assert.equal(page.$$('.series-issue-duplicate-badge').length, 1);
+    assert.deepEqual(unmarkedItems(), ['none', 'none', 'none']);
     answer = () => ({ cleared: 1, requested: 2 });
     clearSelected();
     await page.settle();
@@ -339,14 +348,11 @@ test('Clear Processed Status clears the flags of the selected issues', async (t)
     assert.ok(page.$('#seriesDetailPanel'), 'the series stays open');
     assert.equal(page.$('#fileList .folder-section'), null);
     assert.equal(h.requests(page, 'GET', '/api/files/folders').length, 0, 'the retired folder view is not loaded');
-    assert.equal(h.requests(page, 'GET', h.LIBRARY_RELOAD).length, 0, 'the series library is not rebuilt');
+    assert.equal(h.requests(page, 'GET', h.LIBRARY_RELOAD).length, 1, 'the library behind the series reloads');
+    assert.deepEqual(unmarkedItems(), ['', '', ''], 'the "… Unmarked" actions are offered for the cleared files');
+    assert.equal(healthLoads(), healthBefore + 1, 'the library health counts reload');
     assert.equal(page.$$('.series-issue-select input:checked').length, 2);
     assert.equal(page.$('#selectInfo').textContent, '2 files selected');
-
-    // The library health counts change too, so they are refreshed shortly after.
-    const healthBefore = healthLoads();
-    await h.tick(t, page, page.run('LIBRARY_HEALTH_REFRESH_DELAY'));
-    assert.equal(healthLoads(), healthBefore + 1);
 
     answer = () => 401;
     page.run('clearSelectedProcessedStatus()');

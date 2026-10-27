@@ -234,14 +234,14 @@
                     `Cleared processed status on ${data.cleared} of ${data.requested} file(s). ` +
                     'Run Process / Rename / Normalize to reapply.',
                     'success');
-                // Reload what is shown so the status badges update: the open
-                // series's issues in place, otherwise the library view.
+                // Reload what is shown so the status badges update: an open
+                // series's issues in place, then the library view (kept
+                // behind an open series), which also updates the
+                // "… Unmarked" actions and the library health.
                 if (libraryViewMode === 'series' && currentSeriesDetailId) {
                     await loadSeriesIssues(currentSeriesDetailId, true);
-                    scheduleLibraryHealthRefresh();
-                } else {
-                    await loadActiveLibraryView(1, true);
                 }
+                await loadActiveLibraryView(1, true);
             } catch (err) {
                 console.error('clearSelectedProcessedStatus failed', err);
                 showMessage('Failed to clear processed status: ' + err.message, 'error');

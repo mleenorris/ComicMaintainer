@@ -350,6 +350,25 @@ public class SettingsControllerCoverageTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateIssueNumberPadding_OutOfRange_ReturnsBadRequestWithoutLoggingAnError(bool legacyPost)
+    {
+        var invalid = new ArgumentException("Padding must be between 0 and 10", "padding");
+        _settingsService.Setup(s => s.UpdateIssueNumberPaddingAsync(1_000_000_000, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(invalid);
+        var controller = CreateController();
+        var request = new SettingsController.IssueNumberPaddingRequest { Padding = 1_000_000_000 };
+
+        var result = legacyPost
+            ? await controller.SetIssueNumberPadding(request)
+            : await controller.UpdateIssueNumberPadding(request);
+
+        Assert.Equal(invalid.Message, BadRequestError(result));
+        VerifyLogged(LogLevel.Error, "Failed to update issue number padding", Times.Never());
+    }
+
+    [Theory]
     [InlineData(1.5, 1572864)]
     [InlineData(2047, 2146435072)]
     public async Task SetLogMaxBytes_LegacyPost_ConvertsMegabytesToBytes(double maxMb, int expectedBytes)

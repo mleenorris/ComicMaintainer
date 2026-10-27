@@ -245,7 +245,7 @@ Configuration can be set via:
 | DuplicateDirectory | DUPLICATE_DIR | /duplicates | Directory for duplicate files |
 | ConfigDirectory | CONFIG_DIR | /Config | Directory for configuration data |
 | FilenameFormat | FILENAME_FORMAT | {series} - Chapter {issue} | Template for file naming |
-| IssueNumberPadding | ISSUE_NUMBER_PADDING | 4 | Number of digits for issue numbers |
+| IssueNumberPadding | ISSUE_NUMBER_PADDING | 4 | Number of digits for issue numbers (0–10) |
 | MaxWorkers | MAX_WORKERS | 4 | Maximum concurrent processing jobs |
 | WatcherEnabled | WATCHER_ENABLED | true | Enable/disable file watcher |
 | WebPort | WEB_PORT | 5000 | Web server port |

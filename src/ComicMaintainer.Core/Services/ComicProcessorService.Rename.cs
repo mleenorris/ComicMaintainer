@@ -304,7 +304,7 @@ public partial class ComicProcessorService
         }
 
         var integerPart = (int)asFloat;
-        var formatString = $"D{Math.Max(0, padding)}";
+        var formatString = $"D{ComicFileProcessor.ClampIssueNumberPadding(padding)}";
         var integerFormatted = integerPart.ToString(formatString,
             System.Globalization.CultureInfo.InvariantCulture);
 

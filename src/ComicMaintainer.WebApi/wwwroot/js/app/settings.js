@@ -1271,8 +1271,8 @@
                 return;
             }
             
-            if (isNaN(issueNumberPadding) || issueNumberPadding < 0) {
-                showMessage('Issue number padding must be 0 or greater', 'error');
+            if (isNaN(issueNumberPadding) || issueNumberPadding < 0 || issueNumberPadding > 10) {
+                showMessage('Issue number padding must be between 0 and 10', 'error');
                 return;
             }
             

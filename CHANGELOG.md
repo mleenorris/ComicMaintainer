@@ -150,6 +150,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the path checks looked for the text `..` rather than a real parent-folder segment.
 - **A rename whose new name cannot be generated is reported as failed**, instead of as an
   already correctly named file.
+- **Issue-number padding is limited to 0–10 digits.** The settings API accepted any
+  non-negative value (and answered a negative one with 500), and values from
+  `user-settings.json` or the environment were not checked at all: 1,000,000,000 or more made
+  renames fail or was silently ignored, and a negative value named files "S - Chapter D-1".
+  The API now rejects values outside 0–10 with 400, filenames clamp configured values to that
+  range, and startup logs a warning naming the value used instead.
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.

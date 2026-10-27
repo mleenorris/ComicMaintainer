@@ -133,6 +133,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/files/process-batch`, `POST /api/files/tags`), like their sibling endpoints. The
   batch endpoints reject the whole request when any path is outside it, instead of silently
   skipping it.
+- **`POST /api/files/tags` reports files whose tags it could not write.** It answered 200
+  whether or not anything was written, so a missing, non-archive or unreadable file looked
+  updated. It now answers `207 Multi-Status` listing the `failed` files when only some could
+  be updated, and `400` when none could, like the single-file `PUT /api/files/{path}/tags`.
+- **A malformed folder link in `GET /api/files/folders/{path}/files` is rejected** with `400`
+  instead of listing the files at the root of the library.
 - **Removing metadata is confined to the library**, like writing it already was.
 - **Resetting the database cancels the jobs that are running**, which kept working on the data
   being deleted; **Reset Filename Format** restores the default instead of "undefined"; and the

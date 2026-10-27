@@ -207,7 +207,7 @@
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
 
                 const data = await response.json();
@@ -235,7 +235,7 @@
                 // Superseded by a newer reload (see seriesLoadController); the
                 // pending reload below fetches the current selection.
                 if (!isAbortError(error)) {
-                    showMessage('Failed to load series: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to load series: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 if (seriesLoadController === controller) {
@@ -317,7 +317,7 @@
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 const data = await response.json();
 
@@ -363,7 +363,7 @@
                 }
             } catch (error) {
                 if (!isAbortError(error)) {
-                    showMessage('Failed to load files: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to load files: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 if (folderLoadController === controller) {

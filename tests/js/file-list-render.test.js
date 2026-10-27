@@ -478,6 +478,20 @@ test('a folder list that cannot be fetched is reported', async () => {
     assert.deepEqual(messages(page).filter(m => m.type === 'error').map(m => m.text), ['Failed to load files: Failed to fetch']);
 });
 
+test('a folder list failure without a reference is not reported with an earlier request\'s', async () => {
+    // The library counts fail with a reference while the library opens, then
+    // the folder list fails on a proxy's error page.
+    const page = await bootFilesView({
+        routes: {
+            'GET /api/files/counts': respond(500, { error: 'boom' }, { 'X-Correlation-Id': 'corr-counts' }),
+            'GET /api/files/folders': respond(502, 'Bad Gateway')
+        }
+    });
+
+    assert.equal(callsTo(page, '/api/files/counts').length, 1);
+    assert.deepEqual(messages(page).filter(m => m.type === 'error').map(m => m.text), ['Failed to load files: HTTP error! status: 502']);
+});
+
 test('an expired session while listing folders goes to the login page', async () => {
     const page = await bootFilesView({ routes: { 'GET /api/files/folders': 401 } });
 

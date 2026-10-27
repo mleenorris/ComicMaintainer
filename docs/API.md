@@ -236,11 +236,11 @@ file does not exist or is not a comic archive.
 
 Write the same metadata to one or more files. Requires library write permission.
 
-`files` lists plain paths (not base64url-encoded) and must name at least one file;
-empty entries are ignored. `metadata` takes the fields of the `GET` response and
-replaces each file's `ComicInfo.xml` as `PUT` does. Every field it leaves out,
-including `issue`, is removed from every file, and leaving out `metadata` altogether
-clears all their tags. Use `PUT` for per-file fields such as `issue`.
+`files` lists plain paths (not base64url-encoded); empty entries are ignored.
+`metadata` takes the fields of the `GET` response and replaces each file's
+`ComicInfo.xml` as `PUT` does. Every field it leaves out, including `issue`, is removed
+from every file, and leaving out `metadata` altogether clears all their tags. Use `PUT`
+for per-file fields such as `issue`.
 
 **Request Body:**
 ```json
@@ -259,7 +259,7 @@ clears all their tags. Use `PUT` for per-file fields such as `issue`.
 Returns `200` with an empty body. A file that cannot be written, for example because
 it does not exist, is skipped without being reported, so check the result with `GET`.
 
-A request whose `files` is missing or empty is rejected with `400`
+A request whose `files` is missing or an empty list is rejected with `400`
 (`No files provided`). A request naming any file outside the watched directory is
 rejected with `400` (`One or more file paths are outside the allowed directory`)
 before any file is updated.

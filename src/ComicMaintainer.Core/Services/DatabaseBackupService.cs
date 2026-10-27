@@ -439,7 +439,7 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         var full = Path.GetFullPath(Path.Combine(dir, name));
         var dirWithSeparator = dir.EndsWith(Path.DirectorySeparatorChar) ? dir : dir + Path.DirectorySeparatorChar;
         if (!full.StartsWith(dirWithSeparator, StringComparison.Ordinal)
-            || !string.Equals(Path.GetDirectoryName(full), dir.TrimEnd(Path.DirectorySeparatorChar), StringComparison.Ordinal))
+            || !string.Equals(Path.GetDirectoryName(full), Path.TrimEndingDirectorySeparator(dir), StringComparison.Ordinal))
         {
             throw new ArgumentException("Invalid backup name.", nameof(name));
         }

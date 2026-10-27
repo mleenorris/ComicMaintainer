@@ -175,6 +175,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   job started; `POST /api/scheduled-jobs/{key}/run` answers `queued: false`.
 - **Database backups and restores work when the connection string is a `file:` URI**; such
   databases were mistaken for in-memory ones and never backed up.
+- **Backups can be downloaded, deleted and restored when the backup directory is the file system
+  root** (`AppSettings__DatabaseBackupDirectory=/`). They were created and listed, but every
+  action on one failed with 500 because its name was rejected as invalid.
 - **An error that happens soon after reconnecting is reported**; an error while offline used
   up the reporting window.
 - **The Files view** shows its empty states instead of "Loading files..." forever, shows the

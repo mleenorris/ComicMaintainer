@@ -307,6 +307,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an empty attachment, so a bad conversion is recorded as a failed delivery rather than mailed
   to the device.
 
+- **`POST /api/files/tags` rejects a request without files, and docs/API.md documents the
+  real tags, settings and watcher endpoints.** The docs described a `GET /api/files/tags?file=`
+  route that does not exist and a `{"file", "tags"}` body that the endpoint answered with `200`
+  while updating nothing. A body without `files` now gets `400` (`No files provided`), and the
+  docs cover `GET`/`PUT /api/files/{encodedFilePath}/tags` (base64url path) and
+  `POST /api/files/tags` with `{"files", "metadata"}`. The settings section drops the `default`
+  field that issue-number-padding never returned and documents the `PUT` routes and their
+  `{"message"}` responses; the watcher section replaces the non-existent `/api/watcher/enabled`
+  routes with `GET /api/watcher`.
+
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
   converter previously marked the first comic page as the cover and wrote the issue number

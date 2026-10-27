@@ -151,6 +151,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A rename whose new name cannot be generated is reported as failed**, instead of as an
   already correctly named file.
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
+- **A saved job whose status is not exactly a status name, such as a number, is restored as
+  Interrupted**, like any other unrecognised status. `1` used to come back after a restart as a
+  running job that was reported as the active job but could be neither cancelled nor deleted, and
+  `42` as an undefined status that could not be deleted either.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.
 - **Series metadata works for local (password) logins.** Refresh, match, search, rename,

@@ -261,7 +261,11 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         var output = new List<ExternalSeriesMetadata>();
         foreach (var item in data.EnumerateArray())
         {
-            if (!item.TryGetProperty("attributes", out var attributes))
+            // TryGetProperty throws on anything but an object, so a malformed
+            // entry is skipped instead of failing the whole page.
+            if (item.ValueKind != JsonValueKind.Object
+                || !item.TryGetProperty("attributes", out var attributes)
+                || attributes.ValueKind != JsonValueKind.Object)
             {
                 continue;
             }
@@ -349,7 +353,8 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
 
         foreach (var rel in rels.EnumerateArray())
         {
-            if (!rel.TryGetProperty("type", out var typeProp)
+            if (rel.ValueKind != JsonValueKind.Object
+                || !rel.TryGetProperty("type", out var typeProp)
                 || typeProp.ValueKind != JsonValueKind.String
                 || !string.Equals(typeProp.GetString(), "cover_art", StringComparison.OrdinalIgnoreCase))
             {

@@ -180,15 +180,20 @@ public sealed class SuwayomiServiceCoverageTests
 
     [Theory]
     [InlineData("""{"data":{}}""")]
+    [InlineData("""{"data":{"chapters":null}}""")]
+    [InlineData("""{"data":{"chapters":[]}}""")]
+    [InlineData("""{"data":{"chapters":"Chapter 1"}}""")]
     [InlineData("""{"data":{"chapters":{}}}""")]
+    [InlineData("""{"data":{"chapters":{"nodes":null}}}""")]
     [InlineData("""{"data":{"chapters":{"nodes":{}}}}""")]
-    public async Task GetChaptersAsync_ResponseWithoutANodesArray_ReturnsNoChapters(string json)
+    public async Task GetChaptersAsync_MalformedChapterList_Throws(string json)
     {
         var handler = Server(chapters: json);
         var service = CreateService(handler);
 
-        Assert.Empty(await service.GetChaptersAsync(5));
+        var exception = await Assert.ThrowsAsync<SuwayomiException>(() => service.GetChaptersAsync(5));
 
+        Assert.Equal(UnexpectedResponse, exception.Message);
         var request = Assert.Single(handler.Requests);
         Assert.Equal(5, Variables(request.Body).GetProperty("id").GetInt32());
     }
@@ -300,6 +305,24 @@ public sealed class SuwayomiServiceCoverageTests
             () => service.DownloadMissingIssuesAsync(null, new[] { 1 }, seriesId: 4));
 
         Assert.Equal("Suwayomi has no series with id 4.", exception.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesFromSnapshotAsync_MalformedChapterList_ThrowsWithoutQueueing()
+    {
+        // Regression: a null "chapters" threw an InvalidOperationException, which the Missing
+        // Issues check does not catch, so one series' bad answer failed the whole check.
+        var handler = Server(
+            library: Library("""[{"id":4,"title":"Solo Leveling","inLibrary":true}]"""),
+            chapters: """{"data":{"chapters":null}}""");
+        var service = CreateService(handler);
+        var snapshot = await service.GetLibrarySeriesAsync();
+
+        var exception = await Assert.ThrowsAsync<SuwayomiException>(
+            () => service.DownloadMissingIssuesFromSnapshotAsync("Solo Leveling", new[] { 1 }, snapshot));
+
+        Assert.Equal(UnexpectedResponse, exception.Message);
+        Assert.DoesNotContain(handler.Requests, r => r.Body.Contains("enqueueChapterDownloads", StringComparison.Ordinal));
     }
 
     [Fact]

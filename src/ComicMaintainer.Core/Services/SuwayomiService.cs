@@ -168,15 +168,16 @@ public class SuwayomiService : ISuwayomiService
             new Dictionary<string, object?> { ["id"] = seriesId },
             cancellationToken);
 
-        var chapters = new List<SuwayomiChapter>();
         if (!document.RootElement.TryGetProperty("data", out var data)
             || !data.TryGetProperty("chapters", out var connection)
+            || connection.ValueKind != JsonValueKind.Object
             || !connection.TryGetProperty("nodes", out var nodes)
             || nodes.ValueKind != JsonValueKind.Array)
         {
-            return chapters;
+            throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
         }
 
+        var chapters = new List<SuwayomiChapter>();
         foreach (var node in nodes.EnumerateArray())
         {
             var id = GetInt32OrNull(node, "id");

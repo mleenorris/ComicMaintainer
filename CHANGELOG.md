@@ -181,6 +181,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **Changing the filter on a phone keeps the open series on screen.** On screens up to 768 px
+  wide, every filter change still switched to the Files view, which no longer exists, so
+  screen readers announced "Files view selected." each time. On a series page, choosing a
+  filter or tapping **Clear filter** also closed the series, put the library list in its place
+  while the address still pointed at the series, and saved the library view mode again. Phones
+  now behave like larger screens: the series stays open, its issues are reloaded with the new
+  filter, and nothing is announced.
 - **Offline use survives the browser restarting the service worker.** A restarted worker used
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or

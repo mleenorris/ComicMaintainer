@@ -979,6 +979,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }, cts.Token));
 
         Assert.Equal(JobStatus.Cancelled, job.Status);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.False(_logger.Has(LogLevel.Error, "RenameFileAsync: Error renaming file: {FilePath}"));
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.True(File.Exists(path));
         Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
         _fileStore.Verify(f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);

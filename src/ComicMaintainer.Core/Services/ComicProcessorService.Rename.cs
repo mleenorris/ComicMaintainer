@@ -188,6 +188,11 @@ public partial class ComicProcessorService
                 return false;
             }
         }
+        // A cancelled job didn't fail this file: leave it and its stored state as they are.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "RenameFileAsync: Error renaming file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));

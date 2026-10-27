@@ -66,6 +66,9 @@ function formValues(page) {
         emailFromAddress: value('emailFromAddress'),
         emailFromName: value('emailFromName'),
         emailMaxAttachmentMb: value('emailMaxAttachmentMb'),
+        emailMaxSendsPerHour: value('emailMaxSendsPerHour'),
+        emailMaxSendsPerDay: value('emailMaxSendsPerDay'),
+        emailMinSecondsBetweenSends: value('emailMinSecondsBetweenSends'),
         errorReporting: checked('errorReportingEnabledCheckbox'),
         errorReportingDestination: text('errorReportingDestination'),
         errorReportingToken: value('errorReportingToken'),
@@ -140,6 +143,9 @@ test('the settings page fills every group from GET /api/settings', async () => {
         emailFromAddress: 'comics@example.com',
         emailFromName: 'Comic Maintainer',
         emailMaxAttachmentMb: '30',
+        emailMaxSendsPerHour: '20',
+        emailMaxSendsPerDay: '200',
+        emailMinSecondsBetweenSends: '30',
         errorReporting: true,
         errorReportingDestination: 'mleenorris/ComicMaintainer',
         errorReportingToken: '',
@@ -227,6 +233,9 @@ test('unset optional settings fall back to defaults and first-time hints', async
             email_from_address: null,
             email_from_name: null,
             email_max_attachment_mb: null,
+            email_max_sends_per_hour: null,
+            email_max_sends_per_day: undefined,
+            email_min_seconds_between_sends: null,
             error_reporting_enabled: false,
             error_reporting_github_owner: '',
             error_reporting_github_repo: 'ComicMaintainer',
@@ -265,6 +274,10 @@ test('unset optional settings fall back to defaults and first-time hints', async
     assert.equal(values.emailFromAddress, '');
     assert.equal(values.emailFromName, '');
     assert.equal(values.emailMaxAttachmentMb, '');
+    // An unset email rate limit shows as 0 (no limit).
+    assert.equal(values.emailMaxSendsPerHour, '0');
+    assert.equal(values.emailMaxSendsPerDay, '0');
+    assert.equal(values.emailMinSecondsBetweenSends, '0');
     assert.equal(values.errorReporting, false);
     assert.equal(values.errorReportingDestination, 'the ComicMaintainer project repository',
         'an incomplete owner/repo pair is not shown');

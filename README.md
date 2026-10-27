@@ -288,6 +288,9 @@ For a complete, ready-to-use API collection with all endpoints, see:
 - `POST /api/email/send` - Queue specific files for delivery
 - `POST /api/email/send-series` - Queue every issue of a series
 - `GET|PUT /api/email/subscriptions` - Manage automatic per-series delivery
+- `GET /api/email/deliveries` - Page through the delivery history (`limit`, `offset`)
+- `POST /api/email/deliveries/{id}/cancel` / `POST /api/email/deliveries/cancel-pending` - Cancel deliveries that have not been sent yet
+- `PUT /api/settings/email-rate-limit` - Limit how many comic emails are sent per hour or day, and how far apart
 
 See [Email to E-Reader](docs/EMAIL_DELIVERY.md) for the full endpoint list and configuration.
 

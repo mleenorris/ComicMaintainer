@@ -358,8 +358,13 @@
             const diffMs = now - date;
             const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
             
-            // Show relative time for recent files
-            if (diffDays === 0) {
+            // Show relative time for recent files. A time in the future is
+            // never "N days ago": up to a minute ahead (the server's clock a
+            // little ahead of the browser's) is "Just now", and further ahead
+            // it is shown as a date.
+            if (diffMs < 0) {
+                if (diffMs >= -60 * 1000) return 'Just now';
+            } else if (diffDays === 0) {
                 const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
                 if (diffHours === 0) {
                     const diffMinutes = Math.floor(diffMs / (1000 * 60));
@@ -373,7 +378,7 @@
                 return `${diffDays} days ago`;
             }
             
-            // Show date for older files
+            // Show date for older (or future) files
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');
@@ -807,6 +812,27 @@
                 selectAllCheckbox.checked = allSelected;
                 selectAllCheckbox.indeterminate = someSelected && !allSelected;
             }
+        }
+
+        // Empty the whole selection (files and series) and show it at once:
+        // untick the rendered selection boxes, drop the selected highlights
+        // and reset the selection bar, so its batch actions are disabled. For
+        // code that clears the selection outside a re-render, which may come
+        // late or never (a delete job cancelled before it removes a file, or
+        // the event stream being down). Updates in place, keeping the scroll
+        // position.
+        function clearSelection() {
+            selectedFiles.clear();
+            resetSeriesSelectionState();
+            document.querySelectorAll('#fileList input[type="checkbox"]').forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            document.querySelectorAll('#fileList .series-issue-card--selected').forEach(card => {
+                card.classList.remove('series-issue-card--selected');
+            });
+            updateSeriesSelectionUI();
+            updateSelectInfo();
+            updateSelectAllCheckbox();
         }
 
         async function toggleDirectory(dir) {

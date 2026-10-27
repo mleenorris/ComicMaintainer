@@ -438,6 +438,12 @@
                 if (emailFromAddress) emailFromAddress.value = settingsData.email_from_address || '';
                 if (emailFromName) emailFromName.value = settingsData.email_from_name || '';
                 if (emailMaxAttachmentMb) emailMaxAttachmentMb.value = settingsData.email_max_attachment_mb || '';
+                const emailMaxSendsPerHour = document.getElementById('emailMaxSendsPerHour');
+                const emailMaxSendsPerDay = document.getElementById('emailMaxSendsPerDay');
+                const emailMinSecondsBetweenSends = document.getElementById('emailMinSecondsBetweenSends');
+                if (emailMaxSendsPerHour) emailMaxSendsPerHour.value = settingsData.email_max_sends_per_hour ?? 0;
+                if (emailMaxSendsPerDay) emailMaxSendsPerDay.value = settingsData.email_max_sends_per_day ?? 0;
+                if (emailMinSecondsBetweenSends) emailMinSecondsBetweenSends.value = settingsData.email_min_seconds_between_sends ?? 0;
                 loadEmailStatus();
 
                 const errorReportingEnabled = document.getElementById('errorReportingEnabledCheckbox');
@@ -847,7 +853,7 @@
                     return;
                 }
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 lastDiagnostics = await response.json();
                 renderDiagnostics(lastDiagnostics);
@@ -856,7 +862,7 @@
                 // Rendered inline rather than as a toast: the panel is the only
                 // thing on screen the user is looking at. It still carries the
                 // correlation reference so a failed snapshot is itself traceable.
-                renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, true)}</p>`);
+                renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, error)}</p>`);
             }
         }
 
@@ -1235,6 +1241,17 @@
             }
         }
 
+        /**
+         * A whole number from an email rate-limit input. Blank means 0 (no
+         * limit); anything that is not a whole number comes back as NaN.
+         */
+        function parseEmailRateLimitInput(id) {
+            const value = (document.getElementById(id)?.value ?? '').trim();
+            if (!value) return 0;
+            const number = Number(value);
+            return Number.isInteger(number) ? number : NaN;
+        }
+
         async function saveFilenameFormat() {
             if (!settingsLoaded || !userCapabilities.canAdminister) return;
             const format = document.getElementById('filenameFormat').value.trim();
@@ -1264,6 +1281,15 @@
             const emailFromName = document.getElementById('emailFromName').value.trim();
             const emailMaxAttachmentValue = document.getElementById('emailMaxAttachmentMb').value.trim();
             const emailMaxAttachmentMb = emailMaxAttachmentValue ? parseFloat(emailMaxAttachmentValue) : null;
+            // The rate limit is only saved when its controls are on the page.
+            const emailRateLimitShown = !!document.getElementById('emailMaxSendsPerHour');
+            const emailRateLimit = emailRateLimitShown
+                ? {
+                    maxSendsPerHour: parseEmailRateLimitInput('emailMaxSendsPerHour'),
+                    maxSendsPerDay: parseEmailRateLimitInput('emailMaxSendsPerDay'),
+                    minSecondsBetweenSends: parseEmailRateLimitInput('emailMinSecondsBetweenSends')
+                }
+                : null;
             
             if (!format) {
                 showMessage('Filename format cannot be empty', 'error');
@@ -1313,6 +1339,20 @@
             if (emailMaxAttachmentValue && (isNaN(emailMaxAttachmentMb) || emailMaxAttachmentMb <= 0)) {
                 showMessage('Max email attachment size must be a positive number', 'error');
                 return;
+            }
+
+            if (emailRateLimit) {
+                const limits = [
+                    [emailRateLimit.maxSendsPerHour, 'Max emails per hour', 10000],
+                    [emailRateLimit.maxSendsPerDay, 'Max emails per day', 100000],
+                    [emailRateLimit.minSecondsBetweenSends, 'Minimum seconds between emails', 86400]
+                ];
+                for (const [value, label, max] of limits) {
+                    if (!(value >= 0 && value <= max)) {
+                        showMessage(`${label} must be a whole number from 0 to ${max}`, 'error');
+                        return;
+                    }
+                }
             }
             
             try {
@@ -1490,6 +1530,29 @@
                 }
                 emailStatusCache = null;
 
+                if (emailRateLimit) {
+                    const rateLimitResponse = await fetch(apiUrl('/api/settings/email-rate-limit'), {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...getAuthHeaders()
+                        },
+                        body: JSON.stringify(emailRateLimit)
+                    });
+                    if (handleAuthError(rateLimitResponse)) return;
+                    if (!rateLimitResponse.ok) {
+                        let errorMsg = `HTTP error! status: ${rateLimitResponse.status}`;
+                        try {
+                            const errBody = await rateLimitResponse.json();
+                            if (errBody && (errBody.error || errBody.message)) {
+                                errorMsg = errBody.error || errBody.message;
+                            }
+                        } catch (e) { /* ignore parse errors */ }
+                        showMessage('Failed to save email rate limit: ' + errorMsg, 'error');
+                        return;
+                    }
+                }
+
                 const suwayomiEnabledEl = document.getElementById('enableSuwayomiCheckbox');
                 if (suwayomiEnabledEl) {
                     const suwayomiPasswordInput = document.getElementById('suwayomiPassword').value;
@@ -1660,7 +1723,7 @@
             });
         }
 
-        /** Fetch a /api/backups endpoint; throws an Error carrying `status` on failure. */
+        /** Fetch a /api/backups endpoint; throws an Error carrying `status` (and the response's `correlationId`) on failure. */
         async function fetchBackupsApi(path, options = {}) {
             const response = await fetch(apiUrl(path), {
                 credentials: 'include',
@@ -1679,9 +1742,7 @@
                     const body = await response.json();
                     if (body && (body.error || body.message)) message = body.error || body.message;
                 } catch (_) { /* non-JSON error body */ }
-                const error = new Error(message);
-                error.status = response.status;
-                throw error;
+                throw apiResponseError(response, message);
             }
             return response;
         }
@@ -1765,7 +1826,7 @@
                 showMessage(`Backup ${backup.name} created.`, 'success');
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to create backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to create backup: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 if (button) button.disabled = false;
@@ -1791,7 +1852,7 @@
                 setTimeout(() => URL.revokeObjectURL(url), 60000);
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to download backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to download backup: ' + error.message, 'error', { reference: error });
                 }
             }
         }
@@ -1803,7 +1864,7 @@
                 showMessage(`Backup ${name} deleted.`, 'success');
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to delete backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to delete backup: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();
@@ -1831,7 +1892,7 @@
                 reportRestoreStaged(await response.json());
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to restore backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to restore backup: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();
@@ -1865,7 +1926,7 @@
                 reportRestoreStaged(await response.json());
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to restore from file: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to restore from file: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();
@@ -1878,7 +1939,7 @@
                 showMessage('Pending restore cancelled. The current database will be kept.', 'success');
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to cancel the pending restore: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to cancel the pending restore: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();

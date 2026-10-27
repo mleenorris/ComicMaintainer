@@ -1096,6 +1096,75 @@ public class SettingsControllerCoverageTests
             null, 587, null, null, false, false, null, null, 25, It.IsAny<CancellationToken>()), Times.Once());
     }
 
+    // ---------------------------------------------------------------- email rate limit
+
+    [Fact]
+    public void GetAllSettings_ReturnsTheEmailRateLimit()
+    {
+        _settings.EmailMaxSendsPerHour = 20;
+        _settings.EmailMaxSendsPerDay = 200;
+        _settings.EmailMinSecondsBetweenSends = 30;
+
+        var json = OkJson(CreateController().GetAllSettings());
+
+        Assert.Equal(20, json.GetProperty("email_max_sends_per_hour").GetInt32());
+        Assert.Equal(200, json.GetProperty("email_max_sends_per_day").GetInt32());
+        Assert.Equal(30, json.GetProperty("email_min_seconds_between_sends").GetInt32());
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettings_PassesEveryFieldToSettingsService()
+    {
+        var request = new SettingsController.EmailRateLimitSettingsRequest
+        {
+            MaxSendsPerHour = 20,
+            MaxSendsPerDay = 200,
+            MinSecondsBetweenSends = 30,
+        };
+
+        var result = await CreateController().UpdateEmailRateLimitSettings(request);
+
+        Assert.Equal("Email rate limit updated successfully", OkJson(result).GetProperty("message").GetString());
+        _settingsService.Verify(s => s.UpdateEmailRateLimitSettingsAsync(20, 200, 30, It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettings_NullBody_ReturnsBadRequest()
+    {
+        var result = await CreateController().UpdateEmailRateLimitSettings(null!);
+
+        Assert.Equal("Request body is required", BadRequestError(result));
+        _settingsService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettings_ValidationFailure_ReturnsBadRequestWithServiceMessage()
+    {
+        _settingsService.Setup(s => s.UpdateEmailRateLimitSettingsAsync(
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("Maximum emails per hour must be between 0 and 10000"));
+
+        var result = await CreateController().UpdateEmailRateLimitSettings(
+            new SettingsController.EmailRateLimitSettingsRequest { MaxSendsPerHour = -1 });
+
+        Assert.Equal("Maximum emails per hour must be between 0 and 10000", BadRequestError(result));
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettings_UnexpectedFailure_Returns500()
+    {
+        var failure = new IOException("disk full");
+        _settingsService.Setup(s => s.UpdateEmailRateLimitSettingsAsync(
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        var result = await CreateController().UpdateEmailRateLimitSettings(
+            new SettingsController.EmailRateLimitSettingsRequest());
+
+        Assert.Equal("Failed to update email rate limit", ServerErrorJson(result).GetProperty("error").GetString());
+        VerifyLogged(LogLevel.Error, "Failed to update email rate limit", Times.Once(), failure);
+    }
+
     [Fact]
     public async Task UpdateSuwayomiSettings_PassesEveryFieldToSettingsService()
     {

@@ -31,6 +31,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or that cleared the key by sending the settings back without it, must be updated.
 
 ### Added
+- **Pending email deliveries can be cancelled.** Email Delivery History gives every pending
+  delivery a **Cancel** button and adds **Cancel All Pending**, which covers every page. A
+  delivery still in the queue is cancelled at once; one being prepared (converted to EPUB/AZW3
+  or waiting for the rate limit) is stopped and its temporary file removed; one already being
+  handed to the mail server is reported as such and finishes normally. Cancelled deliveries get
+  the new `cancelled` status and do not count as delivered, so they can be sent again. API:
+  `POST /api/email/deliveries/{id}/cancel` and `POST /api/email/deliveries/cancel-pending`.
+  This is also the way to clear deliveries left `pending` by a restart, which are not resumed.
+- **Email Delivery History is paginated.** It used to show only the 50 most recent deliveries;
+  it now pages through the whole history, 50 at a time, and shows the total.
+  `GET /api/email/deliveries` accepts `offset` alongside `limit` and returns `total`, `offset`,
+  `limit`, `pending_count` and `rate_limited_until` next to `deliveries`.
+- **Email rate limiting.** **Settings → Email Delivery** can cap comic emails per rolling hour
+  (`EMAIL_MAX_SENDS_PER_HOUR`) and per rolling day (`EMAIL_MAX_SENDS_PER_DAY`), and enforce a
+  minimum gap between them (`EMAIL_MIN_SECONDS_BETWEEN_SENDS`); `0`, the default, disables each
+  limit. Deliveries over the limit stay pending, in order, and go out as it allows, and the
+  history shows when the limit is holding them back. Only emails actually sent count. API:
+  `PUT /api/settings/email-rate-limit`. See
+  [Rate limiting](docs/EMAIL_DELIVERY.md#rate-limiting).
 - **`GET /api/files/folders/files`** lists the files directly in the library root, which the
   per-folder route cannot address (its folder segment would be empty). The Files view uses it
   to show those files.
@@ -124,6 +143,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **A blank `JWT_SECRET` no longer prevents startup when `JwtSettings:Secret` is
+  configured.** Startup took an empty variable (`docker run -e JWT_SECRET=`, `JWT_SECRET=` in
+  an env file, or `-e JWT_SECRET="$(cat jwt_secret.txt)"` with a missing file) for the secret
+  and exited with
+  "JWT_SECRET must be configured in appsettings.json or environment variable", even when
+  `JwtSettings:Secret` was set. A blank `JWT_SECRET` now counts as unset both where tokens are
+  signed and where they are validated, so `JwtSettings:Secret` is used. If that is missing or
+  blank too, or holds only the placeholder shipped in `appsettings.json` (which is public, so
+  anyone could sign tokens with it), the app still refuses to start, and the error now says
+  that `JWT_SECRET` is blank.
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
   check for administration read the Authelia settings without that variable, so when the admin
   groups were set only there (the documented way) every signed-in user who was not ReadOnly,
@@ -174,6 +203,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.
+- **Deleting selected files clears the selection on the page at once.** The selection bar kept
+  saying "N files selected" with its batch actions enabled, and the boxes stayed ticked, until a
+  live update redrew the library — never, if the job was cancelled before it deleted a file or
+  the event stream was down — and those actions then failed with "No files selected".
 - **Series metadata works for local (password) logins.** Refresh, match, search, rename,
   aliases, preferred language, apply match and removing a match sent no session token and
   failed with 401 unless signed in through Authelia.
@@ -202,10 +235,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **The Library's List/Grid/Compact toggle highlights the current layout when the Library is
+  opened from another page.** The app starts on the Overview and the buttons were only updated
+  while the Library was shown, so none (or a stale one) was highlighted until a layout was
+  picked.
+- **Library covers that failed to load are fetched again when they come back into view**, for
+  example after a server restart or a dropped connection. A failed cover is watched again after
+  a pause that doubles with each failure (2 to 32 seconds, five times at most); before, it stayed
+  blank until the list was re-rendered.
+- **A modified time ahead of the browser's clock no longer reads "-1 days ago"** in the
+  duplicate review and the Files view. Up to a minute ahead reads "Just now"; further ahead
+  shows the date.
 - **Offline use survives the browser restarting the service worker.** A restarted worker used
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or
   script requested offline answered with nothing instead of a network error.
+- **Background cache updates in the service worker are no longer cut off.** The worker stores
+  the scripts, stylesheets, icons, covers and pages it fetches, refreshes cached scripts and
+  stylesheets, and replaces or evicts a cached cover or page once the server has answered. All of
+  that ran after the page had its response, when the browser may already stop the worker, so a
+  refreshed file could stay stale, a cover or page the session may no longer read could stay
+  cached, and a cache could grow past its size limit. The worker now stays running until that
+  work is done.
 - **The cover-write and email queues can be stopped and started again.** A restart left them
   unable to accept work and could cancel the new run; nothing in the app restarts them today.
   A new run also waits for every earlier run still draining, so deliveries and archive
@@ -327,6 +378,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and every declared resource present and non-empty), and email delivery additionally rejects
   an empty attachment, so a bad conversion is recorded as a failed delivery rather than mailed
   to the device.
+- **Error messages no longer show another request's support reference.** The `(ref: …)` added
+  to an error was the correlation id of whichever API call had last failed with one in the
+  previous 15 seconds, so a request that never reached the server (offline, network error) or
+  a proxy error page without an id showed an earlier, unrelated request's reference and sent
+  support to the wrong log entries. An error now shows the id of its own request, or none.
+
+- **The ⋮ action menu stays on screen in very narrow windows, and closes when you leave the
+  page.** In a window 200 CSS px wide or less (for example at 400 % zoom) the menu was placed
+  past the left edge of the screen, cutting off the start of every item; it now stays at least
+  10 px inside both edges of the window, narrowing (and wrapping long labels) when the window
+  is too narrow for it. An open menu also stayed over the next page — still acting on the
+  previous page's issue — when the page changed without a click (browser Back/Forward, the
+  mouse back button, swipe-back, or the `g h` / `g l` / `g s` / `g j` shortcuts); it now
+  closes whenever the page changes.
+
+- **Sign-in and first-run setup messages stay up for their full time, and signing in redirects
+  once.** Each message on the login and setup pages started a hide timer that was never
+  cancelled, so an error shown again (such as a second failed sign-in three seconds after the
+  first) vanished after about two seconds instead of five. After a successful sign-in the Login
+  button was enabled again while "Redirecting..." was shown, so a second click sent another
+  login request; it now stays disabled until the app opens. When setup was still required but a
+  session already existed (an Authelia session or a stored token), the login page redirected to
+  both the setup page and the app, and network timing decided where the user ended up. It now
+  sends the user to setup, and checks for an existing session only when setup is not required.
 
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
@@ -2897,6 +2972,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.354] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.355] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.356] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.357] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.358] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.359] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.360] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.361] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.362] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.363] - 2026-10-27
 
 ### Changed
 - Automatic version bump on merge to master

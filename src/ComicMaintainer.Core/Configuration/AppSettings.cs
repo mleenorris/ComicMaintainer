@@ -294,6 +294,28 @@ public class AppSettings
     /// </summary>
     public int EmailMaxAttachmentMegabytes { get; set; } = 25;
 
+    /// <summary>
+    /// Most comic emails sent in any rolling 60-minute window. Deliveries over
+    /// the limit stay pending until a slot frees up. 0 (the default) disables
+    /// the limit. A condensed book counts as one email; test emails are not
+    /// limited.
+    /// </summary>
+    public int EmailMaxSendsPerHour { get; set; }
+
+    /// <summary>
+    /// Most comic emails sent in any rolling 24-hour window. Deliveries over
+    /// the limit stay pending until a slot frees up. 0 (the default) disables
+    /// the limit.
+    /// </summary>
+    public int EmailMaxSendsPerDay { get; set; }
+
+    /// <summary>
+    /// Minimum number of seconds between two comic emails, so a large batch is
+    /// spread out instead of arriving at the mail server all at once. 0 (the
+    /// default) sends back to back.
+    /// </summary>
+    public int EmailMinSecondsBetweenSends { get; set; }
+
     // ---------------------------------------------------------------------
     // Automated error reporting (field errors -> GitHub issues)
     // ---------------------------------------------------------------------

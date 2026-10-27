@@ -434,6 +434,12 @@
                 if (emailFromAddress) emailFromAddress.value = settingsData.email_from_address || '';
                 if (emailFromName) emailFromName.value = settingsData.email_from_name || '';
                 if (emailMaxAttachmentMb) emailMaxAttachmentMb.value = settingsData.email_max_attachment_mb || '';
+                const emailMaxSendsPerHour = document.getElementById('emailMaxSendsPerHour');
+                const emailMaxSendsPerDay = document.getElementById('emailMaxSendsPerDay');
+                const emailMinSecondsBetweenSends = document.getElementById('emailMinSecondsBetweenSends');
+                if (emailMaxSendsPerHour) emailMaxSendsPerHour.value = settingsData.email_max_sends_per_hour ?? 0;
+                if (emailMaxSendsPerDay) emailMaxSendsPerDay.value = settingsData.email_max_sends_per_day ?? 0;
+                if (emailMinSecondsBetweenSends) emailMinSecondsBetweenSends.value = settingsData.email_min_seconds_between_sends ?? 0;
                 loadEmailStatus();
 
                 const errorReportingEnabled = document.getElementById('errorReportingEnabledCheckbox');
@@ -844,7 +850,7 @@
                     return;
                 }
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 lastDiagnostics = await response.json();
                 renderDiagnostics(lastDiagnostics);
@@ -853,7 +859,7 @@
                 // Rendered inline rather than as a toast: the panel is the only
                 // thing on screen the user is looking at. It still carries the
                 // correlation reference so a failed snapshot is itself traceable.
-                renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, true)}</p>`);
+                renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, error)}</p>`);
             }
         }
 
@@ -1270,6 +1276,17 @@
             errorReportingDedupeHours: 720
         });
 
+        /**
+         * A whole number from an email rate-limit input. Blank means 0 (no
+         * limit); anything that is not a whole number comes back as NaN.
+         */
+        function parseEmailRateLimitInput(id) {
+            const value = (document.getElementById(id)?.value ?? '').trim();
+            if (!value) return 0;
+            const number = Number(value);
+            return Number.isInteger(number) ? number : NaN;
+        }
+
         async function saveFilenameFormat() {
             if (!settingsLoaded || !userCapabilities.canAdminister) return;
             const format = document.getElementById('filenameFormat').value.trim();
@@ -1304,6 +1321,15 @@
             const errorReportingDedupeHoursValue = parseInt(document.getElementById('errorReportingDedupeHours')?.value, 10);
             // Only an empty or missing field falls back to the default; 0 must reach validation.
             const errorReportingDedupeHours = isNaN(errorReportingDedupeHoursValue) ? 24 : errorReportingDedupeHoursValue;
+            // The rate limit is only saved when its controls are on the page.
+            const emailRateLimitShown = !!document.getElementById('emailMaxSendsPerHour');
+            const emailRateLimit = emailRateLimitShown
+                ? {
+                    maxSendsPerHour: parseEmailRateLimitInput('emailMaxSendsPerHour'),
+                    maxSendsPerDay: parseEmailRateLimitInput('emailMaxSendsPerDay'),
+                    minSecondsBetweenSends: parseEmailRateLimitInput('emailMinSecondsBetweenSends')
+                }
+                : null;
             
             // Check everything the server would reject before sending anything:
             // the groups are saved one by one, so a rejected group leaves the
@@ -1364,6 +1390,19 @@
                 return;
             }
 
+            if (emailRateLimit) {
+                const limits = [
+                    [emailRateLimit.maxSendsPerHour, 'Max emails per hour', 10000],
+                    [emailRateLimit.maxSendsPerDay, 'Max emails per day', 100000],
+                    [emailRateLimit.minSecondsBetweenSends, 'Minimum seconds between emails', 86400]
+                ];
+                for (const [value, label, max] of limits) {
+                    if (!(value >= 0 && value <= max)) {
+                        showMessage(`${label} must be a whole number from 0 to ${max}`, 'error');
+                        return;
+                    }
+                }
+            }
             if (emailMaxAttachmentMb > SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB) {
                 showMessage(`Max email attachment size must be ${SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB} MB or less`, 'error');
                 return;
@@ -1440,6 +1479,15 @@
                     }
                 }
             ];
+
+            if (emailRateLimit) {
+                groups.push({
+                    name: 'email rate limit',
+                    method: 'PUT',
+                    path: '/api/settings/email-rate-limit',
+                    body: emailRateLimit
+                });
+            }
 
             const suwayomiEnabledEl = document.getElementById('enableSuwayomiCheckbox');
             if (suwayomiEnabledEl) {
@@ -1595,7 +1643,7 @@
             });
         }
 
-        /** Fetch a /api/backups endpoint; throws an Error carrying `status` on failure. */
+        /** Fetch a /api/backups endpoint; throws an Error carrying `status` (and the response's `correlationId`) on failure. */
         async function fetchBackupsApi(path, options = {}) {
             const response = await fetch(apiUrl(path), {
                 credentials: 'include',
@@ -1614,9 +1662,7 @@
                     const body = await response.json();
                     if (body && (body.error || body.message)) message = body.error || body.message;
                 } catch (_) { /* non-JSON error body */ }
-                const error = new Error(message);
-                error.status = response.status;
-                throw error;
+                throw apiResponseError(response, message);
             }
             return response;
         }
@@ -1700,7 +1746,7 @@
                 showMessage(`Backup ${backup.name} created.`, 'success');
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to create backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to create backup: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 if (button) button.disabled = false;
@@ -1726,7 +1772,7 @@
                 setTimeout(() => URL.revokeObjectURL(url), 60000);
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to download backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to download backup: ' + error.message, 'error', { reference: error });
                 }
             }
         }
@@ -1738,7 +1784,7 @@
                 showMessage(`Backup ${name} deleted.`, 'success');
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to delete backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to delete backup: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();
@@ -1766,7 +1812,7 @@
                 reportRestoreStaged(await response.json());
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to restore backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to restore backup: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();
@@ -1800,7 +1846,7 @@
                 reportRestoreStaged(await response.json());
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to restore from file: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to restore from file: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();
@@ -1813,7 +1859,7 @@
                 showMessage('Pending restore cancelled. The current database will be kept.', 'success');
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to cancel the pending restore: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to cancel the pending restore: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();

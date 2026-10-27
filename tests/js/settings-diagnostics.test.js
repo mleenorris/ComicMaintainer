@@ -261,7 +261,7 @@ test('diagnostics failures are explained in the panel', async () => {
     await page.run('loadDiagnostics()');
     assert.equal(panelText(page), 'Could not load diagnostics: HTTP error! status: 500 (ref: corr-500)');
 
-    page.run('lastApiFailure = null');
+    // Failures without one are shown without a reference, not with that one.
     page.route('GET /api/diagnostics', 502);
     await page.run('loadDiagnostics()');
     assert.equal(panelText(page), 'Could not load diagnostics: HTTP error! status: 502');

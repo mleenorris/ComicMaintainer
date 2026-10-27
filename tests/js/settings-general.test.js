@@ -51,6 +51,8 @@ function formValues(page) {
         suwayomiPassword: value('suwayomiPassword'),
         suwayomiPasswordHint: text('suwayomiPasswordHint'),
         suwayomiClearPassword: checked('suwayomiClearPasswordCheckbox'),
+        suwayomiDownloadsDirectory: value('suwayomiDownloadsDirectory'),
+        suwayomiImportDirectory: value('suwayomiImportDirectory'),
         defaultView: value('defaultLibraryViewSelect'),
         preferredLanguage: value('defaultPreferredLanguageSelect'),
         smtpHost: value('smtpHost'),
@@ -123,6 +125,8 @@ test('the settings page fills every group from GET /api/settings', async () => {
         suwayomiPassword: '',
         suwayomiPasswordHint: 'Leave blank to keep the stored password.',
         suwayomiClearPassword: false,
+        suwayomiDownloadsDirectory: '/suwayomi/downloads/mangas',
+        suwayomiImportDirectory: 'Manga',
         defaultView: 'series',
         preferredLanguage: 'ja',
         smtpHost: 'smtp.example.com',
@@ -205,6 +209,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
             suwayomi_base_url: null,
             suwayomi_username: null,
             suwayomi_password_set: false,
+            suwayomi_downloads_directory: null,
             default_library_view: 'files',
             allow_registration: false,
             default_preferred_language: null,
@@ -245,6 +250,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
     assert.equal(values.suwayomiBaseUrl, '');
     assert.equal(values.suwayomiUsername, '');
     assert.equal(values.suwayomiPasswordHint, 'Enter a password only if your Suwayomi server requires one.');
+    assert.equal(values.suwayomiDownloadsDirectory, '');
     assert.equal(values.defaultView, 'files');
     assert.equal(values.preferredLanguage, '');
     // Image limits that are not numbers leave the inputs untouched (blank).

@@ -1000,7 +1000,8 @@ public class SettingsControllerCoverageTests
                 break;
             case "suwayomi":
                 _settingsService.Setup(s => s.UpdateSuwayomiSettingsAsync(
-                        It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                        It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                        It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                     .ThrowsAsync(failure);
                 break;
             case "error-reporting":
@@ -1104,12 +1105,15 @@ public class SettingsControllerCoverageTests
             BaseUrl = "http://suwayomi.local:4567",
             Username = "reader",
             Password = Secret,
+            DownloadsDirectory = "/suwayomi/downloads/mangas",
+            ImportDirectory = "Manga",
         };
 
         await CreateController().UpdateSuwayomiSettings(request);
 
         _settingsService.Verify(s => s.UpdateSuwayomiSettingsAsync(
-            true, "http://suwayomi.local:4567", "reader", Secret, It.IsAny<CancellationToken>()), Times.Once());
+            true, "http://suwayomi.local:4567", "reader", Secret,
+            "/suwayomi/downloads/mangas", "Manga", It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
@@ -1118,7 +1122,7 @@ public class SettingsControllerCoverageTests
         await CreateController().UpdateSuwayomiSettings(new SettingsController.SuwayomiSettingsRequest());
 
         _settingsService.Verify(s => s.UpdateSuwayomiSettingsAsync(
-            false, null, null, null, It.IsAny<CancellationToken>()), Times.Once());
+            false, null, null, null, null, null, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]

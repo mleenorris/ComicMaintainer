@@ -1113,7 +1113,7 @@
                                 <span>Enable Suwayomi integration</span>
                             </label>
                             <small class="form-hint">
-                                Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own download directory, so mount that directory inside the watched directory for the new files to be picked up.
+                                Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own downloads folder; set that folder under <em>Import downloaded chapters</em> below to have them moved into the library.
                             </small>
                         </div>
                         <div class="form-group">
@@ -1136,6 +1136,22 @@
                         <div class="form-group">
                             <button class="btn" type="button" onclick="testSuwayomiConnection()"><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg> Test Connection</button>
                             <small id="suwayomiStatusHint" class="form-hint">Save your settings before testing.</small>
+                        </div>
+
+                        <h4 class="settings-subheading">Import downloaded chapters</h4>
+                        <div class="form-group">
+                            <label for="suwayomiDownloadsDirectory">Suwayomi downloads folder</label>
+                            <input type="text" id="suwayomiDownloadsDirectory" name="suwayomiDownloadsDirectory" placeholder="/suwayomi/downloads/mangas" autocomplete="off" spellcheck="false">
+                            <small class="form-hint">
+                                The folder Suwayomi saves chapters to, as mounted in this container (e.g. Suwayomi's <code>downloads/mangas</code>). Chapters it saves there as <code>source/series/chapter.cbz</code> are moved into the library as <code>series/chapter.cbz</code> by the <em>Suwayomi Download Import</em> scheduled job (every 15 minutes by default), and the emptied folders are removed. The folder must be outside the watched directory and writable by ComicMaintainer; turn on <em>Save as CBZ archive</em> in Suwayomi's download settings. Works whether or not the integration above is enabled. Leave blank to turn importing off.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="suwayomiImportDirectory">Import into (optional)</label>
+                            <input type="text" id="suwayomiImportDirectory" name="suwayomiImportDirectory" placeholder="Library root" autocomplete="off" spellcheck="false">
+                            <small class="form-hint">
+                                Where new series folders are created, relative to the watched directory (e.g. <code>Manga</code>). Leave blank for the watched directory itself. Chapters of a series the library already has go into its existing folder.
+                            </small>
                         </div>
                     </section>
                     <section class="settings-card settings-card--danger" id="settings-danger" aria-labelledby="settings-danger-title">

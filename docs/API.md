@@ -552,6 +552,28 @@ Queue downloads for the issue numbers a series is missing locally.
 
 Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable, or no matching series is in the Suwayomi library.
 
+### Importing Suwayomi downloads
+
+Suwayomi saves chapters as `<downloads>/<source>/<series>/<chapter>.cbz`. When a downloads folder is configured, the `suwayomi-download-import` scheduled job (enabled by default, every 15 minutes; see the **Scheduled Jobs** page) moves each finished archive into the library as `<series folder>/<chapter>.cbz`, then removes the download folders it emptied. The file watcher then processes the moved files like any other new file. Importing works whether or not the Suwayomi integration above is enabled.
+
+The series folder is, in order: a folder in the import folder named like the Suwayomi series folder (ignoring case, spacing and punctuation); the existing library folder of the one series whose title, canonical title or alias matches; or a new folder named after the Suwayomi series folder in the import folder. A name already taken gets a ` (2)`, ` (3)`, … suffix. Archives written in the last 30 seconds (or the watcher's stability delay, if longer), archives that cannot be opened, and archives directly in the downloads folder are left in place. Chapters saved as loose images are not imported; enable **Save as CBZ archive** in Suwayomi's download settings.
+
+The folders are set with `PUT /api/settings/suwayomi` (administrators only), alongside the server settings, or with the `SUWAYOMI_DOWNLOADS_DIR` and `SUWAYOMI_IMPORT_DIR` environment variables:
+
+```json
+{
+  "enabled": true,
+  "baseUrl": "http://suwayomi:4567",
+  "downloadsDirectory": "/suwayomi/downloads/mangas",
+  "importDirectory": "Manga"
+}
+```
+
+- `downloadsDirectory` - Absolute path to the folder Suwayomi saves chapters to, as mounted in this service. It must exist and must neither contain nor sit inside the watched, duplicates, config or temp directories. ComicMaintainer needs write access to it.
+- `importDirectory` - Library folder that new series folders are created in: relative to the watched directory, or absolute inside it. Empty means the watched directory itself.
+
+Omit either field to keep its stored value; send `""` to clear it (clearing `downloadsDirectory` turns importing off). An invalid folder returns `400` with `{ "error": "..." }`. `GET /api/settings` returns the current values as `suwayomi_downloads_directory` and `suwayomi_import_directory`.
+
 ## Events
 
 ### GET /api/events

@@ -57,7 +57,7 @@
          * attached, so reporting it quotes this request's reference.
          */
         function apiResponseError(response, message) {
-            const error = new Error(message || `HTTP error! status: ${response.status}`);
+            const error = new Error(message ?? `HTTP error! status: ${response.status}`);
             error.status = response.status;
             error.correlationId = apiFailureReference(response);
             return error;

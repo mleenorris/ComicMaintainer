@@ -60,7 +60,7 @@ test('showMessage keeps persistent messages until the caller removes them', t =>
 /** Fetch `path`, throw apiResponseError() for a failure and report what was caught, as the app's callers do. */
 function reportFailure(page, label, path, method = 'GET') {
     return page.run(`fetch(apiUrl('${path}'), { method: '${method}' })
-        .then(response => { throw apiResponseError(response); })
+        .then(response => { if (!response.ok) throw apiResponseError(response); })
         .catch(error => showMessage('${label}: ' + error.message, 'error', { reference: error }))`);
 }
 

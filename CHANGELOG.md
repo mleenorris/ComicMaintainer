@@ -307,6 +307,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an empty attachment, so a bad conversion is recorded as a failed delivery rather than mailed
   to the device.
 
+- **Sign-in and first-run setup messages stay up for their full time, and signing in redirects
+  once.** Each message on the login and setup pages started a hide timer that was never
+  cancelled, so an error shown again (such as a second failed sign-in three seconds after the
+  first) vanished after about two seconds instead of five. After a successful sign-in the Login
+  button was enabled again while "Redirecting..." was shown, so a second click sent another
+  login request; it now stays disabled until the app opens. When setup was still required but a
+  session already existed (an Authelia session or a stored token), the login page redirected to
+  both the setup page and the app, and network timing decided where the user ended up. It now
+  sends the user to setup, and checks for an existing session only when setup is not required.
+
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
   converter previously marked the first comic page as the cover and wrote the issue number

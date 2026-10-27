@@ -459,18 +459,10 @@ public partial class FileStoreService
         }
     }
 
-        catch (DbUpdateException ex)
+    // SQLite extended result codes (SQLITE_CONSTRAINT_UNIQUE / SQLITE_CONSTRAINT_PRIMARYKEY).
     private const int SqliteConstraintUnique = 2067;
     private const int SqliteConstraintPrimaryKey = 1555;
 
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogError(ex, "Error updating file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
     private bool IsSqliteUniqueConstraintViolation(ComicMaintainerDbContext dbContext, DbUpdateException exception)
     {
         // SQLite is the application's configured provider; other providers must not use

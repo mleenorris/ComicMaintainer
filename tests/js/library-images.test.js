@@ -323,6 +323,32 @@ test('a cover loaded before its retry is due is not watched again', async t => {
     assert.equal(coverCalls(page).length, 3);
 });
 
+test('a cover that fails again while its retry is pending keeps that retry\'s pause', async t => {
+    const page = await bootWithCovers(makeSeriesList(1), 503);
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const observer = imageObserver(page);
+    const [cover] = covers(page);
+    await failToLoad(t, page, cover);
+
+    // Another hydration fails before the 2 s retry is due...
+    page.run('hydrateProtectedImages()');
+    await failToLoad(t, page, cover);
+    assert.equal(coverCalls(page).length, 4);
+    assert.equal(observer.targets.has(cover), false);
+
+    // ...which neither adds a retry nor shortens or lengthens the pending one.
+    t.mock.timers.tick(2000 - 250 - 1);
+    assert.equal(observer.targets.has(cover), false);
+    t.mock.timers.tick(1);
+    assert.equal(observer.targets.has(cover), true);
+    // The next pause is the second one (4 s), not the third.
+    await failToLoad(t, page, cover);
+    t.mock.timers.tick(4000 - 1);
+    assert.equal(observer.targets.has(cover), false);
+    t.mock.timers.tick(1);
+    assert.equal(observer.targets.has(cover), true);
+});
+
 test('a cover replaced by a re-render before its retry is due is not watched again', async t => {
     const page = await bootWithCovers(makeSeriesList(1), 503);
     t.mock.timers.enable({ apis: ['setTimeout'] });

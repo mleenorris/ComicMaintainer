@@ -213,6 +213,7 @@ test('a file dated ahead of the browser\'s clock reads Just now for up to a minu
     const ages = {
         'Ahead/a-second.cbz': seconds(now) + 1,
         'Ahead/under-a-minute.cbz': seconds(now) + 59,
+        'Ahead/a-minute.cbz': seconds(now) + 60,
         'Ahead/minutes.cbz': seconds(now) + 2 * 60,
         'Ahead/hours.cbz': seconds(now) + 2 * 3600,
         'Ahead/days.cbz': seconds(now) + 3 * 86400,
@@ -228,7 +229,7 @@ test('a file dated ahead of the browser\'s clock reads Just now for up to a minu
     await expandFolder(page, 'Ahead');
 
     const shown = page.$$('#fileList .file-item').map(row => row.children[4].textContent);
-    assert.deepEqual(shown, ['Just now', 'Just now', '06-15', '06-15', '06-18', '2025-01-02']);
+    assert.deepEqual(shown, ['Just now', 'Just now', 'Just now', '06-15', '06-15', '06-18', '2025-01-02']);
 });
 
 test('long file names are shortened in the middle, keeping the extension', async () => {

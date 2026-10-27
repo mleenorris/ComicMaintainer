@@ -684,18 +684,30 @@
         const PROTECTED_IMAGE_RETRY_DELAY_MS = 2000;   // First pause; doubled after each failure
         const PROTECTED_IMAGE_MAX_RETRIES = 5;          // Pauses of 2, 4, 8, 16 and 32 seconds
         const protectedImageFailures = new WeakMap();   // image element -> failed loads so far
+        const protectedImageRetryTimers = new WeakMap(); // image element -> pending retry timeout id
 
         function retryProtectedImageLater(image) {
             if (!PROTECTED_IMAGE_OBSERVER) return;
+            // A retry is already pending: another failure before it is due
+            // (from another hydration) must not schedule a sooner one.
+            if (protectedImageRetryTimers.has(image)) return;
             const failures = protectedImageFailures.get(image) || 0;
             if (failures >= PROTECTED_IMAGE_MAX_RETRIES) return;
             protectedImageFailures.set(image, failures + 1);
-            setTimeout(() => {
+            protectedImageRetryTimers.set(image, setTimeout(() => {
+                protectedImageRetryTimers.delete(image);
                 // Not for a cover since removed from the page (the list was
                 // re-rendered) or loaded, or loading, by another hydration.
                 if (!image.isConnected || image.dataset.protectedImageLoaded === '1') return;
                 PROTECTED_IMAGE_OBSERVER.observe(image);
-            }, PROTECTED_IMAGE_RETRY_DELAY_MS * 2 ** failures);
+            }, PROTECTED_IMAGE_RETRY_DELAY_MS * 2 ** failures));
+        }
+
+        function cancelProtectedImageRetry(image) {
+            const timer = protectedImageRetryTimers.get(image);
+            if (timer === undefined) return;
+            clearTimeout(timer);
+            protectedImageRetryTimers.delete(image);
         }
 
         async function hydrateOneProtectedImage(image) {
@@ -772,6 +784,8 @@
                 // scrolls back into view after a transient network failure).
                 delete image.dataset.protectedImageLoaded;
                 retryProtectedImageLater(image);
+            } else {
+                cancelProtectedImageRetry(image);
             }
         }
 

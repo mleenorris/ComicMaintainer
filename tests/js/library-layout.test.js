@@ -75,15 +75,18 @@ test('opening the library from the overview marks the current layout', async () 
     ]) {
         // A visit without a route lands on the overview: the library is not shown yet.
         const page = await bootLibrary({ hash: '', series: makeSeriesList(1), localStorage });
-        assert.equal(page.window.location.hash, '#/home');
+        try {
+            assert.equal(page.window.location.hash, '#/home');
 
-        page.click('#navLibraryBtn');
-        await page.settle();
+            page.click('#navLibraryBtn');
+            await page.settle();
 
-        assert.equal(page.$('#seriesLayoutToggle').hidden, false);
-        assert.equal(page.$('#seriesLayoutToolbarMobile').hidden, false);
-        assert.deepEqual(activeLayoutButtons(page), expected, JSON.stringify(localStorage));
-        page.close();
+            assert.equal(page.$('#seriesLayoutToggle').hidden, false);
+            assert.equal(page.$('#seriesLayoutToolbarMobile').hidden, false);
+            assert.deepEqual(activeLayoutButtons(page), expected, JSON.stringify(localStorage));
+        } finally {
+            page.close();
+        }
     }
 });
 

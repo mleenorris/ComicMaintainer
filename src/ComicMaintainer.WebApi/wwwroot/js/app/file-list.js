@@ -363,7 +363,7 @@
             // little ahead of the browser's) is "Just now", and further ahead
             // it is shown as a date.
             if (diffMs < 0) {
-                if (diffMs > -60 * 1000) return 'Just now';
+                if (diffMs >= -60 * 1000) return 'Just now';
             } else if (diffDays === 0) {
                 const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
                 if (diffHours === 0) {

@@ -84,7 +84,9 @@ public class SeriesImagesController : ControllerBase
         // carry (RFC 9110 §15.4.5), so both responses share these headers.
         Response.Headers[HeaderNames.ETag] = etag;
         Response.Headers[HeaderNames.CacheControl] = "private, max-age=300";
-        if (ConditionalRequests.IfNoneMatchSatisfied(Request.Headers[HeaderNames.IfNoneMatch], etag))
+        if (!Request.Headers.ContainsKey(HeaderNames.IfMatch)
+            && !Request.Headers.ContainsKey(HeaderNames.IfUnmodifiedSince)
+            && ConditionalRequests.IfNoneMatchSatisfied(Request.Headers[HeaderNames.IfNoneMatch], etag))
         {
             return StatusCode(StatusCodes.Status304NotModified);
         }

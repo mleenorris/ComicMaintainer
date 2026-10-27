@@ -27,16 +27,8 @@ internal static class CoreServiceCollectionExtensions
         services.Configure<AppSettings>(configuration.GetSection("AppSettings"));
         services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<AppSettings>, AppSettingsEnvironmentPostConfigure>();
 
-        // Configure JWT settings
-        services.Configure<JwtSettings>(options =>
-        {
-            configuration.GetSection("JwtSettings").Bind(options);
-            
-            // Override with environment variable if present
-            var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
-            if (!string.IsNullOrEmpty(jwtSecret))
-                options.Secret = jwtSecret;
-        });
+        // Configure JWT settings (configuration section + JWT_SECRET environment variable)
+        services.Configure<JwtSettings>(options => JwtSettingsBinder.Bind(configuration, options));
 
         // Configure Authelia settings (configuration section + AUTHELIA_* environment variables)
         services.Configure<AutheliaSettings>(options => AutheliaSettingsBinder.Bind(configuration, options));

@@ -65,7 +65,8 @@ chmod -R 755 /watched_dir /duplicates /Config 2>/dev/null || true
 # writable by PUID too. (/Config is prepared above either way: it is the default temp file location.)
 CONFIG_DIR="${CONFIG_DIR:-/Config}"
 if [ "$CONFIG_DIR" != "/Config" ]; then
-    mkdir -p "$CONFIG_DIR"
+    # Best effort: root may be refused (e.g. NFS root_squash); the app then creates it as PUID.
+    mkdir -p "$CONFIG_DIR" || echo "Warning: could not create $CONFIG_DIR as root; leaving it to $USER_NAME"
     chown -R "$PUID:$PGID" "$CONFIG_DIR" 2>/dev/null || true
     chmod -R 755 "$CONFIG_DIR" 2>/dev/null || true
 fi

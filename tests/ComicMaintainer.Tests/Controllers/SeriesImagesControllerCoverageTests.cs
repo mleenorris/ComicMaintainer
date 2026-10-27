@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Models;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Net.Http.Headers;
 using Moq;
@@ -205,9 +206,10 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     [InlineData("*")]
     public async Task Get_MatchingIfNoneMatch_Returns304WithCacheHeaders(string ifNoneMatch)
     {
-        // Regression: If-None-Match was compared to the ETag as an exact string, so a weak tag,
-        // a list of tags or "*" downloaded the whole image again, and the 304 that an exact
-        // match did get lacked the Cache-Control of the 200 (RFC 9110 §13.1.2, §15.4.5).
+        // Regression: If-None-Match was compared to the ETag as an exact string, so a weak tag, a
+        // list of tags or "*" sent without If-Modified-Since got the whole image again, and the 304
+        // an exact match did get kept the API-wide "no-store" instead of the 200's Cache-Control
+        // (RFC 9110 §13.1.2, §15.4.5).
         var path = WriteImage();
         var etag = ExpectedEtag(path);
         _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
@@ -238,6 +240,29 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         Assert.IsType<PhysicalFileResult>(result);
         Assert.Equal(ExpectedEtag(path), controller.Response.Headers[HeaderNames.ETag].ToString());
         Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
+    }
+
+    [Fact]
+    public async Task Get_StaleIfNoneMatchWithIfModifiedSince_ServesTheImage()
+    {
+        // Regression: the file result had no ETag, so ASP.NET Core judged a browser's
+        // revalidation by If-Modified-Since alone and answered a tag that no longer matched
+        // with 304. If-None-Match takes precedence over If-Modified-Since (RFC 9110 §13.1.3).
+        var path = WriteImage();
+        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
+        var controller = CreateController(ifNoneMatch: "\"0-0\"");
+        var http = controller.HttpContext;
+        http.Request.Headers[HeaderNames.IfModifiedSince] = HeaderUtilities.FormatDate(File.GetLastWriteTimeUtc(path));
+        var body = new MemoryStream();
+        http.Response.Body = body;
+
+        var result = Assert.IsType<PhysicalFileResult>(await controller.Get("batman", CancellationToken.None));
+        await new PhysicalFileResultExecutor(NullLoggerFactory.Instance).ExecuteAsync(controller.ControllerContext, result);
+
+        Assert.Equal(StatusCodes.Status200OK, http.Response.StatusCode);
+        Assert.Equal(PngSignature, body.ToArray());
+        Assert.Equal(ExpectedEtag(path), http.Response.Headers[HeaderNames.ETag].ToString());
     }
 
     [Fact]

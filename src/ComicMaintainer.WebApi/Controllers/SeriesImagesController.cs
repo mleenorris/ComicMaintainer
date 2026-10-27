@@ -89,7 +89,15 @@ public class SeriesImagesController : ControllerBase
             return StatusCode(StatusCodes.Status304NotModified);
         }
 
-        return PhysicalFile(path, record.ImageContentType, enableRangeProcessing: false);
+        // Give the file result the ETag as well: without it ASP.NET Core judges a browser's
+        // revalidation by If-Modified-Since alone, so a tag that no longer matches could still
+        // get 304. If-None-Match takes precedence over If-Modified-Since (RFC 9110 §13.1.3).
+        return PhysicalFile(
+            path,
+            record.ImageContentType,
+            lastModified: null,
+            entityTag: new EntityTagHeaderValue(etag),
+            enableRangeProcessing: false);
     }
 
     /// <summary>

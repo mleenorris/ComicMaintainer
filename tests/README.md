@@ -271,7 +271,7 @@ JavaScript with `npm run test:coverage`.
 | Suite | Tests | Lines | Branches |
 |---|---|---|---|
 | .NET (`ComicMaintainer.Core`, `ComicMaintainer.WebApi`) | 4,678 | 99.0% | 97.5% |
-| JavaScript (`wwwroot/**/*.js`) | 1,130 | 99.9% | 98.3% |
+| JavaScript (`wwwroot/**/*.js`) | 1,135 | 99.9% | 98.3% |
 
 The **Unit Tests** CI job collects .NET coverage from `Category!=Integration`
 only (4,610 tests: 98.8% lines, 97.4% branches); the OpenTelemetry wiring in

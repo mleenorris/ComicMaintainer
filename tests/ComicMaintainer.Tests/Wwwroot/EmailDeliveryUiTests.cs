@@ -238,6 +238,50 @@ public class EmailDeliveryUiTests
     }
 
     [Fact]
+    public void IndexHtml_DeliveryHistoryHasPagingAndCancelAll()
+    {
+        var html = Read("index.html");
+
+        Assert.Contains("id=\"emailDeliveryHistoryRateLimit\"", html);
+        Assert.Contains("id=\"emailDeliveryHistoryPagination\"", html);
+        Assert.Contains("id=\"emailDeliveryHistoryPageInfo\"", html);
+        Assert.Matches(
+            new Regex(@"id=""emailDeliveryHistoryPrevBtn""[^>]*onclick=""loadPreviousEmailDeliveryHistoryPage\(\)"""),
+            html);
+        Assert.Matches(
+            new Regex(@"id=""emailDeliveryHistoryNextBtn""[^>]*onclick=""loadNextEmailDeliveryHistoryPage\(\)"""),
+            html);
+        // Cancelling changes the delivery queue, so read-only users must not get the button.
+        Assert.Matches(
+            new Regex(@"id=""emailDeliveryCancelAllBtn""[^>]*data-requires-write[^>]*onclick=""cancelAllPendingEmailDeliveries\(\)"""),
+            html);
+    }
+
+    [Fact]
+    public void MainJs_DeliveryHistoryPagesAndCancelsThroughTheApi()
+    {
+        var js = WwwrootFiles.ReadAppScripts();
+
+        Assert.Contains("/api/email/deliveries?limit=${EMAIL_DELIVERY_HISTORY_PAGE_SIZE}&offset=${offset}", js);
+        Assert.Contains("/api/email/deliveries/${encodeURIComponent(id)}/cancel", js);
+        Assert.Contains("'/api/email/deliveries/cancel-pending'", js);
+        Assert.Matches(
+            new Regex(@"<button[^>]*data-requires-write[^>]*onclick=""cancelEmailDelivery\('\$\{jsArg\(delivery\.id\)\}', this\)"""),
+            js);
+    }
+
+    [Fact]
+    public void IndexHtml_EmailSettingsHaveRateLimitInputs()
+    {
+        var html = Read("index.html");
+
+        Assert.Matches(new Regex(@"id=""emailMaxSendsPerHour""[^>]*min=""0""[^>]*max=""10000"""), html);
+        Assert.Matches(new Regex(@"id=""emailMaxSendsPerDay""[^>]*min=""0""[^>]*max=""100000"""), html);
+        Assert.Matches(new Regex(@"id=""emailMinSecondsBetweenSends""[^>]*min=""0""[^>]*max=""86400"""), html);
+        Assert.Contains("/api/settings/email-rate-limit", WwwrootFiles.ReadAppScripts());
+    }
+
+    [Fact]
     public void MainJs_SeriesSelectionToolbarOffersEmailSelected()
     {
         var js = WwwrootFiles.ReadAppScripts();

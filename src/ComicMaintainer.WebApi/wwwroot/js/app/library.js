@@ -970,7 +970,7 @@
 
         // Clear only the series-selection bookkeeping. Used by code paths that
         // already clear `selectedFiles` wholesale (job completion, DB reset,
-        // bulk delete) so stale series highlights don't linger.
+        // clearSelection()) so stale series highlights don't linger.
         function resetSeriesSelectionState() {
             selectedSeries.clear();
             selectedSeriesFilePaths.clear();

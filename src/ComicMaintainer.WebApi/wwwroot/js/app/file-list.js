@@ -809,6 +809,27 @@
             }
         }
 
+        // Empty the whole selection (files and series) and show it at once:
+        // untick the rendered selection boxes, drop the selected highlights
+        // and reset the selection bar, so its batch actions are disabled. For
+        // code that clears the selection outside a re-render, which may come
+        // late or never (a delete job cancelled before it removes a file, or
+        // the event stream being down). Updates in place, keeping the scroll
+        // position.
+        function clearSelection() {
+            selectedFiles.clear();
+            resetSeriesSelectionState();
+            document.querySelectorAll('#fileList input[type="checkbox"]').forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            document.querySelectorAll('#fileList .series-issue-card--selected').forEach(card => {
+                card.classList.remove('series-issue-card--selected');
+            });
+            updateSeriesSelectionUI();
+            updateSelectInfo();
+            updateSelectAllCheckbox();
+        }
+
         async function toggleDirectory(dir) {
             const wasCollapsed = collapsedDirectories.has(dir);
             if (wasCollapsed) {

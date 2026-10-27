@@ -398,6 +398,38 @@ test('resetting the series selection leaves the selected files to the caller', a
     assert.equal(selectedFiles(page).length, 2);
 });
 
+test('deleting the selected series clears the selection on the page at once', async () => {
+    const page = await bootSelectable(2, issuesFor, {
+        routes: {
+            'POST /api/jobs/delete-selected': { job_id: 'delete-job', total_items: 4 },
+            'GET /api/jobs/delete-job': { job_id: 'delete-job', status: 'running', total_items: 4, processed_items: 0, failed_items: 0, results: [] }
+        }
+    });
+    page.input('#seriesSelectAll', true);
+    await page.settle();
+    assert.equal(page.$('#selectInfo').textContent, '2 series · 4 files selected');
+    const grid = page.$('#fileList .series-grid');
+
+    page.click('#deleteSelectedBtn');
+    await page.settle();
+
+    const [deletion] = page.fetchCalls.filter(call => call.method === 'POST' && call.path === '/api/jobs/delete-selected');
+    assert.deepEqual([...deletion.body.Files].sort(), [
+        'series-1/series-1 #1.cbz', 'series-1/series-1 #2.cbz', 'series-2/series-2 #1.cbz', 'series-2/series-2 #2.cbz'
+    ]);
+    // Shown before the job reports anything, and in place: the list is not
+    // redrawn, so it keeps its scroll position.
+    assert.deepEqual(selectedFiles(page), []);
+    assert.deepEqual(bulkState(page), { info: 'No files selected', batch: false, process: false, email: false, covers: false });
+    assert.equal(page.$('#deleteSelectedBtn').disabled, true);
+    assert.deepEqual(toolbar(page), {
+        count: 'No series selected', all: false, some: false, clearHidden: true, emailHidden: true, emailDisabled: false
+    });
+    assert.deepEqual(['series-1', 'series-2'].map(id => box(page, id).getAttribute('aria-checked')), ['false', 'false']);
+    assert.equal(page.$$('#fileList .series-card--selected').length, 0);
+    assert.equal(page.$('#fileList .series-grid'), grid);
+});
+
 test('read-only users can select series; write-only actions are marked for hiding', async () => {
     const page = await bootSelectable(1, issuesFor, { user: { canModifyLibrary: false, canAdminister: false } });
     assert.ok(page.document.body.classList.contains('user-read-only'));

@@ -139,6 +139,9 @@ public partial class ComicProcessorService
                     // it is normalized again. Re-stamping the captured state closes that gap.
                     var wasNormalized = await _fileStore.IsFileNormalizedAsync(filePath, cancellationToken);
 
+                    // A cancelled job leaves the file where it is rather than moving it.
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     // File.Move will throw IOException if target exists, which we catch and handle
                     // This avoids race condition from check-then-act pattern
                     File.Move(filePath, newFilePath);

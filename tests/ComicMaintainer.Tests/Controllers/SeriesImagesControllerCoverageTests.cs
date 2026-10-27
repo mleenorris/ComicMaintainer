@@ -4,6 +4,7 @@ using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Net.Http.Headers;
 using Moq;
@@ -276,36 +277,123 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         Assert.Equal(ExpectedEtag(path), http.Response.Headers[HeaderNames.ETag].ToString());
     }
 
+    /// <summary>
+    /// Runs the action's result through the real MVC executors, the way the
+    /// pipeline would, so a returned file result's own precondition handling is
+    /// part of what the test observes.
+    /// </summary>
+    private static async Task<int> ExecuteAsync(SeriesImagesController controller, IActionResult result)
+    {
+        var http = controller.HttpContext;
+        http.RequestServices = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton<IActionResultExecutor<PhysicalFileResult>>(new PhysicalFileResultExecutor(NullLoggerFactory.Instance))
+            .BuildServiceProvider();
+        http.Response.Body = new MemoryStream();
+        await result.ExecuteResultAsync(controller.ControllerContext);
+        return http.Response.StatusCode;
+    }
+
+    private SeriesImagesController CreateServingController(
+        out string path,
+        Func<string, string?>? ifNoneMatch = null,
+        Func<string, string?>? ifMatch = null,
+        Func<string, string?>? ifUnmodifiedSince = null)
+    {
+        var imagePath = WriteImage();
+        path = imagePath;
+        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(imagePath);
+        return CreateController(
+            ifNoneMatch?.Invoke(imagePath),
+            ifMatch?.Invoke(imagePath),
+            ifUnmodifiedSince?.Invoke(imagePath));
+    }
+
+    private static string UnmodifiedSince(string path, int offsetSeconds) =>
+        HeaderUtilities.FormatDate(File.GetLastWriteTimeUtc(path).AddSeconds(offsetSeconds));
+
     [Fact]
     public async Task Get_FailedIfMatchWithIfNoneMatchStar_Returns412()
     {
-        var path = WriteImage();
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
-        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
-        var controller = CreateController(ifNoneMatch: "*", ifMatch: "\"stale\"");
-        controller.HttpContext.Response.Body = new MemoryStream();
+        var controller = CreateServingController(out _, ifNoneMatch: _ => "*", ifMatch: _ => "\"stale\"");
 
-        var result = Assert.IsType<PhysicalFileResult>(await controller.Get("batman", CancellationToken.None));
-        await new PhysicalFileResultExecutor(NullLoggerFactory.Instance).ExecuteAsync(controller.ControllerContext, result);
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
 
-        Assert.Equal(StatusCodes.Status412PreconditionFailed, controller.HttpContext.Response.StatusCode);
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, status);
+    }
+
+    [Fact]
+    public async Task Get_WeakIfMatch_Returns412()
+    {
+        // If-Match uses strong comparison (RFC 9110 §13.1.1), so a weak tag never matches.
+        var controller = CreateServingController(out _, ifMatch: p => "W/" + ExpectedEtag(p));
+
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, status);
     }
 
     [Fact]
     public async Task Get_FailedIfUnmodifiedSinceWithMatchingIfNoneMatch_Returns412()
     {
-        var path = WriteImage();
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
-        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
-        var controller = CreateController(
-            ifNoneMatch: ExpectedEtag(path),
-            ifUnmodifiedSince: HeaderUtilities.FormatDate(File.GetLastWriteTimeUtc(path).AddSeconds(-1)));
-        controller.HttpContext.Response.Body = new MemoryStream();
+        var controller = CreateServingController(
+            out _,
+            ifNoneMatch: ExpectedEtag,
+            ifUnmodifiedSince: p => UnmodifiedSince(p, -1));
 
-        var result = Assert.IsType<PhysicalFileResult>(await controller.Get("batman", CancellationToken.None));
-        await new PhysicalFileResultExecutor(NullLoggerFactory.Instance).ExecuteAsync(controller.ControllerContext, result);
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
 
-        Assert.Equal(StatusCodes.Status412PreconditionFailed, controller.HttpContext.Response.StatusCode);
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, status);
+    }
+
+    [Theory]
+    [InlineData("{etag}", "{etag}")]
+    [InlineData("\"0-0\", {etag}", "W/{etag}")]
+    [InlineData("*", "*")]
+    [InlineData("{etag}", "*")]
+    public async Task Get_PassingIfMatchWithMatchingIfNoneMatch_Returns304(string ifMatch, string ifNoneMatch)
+    {
+        // Regression: a passing If-Match made the action hand the request to the file executor,
+        // which answered 200 with the whole image instead of 304 (RFC 9110 §13.2.2).
+        var controller = CreateServingController(
+            out var path,
+            ifNoneMatch: p => ifNoneMatch.Replace("{etag}", ExpectedEtag(p), StringComparison.Ordinal),
+            ifMatch: p => ifMatch.Replace("{etag}", ExpectedEtag(p), StringComparison.Ordinal));
+
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status304NotModified, status);
+        Assert.Equal(0, controller.HttpContext.Response.Body.Length);
+        Assert.Equal(ExpectedEtag(path), controller.Response.Headers[HeaderNames.ETag].ToString());
+        Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(60)]
+    public async Task Get_PassingIfUnmodifiedSinceWithMatchingIfNoneMatch_Returns304(int offsetSeconds)
+    {
+        var controller = CreateServingController(
+            out _,
+            ifNoneMatch: ExpectedEtag,
+            ifUnmodifiedSince: p => UnmodifiedSince(p, offsetSeconds));
+
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status304NotModified, status);
+        Assert.Equal(0, controller.HttpContext.Response.Body.Length);
+    }
+
+    [Fact]
+    public async Task Get_PassingIfMatchWithStaleIfNoneMatch_ServesTheImage()
+    {
+        var controller = CreateServingController(out _, ifNoneMatch: _ => "\"0-0\"", ifMatch: ExpectedEtag);
+
+        var status = await ExecuteAsync(controller, await controller.Get("batman", CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status200OK, status);
+        Assert.Equal(PngSignature, ((MemoryStream)controller.HttpContext.Response.Body).ToArray());
     }
 
     [Fact]

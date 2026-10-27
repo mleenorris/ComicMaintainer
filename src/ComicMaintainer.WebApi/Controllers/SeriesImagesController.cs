@@ -84,9 +84,15 @@ public class SeriesImagesController : ControllerBase
         // carry (RFC 9110 §15.4.5), so both responses share these headers.
         Response.Headers[HeaderNames.ETag] = etag;
         Response.Headers[HeaderNames.CacheControl] = "private, max-age=300";
-        if (!Request.Headers.ContainsKey(HeaderNames.IfMatch)
-            && !Request.Headers.ContainsKey(HeaderNames.IfUnmodifiedSince)
-            && ConditionalRequests.IfNoneMatchSatisfied(Request.Headers[HeaderNames.IfNoneMatch], etag))
+
+        // If-Match and If-Unmodified-Since are evaluated before If-None-Match
+        // (RFC 9110 §13.2.2): a failure answers 412, and only when they pass
+        // may a matching If-None-Match answer 304.
+        if (!HigherPriorityPreconditionsPass(etag, lastWriteUtc))
+        {
+            return StatusCode(StatusCodes.Status412PreconditionFailed);
+        }
+        if (ConditionalRequests.IfNoneMatchSatisfied(Request.Headers[HeaderNames.IfNoneMatch], etag))
         {
             return StatusCode(StatusCodes.Status304NotModified);
         }
@@ -100,6 +106,36 @@ public class SeriesImagesController : ControllerBase
             lastModified: null,
             entityTag: new EntityTagHeaderValue(etag),
             enableRangeProcessing: false);
+    }
+
+    /// <summary>
+    /// Evaluates <c>If-Match</c> (strong comparison) or, when that is absent,
+    /// <c>If-Unmodified-Since</c> against the image's validators, matching the
+    /// file result executor so both paths agree. False means 412.
+    /// </summary>
+    private bool HigherPriorityPreconditionsPass(string etag, DateTime lastWriteUtc)
+    {
+        var headers = Request.GetTypedHeaders();
+        var ifMatch = headers.IfMatch;
+        if (ifMatch.Count > 0)
+        {
+            var current = new EntityTagHeaderValue(etag);
+            return ifMatch.Any(candidate =>
+                candidate.Equals(EntityTagHeaderValue.Any)
+                || candidate.Compare(current, useStrongComparison: true));
+        }
+
+        var ifUnmodifiedSince = headers.IfUnmodifiedSince;
+        if (ifUnmodifiedSince.HasValue && ifUnmodifiedSince <= DateTimeOffset.UtcNow)
+        {
+            // HTTP dates carry whole seconds, so compare at that precision.
+            var lastModified = new DateTimeOffset(
+                lastWriteUtc.Ticks - (lastWriteUtc.Ticks % TimeSpan.TicksPerSecond),
+                TimeSpan.Zero);
+            return ifUnmodifiedSince >= lastModified;
+        }
+
+        return true;
     }
 
     /// <summary>

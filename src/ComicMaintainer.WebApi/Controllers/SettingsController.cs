@@ -64,7 +64,9 @@ public class SettingsController : ControllerBase
             log_max_bytes = _appSettings.CurrentValue.LogMaxBytes,
             database_cleanup_interval_hours = _appSettings.CurrentValue.DatabaseCleanupIntervalHours,
             enable_external_series_metadata = _appSettings.CurrentValue.EnableExternalSeriesMetadata,
-            comicvine_api_key = _appSettings.CurrentValue.ComicVineApiKey,
+            // As with the SMTP password, the key itself is never returned; the
+            // UI only needs to know whether one is stored.
+            comicvine_api_key_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.ComicVineApiKey),
             comicvine_base_url = _appSettings.CurrentValue.ComicVineBaseUrl,
             enable_mangadex_metadata = _appSettings.CurrentValue.EnableMangaDexMetadata,
             mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
@@ -120,7 +122,7 @@ public class SettingsController : ControllerBase
     [HttpGet("filename-format")]
     public ActionResult<object> GetFilenameFormat()
     {
-        return Ok(new { format = _appSettings.CurrentValue.FilenameFormat });
+        return Ok(new { format = _appSettings.CurrentValue.FilenameFormat, @default = AppSettings.DefaultFilenameFormat });
     }
 
     // RESTful endpoint: PUT /api/settings/filename-format
@@ -563,17 +565,26 @@ public class SettingsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Updates the external series metadata settings. Omit <c>comicVineApiKey</c>
+    /// to keep the stored key; send an empty string to clear it.
+    /// </summary>
     [HttpPut("external-series-metadata")]
     public async Task<ActionResult> UpdateExternalSeriesMetadata([FromBody] ExternalSeriesMetadataSettingsRequest request, CancellationToken cancellationToken = default)
     {
         try
         {
             await _settingsService.UpdateExternalSeriesMetadataEnabledAsync(request.Enabled, cancellationToken);
-            var trimmedApiKey = string.IsNullOrWhiteSpace(request.ComicVineApiKey)
-                ? null
-                : request.ComicVineApiKey.Trim();
 
-            await _settingsService.UpdateComicVineApiKeyAsync(trimmedApiKey, cancellationToken);
+            // A null key means "keep the stored secret"; a blank one clears it.
+            if (request.ComicVineApiKey is not null)
+            {
+                var trimmedApiKey = string.IsNullOrWhiteSpace(request.ComicVineApiKey)
+                    ? null
+                    : request.ComicVineApiKey.Trim();
+
+                await _settingsService.UpdateComicVineApiKeyAsync(trimmedApiKey, cancellationToken);
+            }
 
             if (!string.IsNullOrWhiteSpace(request.ComicVineBaseUrl))
             {
@@ -644,7 +655,7 @@ public class SettingsController : ControllerBase
         {
             _logger.LogWarning("Database reset requested - this will delete all processing data");
 
-            // Get all active jobs and mark them as cancelled
+            // Cancel all active jobs before the data they work on is deleted.
             var activeJobs = _processorService.GetAllJobs()
                 .Where(j => j.Status == Core.Models.JobStatus.Running || j.Status == Core.Models.JobStatus.Queued)
                 .ToList();
@@ -652,8 +663,9 @@ public class SettingsController : ControllerBase
             foreach (var job in activeJobs)
             {
                 _logger.LogInformation("Cancelling job {JobId} due to reset", job.JobId);
-                // Note: Jobs are cancelled via CancellationToken in their execution contexts
-                // We can only mark them and they will stop on their own
+                // Cooperative: the job stops at its next cancellation check.
+                // CancelJob returns (and logs) false when the job already finished.
+                _processorService.CancelJob(job.JobId);
             }
 
             // Clear all database tables
@@ -970,7 +982,10 @@ public class SettingsController : ControllerBase
     public class ExternalSeriesMetadataSettingsRequest
     {
         public bool Enabled { get; set; }
+
+        /// <summary>Null keeps the stored key; an empty (or blank) string clears it.</summary>
         public string? ComicVineApiKey { get; set; }
+
         public string? ComicVineBaseUrl { get; set; }
         public bool EnableMangaDex { get; set; }
         public string? MangaDexBaseUrl { get; set; }

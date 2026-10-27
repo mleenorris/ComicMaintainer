@@ -352,7 +352,7 @@ enforced through two authorization policies:
 | Policy | Grants | Applied to |
 | --- | --- | --- |
 | `CanModifyLibrary` | Any authenticated user **except** `ReadOnly` | All non-`GET` endpoints on the files, jobs, process, metadata, status, series-image and watcher controllers |
-| `CanAdminister` | `Admin` (or any non-`ReadOnly` user when Authelia is enabled without `AdminGroups` configured) | All non-`GET` endpoints on the settings controller, every scheduled-jobs endpoint (reads included), plus service restart |
+| `CanAdminister` | `Admin` (or any non-`ReadOnly` user when Authelia is enabled without admin groups configured in `AUTHELIA_ADMIN_GROUPS`; see [Role Mapping](docs/AUTHELIA.md#role-mapping)) | All non-`GET` endpoints on the settings controller, every scheduled-jobs endpoint (reads included), plus service restart |
 
 The policies are applied centrally by a controller convention, so newly added
 write endpoints are protected by default. The web UI reads
@@ -470,6 +470,7 @@ landmark.
 - **Non-Root Container**: Docker image runs as dedicated user (UID 1000)
 - **Secrets Management**: Environment-based configuration for sensitive data
 - **JWT Security**: HMAC SHA256 signing with configurable expiration
+- **Authelia Header Trust**: With Authelia enabled, the forward-auth headers are only accepted from the reverse proxies listed in the required `AUTHELIA_TRUSTED_PROXIES` (see [AUTHELIA.md](docs/AUTHELIA.md#choosing-authelia_trusted_proxies))
 
 See [SECURITY_FIXES_DOTNET.md](docs/archive/SECURITY_FIXES_DOTNET.md) for complete security documentation.
 

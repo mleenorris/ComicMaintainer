@@ -231,4 +231,183 @@ public class PathValidationMiddlewareTests
         // Assert
         _mockNext.Verify(x => x(It.IsAny<HttpContext>()), Times.Once);
     }
+
+    [Theory]
+    [InlineData("/watched_dir/What If...? 001.cbz")]
+    [InlineData("/watched_dir/Batman... Again/Batman... Again 001.cbz")]
+    [InlineData("/watched_dir/...And Justice for All/Issue 001.cbz")]
+    [InlineData("/watched_dir/What If..Vol 1.cbz")]
+    [InlineData("/watched_dir/..Prelude.cbz")]
+    [InlineData("/watched_dir/Wait../Issue 001.cbz")]
+    [InlineData("/duplicates/What If...? 001.cbz")]
+    public async Task InvokeAsync_NameWithConsecutiveDotsInsideAnAllowedRoot_CallsNext(string path)
+    {
+        // Regression: a ".." substring check rejected legitimate names such as "What If...?", so
+        // every API call carrying such a comic's path was answered with 400.
+        var context = await InvokeWithFilePathAsync(path);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        _mockNext.Verify(x => x(It.IsAny<HttpContext>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("/watched_dir/..")]
+    [InlineData("/watched_dir/comics/../../etc/passwd")]
+    [InlineData("/watched_dir/comics/../Saga 001.cbz")]
+    [InlineData("..\\..\\windows\\system32")]
+    [InlineData("/watched_dir\\..\\etc\\passwd")]
+    [InlineData("/watched_dir/comics\\..\\..\\secret.cbz")]
+    public async Task InvokeAsync_ParentDirectorySegmentWithEitherSeparator_Returns400(string path)
+    {
+        // Any ".." segment is rejected, even one that would resolve back inside an allowed root.
+        // On Linux "\" is not a separator, so "/watched_dir/comics\..\..\secret.cbz" is a single odd
+        // file name inside /watched_dir that only the segment check (splitting on both) rejects.
+        var context = await InvokeWithFilePathAsync(path);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        _mockNext.Verify(x => x(It.IsAny<HttpContext>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("/watched_dir2/comics/test.cbz")]
+    [InlineData("/watched_dir-old/test.cbz")]
+    [InlineData("/watched_dir.bak")]
+    [InlineData("/duplicates2/duplicate.cbz")]
+    [InlineData("/Config2/settings.json")]
+    public async Task InvokeAsync_SiblingSharingARootsNameAsPrefix_Returns400(string path)
+    {
+        // Regression: containment was a bare prefix test, so "/watched_dir2/..." counted as being
+        // inside "/watched_dir".
+        var context = await InvokeWithFilePathAsync(path);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        _mockNext.Verify(x => x(It.IsAny<HttpContext>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("/comics", "/comics/Saga/Saga 001.cbz", true)]
+    [InlineData("/comics", "/comics", true)]
+    [InlineData("/comics", "/comics/", true)]
+    [InlineData("/comics", "/comics2/Saga 001.cbz", false)]
+    [InlineData("/comics/", "/comics/Saga/Saga 001.cbz", true)]
+    [InlineData("/comics/", "/comics", true)]
+    [InlineData("/comics/", "/comics2/Saga 001.cbz", false)]
+    public async Task InvokeAsync_RootWithOrWithoutTrailingSeparator_ContainsOnlyItselfAndItsChildren(
+        string watchedDirectory, string path, bool allowed)
+    {
+        var settings = new AppSettings
+        {
+            WatchedDirectory = watchedDirectory,
+            DuplicateDirectory = "/duplicates",
+            ConfigDirectory = "/Config",
+        };
+
+        var context = await InvokeWithFilePathAsync(path, settings);
+
+        Assert.Equal(allowed ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        _mockNext.Verify(x => x(It.IsAny<HttpContext>()), allowed ? Times.Once() : Times.Never());
+    }
+
+    [Theory]
+    [InlineData("/WATCHED_DIR/comics/test.cbz")]
+    [InlineData("/Watched_Dir/test.cbz")]
+    [InlineData("/DUPLICATES/duplicate.cbz")]
+    [InlineData("/config/settings.json")]
+    public async Task InvokeAsync_RootDifferingOnlyInCase_IsRejectedExceptOnWindows(string path)
+    {
+        // Regression: containment ignored case on every platform, although "/watched_dir" and
+        // "/WATCHED_DIR" are two different directories everywhere but Windows.
+        var context = await InvokeWithFilePathAsync(path);
+
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+            _mockNext.Verify(x => x(It.IsAny<HttpContext>()), Times.Once);
+        }
+        else
+        {
+            Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+            _mockNext.Verify(x => x(It.IsAny<HttpContext>()), Times.Never);
+        }
+    }
+
+    [Theory]
+    [InlineData("", "/Config")]
+    [InlineData("   ", "/Config")]
+    [InlineData("/duplicates", "")]
+    [InlineData("", " ")]
+    public async Task InvokeAsync_BlankDuplicateOrConfigDirectory_StillAllowsLibraryPaths(
+        string duplicateDirectory, string configDirectory)
+    {
+        // Regression: Path.GetFullPath threw for an empty root and the catch turned that into
+        // "invalid", so every request carrying a filePath was answered with 400.
+        var settings = new AppSettings
+        {
+            WatchedDirectory = "/watched_dir",
+            DuplicateDirectory = duplicateDirectory,
+            ConfigDirectory = configDirectory,
+        };
+
+        var context = await InvokeWithFilePathAsync("/watched_dir/comics/test.cbz", settings);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        _mockNext.Verify(x => x(It.IsAny<HttpContext>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task InvokeAsync_BlankDuplicateAndConfigDirectories_StillRejectPathsOutsideTheLibrary(string blank)
+    {
+        // A blank root means "not configured", never "everything is allowed".
+        var settings = new AppSettings
+        {
+            WatchedDirectory = "/watched_dir",
+            DuplicateDirectory = blank,
+            ConfigDirectory = blank,
+        };
+
+        var context = await InvokeWithFilePathAsync("/elsewhere/test.cbz", settings);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        _mockNext.Verify(x => x(It.IsAny<HttpContext>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("/duplicates/comics/duplicate.cbz", true)]
+    [InlineData("/Config/settings.json", true)]
+    [InlineData("/watched_dir/comics/test.cbz", false)]
+    [InlineData("/elsewhere/test.cbz", false)]
+    public async Task InvokeAsync_BlankWatchedDirectory_IsSkippedLikeTheOtherRoots(string path, bool allowed)
+    {
+        // A blank watched directory used to throw, which rejected every path; now it simply
+        // contributes no allowed root, while the duplicate and config roots keep working.
+        var settings = new AppSettings
+        {
+            WatchedDirectory = "",
+            DuplicateDirectory = "/duplicates",
+            ConfigDirectory = "/Config",
+        };
+
+        var context = await InvokeWithFilePathAsync(path, settings);
+
+        Assert.Equal(allowed ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        _mockNext.Verify(x => x(It.IsAny<HttpContext>()), allowed ? Times.Once() : Times.Never());
+    }
+
+    private async Task<HttpContext> InvokeWithFilePathAsync(string filePath, AppSettings? settings = null)
+    {
+        var middleware = new PathValidationMiddleware(
+            _mockNext.Object,
+            _mockLogger.Object,
+            new TestOptionsMonitor<AppSettings>(settings ?? _appSettings));
+        var context = new DefaultHttpContext();
+        context.Request.QueryString = new QueryString($"?filePath={Uri.EscapeDataString(filePath)}");
+        context.Response.Body = new MemoryStream();
+        _mockNext.Setup(x => x(It.IsAny<HttpContext>())).Returns(Task.CompletedTask);
+
+        await middleware.InvokeAsync(context);
+
+        return context;
+    }
 }

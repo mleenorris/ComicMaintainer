@@ -22,6 +22,21 @@ public class FileWatcherServiceTests : IDisposable
     private const int WatcherInitDelayMs = 100;  // Time to wait for watcher to initialize
     private const int SimpleEventDelayMs = 500;   // Time to wait for simple file events
     private const int ProcessingDelayMs = 2000;   // Time to wait for stability delay + processing
+    private const int ExpectedCallTimeoutMs = 15000; // Upper bound when waiting for an expected call
+
+    // The watcher scans, waits for files to settle and processes them on
+    // background threads, so on a busy machine the fixed delays above can end
+    // before an expected call is made. Tests poll for the calls they expect
+    // before verifying them: a slow run takes longer instead of failing.
+    private static async Task WaitForCallAsync(Mock mock, string methodName, string path)
+    {
+        var deadline = Environment.TickCount64 + ExpectedCallTimeoutMs;
+        while (!mock.Invocations.Any(i => i.Method.Name == methodName && i.Arguments.Contains(path))
+            && Environment.TickCount64 < deadline)
+        {
+            await Task.Delay(25);
+        }
+    }
 
     public FileWatcherServiceTests()
     {
@@ -144,6 +159,7 @@ public class FileWatcherServiceTests : IDisposable
         // Act - create a new comic file
         File.WriteAllText(newFile, "fake cbz content");
         await Task.Delay(2000);
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.AddFileAsync), newFile);
 
         // Assert - the file is added to the store so it appears in the file list...
         _mockFileStore.Verify(
@@ -234,6 +250,8 @@ public class FileWatcherServiceTests : IDisposable
         
         // Wait a bit for the async scan to complete
         await Task.Delay(500);
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.AddFileAsync), cbzFile);
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.AddFileAsync), cbrFile);
 
         // Assert - Should add both comic files but not the txt file
         _mockFileStore.Verify(
@@ -270,6 +288,8 @@ public class FileWatcherServiceTests : IDisposable
         
         // Wait for scan to complete
         await Task.Delay(500);
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.AddFileAsync), rootFile);
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.AddFileAsync), subFile);
 
         // Assert - Should find files in root and subdirectories
         _mockFileStore.Verify(
@@ -308,6 +328,8 @@ public class FileWatcherServiceTests : IDisposable
         
         // Wait for file system events and processing (stability delay + processing time)
         await Task.Delay(2000);
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.UpdateFilePathAsync), renamedFile);
+        await WaitForCallAsync(_mockProcessor, nameof(IComicProcessorService.ProcessFileAsync), renamedFile);
 
         // Assert - File path should be updated atomically, preserving state
         _mockFileStore.Verify(
@@ -353,6 +375,8 @@ public class FileWatcherServiceTests : IDisposable
         
         // Wait for file system events
         await Task.Delay(2000);
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.UpdateFilePathAsync), renamedFile);
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.IsFileProcessedAsync), renamedFile);
 
         // Assert - File path should be updated atomically, preserving state
         _mockFileStore.Verify(
@@ -485,6 +509,7 @@ public class FileWatcherServiceTests : IDisposable
         
         // Wait for file system events (stability delay + processing time)
         await Task.Delay(ProcessingDelayMs);
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.IsFileProcessedAsync), comicFile);
 
         // Assert - Should check if file is already processed
         _mockFileStore.Verify(
@@ -705,6 +730,7 @@ public class FileWatcherServiceTests : IDisposable
         // Act - trigger an initial change that gets processed.
         File.AppendAllText(comicFile, "external change");
         await Task.Delay(ProcessingDelayMs);
+        await WaitForCallAsync(_mockProcessor, nameof(IComicProcessorService.ProcessFileAsync), comicFile);
 
         // Simulate the processor's own write echoing back as another change event.
         File.AppendAllText(comicFile, "processor rewrite");

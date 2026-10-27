@@ -12,6 +12,9 @@ public interface IComicEmailQueue
     /// <summary>Starts the background consumer.</summary>
     Task StartAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Stops the background consumer and waits for the in-flight send.</summary>
+    /// <summary>
+    /// Stops the background consumer and waits for the in-flight send. Deliveries
+    /// queued after the stop are kept for the next <see cref="StartAsync"/>.
+    /// </summary>
     Task StopAsync(CancellationToken cancellationToken = default);
 }

@@ -169,7 +169,12 @@ public partial class ComicProcessorService
 
                 _logger.LogDebug("ProcessFileAsync: Attempting to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var newFilePath = GenerateFileName(metadata, filePath);
-                if (newFilePath == filePath)
+                if (newFilePath == null)
+                {
+                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                    await LogHistoryAsync(filePath, "Rename", false, FilenameGenerationFailedMessage, cancellationToken);
+                }
+                else if (newFilePath == filePath)
                 {
                     // File already has correct name, no rename needed
                     _logger.LogDebug("File already has correct name: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));

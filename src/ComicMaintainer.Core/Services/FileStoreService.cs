@@ -33,6 +33,14 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
     /// </summary>
     private const int SqliteParameterChunkSize = 500;
 
+    /// <summary>
+    /// Path comparison for library-root containment: case-insensitive on Windows and
+    /// case-sensitive elsewhere, the same rule as <c>LibraryPathValidator.IsWithin</c>.
+    /// </summary>
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
     private readonly ConcurrentDictionary<string, ComicFile> _files = new();
     private readonly ConcurrentDictionary<string, bool> _duplicateFiles = new();
     private readonly IOptionsMonitor<AppSettings> _settings;
@@ -105,15 +113,10 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
     {
         try
         {
-            // Get the full path to resolve any relative paths
+            // GetFullPath collapses every "." and ".." segment, so traversal out of the library
+            // ends up outside both roots and is rejected by the containment checks below. Names
+            // that merely contain consecutive dots ("What If...?") are legitimate comics.
             var fullPath = Path.GetFullPath(filePath);
-            
-            // Check for path traversal attempts
-            if (fullPath.Contains(".."))
-            {
-                _logger.LogWarning("Path traversal attempt detected: {FilePath}", SanitizeForLogging(filePath));
-                return false;
-            }
 
             // Ensure path is within allowed directories
             var watchedDir = Path.GetFullPath(_settings.CurrentValue.WatchedDirectory);
@@ -121,9 +124,9 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
                 ? Path.GetFullPath(_settings.CurrentValue.DuplicateDirectory) 
                 : string.Empty;
 
-            var isInWatchedDir = fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
+            var isInWatchedDir = IsSameOrUnder(fullPath, watchedDir);
             var isInDuplicateDir = !string.IsNullOrEmpty(duplicateDir) && 
-                                  fullPath.StartsWith(duplicateDir, StringComparison.OrdinalIgnoreCase);
+                                  IsSameOrUnder(fullPath, duplicateDir);
 
             return isInWatchedDir || isInDuplicateDir;
         }
@@ -132,6 +135,20 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
             _logger.LogWarning(ex, "Error validating path: {FilePath}", SanitizeForLogging(filePath));
             return false;
         }
+    }
+
+    /// <summary>
+    /// Returns true when the already normalized <paramref name="fullPath"/> is
+    /// <paramref name="directory"/> itself or lives beneath it. Trailing separators on either
+    /// side are ignored, and a sibling that merely shares the directory's name as a prefix
+    /// (<c>/comics2</c> next to <c>/comics</c>) is outside.
+    /// </summary>
+    private static bool IsSameOrUnder(string fullPath, string directory)
+    {
+        var root = directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(
+                   fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), root, PathComparison)
+               || fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison);
     }
 
 
@@ -263,9 +280,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
                     : Path.GetFullPath(fileDir)
                         .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-                if (!string.IsNullOrEmpty(fileDirFull) &&
-                    (string.Equals(fileDirFull, watchedFull, StringComparison.OrdinalIgnoreCase) ||
-                     fileDirFull.StartsWith(watchedFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
+                if (!string.IsNullOrEmpty(fileDirFull) && IsSameOrUnder(fileDirFull, watchedFull))
                 {
                     var rel = Path.GetRelativePath(watchedFull, fileDirFull);
                     if (rel == "." || string.IsNullOrEmpty(rel))
@@ -306,8 +321,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
                 var dirFull = Path.GetFullPath(directory)
                     .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-                if (string.Equals(dirFull, watchedFull, StringComparison.OrdinalIgnoreCase) ||
-                    dirFull.StartsWith(watchedFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                if (IsSameOrUnder(dirFull, watchedFull))
                 {
                     var rel = Path.GetRelativePath(watchedFull, dirFull);
                     if (rel == "." || string.IsNullOrEmpty(rel))

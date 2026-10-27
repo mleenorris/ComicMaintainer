@@ -7,14 +7,30 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { pathToFileURL } = require('node:url');
 
 const WWWROOT = path.resolve(__dirname, '..', '..', '..', 'src', 'ComicMaintainer.WebApi', 'wwwroot');
 
-/** Script paths (relative to wwwroot) index.html loads, in order. */
-function indexHtmlScripts() {
-    const html = fs.readFileSync(path.join(WWWROOT, 'index.html'), 'utf8');
+/**
+ * Run a wwwroot script in a vm context. The filename must be a file: URL:
+ * node's test coverage only attributes code to scripts whose URL is one, so a
+ * relative name would leave every SPA script out of the coverage report.
+ */
+function runWwwrootScript(script, context) {
+    const file = path.join(WWWROOT, ...script.split('/'));
+    vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: pathToFileURL(file).href });
+}
+
+/** Script paths (relative to wwwroot) an HTML page loads, in order. */
+function htmlScripts(page) {
+    const html = fs.readFileSync(path.join(WWWROOT, page), 'utf8');
     return [...html.matchAll(/<script\s+src="\/(js\/[^"?]+\.js)\?v=__APP_VERSION__"\s*><\/script>/g)]
         .map(match => match[1]);
+}
+
+/** Script paths (relative to wwwroot) index.html loads, in order. */
+function indexHtmlScripts() {
+    return htmlScripts('index.html');
 }
 
 function createLocalStorage(initial = {}) {
@@ -93,8 +109,7 @@ function loadScripts(scripts, overrides = {}) {
     // Browser scripts reach the global object as `window` and `self`.
     vm.runInContext('var window = globalThis; var self = globalThis;', context);
     for (const script of scripts) {
-        const file = path.join(WWWROOT, ...script.split('/'));
-        vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: script });
+        runWwwrootScript(script, context);
     }
     return {
         context,
@@ -105,4 +120,4 @@ function loadScripts(scripts, overrides = {}) {
     };
 }
 
-module.exports = { WWWROOT, indexHtmlScripts, loadScripts, createLocalStorage };
+module.exports = { WWWROOT, htmlScripts, indexHtmlScripts, loadScripts, createLocalStorage, runWwwrootScript };

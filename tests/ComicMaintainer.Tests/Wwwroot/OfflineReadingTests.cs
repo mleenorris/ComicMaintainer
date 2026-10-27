@@ -3,9 +3,9 @@ using System.Text.RegularExpressions;
 namespace ComicMaintainer.Tests.Wwwroot;
 
 /// <summary>
-/// Guard rails for offline comic downloads. The feature is split across three
+/// Guard rails for offline comic downloads. The feature is split across the
 /// shipped static files (the service worker stores and serves the download,
-/// the reader drives it, the offline page lists it), so these text-level
+/// the reader page drives it, the offline page lists it), so these text-level
 /// assertions exist to stop one half being removed without the other.
 /// </summary>
 public class OfflineReadingTests
@@ -111,7 +111,7 @@ public class OfflineReadingTests
     [Fact]
     public void Reader_ExposesOfflineDownloadControl()
     {
-        var contents = ReadAsset("reader.html");
+        var contents = WwwrootFiles.ReadPageWithScript("reader.html");
 
         Assert.Contains("id=\"offlineBtn\"", contents);
         Assert.Contains("toggleOfflineDownload()", contents);
@@ -126,7 +126,7 @@ public class OfflineReadingTests
     [Fact]
     public void Reader_QueuesReadingProgressWhileOffline()
     {
-        var contents = ReadAsset("reader.html");
+        var contents = WwwrootFiles.ReadPageWithScript("reader.html");
 
         // Progress POSTs fail outright while offline, so they are parked in
         // localStorage instead of being lost.
@@ -140,7 +140,7 @@ public class OfflineReadingTests
     [Fact]
     public void Reader_ReplaysQueuedProgressWhenBackOnline()
     {
-        var contents = ReadAsset("reader.html");
+        var contents = WwwrootFiles.ReadPageWithScript("reader.html");
 
         Assert.Contains("flushPendingProgress", contents);
         // Reconnecting must trigger the replay; without this the queue would
@@ -151,13 +151,20 @@ public class OfflineReadingTests
     [Fact]
     public void OfflinePage_ListsDownloadedComicsWithoutNetworkAccess()
     {
-        var contents = ReadAsset("offline.html");
+        var page = ReadAsset("offline.html");
+        var script = ReadAsset("js", "pages", "offline.js");
 
-        Assert.Contains("LIST_OFFLINE_COMICS", contents);
-        Assert.Contains("/reader.html?file=", contents);
+        Assert.Contains("LIST_OFFLINE_COMICS", script);
+        Assert.Contains("/reader.html?file=", script);
         // The offline page is shown precisely when the network is gone, so it
-        // must stay self-contained (no external CSS/JS or fetches).
-        Assert.DoesNotContain("fetch(", contents);
-        Assert.DoesNotContain("<script src", contents);
+        // must not fetch anything or load external CSS. Its only script is its
+        // own page script, which the service worker precaches with it.
+        Assert.DoesNotContain("fetch(", page + script);
+        Assert.DoesNotMatch(new Regex(@"<link[^>]+rel=""stylesheet"""), page);
+        var scripts = Regex.Matches(page, @"<script\b[^>]*\bsrc=""([^""]+)""")
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+        Assert.Equal(new[] { "/js/pages/offline.js?v=__APP_VERSION__" }, scripts);
+        Assert.Matches(new Regex(@"const PAGE_SCRIPTS = \[[^\]]*'/js/pages/offline\.js'"), ReadAsset("sw.js"));
     }
 }

@@ -330,16 +330,32 @@
 
                 // Newly arrived folders should be collapsed by default, but
                 // preserve the user's explicit state for folders we've already
-                // expanded in this session.
+                // expanded in this session. The library root (path '') is the
+                // exception: it has no header to expand it by, so it is never
+                // collapsed and its files are always shown.
+                let rootArrived = false;
                 for (const f of newFolders) {
                     if (f && typeof f.path === 'string') {
-                        if (!folderFiles.has(f.path)) {
+                        if (!f.path) {
+                            rootArrived = true;
+                        } else if (!folderFiles.has(f.path)) {
                             collapsedDirectories.add(f.path);
                         }
                     }
                 }
 
+                // The list has arrived: stop counting as loading before drawing
+                // it, or an empty result would be drawn as "Loading files..."
+                // (finally{} clears the flag only after this render) instead
+                // of its empty state.
+                folderLoading = false;
                 renderFileList();
+                // The root's files are on screen straight away, so fetch them
+                // for the current filter/search even when a list from an
+                // earlier one is cached.
+                if (rootArrived) {
+                    ensureFolderLoaded('', true).catch(() => {});
+                }
                 updateButtonVisibility();
                 ensureScrollObserver();
                 if (refresh) {
@@ -372,23 +388,16 @@
         }
         
         function updateButtonVisibility() {
-            // Get all unmarked-related buttons
-            const processUnmarkedBtn = document.querySelector('button[onclick="processUnmarkedFiles()"]');
-            const renameUnmarkedBtn = document.querySelector('button[onclick="renameUnmarkedFiles()"]');
-            const normalizeUnmarkedBtn = document.querySelector('button[onclick="normalizeUnmarkedFiles()"]');
-            const filterUnmarkedBtn = document.getElementById('filterUnmarked');
-            const controlsWrapper = document.querySelector('.controls-wrapper');
-
-            // Show or hide buttons based on whether there are unmarked files
-            const hasUnmarkedFiles = unmarkedCount > 0;
-            const displayStyle = hasUnmarkedFiles ? '' : 'none';
-            
-            if (processUnmarkedBtn) processUnmarkedBtn.style.display = displayStyle;
-            if (renameUnmarkedBtn) renameUnmarkedBtn.style.display = displayStyle;
-            if (normalizeUnmarkedBtn) normalizeUnmarkedBtn.style.display = displayStyle;
-            if (filterUnmarkedBtn) filterUnmarkedBtn.style.display = displayStyle;
+            // The "… Unmarked" actions have nothing to act on without unmarked
+            // files, so they are shown only while there are some.
+            const displayStyle = unmarkedCount > 0 ? '' : 'none';
+            for (const id of ['processUnmarkedItem', 'renameUnmarkedItem', 'normalizeUnmarkedItem']) {
+                const item = document.getElementById(id);
+                if (item) item.style.display = displayStyle;
+            }
             // The processing controls are always available (inside the Library
             // Health dropdown); only their dropdown collapse state hides them.
+            const controlsWrapper = document.querySelector('.controls-wrapper');
             if (controlsWrapper) controlsWrapper.style.display = '';
         }
         

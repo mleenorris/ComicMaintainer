@@ -34,6 +34,9 @@ public class HtmlVersioningTests
     [Theory]
     [InlineData("index.html")]
     [InlineData("reader.html")]
+    [InlineData("login.html")]
+    [InlineData("setup.html")]
+    [InlineData("offline.html")]
     public void HtmlPage_DoesNotReferenceUnversionedMainCssOrJs(string fileName)
     {
         var path = Path.Combine(WwwRoot, fileName);

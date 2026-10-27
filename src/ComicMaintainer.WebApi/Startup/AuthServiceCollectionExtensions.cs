@@ -54,12 +54,20 @@ internal static class AuthServiceCollectionExtensions
             Log.Warning("⚠️ Set JWT_SECRET environment variable to use a secure, persistent secret.");
         }
 
-        // Check if Authelia is enabled
-        var autheliaSettings = configuration.GetSection("AutheliaSettings").Get<AutheliaSettings>() ?? new AutheliaSettings();
-        var autheliaEnabled = Environment.GetEnvironmentVariable("AUTHELIA_ENABLED");
-        if (!string.IsNullOrEmpty(autheliaEnabled))
+        // Check if Authelia is enabled. Read through the same binder as IOptions<AutheliaSettings> (used by the
+        // handler), so the validation, schemes and CanAdminister fallback below match what the handler sees.
+        var autheliaSettings = AutheliaSettingsBinder.Load(configuration);
+
+        // Anyone who can reach the app directly could forge the Authelia headers, so the reverse proxies
+        // allowed to send them must be configured; refuse to start otherwise.
+        if (autheliaSettings.Enabled)
         {
-            autheliaSettings.Enabled = autheliaEnabled.Equals("true", StringComparison.OrdinalIgnoreCase);
+            if (!TrustedProxyAllowlist.TryParse(autheliaSettings.TrustedProxies, out var trustedProxies, out var error))
+            {
+                throw new InvalidOperationException(error);
+            }
+
+            Log.Information("Authelia headers will only be accepted from {TrustedProxies}", string.Join(", ", trustedProxies.Networks));
         }
 
         // Configure authentication schemes

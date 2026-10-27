@@ -43,7 +43,7 @@ public partial class ComicProcessorService
         // First, try the atomic File.Replace operation
         try
         {
-            File.Replace(tempFile, targetFile, backupPath);
+            ReplaceFile(tempFile, targetFile, backupPath);
             
             // Clean up backup if replace succeeded
             if (File.Exists(backupPath))
@@ -115,7 +115,7 @@ public partial class ComicProcessorService
                 await DelayWithExponentialBackoffAsync(attempt, lastException, targetFile, cancellationToken);
                 
                 // Attempt to replace the file
-                File.Replace(tempFile, targetFile, backupPath);
+                ReplaceFile(tempFile, targetFile, backupPath);
                 
                 // Clean up backup if replace succeeded
                 if (File.Exists(backupPath))
@@ -145,6 +145,15 @@ public partial class ComicProcessorService
             throw lastException;
         }
     }
+
+    /// <summary>
+    /// Replaces <paramref name="destinationFile"/> with <paramref name="sourceFile"/> using
+    /// <see cref="File.Replace(string, string, string?)"/>, keeping the previous contents in
+    /// <paramref name="backupFile"/>. Virtual so tests can simulate failures that cannot be
+    /// provoked on a single test filesystem, such as a cross-device link error.
+    /// </summary>
+    protected virtual void ReplaceFile(string sourceFile, string destinationFile, string backupFile) =>
+        File.Replace(sourceFile, destinationFile, backupFile);
 
     /// <summary>
     /// Attempts to restore a backup file with proper error handling
@@ -189,22 +198,24 @@ public partial class ComicProcessorService
     /// <summary>
     /// Checks if an IOException is a cross-device link error
     /// </summary>
-    private static bool IsCrossDeviceLinkError(IOException ex)
+    private static bool IsCrossDeviceLinkError(IOException ex) =>
+        IsCrossDeviceLinkError(ex.HResult, OperatingSystem.IsWindows());
+
+    /// <summary>
+    /// Classifies an <see cref="Exception.HResult"/> as a cross-device link error. .NET reports
+    /// Win32 errors as HRESULT_FROM_WIN32 on Windows and the raw errno on Unix, so each
+    /// platform's code is only matched on that platform: ERROR_NOT_SAME_DEVICE (17) is EEXIST on
+    /// Unix, where EXDEV is 18. The message is not inspected because it can contain arbitrary
+    /// path text.
+    /// </summary>
+    private static bool IsCrossDeviceLinkError(int hresult, bool isWindows)
     {
-        // EXDEV (errno 18 on Linux/Unix) = Cross-device link
-        // On Windows, HResult 0x80070011 = ERROR_NOT_SAME_DEVICE
+        // HRESULT_FROM_WIN32(ERROR_NOT_SAME_DEVICE)
+        const int HRESULT_ERROR_NOT_SAME_DEVICE = unchecked((int)0x80070011);
+        // EXDEV on Linux, macOS and the BSDs
         const int EXDEV = 18;
-        const int ERROR_NOT_SAME_DEVICE = 0x11;
-        const int HRESULT_ERROR_CODE_MASK = 0xFFFF;
-        
-        // Check HResult for Windows (upper 16 bits are facility code, lower 16 bits are error code)
-        var hresult = ex.HResult;
-        var errorCode = hresult & HRESULT_ERROR_CODE_MASK;
-        
-        // Check if this is a cross-device error on Windows or Unix
-        return errorCode == ERROR_NOT_SAME_DEVICE || 
-               errorCode == EXDEV ||
-               ex.Message.Contains("cross-device", StringComparison.OrdinalIgnoreCase);
+
+        return isWindows ? hresult == HRESULT_ERROR_NOT_SAME_DEVICE : hresult == EXDEV;
     }
 
     /// <summary>

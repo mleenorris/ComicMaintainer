@@ -37,8 +37,9 @@ public interface ISeriesArchiveCoverWriteQueue
     Task StartAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Stop accepting new work and wait for the in-flight item (if any) to
-    /// finish so a graceful shutdown does not leave a half-written archive.
+    /// Stop the background consumer and wait for the in-flight item (if any) to
+    /// finish so a graceful shutdown does not leave a half-written archive. Work
+    /// queued after the stop is kept for the next <see cref="StartAsync"/>.
     /// </summary>
     Task StopAsync(CancellationToken cancellationToken = default);
 }

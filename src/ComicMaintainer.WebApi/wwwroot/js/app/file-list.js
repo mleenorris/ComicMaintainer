@@ -531,10 +531,15 @@
         async function ensureFolderLoaded(dir, force = false) {
             const existing = folderFiles.get(dir);
             if (!force && existing && existing.status === 'loaded') return;
-            if (existing && existing.status === 'loading') return existing.promise;
+            // A forced load is for a changed filter, search or sort, so it
+            // supersedes a request still in flight instead of joining it.
+            if (!force && existing && existing.status === 'loading') return existing.promise;
 
-            const encoded = encodeFolderPath(dir);
-            let url = apiUrl(`/api/files/folders/${encoded}/files`);
+            // The root folder's path is empty, and an empty path segment
+            // (folders//files) routes nowhere, so the root has its own URL.
+            let url = apiUrl(dir
+                ? `/api/files/folders/${encodeFolderPath(dir)}/files`
+                : '/api/files/folders/files');
             const params = [];
             if (searchQuery) params.push(`search=${encodeURIComponent(searchQuery)}`);
             if (filterMode !== 'all') params.push(`filter=${encodeURIComponent(filterMode)}`);
@@ -542,28 +547,35 @@
             if (sortDirection !== 'asc') params.push(`direction=${encodeURIComponent(sortDirection)}`);
             if (params.length) url += '?' + params.join('&');
 
-            const fetchPromise = (async () => {
+            const entry = { status: 'loading', files: [], promise: null };
+            folderFiles.set(dir, entry);
+            entry.promise = (async () => {
+                let result;
                 try {
                     const response = await fetch(url, { headers: getAuthHeaders() });
                     if (handleAuthError(response)) {
-                        folderFiles.set(dir, { status: 'error', files: [] });
-                        return;
-                    }
-                    if (!response.ok) {
+                        result = { status: 'error', files: [] };
+                    } else if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
+                    } else {
+                        const data = await response.json();
+                        result = { status: 'loaded', files: data.files || [] };
                     }
-                    const data = await response.json();
-                    folderFiles.set(dir, { status: 'loaded', files: data.files || [] });
                 } catch (err) {
-                    folderFiles.set(dir, { status: 'error', files: [] });
-                } finally {
-                    renderFileList();
+                    result = { status: 'error', files: [] };
                 }
+                // A newer request for this folder has taken over: an older
+                // answer must not overwrite the latest one, so wait for it.
+                const current = folderFiles.get(dir);
+                if (current && current !== entry) {
+                    return current.promise;
+                }
+                folderFiles.set(dir, result);
+                renderFileList();
             })();
 
-            folderFiles.set(dir, { status: 'loading', files: [], promise: fetchPromise });
             renderFileList();
-            return fetchPromise;
+            return entry.promise;
         }
 
         function ensureScrollObserver() {
@@ -855,13 +867,15 @@
         }
 
         function collapseAllFolders() {
-            collapsedDirectories = new Set(folderList.map(f => f.path || ''));
+            // The root has no header to reopen it by, so it stays open.
+            collapsedDirectories = new Set(folderList.map(f => f.path || '').filter(dir => dir));
             allFoldersExpanded = false;
             renderFileList();
         }
 
         function updateToggleAllButton() {
-            const totalDirs = folderList.length;
+            // Only folders with a header can be collapsed; the root can't.
+            const totalDirs = folderList.filter(f => f.path).length;
             if (totalDirs > 0 && collapsedDirectories.size >= totalDirs) {
                 allFoldersExpanded = false;
             } else {

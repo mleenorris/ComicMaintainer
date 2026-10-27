@@ -19,7 +19,7 @@
             try {
                 const response = await fetch(apiUrl('/api/metadata/refresh-all'), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -47,7 +47,7 @@
             try {
                 const response = await fetch(apiUrl('/api/metadata/match-unmatched'), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -363,8 +363,7 @@
                     }
                     const job = await response.json();
                     renderMetadataRefreshToast(jobId, label, job);
-                    const status = (job.status || '').toString().toLowerCase();
-                    if (isTerminalJobStatus(status)) {
+                    if (isTerminalJobStatus(metadataRefreshJobStatus(job))) {
                         metadataRefreshJobs.delete(jobId);
                         // Final library refresh + provider health update.
                         if (typeof loadSeriesLibrary === 'function') {
@@ -380,6 +379,13 @@
                 }
             };
             setTimeout(tick, intervalMs);
+        }
+
+        // The job's status as the lower-case name isTerminalJobStatus() and the
+        // toast's CSS modifiers use. The API sends the JobStatus name
+        // ("Running", "Completed", ...).
+        function metadataRefreshJobStatus(job) {
+            return (job.status || job.Status || 'queued').toString().toLowerCase();
         }
 
         function renderMetadataRefreshToast(jobId, label, job) {
@@ -401,7 +407,7 @@
             const processed = job.processedSeries || job.ProcessedSeries || 0;
             const successes = job.successes || job.Successes || 0;
             const failures = job.failures || job.Failures || 0;
-            const status = (job.status || job.Status || 'queued').toString().toLowerCase();
+            const status = metadataRefreshJobStatus(job);
             const current = job.currentSeries || job.CurrentSeries || '';
             const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
             renderHtml(toast, html`
@@ -447,6 +453,7 @@
             if (!seriesTitle) return;
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}`), {
+                    headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -514,9 +521,13 @@
             const formData = new FormData();
             formData.append('file', file);
             try {
+                // Let the browser set the multipart Content-Type (with
+                // boundary); getAuthHeaders() defaults it to JSON.
+                const headers = getAuthHeaders();
+                delete headers['Content-Type'];
                 const response = await fetch(apiUrl(`/api/series-images/${encodeURIComponent(seriesTitle)}`), {
                     method: 'PUT',
-                    headers: getAuthHeaders(),
+                    headers,
                     body: formData
                 });
                 if (!response.ok) {
@@ -740,7 +751,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/preferred-language`), {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin',
                     body: JSON.stringify({ language: value })
                 });
@@ -830,7 +841,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/name`), {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin',
                     body: JSON.stringify({ name: value })
                 });
@@ -909,7 +920,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin',
                     body: JSON.stringify(payload)
                 });
@@ -940,6 +951,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`), {
                     method: 'POST',
+                    headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -992,6 +1004,7 @@
             renderHtml(container, html`<p style="color: var(--text-secondary);">Searching...</p>`);
             try {
                 const response = await fetch(apiUrl(`/api/metadata/search?query=${encodeURIComponent(query)}&limit=10`), {
+                    headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -1129,7 +1142,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/apply-match`), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin',
                     body: JSON.stringify({
                         canonicalTitle: result.canonical_title,
@@ -1184,6 +1197,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/external`), {
                     method: 'DELETE',
+                    headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
                 if (response.status === 404) {

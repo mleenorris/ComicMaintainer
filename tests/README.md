@@ -7,10 +7,32 @@ This directory contains unit tests for the ComicMaintainer project.
 ```
 tests/
 ├── ComicMaintainer.Tests/
-│   ├── Controllers/        # API Controller tests
+│   ├── Authentication/    # Authelia forward-auth handler
+│   ├── Authorization/     # Write-operation authorization convention
+│   ├── Controllers/       # API Controller tests
+│   ├── Data/              # EF Core context, factory and SQLite setup
+│   ├── ErrorReporting/    # Automated error report pipeline
+│   ├── Fuzz/              # Randomized-input tests of models and path helpers
+│   ├── HealthChecks/      # Health check implementations
+│   ├── Helpers/           # Shared test doubles
+│   ├── Hubs/              # SignalR progress hub
+│   ├── Infrastructure/    # Global exception handler
+│   ├── Integration/       # In-process API tests (WebApplicationFactory, Category=Integration)
+│   ├── Middleware/        # Request pipeline middleware and filters
+│   ├── Models/            # Model tests
+│   ├── Reader/            # Reading progress, sessions and preferences
+│   ├── Security/          # CORS and security headers
 │   ├── Services/          # Service layer tests
+│   ├── Startup/           # Service registration and startup wiring
 │   ├── Utilities/         # Utility class tests
+│   ├── Wwwroot/           # Static checks over the shipped web UI files
 │   └── xunit.runner.json  # xUnit configuration
+├── js/                     # node:test tests for the web UI's JavaScript
+│   └── support/
+│       ├── sandbox.js     # Runs wwwroot scripts in a bare node:vm context
+│       ├── dom.js         # Loads the real HTML pages in jsdom with browser stubs
+│       ├── app.js         # bootApp(): the signed-in SPA at a route
+│       └── *-helpers.js   # Per-area fixtures and helpers (core, email, jobs, library, reader, series, settings, sw)
 └── README.md
 ```
 
@@ -36,9 +58,67 @@ dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
 # From the repository root
 ./scripts/run-tests-with-coverage.sh
 
-# Or manually:
-dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults
+# Or manually (coverlet.runsettings excludes EF migrations and generated code):
+dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj \
+  --collect:"XPlat Code Coverage" --settings coverlet.runsettings \
+  --results-directory ./TestResults
 ```
+
+### JavaScript Tests
+```bash
+npm ci                  # installs jsdom, the only dependency
+npm test                # all tests/js/**/*.test.js
+npm run test:coverage   # plus a coverage table and coverage/lcov.info
+```
+
+Page-level tests load a real page from `wwwroot` with `loadPage()` from
+`tests/js/support/dom.js` and drive it like a browser:
+
+```js
+const { loadPage, respond } = require('./support/dom');
+
+test('reports a busy server', async () => {
+    const page = loadPage({                       // index.html by default
+        localStorage: { jwt_token: token },       // signed-in session
+        routes: { 'GET /api/preferences': {} }
+    });
+    await page.settle();                          // let boot-time fetches resolve
+    page.route('POST /api/jobs', respond(409, { error: 'busy' }));
+    page.click('#startButton');
+    await page.waitFor(() => page.fetchCalls.some(c => c.path === '/api/jobs'));
+});
+```
+
+Use `t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })` and
+`t.mock.timers.tick(ms)` for debounces and polling (tick one interval period at
+a time); `page.settle()`/`page.waitFor()` keep using real timers. Values read
+from the page (`page.run(code)`) belong to the page's realm: compare them with
+`assert.deepStrictEqual` via `page.evaluate(code)` or `plain(value)`.
+
+Unrouted requests answer 404 and are listed in `page.unmatchedRequests`;
+`page.navigations`, `page.dialogs`, `page.eventSources` and
+`page.serviceWorkerRegistrations` record what the page did. Redirects and
+reloads are only recorded (the page stays on its document); fragment changes
+are applied and fire `hashchange`. Scripts run with `file:` URLs so Node's
+coverage attributes them to the files under `wwwroot`. Inline handlers in
+markup the app renders with `renderHtml()`/`appendHtml()` run as they would in
+a browser, so `page.click()` on a rendered button calls its `onclick` code.
+
+Tests of the signed-in SPA can use `bootApp()` from `tests/js/support/app.js`,
+which loads `index.html` at a route with a valid session token and the
+`/api/auth/*` answers already routed (`user: { canModifyLibrary: false,
+canAdminister: false }` boots a read-only user), then waits for the boot:
+
+```js
+const { bootApp } = require('./support/app');
+
+const page = await bootApp({ hash: '#/settings', routes: { 'GET /api/settings': { ... } } });
+```
+
+The standalone pages (`reader.html`, `login.html`, `setup.html`,
+`offline.html`) keep no inline code: each loads its own classic script from
+`wwwroot/js/pages/`, so `loadPage({ html: 'reader.html', url: ... })` runs
+`js/shared.js` and `js/pages/reader.js` and measures them like the app scripts.
 
 ## Code Coverage
 
@@ -119,15 +199,15 @@ public void IsComicArchive_VariousExtensions_ReturnsCorrectResult(string fileNam
 ## Continuous Integration
 
 Tests are automatically run on:
-- Push to `main` or `develop` branches
-- Pull requests targeting `main` or `develop`
+- Push to `main`, `develop` or `dotnet` branches
+- Pull requests targeting `main`, `develop` or `dotnet`
 - Manual workflow dispatch
 
 There are two CI workflows that gate every PR:
 
 | Workflow | Job(s) | What it runs |
 |---|---|---|
-| `.github/workflows/test-dotnet.yml` | **Unit Tests** | `dotnet test --filter "Category!=Integration"` (fast) |
+| `.github/workflows/test-dotnet.yml` | **Unit Tests** | `npm run test:coverage` (JavaScript), then `dotnet test --filter "Category!=Integration"` with coverage |
 |  | **Integration Tests** | `dotnet test --filter "Category=Integration"` (in-process API tests) |
 | `.github/workflows/integration-tests-e2e.yml` | **Docker Container Smoke Test** | Builds `Dockerfile.dotnet`, starts the container, hits `/api/version`, and verifies the file watcher reacts to a fixture `.cbz` |
 
@@ -185,13 +265,21 @@ docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
 
 ## Current Test Coverage
 
-As of the last update:
-- **Total Tests**: 146
-- **Controllers**: 30 tests (WatcherController: 6, JobsController: 3, FilesController: 21)
-- **Services**: 72 tests (ComicProcessor: 12, ComicArchive: 8, FileWatcher: 9, ComicFileProcessor: 32, Integration: 8)
-- **Utilities**: 31 tests (ComicFileExtensions: 18, LoggingHelper: 11)
-- **Models**: 11 tests (ComicInfo, ComicMetadata, ComicFile, ProcessingJob)
-- **Code Coverage**: 27.95%
+Measured with the full suites: .NET with coverlet and `coverlet.runsettings`,
+JavaScript with `npm run test:coverage`.
+
+| Suite | Tests | Lines | Branches |
+|---|---|---|---|
+| .NET (`ComicMaintainer.Core`, `ComicMaintainer.WebApi`) | 4,678 | 99.0% | 97.5% |
+| JavaScript (`wwwroot/**/*.js`) | 1,130 | 99.9% | 98.3% |
+
+The **Unit Tests** CI job collects .NET coverage from `Category!=Integration`
+only (4,610 tests: 98.8% lines, 97.4% branches); the OpenTelemetry wiring in
+`TelemetryExtensions` is covered by the integration tests.
+
+What remains uncovered is mostly defensive: cleanup `catch` blocks for
+file-system failures that cannot be provoked when tests run as root, retry
+paths behind database insert races, and element-exists guards in the web UI.
 
 ## Adding New Tests
 

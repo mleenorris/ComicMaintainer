@@ -443,7 +443,7 @@
                                 <button class="action-dropdown-item" onclick="processAllFilesAsync(); closeAllActionDropdowns();">
                                     <svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Process All
                                 </button>
-                                <button class="action-dropdown-item" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
+                                <button class="action-dropdown-item" id="processUnmarkedItem" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
                                     <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> Process Unmarked
                                 </button>
                                 <button class="action-dropdown-item" id="processSelectedItem" onclick="processSelectedFilesAsync(); closeAllActionDropdowns();" disabled>
@@ -464,7 +464,7 @@
                             <button class="action-dropdown-item" onclick="renameAllFiles(); closeAllActionDropdowns();">
                                 <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename All
                             </button>
-                            <button class="action-dropdown-item" onclick="renameUnmarkedFiles(); closeAllActionDropdowns();">
+                            <button class="action-dropdown-item" id="renameUnmarkedItem" onclick="renameUnmarkedFiles(); closeAllActionDropdowns();">
                                 <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename Unmarked
                             </button>
                             <button class="action-dropdown-item" id="renameSelectedItem" onclick="renameSelectedFiles(); closeAllActionDropdowns();" disabled>
@@ -482,7 +482,7 @@
                             <button class="action-dropdown-item" onclick="normalizeAllFiles(); closeAllActionDropdowns();">
                                 <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize All
                             </button>
-                            <button class="action-dropdown-item" onclick="normalizeUnmarkedFiles(); closeAllActionDropdowns();">
+                            <button class="action-dropdown-item" id="normalizeUnmarkedItem" onclick="normalizeUnmarkedFiles(); closeAllActionDropdowns();">
                                 <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize Unmarked
                             </button>
                             <button class="action-dropdown-item" id="normalizeSelectedItem" onclick="normalizeSelectedFiles(); closeAllActionDropdowns();" disabled>
@@ -1055,10 +1055,14 @@
                         <h4 class="settings-subheading">ComicVine (US comics)</h4>
                         <div class="form-group">
                             <label for="comicVineApiKey">ComicVine API Key</label>
-                            <input type="password" id="comicVineApiKey" name="comicVineApiKey" placeholder="Enter ComicVine API key" autocomplete="off">
-                            <small class="form-hint">
+                            <input type="password" id="comicVineApiKey" name="comicVineApiKey" placeholder="Enter ComicVine API key" autocomplete="new-password">
+                            <small id="comicVineApiKeyHint" class="form-hint">
                                 Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.
                             </small>
+                            <label for="comicVineClearApiKeyCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="comicVineClearApiKeyCheckbox" name="comicVineClearApiKey">
+                                <span>Clear stored API key on save</span>
+                            </label>
                         </div>
                         <div class="form-group">
                             <label for="comicVineBaseUrl">ComicVine Base URL</label>

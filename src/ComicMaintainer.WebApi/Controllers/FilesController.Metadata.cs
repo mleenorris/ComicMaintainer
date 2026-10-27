@@ -238,6 +238,12 @@ public partial class FilesController
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("Invalid file path");
 
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to get tags for file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
+
             var metadata = await _processor.GetMetadataAsync(filePath);
             return metadata != null ? Ok(metadata) : NotFound();
         }
@@ -258,6 +264,12 @@ public partial class FilesController
             var filePath = DecodeBase64UrlSafe(encodedFilePath);
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("Invalid file path");
+
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to update tags for file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
 
             var success = await _processor.UpdateMetadataAsync(filePath, metadata);
             if (success && _eventBroadcaster is not null)

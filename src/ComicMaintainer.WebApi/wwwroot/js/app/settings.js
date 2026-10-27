@@ -364,7 +364,12 @@
 
                 // Load external metadata settings
                 document.getElementById('enableExternalSeriesMetadata').checked = !!settingsData.enable_external_series_metadata;
-                document.getElementById('comicVineApiKey').value = settingsData.comicvine_api_key || '';
+                // The key is never returned by the API; only whether one is stored.
+                document.getElementById('comicVineApiKey').value = '';
+                document.getElementById('comicVineApiKeyHint').textContent = settingsData.comicvine_api_key_set
+                    ? 'Leave blank to keep the stored key.'
+                    : 'Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.';
+                document.getElementById('comicVineClearApiKeyCheckbox').checked = false;
                 document.getElementById('comicVineBaseUrl').value = settingsData.comicvine_base_url || 'https://comicvine.gamespot.com/api';
                 document.getElementById('enableMangaDexMetadata').checked = !!settingsData.enable_mangadex_metadata;
                 document.getElementById('mangaDexBaseUrl').value = settingsData.mangadex_base_url || 'https://api.mangadex.org';
@@ -1234,6 +1239,7 @@
             const dbCleanupInterval = parseInt(document.getElementById('dbCleanupInterval').value);
             const enableExternalSeriesMetadata = document.getElementById('enableExternalSeriesMetadata').checked;
             const comicVineApiKey = document.getElementById('comicVineApiKey').value.trim();
+            const comicVineClearApiKey = document.getElementById('comicVineClearApiKeyCheckbox').checked;
             const comicVineBaseUrl = document.getElementById('comicVineBaseUrl').value.trim();
             const enableMangaDexMetadata = document.getElementById('enableMangaDexMetadata').checked;
             const mangaDexBaseUrl = document.getElementById('mangaDexBaseUrl').value.trim();
@@ -1395,7 +1401,8 @@
                     },
                     body: JSON.stringify({
                         enabled: enableExternalSeriesMetadata,
-                        comicVineApiKey: comicVineApiKey,
+                        // null keeps the stored key; '' clears it.
+                        comicVineApiKey: comicVineClearApiKey ? '' : (comicVineApiKey || null),
                         comicVineBaseUrl: comicVineBaseUrl || 'https://comicvine.gamespot.com/api',
                         enableMangaDex: enableMangaDexMetadata,
                         mangaDexBaseUrl: mangaDexBaseUrl || 'https://api.mangadex.org',
@@ -1586,6 +1593,9 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
+                if (!data.default) {
+                    throw new Error('No default format was returned');
+                }
                 
                 document.getElementById('filenameFormat').value = data.default;
                 showMessage('Reset to default format', 'info');

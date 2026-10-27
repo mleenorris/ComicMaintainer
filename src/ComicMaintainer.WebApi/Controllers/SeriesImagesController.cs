@@ -179,7 +179,8 @@ public class SeriesImagesController : ControllerBase
 
             return Ok(new { query, candidates });
         }
-        catch (Exception ex)
+        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a search error.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error searching provider image candidates for {Query}"),
                 LoggingHelper.SanitizeForLog(query));

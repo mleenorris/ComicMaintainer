@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Encodings.Web;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
@@ -15,11 +16,28 @@ namespace ComicMaintainer.WebApi.Authentication;
 /// </summary>
 public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthenticationOptions>
 {
+    // Upper case, lower case, digits and non-alphanumerics: every class Identity's
+    // password validator can require.
+    private static readonly string[] PasswordCharacterClasses =
+    [
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "abcdefghijklmnopqrstuvwxyz",
+        "0123456789",
+        "!@#$%^&*",
+    ];
+
+    private static readonly string PasswordAlphabet = string.Concat(PasswordCharacterClasses);
+
     private readonly AutheliaSettings _autheliaSettings;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly RoleManager<ApplicationRole> _roleManager;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly ILogger<AutheliaAuthenticationHandler> _logger;
+
+    // Untrusted peers already reported at Warning level (later requests log at Debug); bounded so that
+    // a scan from many addresses cannot grow it without limit.
+    private const int MaxReportedUntrustedPeers = 1000;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ReportedUntrustedPeers = new();
 
     public AutheliaAuthenticationHandler(
         IOptionsMonitor<AutheliaAuthenticationOptions> options,
@@ -53,6 +71,12 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             return AuthenticateResult.NoResult();
         }
 
+        // Only the reverse proxy may assert an identity: anyone reaching the app directly could forge these headers.
+        if (!IsFromTrustedProxy())
+        {
+            return AuthenticateResult.NoResult();
+        }
+
         var username = usernameValues.ToString();
         if (string.IsNullOrWhiteSpace(username))
         {
@@ -62,13 +86,14 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
 
         _logger.LogInformation("Authenticating user via Authelia: {Username}", username);
 
-        // Get optional headers
+        // Get optional headers. A missing header reads as "" rather than null, so blank
+        // values are treated as absent to let the email/name fallbacks below apply.
         Request.Headers.TryGetValue(_autheliaSettings.EmailHeader, out var emailValues);
         Request.Headers.TryGetValue(_autheliaSettings.NameHeader, out var nameValues);
         Request.Headers.TryGetValue(_autheliaSettings.GroupsHeader, out var groupsValues);
 
-        var email = emailValues.ToString();
-        var displayName = nameValues.ToString();
+        var email = NullIfBlank(emailValues.ToString());
+        var displayName = NullIfBlank(nameValues.ToString());
         var groups = groupsValues.ToString();
 
         // Ensure user exists in the database
@@ -109,6 +134,35 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             username, string.Join(", ", roles));
 
         return AuthenticateResult.Success(ticket);
+    }
+
+    /// <summary>
+    /// Whether the direct peer of the connection is in <c>AUTHELIA_TRUSTED_PROXIES</c>. X-Forwarded-For is not
+    /// consulted: it is just another header the client controls.
+    /// </summary>
+    private bool IsFromTrustedProxy()
+    {
+        var remoteIp = Context.Connection.RemoteIpAddress;
+        if (TrustedProxyAllowlist.TryParse(_autheliaSettings.TrustedProxies, out var trustedProxies, out _)
+            && trustedProxies.Contains(remoteIp))
+        {
+            return true;
+        }
+
+        var peer = ComicMaintainer.Core.Utilities.LoggingHelper.SanitizeForLog(
+            remoteIp is null ? "unknown" : TrustedProxyAllowlist.Normalize(remoteIp).ToString());
+        if (ReportedUntrustedPeers.Count < MaxReportedUntrustedPeers && ReportedUntrustedPeers.TryAdd(peer, 0))
+        {
+            _logger.LogWarning(
+                "Ignoring Authelia headers from {RemoteIp}: the address is not in AUTHELIA_TRUSTED_PROXIES. " +
+                "If this is your reverse proxy, add its IP address or subnet to AUTHELIA_TRUSTED_PROXIES.", peer);
+        }
+        else
+        {
+            _logger.LogDebug("Ignoring Authelia headers from {RemoteIp} (not in AUTHELIA_TRUSTED_PROXIES)", peer);
+        }
+
+        return false;
     }
 
     private async Task<ApplicationUser?> EnsureUserExistsAsync(string username, string? email, string? displayName, string? groups)
@@ -158,7 +212,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             };
 
             // Generate a random password (won't be used since Authelia handles auth)
-            var randomPassword = GenerateRandomPassword();
+            var randomPassword = GenerateRandomPassword(_userManager.Options.Password);
             var result = await _userManager.CreateAsync(user, randomPassword);
 
             if (!result.Succeeded)
@@ -229,24 +283,33 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         _logger.LogInformation("Assigned role {Role} to Authelia user: {Username}", targetRole, user.UserName);
     }
 
-    private static string GenerateRandomPassword()
+    private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>
+    /// A random password that satisfies <paramref name="policy"/>. It is never used to sign in,
+    /// but Identity validates it when the account is created, so it holds at least one character
+    /// of every class Identity can require, enough distinct characters and at least 32 characters
+    /// (more if the policy requires it). Characters are drawn and shuffled with
+    /// <see cref="RandomNumberGenerator"/>, without modulo bias.
+    /// </summary>
+    private static string GenerateRandomPassword(PasswordOptions policy)
     {
-        // Generate a secure random password (won't be used but required for user creation)
-        // Using RandomNumberGenerator for cryptographic randomness
-        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-        var password = new char[32];
-        var randomBytes = new byte[32];
-        
-        using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
+        var uniqueChars = Math.Clamp(policy.RequiredUniqueChars, 0, PasswordAlphabet.Length);
+        var length = Math.Max(32, Math.Max(policy.RequiredLength, uniqueChars + PasswordCharacterClasses.Length));
+        var password = new char[length];
+
+        var distinct = PasswordAlphabet.ToCharArray();
+        RandomNumberGenerator.Shuffle(distinct.AsSpan());
+        distinct.AsSpan(0, uniqueChars).CopyTo(password);
+
+        var next = uniqueChars;
+        foreach (var characterClass in PasswordCharacterClasses)
         {
-            rng.GetBytes(randomBytes);
+            password[next++] = characterClass[RandomNumberGenerator.GetInt32(characterClass.Length)];
         }
-        
-        for (int i = 0; i < 32; i++)
-        {
-            password[i] = chars[randomBytes[i] % chars.Length];
-        }
-        
+
+        RandomNumberGenerator.GetItems(PasswordAlphabet.AsSpan(), password.AsSpan(next));
+        RandomNumberGenerator.Shuffle(password.AsSpan());
         return new string(password);
     }
 }

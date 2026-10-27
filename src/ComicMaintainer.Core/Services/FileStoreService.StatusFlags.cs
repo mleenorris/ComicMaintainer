@@ -61,10 +61,10 @@ public partial class FileStoreService
                 // Create entity if it doesn't exist
                 if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
                 {
+                    var newEntity = CreateFileEntity(filePath, isDuplicate: duplicate);
                     try
                     {
-                        entity = CreateFileEntity(filePath, isDuplicate: duplicate);
-                        dbContext.ComicFiles.Add(entity);
+                        dbContext.ComicFiles.Add(newEntity);
                         await dbContext.SaveChangesAsync(cancellationToken);
                         MarkChanged();
                         _logger.LogDebug("Created file entity and set duplicate status for {FilePath} to {Status}", SanitizeForLogging(filePath), duplicate);
@@ -75,6 +75,8 @@ public partial class FileStoreService
                         // Race condition: entity was created by another thread between our check and insert
                         // Retry by fetching and updating the existing entity
                         _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                        // Stop tracking the failed insert, otherwise the retry's SaveChanges re-inserts it.
+                        dbContext.Entry(newEntity).State = EntityState.Detached;
                         entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
                         if (entity != null)
                         {
@@ -131,12 +133,12 @@ public partial class FileStoreService
                 // Create entity if it doesn't exist
                 if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
                 {
+                    var newEntity = CreateFileEntity(filePath);
+                    newEntity.IsRenamed = renamed;
+                    newEntity.IsProcessed = ComputeProcessedState(renamed, newEntity.IsNormalized);
                     try
                     {
-                        entity = CreateFileEntity(filePath);
-                        entity.IsRenamed = renamed;
-                        entity.IsProcessed = ComputeProcessedState(renamed, entity.IsNormalized);
-                        dbContext.ComicFiles.Add(entity);
+                        dbContext.ComicFiles.Add(newEntity);
                         await dbContext.SaveChangesAsync(cancellationToken);
                         MarkChanged();
                         _logger.LogDebug("Created file entity and set renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
@@ -146,6 +148,8 @@ public partial class FileStoreService
                     {
                         // Race condition: entity was created by another thread between our check and insert
                         _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                        // Stop tracking the failed insert, otherwise the retry's SaveChanges re-inserts it.
+                        dbContext.Entry(newEntity).State = EntityState.Detached;
                         entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
                         if (entity != null)
                         {
@@ -203,12 +207,12 @@ public partial class FileStoreService
                 // Create entity if it doesn't exist
                 if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
                 {
+                    var newEntity = CreateFileEntity(filePath);
+                    newEntity.IsNormalized = normalized;
+                    newEntity.IsProcessed = ComputeProcessedState(newEntity.IsRenamed, normalized);
                     try
                     {
-                        entity = CreateFileEntity(filePath);
-                        entity.IsNormalized = normalized;
-                        entity.IsProcessed = ComputeProcessedState(entity.IsRenamed, normalized);
-                        dbContext.ComicFiles.Add(entity);
+                        dbContext.ComicFiles.Add(newEntity);
                         await dbContext.SaveChangesAsync(cancellationToken);
                         MarkChanged();
                         _logger.LogDebug("Created file entity and set normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
@@ -218,6 +222,8 @@ public partial class FileStoreService
                     {
                         // Race condition: entity was created by another thread between our check and insert
                         _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                        // Stop tracking the failed insert, otherwise the retry's SaveChanges re-inserts it.
+                        dbContext.Entry(newEntity).State = EntityState.Detached;
                         entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
                         if (entity != null)
                         {

@@ -39,6 +39,16 @@ public partial class FilesController
     {
         try
         {
+            // Validate every path the batch job would process (it skips blank entries itself)
+            foreach (var filePath in filePaths)
+            {
+                if (!string.IsNullOrWhiteSpace(filePath) && !IsPathSafe(filePath))
+                {
+                    _logger.LogWarning("Attempt to process file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
+                    return BadRequest("One or more file paths are outside the allowed directory");
+                }
+            }
+
             var jobId = await _processor.ProcessFilesAsync(filePaths);
             return Ok(new { jobId });
         }
@@ -57,6 +67,16 @@ public partial class FilesController
     {
         try
         {
+            // Validate every path before updating any file, so a rejected path fails the whole request
+            foreach (var file in request.Files)
+            {
+                if (!string.IsNullOrEmpty(file) && !IsPathSafe(file))
+                {
+                    _logger.LogWarning("Attempt to update tags for file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(file)));
+                    return BadRequest("One or more file paths are outside the allowed directory");
+                }
+            }
+
             foreach (var file in request.Files)
             {
                 if (!string.IsNullOrEmpty(file))
@@ -127,6 +147,12 @@ public partial class FilesController
             var filePath = DecodeBase64UrlSafe(encodedFilePath);
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("Invalid file path");
+
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to process file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
 
             var success = await _processor.ProcessFileAsync(filePath, forceReprocess);
             return success ? Ok() : BadRequest("Failed to process file");

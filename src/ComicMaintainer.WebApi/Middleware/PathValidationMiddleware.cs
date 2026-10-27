@@ -8,6 +8,14 @@ namespace ComicMaintainer.WebApi.Middleware;
 /// </summary>
 public class PathValidationMiddleware
 {
+    /// <summary>
+    /// Path comparison for allowed-root containment: case-insensitive on Windows and
+    /// case-sensitive elsewhere, the same rule as <c>LibraryPathValidator.IsWithin</c>.
+    /// </summary>
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
     private readonly RequestDelegate _next;
     private readonly ILogger<PathValidationMiddleware> _logger;
     private readonly IOptionsMonitor<AppSettings> _settings;
@@ -45,31 +53,47 @@ public class PathValidationMiddleware
 
     private bool IsValidPath(string filePath)
     {
+        // Only a real ".." segment is a traversal attempt; names such as "What If...?" or
+        // "Batman... Again" are legitimate comics. Both separators count, so "\..\" is rejected
+        // even where "\" is an ordinary file-name character. Containment below is the real guard.
+        if (filePath.Split('/', '\\').Any(segment => segment == ".."))
+        {
+            return false;
+        }
+
         try
         {
-            // Get the full path
             var fullPath = Path.GetFullPath(filePath);
-            
-            // Check for path traversal attempts
-            if (fullPath.Contains("..") || filePath.Contains(".."))
-            {
-                return false;
-            }
 
             // Ensure path is within allowed directories
             var settings = _settings.CurrentValue;
-            var watchedDir = Path.GetFullPath(settings.WatchedDirectory);
-            var duplicateDir = Path.GetFullPath(settings.DuplicateDirectory);
-            var configDir = Path.GetFullPath(settings.ConfigDirectory);
-
-            return fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase) ||
-                   fullPath.StartsWith(duplicateDir, StringComparison.OrdinalIgnoreCase) ||
-                   fullPath.StartsWith(configDir, StringComparison.OrdinalIgnoreCase);
+            return IsSameOrUnder(fullPath, settings.WatchedDirectory) ||
+                   IsSameOrUnder(fullPath, settings.DuplicateDirectory) ||
+                   IsSameOrUnder(fullPath, settings.ConfigDirectory);
         }
         catch
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Returns true when the normalized <paramref name="fullPath"/> is <paramref name="directory"/>
+    /// itself or lives beneath it. Trailing separators are ignored, and a sibling that merely shares
+    /// the directory's name as a prefix (<c>/comics2</c> next to <c>/comics</c>) is outside. A blank
+    /// directory is not configured and contains nothing.
+    /// </summary>
+    private static bool IsSameOrUnder(string fullPath, string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return false;
+        }
+
+        var root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(
+                   fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), root, PathComparison)
+               || fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison);
     }
 
     private static string SanitizePath(string path)

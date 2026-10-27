@@ -51,12 +51,20 @@ public class CondensedBookBuildTrackerTests : IDisposable
     {
         SetupPlan();
         var epub = CreateBook("Series 001-002");
-        SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(epub, Path.GetFileName(epub))));
+        var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        SetupBuild(async (_, token) =>
+        {
+            await released.Task.WaitAsync(token);
+            return new CondensedBookFile(epub, Path.GetFileName(epub));
+        });
 
-        var started = await _tracker.StartAsync(Request(), Owner);
-        Assert.Equal(CondensedBookBuildStatus.Queued, started.Status);
+        var started = await _tracker.StartAsync(Request(), Owner).WaitAsync(TimeSpan.FromSeconds(10));
+        // StartAsync returns without waiting for the build, which its worker
+        // may already have picked up.
+        Assert.Contains(started.Status, new[] { CondensedBookBuildStatus.Queued, CondensedBookBuildStatus.Running });
         Assert.Equal("Series 001-002", started.DisplayName);
 
+        released.SetResult();
         var finished = await WaitForTerminalAsync(started.BuildId);
         Assert.Equal(CondensedBookBuildStatus.Completed, finished.Status);
         Assert.Null(finished.Error);
@@ -163,9 +171,11 @@ public class CondensedBookBuildTrackerTests : IDisposable
             await releasePlans.Task;
         });
         var epub = CreateBook("Series 001-002");
+        var buildStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseBuild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         SetupBuild(async (_, token) =>
         {
+            buildStarted.TrySetResult();
             await releaseBuild.Task.WaitAsync(token);
             return new CondensedBookFile(epub, Path.GetFileName(epub));
         });
@@ -177,6 +187,9 @@ public class CondensedBookBuildTrackerTests : IDisposable
         releasePlans.SetResult();
 
         var started = await Task.WhenAll(requests);
+        // The build runs on a background worker; let it reach the conversion
+        // before counting how many conversions were started.
+        await buildStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.All(started, build => Assert.Equal(started[0].BuildId, build.BuildId));
         _email.Verify(e => e.CreateCondensedBookAsync(

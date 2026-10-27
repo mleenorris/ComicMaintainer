@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using SharpCompress.Archives;
-using SharpCompress.Archives.Zip;
 using SharpCompress.Common;
 using SharpCompress.Writers.Zip;
 
@@ -142,46 +141,9 @@ public partial class ComicProcessorService
             
             try
             {
-                // Create new archive with updated metadata in a separate scope
-                // to ensure all file handles are released before file replacement
-                {
-                    using var sourceArchive = ArchiveFactory.OpenArchive(filePath);
-                    using var writer = ZipArchive.CreateArchive();
-                    
-                    // Add all existing entries except ComicInfo.xml
-                    foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
-                    {
-                        if (entry.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) != true && entry.Key != null)
-                        {
-                            using var stream = entry.OpenEntryStream();
-                            // Use a buffer to avoid loading entire files into memory
-                            const int maxBufferSize = 10 * 1024 * 1024; // 10MB limit per entry
-                            if (entry.Size > maxBufferSize)
-                            {
-                                _logger.LogWarning(
-                                    "Skipping large entry {Entry} ({Size} bytes) to prevent memory issues",
-                                    LoggingHelper.SanitizeForLog(entry.Key),
-                                    entry.Size);
-                                continue;
-                            }
-                            var memStream = new MemoryStream();
-                            stream.CopyTo(memStream);
-                            memStream.Position = 0;
-                            writer.AddEntry(entry.Key, memStream, true, entry.Size, entry.LastModifiedTime);
-                        }
-                    }
-                    
-                    // Add new ComicInfo.xml
-                    var xmlBytes = System.Text.Encoding.UTF8.GetBytes(comicInfoXml);
-                    var xmlStream = new MemoryStream(xmlBytes);
-                    writer.AddEntry("ComicInfo.xml", xmlStream, true);
-                    
-                    // Save to temp file
-                    using (var tempStream = File.Create(tempFile))
-                    {
-                        writer.SaveTo(tempStream, new ZipWriterOptions(CompressionType.Deflate));
-                    }
-                }
+                // Write the new archive to the temp file; RewriteArchive releases all
+                // file handles before returning, ahead of the file replacement.
+                RewriteArchive(filePath, tempFile, comicInfoXml);
                 
                 // Give a brief moment for any file handles to be fully released
                 await Task.Delay(FileHandleReleaseDelayMs, cancellationToken);
@@ -234,6 +196,18 @@ public partial class ComicProcessorService
     {
         try
         {
+            if (!TryResolveAllowedPath(filePath, out var resolvedPath))
+            {
+                _logger.LogWarning(
+                    "Cannot remove metadata: file is outside the allowed directories: {FilePath}",
+                    LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
+
+            // Operate on the validated physical path so a linked path component
+            // cannot redirect the rewrite to an archive outside the library.
+            filePath = resolvedPath;
+
             if (!File.Exists(filePath))
             {
                 _logger.LogWarning(
@@ -263,46 +237,9 @@ public partial class ComicProcessorService
 
             try
             {
-                // Rewrite the archive without ComicInfo.xml in a separate scope so all
-                // file handles are released before File.Replace.
-                {
-                    using var sourceArchive = ArchiveFactory.OpenArchive(filePath);
-                    using var writer = ZipArchive.CreateArchive();
-
-                    foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
-                    {
-                        if (entry.Key == null)
-                        {
-                            continue;
-                        }
-
-                        // Skip ComicInfo.xml — that is the entry we are removing.
-                        if (entry.Key.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-
-                        using var stream = entry.OpenEntryStream();
-                        const int maxBufferSize = 10 * 1024 * 1024; // 10MB limit per entry
-                        if (entry.Size > maxBufferSize)
-                        {
-                            _logger.LogWarning(
-                                "Skipping large entry {Entry} ({Size} bytes) to prevent memory issues",
-                                LoggingHelper.SanitizeForLog(entry.Key),
-                                entry.Size);
-                            continue;
-                        }
-                        var memStream = new MemoryStream();
-                        stream.CopyTo(memStream);
-                        memStream.Position = 0;
-                        writer.AddEntry(entry.Key, memStream, true, entry.Size, entry.LastModifiedTime);
-                    }
-
-                    using (var tempStream = File.Create(tempFile))
-                    {
-                        writer.SaveTo(tempStream, new ZipWriterOptions(CompressionType.Deflate));
-                    }
-                }
+                // Rewrite the archive without ComicInfo.xml; RewriteArchive releases all
+                // file handles before returning, ahead of File.Replace.
+                RewriteArchive(filePath, tempFile, comicInfoXml: null);
 
                 await Task.Delay(FileHandleReleaseDelayMs, cancellationToken);
 
@@ -331,6 +268,43 @@ public partial class ComicProcessorService
         {
             _logger.LogError(ex, "Error removing metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Writes a zip to <paramref name="destinationPath"/> holding every non-directory entry of
+    /// <paramref name="sourcePath"/> except ComicInfo.xml (same order, names and timestamps),
+    /// followed by <paramref name="comicInfoXml"/> as ComicInfo.xml when it is not null.
+    /// Entries are streamed one at a time, so memory use does not grow with entry or archive size.
+    /// Throws if any entry cannot be copied, so callers never replace the original with an
+    /// archive that is missing pages.
+    /// </summary>
+    private static void RewriteArchive(string sourcePath, string destinationPath, string? comicInfoXml)
+    {
+        using var sourceArchive = ArchiveFactory.OpenArchive(sourcePath);
+        using var destination = File.Create(destinationPath);
+        using var writer = new ZipWriter(destination, new ZipWriterOptions(CompressionType.Deflate));
+
+        foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
+        {
+            if (entry.Key == null)
+            {
+                throw new InvalidDataException("The archive contains an entry without a name, which cannot be copied.");
+            }
+
+            if (entry.Key.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            using var entryStream = entry.OpenEntryStream();
+            writer.Write(entry.Key, entryStream, entry.LastModifiedTime);
+        }
+
+        if (comicInfoXml != null)
+        {
+            using var xmlStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(comicInfoXml));
+            writer.Write("ComicInfo.xml", xmlStream, DateTime.Now);
         }
     }
 

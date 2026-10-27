@@ -1,3 +1,4 @@
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Hosting;
@@ -46,30 +47,20 @@ public class ServiceWorkerControllerTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(_tempDirectory, recursive: true);
-        }
-        catch (IOException)
-        {
-            // Best effort; a leftover temp directory must not fail the run.
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
+        TestIO.TryDeleteDirectory(_tempDirectory);
     }
 
     [Fact]
     public void Dispose_DeletesTheTempDirectory()
     {
         // Regression test for #876: every test used to leave its directory behind.
-        var tests = new ServiceWorkerControllerTests();
-        File.WriteAllText(Path.Combine(tests._tempDirectory, "sw.js"), "// Service Worker");
+        File.WriteAllText(Path.Combine(_tempDirectory, "sw.js"), "// Service Worker");
 
         // xUnit only disposes test classes that implement IDisposable.
-        Assert.IsAssignableFrom<IDisposable>(tests).Dispose();
+        Assert.IsAssignableFrom<IDisposable>(this);
+        Dispose();
 
-        Assert.False(Directory.Exists(tests._tempDirectory));
+        Assert.False(Directory.Exists(_tempDirectory));
     }
 
     [Fact]

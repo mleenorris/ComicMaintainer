@@ -14,15 +14,42 @@ public class TestRunConfigDirectoryTests
     [Fact]
     public async Task Program_WritesItsLogsAndUserSettingsToThePerRunConfigDirectory()
     {
-        await using var factory = new WebApplicationFactory<Program>();
-        using var client = factory.CreateClient();
+        var factory = new WebApplicationFactory<Program>();
+        try
+        {
+            using var client = factory.CreateClient();
+            var response = await client.GetAsync("/api/version");
+            response.EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            // Stopping the host flushes and closes the Serilog file sinks before the files are inspected.
+            await factory.DisposeAsync();
+        }
 
-        var response = await client.GetAsync("/api/version");
+        var configDirectory = TestRunConfigDirectory.DirectoryPath;
+        Assert.Equal(configDirectory, Environment.GetEnvironmentVariable("CONFIG_DIR"));
+        Assert.StartsWith(Path.GetTempPath(), configDirectory);
+        Assert.True(Directory.Exists(configDirectory), $"Expected config directory {configDirectory} to exist.");
+        Assert.True(File.Exists(Path.Join(configDirectory, "user-settings.json")));
+        Assert.True(
+            await WaitForAsync(() => Directory.GetFiles(configDirectory, "debug*.log").Length > 0, TimeSpan.FromSeconds(5)),
+            "Expected a debug*.log file in the per-run config directory.");
+    }
 
-        response.EnsureSuccessStatusCode();
-        Assert.Equal(TestRunConfigDirectory.Path, Environment.GetEnvironmentVariable("CONFIG_DIR"));
-        Assert.StartsWith(Path.GetTempPath(), TestRunConfigDirectory.Path);
-        Assert.True(File.Exists(Path.Join(TestRunConfigDirectory.Path, "user-settings.json")));
-        Assert.NotEmpty(Directory.GetFiles(TestRunConfigDirectory.Path, "debug*.log"));
+    private static async Task<bool> WaitForAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                return false;
+            }
+
+            await Task.Delay(50);
+        }
+
+        return true;
     }
 }

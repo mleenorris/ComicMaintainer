@@ -16,28 +16,14 @@ internal static class TestRunConfigDirectory
     public const string EnvironmentVariable = "CONFIG_DIR";
 
     /// <summary>The directory CONFIG_DIR points at for the whole run. Program creates it on first use.</summary>
-    public static string Path { get; } = System.IO.Path.Join(
-        System.IO.Path.GetTempPath(), "ComicMaintainer.Tests", "Config-" + Guid.NewGuid().ToString("N"));
+    public static string DirectoryPath { get; } = Path.Join(
+        Path.GetTempPath(), "ComicMaintainer.Tests", "Config-" + Guid.NewGuid().ToString("N"));
 
     [ModuleInitializer]
     internal static void Initialize()
     {
-        Environment.SetEnvironmentVariable(EnvironmentVariable, Path);
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => Delete();
-    }
-
-    private static void Delete()
-    {
-        try
-        {
-            Directory.Delete(Path, recursive: true);
-        }
-        catch (IOException)
-        {
-            // Best effort; also covers a run that never started a host, so never created it.
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
+        Environment.SetEnvironmentVariable(EnvironmentVariable, DirectoryPath);
+        // Best effort; also covers a run that never started a host, so never created it.
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => TestIO.TryDeleteDirectory(DirectoryPath);
     }
 }

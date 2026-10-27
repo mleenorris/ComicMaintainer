@@ -266,7 +266,8 @@ docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
 4. **One assertion per test**: Focus on testing one thing
 5. **Clean up resources**: Dispose of resources in test teardown. A test class
    that creates a temp directory implements `IDisposable` and deletes it there
-   (best effort, ignoring `IOException` and `UnauthorizedAccessException`)
+   with `TestIO.TryDeleteDirectory` (`Helpers/TestIO.cs`), which is best effort:
+   a missing directory, `IOException` and `UnauthorizedAccessException` are ignored
 6. **Mock external dependencies**: Keep tests fast and reliable
 
 ## Current Test Coverage

@@ -49,30 +49,20 @@ public class FileStoreServiceTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(_testDirectory, recursive: true);
-        }
-        catch (IOException)
-        {
-            // Best effort; a leftover temp directory must not fail the run.
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
+        TestIO.TryDeleteDirectory(_testDirectory);
     }
 
     [Fact]
     public void Dispose_DeletesTheTestDirectory()
     {
         // Regression test for #876: every test used to leave its directory (and archives) behind.
-        var tests = new FileStoreServiceTests();
-        File.WriteAllText(Path.Combine(tests._testDirectory, "test.cbz"), "test content");
+        File.WriteAllText(Path.Combine(_testDirectory, "test.cbz"), "test content");
 
         // xUnit only disposes test classes that implement IDisposable.
-        Assert.IsAssignableFrom<IDisposable>(tests).Dispose();
+        Assert.IsAssignableFrom<IDisposable>(this);
+        Dispose();
 
-        Assert.False(Directory.Exists(tests._testDirectory));
+        Assert.False(Directory.Exists(_testDirectory));
     }
 
     [Fact]

@@ -9,6 +9,16 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class FileStoreService
 {
+    private readonly record struct FileStatusSnapshot(
+        bool IsRenamed,
+        bool IsNormalized,
+        bool IsDuplicate,
+        DateTime CreatedAt)
+    {
+        public static FileStatusSnapshot FromComicFile(ComicFile file) =>
+            new(file.IsRenamed, file.IsNormalized, file.IsDuplicate, file.CreatedAt);
+    }
+
     public async Task AddFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
         // Validate path is within allowed directories
@@ -24,13 +34,14 @@ public partial class FileStoreService
         var fileInfo = new FileInfo(filePath);
         
         // Check if file exists in database to preserve status
-        bool isRenamed = false;
-        bool isNormalized = false;
-        bool isDuplicate = _duplicateFiles.ContainsKey(filePath);
+        var status = new FileStatusSnapshot(
+            IsRenamed: false,
+            IsNormalized: false,
+            IsDuplicate: _duplicateFiles.ContainsKey(filePath),
+            CreatedAt: DateTime.UtcNow);
         // Default the creation stamp to now for a brand-new file; if the file is already
         // tracked in the database, preserve its original CreatedAt so re-adds (e.g. watcher
         // re-scan) don't reset the series recency window used by Overview "Series Updates".
-        DateTime createdAt = DateTime.UtcNow;
         // Durable per-file metadata and version stamps that must survive a re-add, so a
         // watcher re-scan doesn't discard authored metadata and force a needless reprocess.
         // (Read state is no longer carried here: it is per-user, keyed by path in
@@ -47,10 +58,7 @@ public partial class FileStoreService
             if (entity != null)
             {
                 // Preserve existing status from database
-                isRenamed = entity.IsRenamed;
-                isNormalized = entity.IsNormalized;
-                isDuplicate = entity.IsDuplicate;
-                createdAt = entity.CreatedAt;
+                status = new(entity.IsRenamed, entity.IsNormalized, entity.IsDuplicate, entity.CreatedAt);
                 tracked = ToComicFile(entity);
             }
         }
@@ -60,11 +68,12 @@ public partial class FileStoreService
         }
 
         // Fall back to the in-memory snapshot when the database row could not be read
-        // (or does not exist yet) so a transient database error can't silently drop
-        // read/metadata state either.
+        // (or does not exist yet) so a transient database error can't silently reset the
+        // file to unprocessed, move its CreatedAt to now, or drop its metadata either.
         if (tracked is null && _files.TryGetValue(filePath, out var cachedFile))
         {
             tracked = cachedFile;
+            status = FileStatusSnapshot.FromComicFile(cachedFile);
         }
 
         var comicFile = new ComicFile
@@ -74,11 +83,11 @@ public partial class FileStoreService
             Directory = fileInfo.DirectoryName ?? string.Empty,
             FileSize = fileInfo.Length,
             LastModified = fileInfo.LastWriteTime,
-            CreatedAt = createdAt,
-            IsRenamed = isRenamed,
-            IsNormalized = isNormalized,
-            IsProcessed = ComputeProcessedState(isRenamed, isNormalized),
-            IsDuplicate = isDuplicate,
+            CreatedAt = status.CreatedAt,
+            IsRenamed = status.IsRenamed,
+            IsNormalized = status.IsNormalized,
+            IsProcessed = ComputeProcessedState(status.IsRenamed, status.IsNormalized),
+            IsDuplicate = status.IsDuplicate,
             // Per-user read state lives in UserFileReadStatuses and is keyed by path, so a
             // re-add cannot lose it and there is nothing to carry over onto the shared
             // in-memory entry (which is visible to every user).

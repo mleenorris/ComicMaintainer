@@ -178,6 +178,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry with nothing skipped, and if an entry cannot be copied the original is left untouched.
 - **Two simultaneous updates of a newly added file no longer lose one of them**, and renaming a
   file to its own path no longer deletes its database record.
+- **A file re-added while the database is briefly unavailable keeps its processed state.** When
+  its record could not be read (a transient error such as "database is locked"), the file was
+  rebuilt in memory as not renamed, not normalized and created just now, so until the next
+  restart it was listed as unprocessed, was processed again and could push its series to the top
+  of Series Updates. A duplicate could also lose its duplicate flag, in the database as well. The
+  file now keeps all of these, as it already kept its metadata.
+- **Saving the page and marking a comic read at the same moment no longer undoes one of them.**
+  The reader does both when the first page it shows is the last one (a one-page comic, say). If
+  the user had no read record for the comic yet, both requests created one and the request that
+  lost overwrote the other's change with its defaults, so the comic stayed unread or its saved
+  page went back to 1. Only each request's own change is applied now.
 - **An unrelated error while replacing a file is retried** instead of being mistaken for a
   cross-device move and falling back to a non-atomic copy.
 - **Comics whose names contain consecutive dots ("What If...?") are tracked and usable.** They

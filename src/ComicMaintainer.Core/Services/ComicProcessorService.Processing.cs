@@ -48,6 +48,15 @@ public partial class ComicProcessorService
                 return false;
             }
 
+            if (new FileInfo(filePath).LinkTarget is not null)
+            {
+                _logger.LogWarning("ProcessFileAsync: File symlinks are not processed: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
+                await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                await LogHistoryAsync(filePath, "Process", false, "File symlinks are not processed", cancellationToken);
+                return false;
+            }
+
             _logger.LogInformation("ProcessFileAsync: Starting processing for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             // Skip files that the database already considers fully processed, preventing
@@ -80,7 +89,7 @@ public partial class ComicProcessorService
             _logger.LogDebug("ProcessFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             
             // Extract metadata from the archive
-            var metadata = await GetMetadataAsync(filePath, cancellationToken);
+            var metadata = await GetMetadataAtResolvedPath(resolvedPath, filePath);
             
             if (metadata != null)
             {
@@ -172,6 +181,14 @@ public partial class ComicProcessorService
 
                 _logger.LogDebug("ProcessFileAsync: Attempting to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var newResolvedPath = GenerateFileName(metadata, resolvedPath);
+                if (newResolvedPath != null)
+                {
+                    _logger.LogInformation(
+                        "Renaming file from {OldPath} to {NewPath}",
+                        LoggingHelper.SanitizePathForLog(filePath),
+                        LoggingHelper.SanitizePathForLog(newResolvedPath));
+                }
+
                 if (newResolvedPath == null)
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
@@ -206,40 +223,45 @@ public partial class ComicProcessorService
                 }
                 else
                 {
-                    // Only the file name changes, so the caller's path keeps its folder.
-                    var newFilePath = Path.Combine(Path.GetDirectoryName(filePath) ?? string.Empty, Path.GetFileName(newResolvedPath));
+                    var newFilePath = newResolvedPath;
                     try
                     {
-                        _logger.LogInformation(
-                            "Renaming file from {OldPath} to {NewPath}",
-                            LoggingHelper.SanitizePathForLog(filePath),
-                            LoggingHelper.SanitizePathForLog(newFilePath));
-                        var oldFilePath = filePath;
-                        var beforeFilename = Path.GetFileName(oldFilePath);
-                        var afterFilename = Path.GetFileName(newFilePath);
-                        
-                        File.Move(resolvedPath, newResolvedPath);
-                        
-                        // Atomically move the database record to the new path, preserving all
-                        // processing state so the FileSystemWatcher rename event sees the entry
-                        // as already tracked and does not re-queue it for processing.
-                        await _fileStore.UpdateFilePathAsync(oldFilePath, newFilePath, cancellationToken);
-                        await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
-
-                        // The normalize phase above marked the (old-path) row normalized. Re-assert
-                        // that on the new path so the move can't drop it if the watcher removed the
-                        // old row before UpdateFilePathAsync migrated it (Delete+Create race),
-                        // which would otherwise leave the file showing as unprocessed.
-                        if (normalizeSuccess)
+                        using var renameDirectoryHandle = OpenRenameDirectory(resolvedPath);
+                        if (!TryResolveAllowedPath(resolvedPath, out currentPath) || currentPath != resolvedPath)
                         {
-                            await _fileStore.MarkFileNormalizedAsync(newFilePath, true, cancellationToken);
+                            _logger.LogWarning("ProcessFileAsync: File path changed during processing, not renaming: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                            await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                            await LogHistoryAsync(filePath, "Rename", false, "File path changed during processing", cancellationToken);
                         }
-                        
-                        await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null, 
-                            beforeFilename, afterFilename, metadata, metadata, cancellationToken);
-                        
-                        filePath = newFilePath;
-                        renameSuccess = true;
+                        else
+                        {
+                            _logger.LogDebug("ProcessFileAsync: Rename path validated: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                            newFilePath = MoveFileInRenameDirectory(renameDirectoryHandle, resolvedPath, newResolvedPath);
+                            var oldFilePath = filePath;
+                            var beforeFilename = Path.GetFileName(oldFilePath);
+                            var afterFilename = Path.GetFileName(newFilePath);
+
+                            // Atomically move the database record to the new path, preserving all
+                            // processing state so the FileSystemWatcher rename event sees the entry
+                            // as already tracked and does not re-queue it for processing.
+                            await _fileStore.UpdateFilePathAsync(oldFilePath, newFilePath, cancellationToken);
+                            await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
+
+                            // The normalize phase above marked the (old-path) row normalized. Re-assert
+                            // that on the new path so the move can't drop it if the watcher removed the
+                            // old row before UpdateFilePathAsync migrated it (Delete+Create race),
+                            // which would otherwise leave the file showing as unprocessed.
+                            if (normalizeSuccess)
+                            {
+                                await _fileStore.MarkFileNormalizedAsync(newFilePath, true, cancellationToken);
+                            }
+
+                            await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null,
+                                beforeFilename, afterFilename, metadata, metadata, cancellationToken);
+
+                            filePath = newFilePath;
+                            renameSuccess = true;
+                        }
                     }
                     catch (IOException ex) when (TargetFileExists(newResolvedPath, resolvedPath))
                     {

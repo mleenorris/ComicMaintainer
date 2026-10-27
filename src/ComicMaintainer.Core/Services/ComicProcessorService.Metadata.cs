@@ -19,8 +19,26 @@ public partial class ComicProcessorService
             if (!TryResolveAllowedPath(filePath, out var resolvedPath))
                 return Task.FromResult<ComicMetadata?>(null);
 
-            if (!File.Exists(resolvedPath) || !IsComicArchive(resolvedPath))
+            return GetMetadataAtResolvedPath(resolvedPath, filePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return Task.FromResult<ComicMetadata?>(null);
+        }
+    }
+
+    private Task<ComicMetadata?> GetMetadataAtResolvedPath(string resolvedPath, string fallbackFilePath)
+    {
+        try
+        {
+            if (!TryResolveAllowedPath(resolvedPath, out var currentPath) ||
+                !string.Equals(currentPath, resolvedPath, StringComparison.Ordinal) ||
+                !File.Exists(resolvedPath) ||
+                !IsComicArchive(resolvedPath))
+            {
                 return Task.FromResult<ComicMetadata?>(null);
+            }
 
             using var archive = ArchiveFactory.OpenArchive(resolvedPath);
             
@@ -37,13 +55,13 @@ public partial class ComicProcessorService
             // Fallback: parse from filename
             return Task.FromResult<ComicMetadata?>(new ComicMetadata
             {
-                Series = ExtractSeriesFromFilename(filePath),
-                Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(filePath))
+                Series = ExtractSeriesFromFilename(fallbackFilePath),
+                Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(fallbackFilePath))
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(fallbackFilePath));
             return Task.FromResult<ComicMetadata?>(null);
         }
     }

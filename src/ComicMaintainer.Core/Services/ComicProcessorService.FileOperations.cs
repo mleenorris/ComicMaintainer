@@ -3,6 +3,10 @@ using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32.SafeHandles;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using SharpCompress.Archives;
@@ -229,4 +233,106 @@ public partial class ComicProcessorService
             out resolvedPath,
             _settings.WatchedDirectory,
             _settings.DuplicateDirectory);
+
+    private static SafeFileHandle? OpenRenameDirectory(string sourcePath)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return null;
+        }
+
+        var directoryPath = Path.GetDirectoryName(sourcePath)
+            ?? throw new IOException("Cannot determine the source directory.");
+        var descriptor = OpenLinuxDirectory(directoryPath, 0x10000 | 0x80000);
+        if (descriptor < 0)
+        {
+            throw new IOException($"Could not open the source directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
+        }
+
+        var handle = new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
+        try
+        {
+            if (!string.Equals(ReadLinuxDirectoryPath(descriptor), directoryPath, StringComparison.Ordinal))
+            {
+                throw new IOException("The source directory changed while it was being opened.");
+            }
+
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    private string MoveFileInRenameDirectory(SafeFileHandle? directoryHandle, string sourcePath, string targetPath)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            File.Move(sourcePath, targetPath);
+            return targetPath;
+        }
+
+        if (directoryHandle is null || directoryHandle.IsInvalid)
+        {
+            throw new IOException("The source directory handle is unavailable.");
+        }
+
+        var directoryDescriptor = directoryHandle.DangerousGetHandle().ToInt32();
+        var currentDirectory = ReadLinuxDirectoryPath(directoryDescriptor);
+        if (!LibraryPathValidator.IsWithin(currentDirectory, _settings.WatchedDirectory) &&
+            !LibraryPathValidator.IsWithin(currentDirectory, _settings.DuplicateDirectory))
+        {
+            throw new IOException("The source directory is outside the allowed directories.");
+        }
+
+        var result = RenameLinuxNoReplace(
+            directoryDescriptor,
+            Path.GetFileName(sourcePath),
+            directoryDescriptor,
+            Path.GetFileName(targetPath),
+            1);
+        if (result != 0)
+        {
+            throw new IOException($"Could not rename the file: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
+        }
+
+        return Path.Combine(ReadLinuxDirectoryPath(directoryDescriptor), Path.GetFileName(targetPath));
+    }
+
+    private static string ReadLinuxDirectoryPath(int descriptor)
+    {
+        var buffer = new byte[4096];
+        var length = ReadLinuxLink($"/proc/self/fd/{descriptor}", buffer, (nuint)buffer.Length);
+        if (length <= 0 || length >= buffer.Length)
+        {
+            throw new IOException($"Could not resolve the opened directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
+        }
+
+        var path = Encoding.UTF8.GetString(buffer, 0, (int)length);
+        if (path.EndsWith(" (deleted)", StringComparison.Ordinal))
+        {
+            throw new IOException("The opened source directory no longer has a path.");
+        }
+
+        return path;
+    }
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenLinuxDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+
+    [DllImport("libc", EntryPoint = "readlink", SetLastError = true)]
+    private static extern nint ReadLinuxLink(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        [Out] byte[] buffer,
+        nuint bufferSize);
+
+    [DllImport("libc", EntryPoint = "renameat2", SetLastError = true)]
+    private static extern int RenameLinuxNoReplace(
+        int sourceDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceName,
+        int targetDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName,
+        uint flags);
 }

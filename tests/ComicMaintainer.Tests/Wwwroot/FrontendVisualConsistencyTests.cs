@@ -141,6 +141,17 @@ public class FrontendVisualConsistencyTests
     }
 
     [Fact]
+    public void MainCss_ActionMenuFitsWithinTheViewport()
+    {
+        var css = Read("css", "main.css");
+
+        // toggleDropdown() keeps the action menu 10px inside both edges of the
+        // viewport, which only works while the menu fits. In a window 200 CSS px
+        // wide (400% zoom) the start of its items was cut off on the left.
+        Assert.Contains("max-width: calc(100vw - 20px)", RuleBody(css, @"\.dropdown-menu"));
+    }
+
+    [Fact]
     public void MainCss_MobileHeaderSearchShrinksAndAvoidsFocusZoom()
     {
         var css = Read("css", "main.css");

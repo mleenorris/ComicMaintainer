@@ -6,10 +6,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { deferred } = require('./support/app');
 const {
     PORTRAIT_QUERY,
     makeSeries,
     makeSeriesList,
+    seriesPages,
     bootLibrary,
     seriesCalls,
     savedPreferences,
@@ -247,6 +249,37 @@ test('switching to the series view from a series page closes it and reloads the 
     assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
     assert.ok(page.$('#seriesViewModeBtn').classList.contains('active'));
     assert.ok(!page.$('#filesViewModeBtn').classList.contains('active'));
+});
+
+test('drawing the library over a series page closes an Actions menu left open there', async () => {
+    // An open menu is moved to <body> (js/app/menus.js), so it would stay on
+    // screen over the library, still acting on an issue that is gone.
+    const page = await bootLibrary({ hash: '#/series/series-1', series: makeSeriesList(2), routes: ISSUES_ROUTE });
+    const openIssueMenu = () => {
+        page.click(page.$('#seriesDetailPanel .series-issue-actions-toggle'));
+        assert.equal(page.$$('body > .dropdown-menu.show').length, 1);
+    };
+    const leftOpen = () => page.$$('body > .dropdown-menu, .dropdown-menu.show');
+
+    // The loading state that replaces the series page closes it...
+    const pending = deferred();
+    page.route('GET /api/files/series', () => pending.promise);
+    openIssueMenu();
+    const switching = page.run("setLibraryViewMode('series')");
+    await page.settle();
+    assert.ok(page.$('#fileList > .loading'));
+    assert.deepEqual(leftOpen(), []);
+    pending.resolve(seriesPages(makeSeriesList(2))({ query: {} }));
+    await switching;
+    assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
+
+    // ...and so does drawing the loaded library itself.
+    page.run("navigate('#/series/series-1')");
+    await page.settle();
+    openIssueMenu();
+    page.run('renderSeriesLibrary()');
+    assert.deepEqual(leftOpen(), []);
+    assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
 });
 
 test('a legacy Files mode is coerced back to the series library', async () => {

@@ -3183,6 +3183,8 @@
             box-shadow: var(--shadow-md);
             z-index: 1000;
             min-width: 150px;
+            /* toggleDropdown() keeps the menu 10px inside each viewport edge. */
+            max-width: calc(100vw - 20px);
         }
         
         .dropdown-menu.show {

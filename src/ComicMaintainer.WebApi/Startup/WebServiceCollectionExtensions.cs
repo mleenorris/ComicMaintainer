@@ -83,6 +83,14 @@ internal static class WebServiceCollectionExtensions
         var trustedProxies = LoadRateLimiterTrustedProxies(configuration);
         services.AddRateLimiter(options =>
         {
+            // Logged here, when the pipeline is built: Serilog is not configured yet while services are registered.
+            if (trustedProxies.Networks.Count > 0)
+            {
+                Log.Information(
+                    "Rate limiting counts anonymous requests from {TrustedProxies} per X-Forwarded-For client address",
+                    string.Join(", ", trustedProxies.Networks));
+            }
+
             options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
             {
                 // Allow generous per-minute limits for authenticated traffic to avoid
@@ -204,13 +212,6 @@ internal static class WebServiceCollectionExtensions
             && TrustedProxyAllowlist.TryParse(autheliaSettings.TrustedProxies, out var autheliaProxies, out _))
         {
             trustedProxies = trustedProxies.Union(autheliaProxies);
-        }
-
-        if (trustedProxies.Networks.Count > 0)
-        {
-            Log.Information(
-                "Rate limiting counts anonymous requests from {TrustedProxies} per X-Forwarded-For client address",
-                string.Join(", ", trustedProxies.Networks));
         }
 
         return trustedProxies;

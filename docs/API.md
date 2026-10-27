@@ -744,7 +744,11 @@ environment; in production the correlation id is the link to the full detail in 
 
 ## Rate Limiting
 
-Currently, there is no rate limiting implemented. Consider adding rate limiting if the API is exposed to the internet.
+Requests are rate-limited per minute: 100 for each client address that is not signed in, and 1000 for each signed-in
+user. Requests over the limit are delayed until the next minute, or rejected with `429 Too Many Requests` when too
+many are already waiting (10 per client address, 100 per user). Behind a reverse proxy, set `TRUSTED_PROXIES` so that
+signed-out clients are counted by the address the proxy forwards in `X-Forwarded-For` instead of all sharing the
+proxy's; see [Trusted Proxies and Rate Limiting](REVERSE_PROXY.md#trusted-proxies-and-rate-limiting).
 
 ## CORS
 

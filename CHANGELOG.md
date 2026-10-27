@@ -109,6 +109,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **One client can no longer stop everyone from signing in behind a reverse proxy.** Signed-out
+  requests are rate-limited per client address, but behind a proxy every request comes from the
+  proxy's address, so one client sending more than about 110 requests a minute (a
+  password-guessing script, say) made signing in fail with `429 Too Many Requests` for every
+  user until the minute was over. Set the new `TRUSTED_PROXIES` to your proxy's address or its
+  Docker network's subnet (with Authelia enabled, `AUTHELIA_TRUSTED_PROXIES` is used too), and
+  requests from the proxy are counted per client, by the address it appends to
+  `X-Forwarded-For`; addresses a client writes into the header itself are ignored. An invalid
+  entry stops the app from starting. See
+  [Trusted Proxies and Rate Limiting](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting).
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
   check for administration read the Authelia settings without that variable, so when the admin
   groups were set only there (the documented way) every signed-in user who was not ReadOnly,

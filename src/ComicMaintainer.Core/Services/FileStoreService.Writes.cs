@@ -60,11 +60,15 @@ public partial class FileStoreService
         }
 
         // Fall back to the in-memory snapshot when the database row could not be read
-        // (or does not exist yet) so a transient database error can't silently drop
-        // read/metadata state either.
+        // (or does not exist yet) so a transient database error can't silently reset the
+        // file to unprocessed, move its CreatedAt to now, or drop its metadata either.
         if (tracked is null && _files.TryGetValue(filePath, out var cachedFile))
         {
             tracked = cachedFile;
+            isRenamed = cachedFile.IsRenamed;
+            isNormalized = cachedFile.IsNormalized;
+            isDuplicate = cachedFile.IsDuplicate;
+            createdAt = cachedFile.CreatedAt;
         }
 
         var comicFile = new ComicFile

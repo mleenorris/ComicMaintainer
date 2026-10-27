@@ -204,12 +204,12 @@ public partial class FileStoreService
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-            var status = await GetOrCreateUserReadStatusAsync(dbContext, userId, filePath, create: true, cancellationToken);
-            status!.IsRead = read;
-            status.LastReadDate = read ? DateTime.UtcNow : status.LastReadDate;
-            status.UpdatedAt = DateTime.UtcNow;
-
-            await SaveUserReadStatusAsync(dbContext, status, cancellationToken);
+            await SaveUserReadStatusAsync(dbContext, userId, filePath, status =>
+            {
+                status.IsRead = read;
+                status.LastReadDate = read ? DateTime.UtcNow : status.LastReadDate;
+                status.UpdatedAt = DateTime.UtcNow;
+            }, cancellationToken);
             InvalidateUserReadPaths(userId);
             await SyncReadingProgressAsync(dbContext, userId, new[] { filePath }, read, DateTime.UtcNow, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -320,12 +320,12 @@ public partial class FileStoreService
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-            var status = await GetOrCreateUserReadStatusAsync(dbContext, userId, filePath, create: true, cancellationToken);
-            status!.CurrentPage = currentPage;
-            status.LastReadDate = DateTime.UtcNow;
-            status.UpdatedAt = DateTime.UtcNow;
-
-            await SaveUserReadStatusAsync(dbContext, status, cancellationToken);
+            await SaveUserReadStatusAsync(dbContext, userId, filePath, status =>
+            {
+                status.CurrentPage = currentPage;
+                status.LastReadDate = DateTime.UtcNow;
+                status.UpdatedAt = DateTime.UtcNow;
+            }, cancellationToken);
             _logger.LogDebug("Updated reading progress for {FilePath} to page {Page}", SanitizeForLogging(filePath), currentPage);
         }
         catch (Exception ex)
@@ -362,14 +362,27 @@ public partial class FileStoreService
     }
 
     /// <summary>
-    /// Persist a read-status row, tolerating the race where a concurrent request inserted
+    /// Apply <paramref name="update"/> to the user's read-status row for a file, creating the
+    /// row if needed, and persist it, tolerating the race where a concurrent request inserted
     /// the same (user, path) pair between our lookup and this save.
     /// </summary>
+    /// <remarks>
+    /// On that race only <paramref name="update"/> is replayed on the row that won. Copying
+    /// the row we failed to insert would also copy the defaults this request never meant to
+    /// set (unread, page 1) over the winner's change: the reader posts progress and mark-read
+    /// together for a comic whose first page shown is its last, so a finished comic stayed
+    /// unread or its saved page went back to 1.
+    /// </remarks>
     private async Task SaveUserReadStatusAsync(
         ComicMaintainerDbContext dbContext,
-        UserFileReadStatusEntity status,
+        string userId,
+        string filePath,
+        Action<UserFileReadStatusEntity> update,
         CancellationToken cancellationToken)
     {
+        var status = (await GetOrCreateUserReadStatusAsync(dbContext, userId, filePath, create: true, cancellationToken))!;
+        update(status);
+
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -380,17 +393,14 @@ public partial class FileStoreService
             dbContext.Entry(status).State = EntityState.Detached;
 
             var winner = await dbContext.UserFileReadStatuses
-                .FirstOrDefaultAsync(e => e.UserId == status.UserId && e.FilePath == status.FilePath, cancellationToken);
+                .FirstOrDefaultAsync(e => e.UserId == userId && e.FilePath == filePath, cancellationToken);
 
             if (winner == null)
             {
                 throw;
             }
 
-            winner.IsRead = status.IsRead;
-            winner.CurrentPage = status.CurrentPage;
-            winner.LastReadDate = status.LastReadDate ?? winner.LastReadDate;
-            winner.UpdatedAt = DateTime.UtcNow;
+            update(winner);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
     }

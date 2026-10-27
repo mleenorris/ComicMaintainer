@@ -46,7 +46,7 @@ public class OverviewServiceCoverageTests
         ContentId = contentId,
         CurrentPage = page,
         TotalPages = 20,
-        PercentComplete = page * 5,
+        PercentComplete = page * 5.0,
         LastReadAt = lastReadAt
     };
 

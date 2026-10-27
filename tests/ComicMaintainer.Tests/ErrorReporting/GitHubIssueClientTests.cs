@@ -115,17 +115,18 @@ public sealed class GitHubIssueClientTests
         Assert.IsAssignableFrom<JsonException>(ex.InnerException);
     }
 
-    // Charsets Encoding.GetEncoding cannot resolve: a code page that needs
-    // CodePagesEncodingProvider, a common misspelling of UTF-8, and an unknown name.
-    public static TheoryData<string> UndecodableCharsets => new() { "windows-1252", "utf8", "no-such-charset" };
+    // Charset names Encoding.GetEncoding never resolves. windows-1252 is not one of
+    // them: SharpCompress registers the code pages for the whole process the first
+    // time it reads an archive, so it resolves once any archive test has run.
+    public static TheoryData<string> UndecodableCharsets => new() { "utf8", "no-such-charset" };
 
     [Theory]
     [MemberData(nameof(UndecodableCharsets))]
     public async Task CreateIssueAsync_ReadsTheResponseWhateverTheDeclaredCharset(string charset)
     {
-        // JSON is always UTF-8 and GitHub sends nothing else, but a proxy can label the
-        // body with a charset .NET cannot decode. That used to escape as a raw
-        // InvalidOperationException, so an issue GitHub had created went unrecorded.
+        // GitHub always sends UTF-8 JSON, but a proxy can label the body with a charset
+        // .NET cannot decode. That used to escape as a raw InvalidOperationException,
+        // so an issue GitHub had created went unrecorded.
         var (client, _, _) = CreateClient(_ => Json(
             HttpStatusCode.Created,
             """{ "number": 42, "html_url": "https://github.com/acme/comics/issues/42" }""",
@@ -134,6 +135,24 @@ public sealed class GitHubIssueClientTests
         var issue = await CreateIssue(client);
 
         Assert.Equal(new GitHubIssueReference(42, "https://github.com/acme/comics/issues/42"), issue);
+    }
+
+    [Theory]
+    [InlineData("windows-1252")]
+    [InlineData("iso-8859-1")]
+    public async Task CreateIssueAsync_ReadsNonAsciiTextAsUtf8WhateverTheDeclaredCharset(string charset)
+    {
+        // Decoding with the declared charset would garble the non-ASCII URL (or, for
+        // windows-1252 before the code pages are registered, throw).
+        const string url = "https://github.com/acme/bandes-dessinées/issues/42";
+        var (client, _, _) = CreateClient(_ => Json(
+            HttpStatusCode.Created,
+            $$"""{ "number": 42, "html_url": "{{url}}" }""",
+            charset));
+
+        var issue = await CreateIssue(client);
+
+        Assert.Equal(new GitHubIssueReference(42, url), issue);
     }
 
     [Theory]

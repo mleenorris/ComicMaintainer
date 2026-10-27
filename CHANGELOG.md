@@ -110,12 +110,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Automated error reporting works when GitHub's response is labelled with a charset .NET
-  cannot decode.** Something in between, such as a proxy, could label the response
-  `charset=windows-1252` or `utf8`; filing an issue then failed with a raw error, so the report
-  was dropped, **Send Test Report** answered 500, and an issue GitHub had already created was
-  never recorded and could be filed again. Responses are now always read as UTF-8, which JSON
-  requires and GitHub sends, so the issue is recorded and a rejected assignee falls back to an
-  unassigned issue.
+  cannot decode.** When something in between, such as a proxy, labelled the response
+  `charset=utf8` or another name .NET does not recognise, filing an issue failed with a raw
+  error: the report was dropped, **Send Test Report** answered 500, and an issue GitHub had
+  already created was never recorded and could be filed again. Responses are now always read
+  as UTF-8, which JSON requires and GitHub sends, so the issue is recorded and a rejected
+  assignee falls back to an unassigned issue.
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
   check for administration read the Authelia settings without that variable, so when the admin
   groups were set only there (the documented way) every signed-in user who was not ReadOnly,

@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
-const { deferred } = require('./support/app');
+const { deferred, addReadOnlyGate, isDisplayed } = require('./support/app');
 const {
     bootSeries, metadataRecord, messages, lastMessage, callsTo, text, libraryRefreshes, openManageNames, optionTexts,
     buttonIn, answerConfirm
@@ -570,4 +570,36 @@ test('a failure while opening Combine Folders is reported', async () => {
     assert.deepEqual(lastMessage(page), { text: 'Failed to check for combinable folders', type: 'error' });
     assert.ok(logged(page, 'checkCombinableFoldersFromManageSeries failed'));
     assert.equal(modalOpen(page), false);
+});
+
+test('read-only users are offered none of the controls that change the series', async () => {
+    // The buttons a user is shown once the modal lists a user alias and a
+    // provider search result, and whether they can type a new alias.
+    const shown = async user => {
+        const page = await bootSeries({ user, beforeScripts: addReadOnlyGate });
+        page.route(`GET ${RECORD}`, metadataRecord({ user_aliases: ['My Saga'] }));
+        page.route('GET /api/metadata/search', { results: [{ canonical_title: 'Saga', source: 'ComicVine', aliases: [] }] });
+        // Read-only users don't get the Actions menu that opens it.
+        await page.run("openManageSeriesNamesModal('Saga')");
+        await page.settle();
+        page.click(`${MODAL} button[onclick="searchExternalSeries()"]`);
+        await page.settle();
+        return {
+            buttons: page.$$(`${MODAL} button`).filter(isDisplayed).map(text),
+            newAlias: isDisplayed(page.$('#manageSeriesNewAlias'))
+        };
+    };
+
+    assert.deepEqual(await shown({ canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] }), {
+        buttons: ['×', 'Search', 'Close'],
+        newAlias: false
+    });
+    assert.deepEqual(await shown({}), {
+        buttons: [
+            '×', '×', 'Add', 'Upload Image', 'Fetch from Provider', 'Clear Image', 'Search',
+            'Use This Match', 'Adopt as Canonical', 'Add Aliases',
+            'Refresh from Provider', 'Clear External Metadata', 'Check for Combinable Folders', 'Save', 'Close'
+        ],
+        newAlias: true
+    });
 });

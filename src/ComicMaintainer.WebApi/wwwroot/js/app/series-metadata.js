@@ -878,7 +878,7 @@
             renderHtml(container, aliases.map(a => html`
                 <span class="badge" style="display: inline-flex; align-items: center; padding: 4px 4px 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">
                     ${a}
-                    <button type="button" onclick="removeManageSeriesAlias('${jsArg(a)}')" style="margin-left: 6px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px;" title="Remove alias">×</button>
+                    <button type="button" data-requires-write onclick="removeManageSeriesAlias('${jsArg(a)}')" style="margin-left: 6px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px;" title="Remove alias">×</button>
                 </span>
             `));
         }
@@ -1066,7 +1066,7 @@
                                 </div>
                             </div>
                             <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Aliases: ${aliases}</div>
-                            <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
+                            <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;" data-requires-write>
                                 <button class="btn btn-small btn-primary" type="button" onclick="applySearchResultAsMatch(${idx})" title="Mark this candidate as the correct match for the series">${uiIcon('check-circle')} Use This Match</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'canonical')">Adopt as Canonical</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'aliases')">Add Aliases</button>

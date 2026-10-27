@@ -124,7 +124,7 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
 
         try
         {
-            var created = await response.Content.ReadFromJsonAsync<IssueResponse>(JsonOptions, cancellationToken);
+            var created = await ReadJsonAsync<IssueResponse>(response.Content, cancellationToken);
             if (created is null || created.Number <= 0)
             {
                 throw new GitHubIssueTransientException("GitHub accepted the issue but returned no issue number");
@@ -264,7 +264,7 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
     {
         try
         {
-            var body = await response.Content.ReadFromJsonAsync<ValidationErrorResponse>(JsonOptions, cancellationToken);
+            var body = await ReadJsonAsync<ValidationErrorResponse>(response.Content, cancellationToken);
             return body?.Errors?.Any(e =>
                 string.Equals(e.Field, "assignees", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(e.Field, "assignee", StringComparison.OrdinalIgnoreCase)) == true;
@@ -273,6 +273,21 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads a response body as UTF-8 JSON whatever charset it declares. JSON is
+    /// always UTF-8 (RFC 8259 §8.1) and GitHub sends nothing else, but
+    /// <c>ReadFromJsonAsync</c> honors the declared charset and throws
+    /// <see cref="InvalidOperationException"/> for one .NET cannot decode (a proxy
+    /// relabeling the body <c>windows-1252</c> or <c>utf8</c>), which would escape
+    /// the transient/permanent classification. A body that cannot be parsed still
+    /// fails with <see cref="JsonException"/>.
+    /// </summary>
+    private static async Task<T?> ReadJsonAsync<T>(HttpContent content, CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken);
     }
 
     private sealed record IssueResponse

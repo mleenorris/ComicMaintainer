@@ -115,6 +115,39 @@ public sealed class GitHubIssueClientTests
         Assert.IsAssignableFrom<JsonException>(ex.InnerException);
     }
 
+    // Charsets Encoding.GetEncoding cannot resolve: a code page that needs
+    // CodePagesEncodingProvider, a common misspelling of UTF-8, and an unknown name.
+    public static TheoryData<string> UndecodableCharsets => new() { "windows-1252", "utf8", "no-such-charset" };
+
+    [Theory]
+    [MemberData(nameof(UndecodableCharsets))]
+    public async Task CreateIssueAsync_ReadsTheResponseWhateverTheDeclaredCharset(string charset)
+    {
+        // JSON is always UTF-8 and GitHub sends nothing else, but a proxy can label the
+        // body with a charset .NET cannot decode. That used to escape as a raw
+        // InvalidOperationException, so an issue GitHub had created went unrecorded.
+        var (client, _, _) = CreateClient(_ => Json(
+            HttpStatusCode.Created,
+            """{ "number": 42, "html_url": "https://github.com/acme/comics/issues/42" }""",
+            charset));
+
+        var issue = await CreateIssue(client);
+
+        Assert.Equal(new GitHubIssueReference(42, "https://github.com/acme/comics/issues/42"), issue);
+    }
+
+    [Theory]
+    [MemberData(nameof(UndecodableCharsets))]
+    public async Task CreateIssueAsync_WrapsAnUnparseableResponseWhateverTheDeclaredCharset(string charset)
+    {
+        var (client, _, _) = CreateClient(_ => Json(HttpStatusCode.Created, "this is not json", charset));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.Equal("GitHub returned a response that could not be parsed", ex.Message);
+        Assert.IsAssignableFrom<JsonException>(ex.InnerException);
+    }
+
     [Fact]
     public async Task AddCommentAsync_PostsTheCommentToTheIssue()
     {
@@ -282,6 +315,31 @@ public sealed class GitHubIssueClientTests
     }
 
     [Theory]
+    [MemberData(nameof(UndecodableCharsets))]
+    public async Task UnprocessableAssigneeValidationFailures_AreFlaggedWhateverTheDeclaredCharset(string charset)
+    {
+        var (client, _, _) = CreateClient(_ => Json(
+            HttpStatusCode.UnprocessableEntity,
+            """{ "message": "Validation Failed", "errors": [ { "resource": "Issue", "field": "assignees", "code": "invalid" } ] }""",
+            charset));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssuePermanentException>(() => CreateIssue(client, assignee: "octocat"));
+
+        Assert.True(ex.IsAssigneeRejection);
+    }
+
+    [Theory]
+    [MemberData(nameof(UndecodableCharsets))]
+    public async Task UnparseableUnprocessableResponses_AreNotAssigneeRejectionsWhateverTheDeclaredCharset(string charset)
+    {
+        var (client, _, _) = CreateClient(_ => Json(HttpStatusCode.UnprocessableEntity, "<html>not json</html>", charset));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssuePermanentException>(() => CreateIssue(client, assignee: "octocat"));
+
+        Assert.False(ex.IsAssigneeRejection);
+    }
+
+    [Theory]
     [InlineData(HttpStatusCode.Created)]
     [InlineData(HttpStatusCode.UnprocessableEntity)]
     public async Task ResponseBodyThatFailsToDownload_IsTransient(HttpStatusCode status)
@@ -347,6 +405,14 @@ public sealed class GitHubIssueClientTests
     {
         Content = new StringContent(body, Encoding.UTF8, "application/json")
     };
+
+    /// <summary>A UTF-8 JSON body whose <c>Content-Type</c> declares <paramref name="charset"/> instead.</summary>
+    private static HttpResponseMessage Json(HttpStatusCode status, string body, string charset)
+    {
+        var response = Json(status, body);
+        response.Content.Headers.ContentType!.CharSet = charset;
+        return response;
+    }
 
     private static (GitHubIssueClient Client, StubHandler Handler, StubHttpClientFactory Factory) CreateClient(
         Func<HttpRequestMessage, HttpResponseMessage> respond)

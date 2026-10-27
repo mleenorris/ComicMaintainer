@@ -241,6 +241,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query runs, such as an unauthorized account, and an unreachable server are still only shown
   to the user.
 
+- **A malformed Suwayomi chapter list no longer fails the whole Missing Issues check.** When
+  Suwayomi answered the chapter query with a `chapters` value that was not an object, such as
+  `null`, reading it threw: the chapter list of that series failed with a 500, and the
+  scheduled Missing Issues check stopped for the whole library. The answer is now reported as
+  "The Suwayomi server returned an unexpected response.", so the chapter list answers 400 with
+  that message and the check logs a warning for that series and carries on with the rest. A
+  chapter list without its `chapters` or `nodes` is reported the same way instead of being read
+  as an empty list, which said every missing issue had no matching chapter.
+
+- **One malformed entry in a MangaDex answer no longer empties the whole search.** A search
+  result that was not a JSON object, such as `null`, or whose `attributes` were not one, made
+  the lookup throw: every other match was dropped, and the provider health recorded a failure
+  with the cryptic "The requested operation requires an element of type 'Object'…". Such
+  entries, and cover-art relationships of the same kind, are now skipped and the remaining
+  matches are returned.
+
 - **Condensed downloads no longer die at 30 seconds, and a timeout now files an issue.** Every
   request in the application was capped by a 30 second default timeout policy, and because the
   timeout middleware ran *before* routing it could never see an endpoint's own policy — so the

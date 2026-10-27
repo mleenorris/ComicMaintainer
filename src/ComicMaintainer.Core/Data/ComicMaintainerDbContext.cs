@@ -734,7 +734,7 @@ public class ComicEmailDeliveryEntity
     /// <summary><c>original</c> or <c>epub</c>.</summary>
     public string DeliveryFormat { get; set; } = "original";
 
-    /// <summary><c>pending</c>, <c>sent</c> or <c>failed</c>.</summary>
+    /// <summary><c>pending</c>, <c>sent</c>, <c>failed</c> or <c>cancelled</c>.</summary>
     public string Status { get; set; } = "pending";
 
     /// <summary><c>manual</c> for user-initiated sends, <c>auto</c> for series subscriptions.</summary>

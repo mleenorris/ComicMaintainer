@@ -25,6 +25,7 @@ const SAVE_STEPS = {
     metadata: 'POST /api/settings/external-series-metadata',
     images: 'POST /api/settings/series-image-limits',
     email: 'PUT /api/settings/email',
+    emailRateLimit: 'PUT /api/settings/email-rate-limit',
     suwayomi: 'PUT /api/settings/suwayomi',
     errorReporting: 'PUT /api/settings/error-reporting'
 };
@@ -85,6 +86,9 @@ test('saving sends each settings group in order with the edited values', async (
     page.input('#emailFromAddress', '');
     page.input('#emailFromName', ' Comics ');
     page.input('#emailMaxAttachmentMb', '');
+    page.input('#emailMaxSendsPerHour', '12');
+    page.input('#emailMaxSendsPerDay', '');
+    page.input('#emailMinSecondsBetweenSends', '90');
     page.input('#suwayomiBaseUrl', '');
     page.input('#suwayomiUsername', '  ');
     page.input('#errorReportingClearTokenCheckbox', true);
@@ -113,6 +117,7 @@ test('saving sends each settings group in order with the edited values', async (
         'POST /api/settings/external-series-metadata',
         'POST /api/settings/series-image-limits',
         'PUT /api/settings/email',
+        'PUT /api/settings/email-rate-limit',
         'PUT /api/settings/suwayomi',
         'GET /api/suwayomi/status',
         'PUT /api/settings/error-reporting',
@@ -146,6 +151,8 @@ test('saving sends each settings group in order with the edited values', async (
         emailFromName: 'Comics',
         emailMaxAttachmentMb: null
     });
+    // A blank rate-limit field is 0: no limit.
+    assert.deepEqual(body(page, 'emailRateLimit', since), { maxSendsPerHour: 12, maxSendsPerDay: 0, minSecondsBetweenSends: 90 });
     // A blank password keeps the stored one (null); blank fields are unset.
     assert.deepEqual(body(page, 'suwayomi', since), { enabled: true, baseUrl: null, username: null, password: null });
     // "Clear token" wins over a typed token; blank numbers fall back.
@@ -196,6 +203,7 @@ test('new secrets are sent, cleared secrets are sent empty', async () => {
         emailFromName: 'Comic Maintainer',
         emailMaxAttachmentMb: 12.5
     });
+    assert.deepEqual(body(page, 'emailRateLimit', since), { maxSendsPerHour: 20, maxSendsPerDay: 200, minSecondsBetweenSends: 30 });
     assert.deepEqual(body(page, 'suwayomi', since), {
         enabled: false,
         baseUrl: 'http://suwayomi:4567',
@@ -296,9 +304,22 @@ test('groups whose controls are missing are not saved', async () => {
 
     assert.deepEqual(saveRequests(page, since), [
         SAVE_STEPS.format, SAVE_STEPS.log, SAVE_STEPS.padding, SAVE_STEPS.cleanup,
-        SAVE_STEPS.metadata, SAVE_STEPS.images, SAVE_STEPS.email
+        SAVE_STEPS.metadata, SAVE_STEPS.images, SAVE_STEPS.email, SAVE_STEPS.emailRateLimit
     ]);
     assert.equal(callsTo(page, 'GET /api/suwayomi/status', since).length, 0);
+    assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
+});
+
+test('the email rate limit is not saved when its controls are missing', async () => {
+    const page = await bootSettings();
+    routeSaveSteps(page);
+    for (const id of ['emailMaxSendsPerHour', 'emailMaxSendsPerDay', 'emailMinSecondsBetweenSends']) {
+        page.$(`#${id}`).closest('.form-group').remove();
+    }
+
+    const since = await save(page);
+
+    assert.deepEqual(saveRequests(page, since), Object.values(SAVE_STEPS).filter(step => step !== SAVE_STEPS.emailRateLimit));
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
 });
 
@@ -322,7 +343,16 @@ const INVALID_FORMS = [
     ['SMTP port 0', { smtpPort: '0' }, 'SMTP port must be between 1 and 65535'],
     ['SMTP port above 65535', { smtpPort: '70000' }, 'SMTP port must be between 1 and 65535'],
     ['zero attachment size', { emailMaxAttachmentMb: '0' }, 'Max email attachment size must be a positive number'],
-    ['negative attachment size', { emailMaxAttachmentMb: '-5' }, 'Max email attachment size must be a positive number']
+    ['negative attachment size', { emailMaxAttachmentMb: '-5' }, 'Max email attachment size must be a positive number'],
+    ['fractional emails per hour', { emailMaxSendsPerHour: '1.5' }, 'Max emails per hour must be a whole number from 0 to 10000'],
+    ['negative emails per hour', { emailMaxSendsPerHour: '-1' }, 'Max emails per hour must be a whole number from 0 to 10000'],
+    ['too many emails per hour', { emailMaxSendsPerHour: '10001' }, 'Max emails per hour must be a whole number from 0 to 10000'],
+    ['negative emails per day', { emailMaxSendsPerDay: '-3' }, 'Max emails per day must be a whole number from 0 to 100000'],
+    ['too many emails per day', { emailMaxSendsPerDay: '100001' }, 'Max emails per day must be a whole number from 0 to 100000'],
+    ['fractional seconds between emails', { emailMinSecondsBetweenSends: '0.5' },
+        'Minimum seconds between emails must be a whole number from 0 to 86400'],
+    ['more than a day between emails', { emailMinSecondsBetweenSends: '86401' },
+        'Minimum seconds between emails must be a whole number from 0 to 86400']
 ];
 
 test('invalid values are rejected before anything is saved', async t => {
@@ -379,18 +409,25 @@ const FAILED_SAVES = [
         'Failed to save email settings: HTTP error! status: 502', 7],
     ['email rejected without a reason', 'email', respond(500, {}),
         'Failed to save email settings: HTTP error! status: 500', 7],
+    ['email rate limit rejected with an error', 'emailRateLimit',
+        respond(400, { error: 'Maximum emails per hour must be between 0 and 10000' }),
+        'Failed to save email rate limit: Maximum emails per hour must be between 0 and 10000', 8],
+    ['email rate limit rejected with a message', 'emailRateLimit', respond(500, { message: 'Storage failure' }),
+        'Failed to save email rate limit: Storage failure', 8],
+    ['email rate limit failed with a non-JSON body', 'emailRateLimit', respond(502, 'Bad gateway'),
+        'Failed to save email rate limit: HTTP error! status: 502', 8],
     ['Suwayomi rejected with an error', 'suwayomi', respond(400, { error: 'Base URL must be an absolute http(s) URL' }),
-        'Failed to save Suwayomi settings: Base URL must be an absolute http(s) URL', 8],
+        'Failed to save Suwayomi settings: Base URL must be an absolute http(s) URL', 9],
     ['Suwayomi rejected with a message', 'suwayomi', respond(500, { message: 'Storage failure' }),
-        'Failed to save Suwayomi settings: Storage failure', 8],
+        'Failed to save Suwayomi settings: Storage failure', 9],
     ['Suwayomi failed with a non-JSON body', 'suwayomi', respond(502, 'Bad gateway'),
-        'Failed to save Suwayomi settings: HTTP error! status: 502', 8],
+        'Failed to save Suwayomi settings: HTTP error! status: 502', 9],
     ['error reporting rejected with an error', 'errorReporting', respond(400, { error: 'MaxIssuesPerDay must be between 0 and 100' }),
-        'Failed to save error reporting settings: MaxIssuesPerDay must be between 0 and 100', 9],
+        'Failed to save error reporting settings: MaxIssuesPerDay must be between 0 and 100', 10],
     ['error reporting rejected with a message', 'errorReporting', respond(500, { message: 'Storage failure' }),
-        'Failed to save error reporting settings: Storage failure', 9],
+        'Failed to save error reporting settings: Storage failure', 10],
     ['error reporting failed with a non-JSON body', 'errorReporting', respond(500, 'oops'),
-        'Failed to save error reporting settings: HTTP error! status: 500', 9],
+        'Failed to save error reporting settings: HTTP error! status: 500', 10],
     ['network failure', 'format', networkError, 'Failed to save settings: Failed to fetch', 1]
 ];
 
@@ -411,12 +448,12 @@ test('a failed step stops the save and says which group failed', async t => {
     }
 });
 
-test('an expired session while saving the email, Suwayomi or error reporting group redirects to login', async t => {
+test('an expired session while saving the email, email rate limit, Suwayomi or error reporting group redirects to login', async t => {
     const page = await bootSettings();
     const token = page.window.localStorage.getItem('jwt_token');
     const steps = Object.values(SAVE_STEPS);
 
-    for (const [step, attempted] of [['email', 7], ['suwayomi', 8], ['errorReporting', 9]]) {
+    for (const [step, attempted] of [['email', 7], ['emailRateLimit', 8], ['suwayomi', 9], ['errorReporting', 10]]) {
         await t.test(step, async () => {
             page.window.localStorage.setItem('jwt_token', token);
             routeSaveSteps(page, { [step]: 401 });

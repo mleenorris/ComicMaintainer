@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 
 namespace ComicMaintainer.WebApi.Startup;
 
@@ -135,6 +136,23 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var emailMaxAttachmentMb = Environment.GetEnvironmentVariable("EMAIL_MAX_ATTACHMENT_MB");
         if (!string.IsNullOrEmpty(emailMaxAttachmentMb) && int.TryParse(emailMaxAttachmentMb, out var maxAttachmentMb) && maxAttachmentMb > 0)
             options.EmailMaxAttachmentMegabytes = maxAttachmentMb;
+
+        // Email rate limit. 0 is accepted so an environment variable can switch
+        // off a limit saved from the UI.
+        var emailMaxSendsPerHour = Environment.GetEnvironmentVariable("EMAIL_MAX_SENDS_PER_HOUR");
+        if (!string.IsNullOrEmpty(emailMaxSendsPerHour) && int.TryParse(emailMaxSendsPerHour, out var maxSendsPerHour)
+            && maxSendsPerHour is >= 0 and <= EmailRateLimitBounds.MaxSendsPerHour)
+            options.EmailMaxSendsPerHour = maxSendsPerHour;
+
+        var emailMaxSendsPerDay = Environment.GetEnvironmentVariable("EMAIL_MAX_SENDS_PER_DAY");
+        if (!string.IsNullOrEmpty(emailMaxSendsPerDay) && int.TryParse(emailMaxSendsPerDay, out var maxSendsPerDay)
+            && maxSendsPerDay is >= 0 and <= EmailRateLimitBounds.MaxSendsPerDay)
+            options.EmailMaxSendsPerDay = maxSendsPerDay;
+
+        var emailMinSecondsBetweenSends = Environment.GetEnvironmentVariable("EMAIL_MIN_SECONDS_BETWEEN_SENDS");
+        if (!string.IsNullOrEmpty(emailMinSecondsBetweenSends) && int.TryParse(emailMinSecondsBetweenSends, out var minSecondsBetweenSends)
+            && minSecondsBetweenSends is >= 0 and <= EmailRateLimitBounds.MaxMinSecondsBetweenSends)
+            options.EmailMinSecondsBetweenSends = minSecondsBetweenSends;
 
         // Automated error reporting. Provided as environment variables as well as
         // settings so the token can be supplied by a Docker secret / orchestrator

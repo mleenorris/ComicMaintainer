@@ -31,6 +31,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or that cleared the key by sending the settings back without it, must be updated.
 
 ### Added
+- **Pending email deliveries can be cancelled.** Email Delivery History gives every pending
+  delivery a **Cancel** button and adds **Cancel All Pending**, which covers every page. A
+  delivery still in the queue is cancelled at once; one being prepared (converted to EPUB/AZW3
+  or waiting for the rate limit) is stopped and its temporary file removed; one already being
+  handed to the mail server is reported as such and finishes normally. Cancelled deliveries get
+  the new `cancelled` status and do not count as delivered, so they can be sent again. API:
+  `POST /api/email/deliveries/{id}/cancel` and `POST /api/email/deliveries/cancel-pending`.
+  This is also the way to clear deliveries left `pending` by a restart, which are not resumed.
+- **Email Delivery History is paginated.** It used to show only the 50 most recent deliveries;
+  it now pages through the whole history, 50 at a time, and shows the total.
+  `GET /api/email/deliveries` accepts `offset` alongside `limit` and returns `total`, `offset`,
+  `limit`, `pending_count` and `rate_limited_until` next to `deliveries`.
+- **Email rate limiting.** **Settings → Email Delivery** can cap comic emails per rolling hour
+  (`EMAIL_MAX_SENDS_PER_HOUR`) and per rolling day (`EMAIL_MAX_SENDS_PER_DAY`), and enforce a
+  minimum gap between them (`EMAIL_MIN_SECONDS_BETWEEN_SENDS`); `0`, the default, disables each
+  limit. Deliveries over the limit stay pending, in order, and go out as it allows, and the
+  history shows when the limit is holding them back. Only emails actually sent count. API:
+  `PUT /api/settings/email-rate-limit`. See
+  [Rate limiting](docs/EMAIL_DELIVERY.md#rate-limiting).
 - **`GET /api/files/folders/files`** lists the files directly in the library root, which the
   per-folder route cannot address (its folder segment would be empty). The Files view uses it
   to show those files.

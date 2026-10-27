@@ -97,6 +97,9 @@ public class SettingsController : ControllerBase
             email_from_address = _appSettings.CurrentValue.EmailFromAddress,
             email_from_name = _appSettings.CurrentValue.EmailFromName,
             email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes,
+            email_max_sends_per_hour = _appSettings.CurrentValue.EmailMaxSendsPerHour,
+            email_max_sends_per_day = _appSettings.CurrentValue.EmailMaxSendsPerDay,
+            email_min_seconds_between_sends = _appSettings.CurrentValue.EmailMinSecondsBetweenSends,
             error_reporting_enabled = _appSettings.CurrentValue.ErrorReportingEnabled,
             // The destination is fixed, not a setting. It is still returned so
             // the UI can name the repository it files issues in without
@@ -875,6 +878,53 @@ public class SettingsController : ControllerBase
         public string? EmailFromAddress { get; set; }
         public string? EmailFromName { get; set; }
         public int EmailMaxAttachmentMb { get; set; } = 25;
+    }
+
+    /// <summary>
+    /// Updates the email rate limit. Each value is a non-negative integer and
+    /// 0 disables that limit.
+    /// </summary>
+    [HttpPut("email-rate-limit")]
+    public async Task<ActionResult> UpdateEmailRateLimitSettings(
+        [FromBody] EmailRateLimitSettingsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        try
+        {
+            await _settingsService.UpdateEmailRateLimitSettingsAsync(
+                request.MaxSendsPerHour,
+                request.MaxSendsPerDay,
+                request.MinSecondsBetweenSends,
+                cancellationToken);
+
+            return Ok(new { message = "Email rate limit updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update email rate limit");
+            return StatusCode(500, new { error = "Failed to update email rate limit" });
+        }
+    }
+
+    public class EmailRateLimitSettingsRequest
+    {
+        /// <summary>Most comic emails in any rolling 60-minute window; 0 for no limit.</summary>
+        public int MaxSendsPerHour { get; set; }
+
+        /// <summary>Most comic emails in any rolling 24-hour window; 0 for no limit.</summary>
+        public int MaxSendsPerDay { get; set; }
+
+        /// <summary>Minimum gap between two comic emails; 0 to send back to back.</summary>
+        public int MinSecondsBetweenSends { get; set; }
     }
 
     /// <summary>

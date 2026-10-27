@@ -60,6 +60,8 @@ fi
 mkdir -p /watched_dir /duplicates /Config
 chown -R "$PUID:$PGID" /app /Config /watched_dir /duplicates 2>/dev/null || true
 chmod -R 755 /watched_dir /duplicates /Config 2>/dev/null || true
+# The JWT signing key the app generates when JWT_SECRET is not set must stay private to its user.
+chmod 600 /Config/jwt-secret.key 2>/dev/null || true
 
 # Switch to the specified user and run the application
 echo "Switching to user $USER_NAME (UID=$PUID, GID=$PGID)"

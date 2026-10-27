@@ -16,7 +16,9 @@ services:
       - PGID=${PGID:-100}
       - MAX_WORKERS=4
       - DB_CACHE_SIZE_MB=64
-      - JWT_SECRET=${JWT_SECRET:-ChangeThisToASecureRandomString-MustBeAtLeast32CharactersLong!!}
+      # JWT signing secret. Leave JWT_SECRET unset to have a random key generated on first start and kept in
+      # /Config/jwt-secret.key; or set it to your own (e.g. `openssl rand -base64 48`).
+      - JWT_SECRET=${JWT_SECRET:-}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@comicmaintainer.local}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Admin123!}

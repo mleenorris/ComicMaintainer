@@ -36,23 +36,13 @@ internal static class AuthServiceCollectionExtensions
         .AddEntityFrameworkStores<ComicMaintainerDbContext>()
         .AddDefaultTokenProviders();
 
-        // Configure JWT Authentication
+        // Configure JWT Authentication. The signing secret is resolved once (see JwtSecretResolver) and used both to
+        // validate tokens here and to sign them in AuthService, which reads it from IOptions<JwtSettings>. Program
+        // logs where it came from once logging is set up.
         var jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>() ?? new JwtSettings();
-        var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET") ?? jwtSettings.Secret;
-
-        if (string.IsNullOrEmpty(jwtSecret))
-        {
-            throw new InvalidOperationException("JWT_SECRET must be configured in appsettings.json or environment variable");
-        }
-
-        // Warn if using default JWT secret
-        var defaultSecret = "YourSecretKeyHere-ChangeInProduction-MustBeAtLeast32CharactersLong!";
-        if (jwtSecret == defaultSecret)
-        {
-            Log.Warning("⚠️ WARNING: Using default JWT secret! Please set JWT_SECRET environment variable for production.");
-            Log.Warning("⚠️ Current secret is stored in appsettings.json which is not persisted in /Config directory.");
-            Log.Warning("⚠️ Set JWT_SECRET environment variable to use a secure, persistent secret.");
-        }
+        var jwtSecret = JwtSecretResolver.Resolve(configuration);
+        services.AddSingleton(jwtSecret);
+        services.PostConfigure<JwtSettings>(options => options.Secret = jwtSecret.Value);
 
         // Check if Authelia is enabled. Read through the same binder as IOptions<AutheliaSettings> (used by the
         // handler), so the validation, schemes and CanAdminister fallback below match what the handler sees.
@@ -108,7 +98,7 @@ internal static class AuthServiceCollectionExtensions
                 ValidateIssuerSigningKey = true,
                 ValidIssuer = jwtSettings.Issuer,
                 ValidAudience = jwtSettings.Audience,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret.Value))
             };
             
             // Configure events to return JSON for authentication failures and support token in query string

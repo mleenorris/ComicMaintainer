@@ -54,9 +54,11 @@ public class SuwayomiDownloadImportJobHandler : IScheduledJobHandler
         if (result.Imported.Count > 0)
         {
             var series = result.Imported
-                .Select(chapter => Path.GetFileName(Path.GetDirectoryName(chapter.DestinationPath)))
-                .Where(name => !string.IsNullOrEmpty(name))
+                .Select(chapter => Path.GetDirectoryName(chapter.DestinationPath))
+                .Where(directory => !string.IsNullOrEmpty(directory))
                 .Distinct(StringComparer.Ordinal)
+                .Select(directory => Path.GetFileName(directory))
+                .Where(name => !string.IsNullOrEmpty(name))
                 .ToList();
             var named = string.Join(", ", series.Take(MaxSeriesNamedInSummary));
             if (series.Count > MaxSeriesNamedInSummary)
@@ -69,7 +71,7 @@ public class SuwayomiDownloadImportJobHandler : IScheduledJobHandler
 
         if (result.PermissionDenied)
         {
-            parts.Add("stopped: permission denied moving a chapter (ComicMaintainer's user needs write access to the Suwayomi downloads folder and the library)");
+            parts.Add("stopped: permission denied reading or moving a chapter (ComicMaintainer's user needs write access to the Suwayomi downloads folder and the library)");
         }
 
         if (result.StillDownloading > 0)

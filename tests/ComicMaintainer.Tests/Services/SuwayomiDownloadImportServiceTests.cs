@@ -310,6 +310,57 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportAsync_StopsWithAPermissionErrorWhenAChapterCannotBeRead()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return; // File modes are not enforced there.
+        }
+
+        var chapter = Download("Source", "Solo Leveling", "Chapter 1.cbz");
+        Download("Source", "Solo Leveling", "Chapter 2.cbz");
+        File.SetUnixFileMode(chapter, UnixFileMode.None);
+        try
+        {
+            var result = await CreateService().ImportAsync();
+
+            Assert.True(result.PermissionDenied);
+            Assert.Equal(1, result.Failed);
+            Assert.Equal(0, result.Unreadable);
+            Assert.Empty(result.Imported);
+        }
+        finally
+        {
+            File.SetUnixFileMode(chapter, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
+    public async Task ImportAsync_ReportsADownloadsFolderThatCannotBeListed()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return; // File modes are not enforced there.
+        }
+
+        Download("Source", "Solo Leveling", "Chapter 1.cbz");
+        var source = Path.Combine(_downloads, "Source");
+        File.SetUnixFileMode(source, UnixFileMode.None);
+        try
+        {
+            var result = await CreateService().ImportAsync();
+
+            Assert.NotNull(result.SkippedReason);
+            Assert.Contains("could not be read", result.SkippedReason);
+            Assert.Empty(result.Imported);
+        }
+        finally
+        {
+            File.SetUnixFileMode(source, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
     public async Task ImportAsync_LeavesArchivesOutsideASeriesFolderAndReportsChaptersSavedAsImages()
     {
         var stray = WriteCbz(Path.Combine(_downloads, "stray.cbz"));

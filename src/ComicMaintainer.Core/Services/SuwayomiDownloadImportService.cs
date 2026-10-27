@@ -45,11 +45,12 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     };
 
     // Never follow links out of the downloads folder, and skip hidden entries
-    // such as staging files.
+    // such as staging files. A folder that cannot be listed throws, so the
+    // run reports the permission problem instead of silently missing chapters.
     private static readonly EnumerationOptions ScanOptions = new()
     {
         RecurseSubdirectories = true,
-        IgnoreInaccessible = true,
+        IgnoreInaccessible = false,
         AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.Hidden | FileAttributes.System
     };
 
@@ -245,21 +246,28 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     /// is still writing does not open.
     /// </summary>
     public static bool IsCompleteArchive(string path)
+        => ProbeArchive(path) == ArchiveState.Complete;
+
+    private static ArchiveState ProbeArchive(string path)
     {
         try
         {
             if (ComicFileExtensions.NormalizeExtension(Path.GetExtension(path)) == ".cbz")
             {
                 using var zip = ZipFile.OpenRead(path);
-                return zip.Entries.Count > 0;
+                return zip.Entries.Count > 0 ? ArchiveState.Complete : ArchiveState.Incomplete;
             }
 
             using var rar = RarArchive.OpenArchive(path);
-            return rar.Entries.Any();
+            return rar.Entries.Any() ? ArchiveState.Complete : ArchiveState.Incomplete;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return ArchiveState.PermissionDenied;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return false;
+            return ArchiveState.Incomplete;
         }
     }
 
@@ -289,7 +297,17 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 continue;
             }
 
-            if (!IsCompleteArchive(archive))
+            var state = ProbeArchive(archive);
+            if (state == ArchiveState.PermissionDenied)
+            {
+                // Permissions rarely differ per file, so stop like a refused move.
+                _logger.LogWarning("Permission denied reading Suwayomi download {File}", LoggingHelper.SanitizePathForLog(archive));
+                result.Failed++;
+                result.PermissionDenied = true;
+                return;
+            }
+
+            if (state != ArchiveState.Complete)
             {
                 result.Unreadable++;
                 _logger.LogDebug("Leaving unreadable Suwayomi download {File} in place", LoggingHelper.SanitizePathForLog(archive));
@@ -776,6 +794,13 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         Moved,
         Vanished,
         Failed,
+        PermissionDenied
+    }
+
+    private enum ArchiveState
+    {
+        Complete,
+        Incomplete,
         PermissionDenied
     }
 

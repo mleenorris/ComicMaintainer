@@ -96,6 +96,16 @@ public class SuwayomiDownloadImportJobHandlerTests
     }
 
     [Fact]
+    public void FormatSummary_CountsSeriesFoldersByFullPath()
+    {
+        var result = WithImports("/library/English/Foo/Chapter 1.cbz", "/library/Japanese/Foo/Chapter 1.cbz");
+
+        var summary = SuwayomiDownloadImportJobHandler.FormatSummary(result);
+
+        Assert.Contains("into 2 series folder(s) (Foo, Foo)", summary);
+    }
+
+    [Fact]
     public void FormatSummary_NamesAtMostTenSeries()
     {
         var result = WithImports(Enumerable.Range(1, 12).Select(i => $"/library/Series {i:00}/Chapter 1.cbz").ToArray());

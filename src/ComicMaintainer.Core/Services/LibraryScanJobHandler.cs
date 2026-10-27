@@ -104,7 +104,10 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         {
             diskPaths = new HashSet<string>(
                 Directory.EnumerateFiles(watchedDir, "*.*", SearchOption.AllDirectories)
-                    .Where(ComicFileExtensions.IsComicArchive),
+                    .Where(ComicFileExtensions.IsComicArchive)
+                    // Skip files still being staged into the library (e.g. a
+                    // Suwayomi import), as the file watcher does.
+                    .Where(path => !Path.GetFileName(path).StartsWith(".tmp_", StringComparison.OrdinalIgnoreCase)),
                 StringComparer.OrdinalIgnoreCase);
 
             _logger.LogInformation("Library scan: found {Count} comic file(s) on disk under {Dir}",

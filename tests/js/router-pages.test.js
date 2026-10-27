@@ -281,7 +281,11 @@ test('an Actions menu left open on a series page closes when the page changes wi
     // A click anywhere else closes it, but Back/Forward (also the mouse back
     // button and swipe-back) and the "g" shortcuts change the page without one.
     const page = await boot({ hash: '#/library', routes: libraryRoutes() });
-    const keys = (...sequence) => sequence.forEach(key => press(page, key, {}, page.document.body));
+    const keys = async (...sequence) => {
+        for (const key of sequence) {
+            await press(page, key, {}, page.document.body);
+        }
+    };
     const leftOpen = () => page.$$('body > .dropdown-menu, .dropdown-menu.show');
 
     async function leaveWithMenuOpen(name, leave, view) {
@@ -290,17 +294,17 @@ test('an Actions menu left open on a series page closes when the page changes wi
         page.click(toggle);
         assert.deepEqual(leftOpen(), [menu], `${name}: the menu is open, in <body>`);
 
-        leave();
+        await leave();
         await page.waitFor(() => page.evaluate('currentView') === view);
         assert.deepEqual(leftOpen(), [], name);
     }
 
     for (const [name, leave, view] of [
         ['Back', () => page.window.history.back(), 'library'],
-        ['g l', () => keys('g', 'l'), 'library'],
-        ['g h', () => keys('g', 'h'), 'home'],
-        ['g s', () => keys('g', 's'), 'settings'],
-        ['g j', () => keys('g', 'j'), 'jobs']
+        ['g l', async () => await keys('g', 'l'), 'library'],
+        ['g h', async () => await keys('g', 'h'), 'home'],
+        ['g s', async () => await keys('g', 's'), 'settings'],
+        ['g j', async () => await keys('g', 'j'), 'jobs']
     ]) {
         await go(page, `#/series/${SAGA.id}`);
         await leaveWithMenuOpen(name, leave, view);

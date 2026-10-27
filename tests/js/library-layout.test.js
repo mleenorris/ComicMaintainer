@@ -277,9 +277,12 @@ test('drawing the library over a series page closes an Actions menu left open th
     page.run("navigate('#/series/series-1')");
     await page.settle();
     openIssueMenu();
+    page.document.body.insertAdjacentHTML('beforeend', '<div id="filterDropdownMenu" class="show"></div>');
     page.run('renderSeriesLibrary()');
     assert.deepEqual(leftOpen(), []);
     assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
+    // Only the Actions menus are closed; a redraw leaves the filter menu open.
+    assert.ok(page.$('#filterDropdownMenu').classList.contains('show'));
 });
 
 test('a legacy Files mode is coerced back to the series library', async () => {

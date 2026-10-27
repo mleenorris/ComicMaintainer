@@ -132,13 +132,19 @@
             }
         }
         
-        function closeAllDropdowns() {
+        // Closes the Actions menus only (restoring any portaled one), leaving
+        // the filter menu alone, for redraws that replace the menus' hosts.
+        function closeActionDropdowns() {
             document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
                 menu.classList.remove('show');
                 menu.classList.remove('show-above');
             });
             // Return any portaled menu to its original location in the DOM.
             restorePortaledDropdown();
+        }
+
+        function closeAllDropdowns() {
+            closeActionDropdowns();
             // Also close filter dropdown
             const filterMenu = document.getElementById('filterDropdownMenu');
             if (filterMenu) {

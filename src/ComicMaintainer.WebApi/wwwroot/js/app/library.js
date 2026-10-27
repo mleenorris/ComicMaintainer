@@ -174,7 +174,7 @@
             if (!append && fileListEl && !currentSeriesDetailId) {
                 // Restore/close any open action menu (which may be portaled to
                 // <body>) before the list's DOM is replaced below.
-                closeAllDropdowns();
+                closeActionDropdowns();
                 renderHtml(fileListEl, html`
                     <div class="loading">
                         <div class="spinner"></div>
@@ -795,7 +795,7 @@
 
             // Restore/close any open action menu (which may be portaled to
             // <body>) before the list's DOM is rebuilt below.
-            closeAllDropdowns();
+            closeActionDropdowns();
 
             // Drop any selected series that are no longer present in the
             // currently loaded library list (e.g. after a filter change) so

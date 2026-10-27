@@ -1,11 +1,15 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Startup;
 
-// Configure Serilog for dual logging: console (clean) and file (debug)
-var configDir = Environment.GetEnvironmentVariable("CONFIG_DIR") 
-    ?? "/Config";
+var builder = WebApplication.CreateBuilder(args);
 
-// Ensure log directory exists
+// One directory holds the database, DataProtection keys, logs, user-settings.json, backups and
+// caches: CONFIG_DIR, then AppSettings:ConfigDirectory, then /Config (see ConfigDirectoryResolver).
+var configDir = ConfigDirectoryResolver.Resolve(builder.Configuration);
+string? unwritableConfigDir = null;
+
+// Ensure the config directory exists
 try
 {
     Directory.CreateDirectory(configDir);
@@ -13,6 +17,7 @@ try
 catch (UnauthorizedAccessException)
 {
     // Fallback to temp directory if we don't have permission
+    unwritableConfigDir = configDir;
     configDir = Path.Combine(Path.GetTempPath(), "ComicMaintainer");
     Directory.CreateDirectory(configDir);
 }
@@ -25,12 +30,18 @@ UserSettingsBootstrap.EnsureUserSettingsFileMigrated(userSettingsPath);
 // Load user settings to get LogMaxBytes
 var logMaxBytes = UserSettingsBootstrap.LoadLogMaxBytes(userSettingsPath);
 
-var builder = WebApplication.CreateBuilder(args);
-
 // Register user-settings.json as a live (reload-on-change) configuration source so that
 // SettingsService writes are picked up at runtime by IOptionsMonitor<AppSettings>.
 // The file is intentionally optional (it may have been removed) and is reloaded on change.
 builder.Configuration.AddJsonFile(userSettingsPath, optional: true, reloadOnChange: true);
+
+// Publish the directory chosen above as AppSettings:ConfigDirectory, after every other source, so the
+// database and DataProtection keys (AddComicMaintainerData) and AppSettings.ConfigDirectory (settings,
+// backups, caches, the logs page) all use it.
+builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+{
+    [ConfigDirectoryResolver.ConfigurationKey] = configDir,
+});
 
 // Use Serilog for logging (see Startup/LoggingExtensions.cs)
 builder.AddComicMaintainerLogging(configDir, logMaxBytes);
@@ -59,6 +70,14 @@ logger.LogInformation("╔══════════════════
 logger.LogInformation("║         Comic Maintainer - .NET Edition          ║");
 logger.LogInformation("║                  Version {Version}║", version.PadRight(24));
 logger.LogInformation("╚══════════════════════════════════════════════════╝");
+
+if (unwritableConfigDir is not null)
+{
+    logger.LogWarning(
+        "Cannot create the config directory {RequestedConfigDirectory}; using {ConfigDirectory} instead, which may not survive a restart. Set CONFIG_DIR to a writable directory.",
+        LoggingHelper.SanitizeForLog(unwritableConfigDir),
+        LoggingHelper.SanitizeForLog(configDir));
+}
 
 // Initialize database and seed roles
 await app.InitializeComicMaintainerDatabaseAsync(logger);

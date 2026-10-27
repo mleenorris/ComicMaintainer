@@ -46,8 +46,9 @@ internal static class CoreServiceCollectionExtensions
 
     public static IServiceCollection AddComicMaintainerData(this IServiceCollection services, IConfiguration configuration)
     {
-        // Configure database
-        var configDirectory = configuration["AppSettings:ConfigDirectory"] ?? "/Config";
+        // Configure database. Program publishes the config directory it resolved (CONFIG_DIR, then
+        // AppSettings:ConfigDirectory, then /Config) as AppSettings:ConfigDirectory.
+        var configDirectory = configuration[ConfigDirectoryResolver.ConfigurationKey] ?? ConfigDirectoryResolver.DefaultDirectory;
         var rawConnectionString = configuration.GetConnectionString("DefaultConnection")
             ?? $"Data Source={Path.Combine(configDirectory, "comicmaintainer.db")}";
         // Normalize the connection string (pooling, shared cache, default timeout) once so

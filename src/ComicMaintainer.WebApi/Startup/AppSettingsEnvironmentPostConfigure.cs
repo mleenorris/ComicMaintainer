@@ -20,9 +20,9 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         if (!string.IsNullOrEmpty(duplicateDir))
             options.DuplicateDirectory = duplicateDir;
 
-        var configDirEnv = Environment.GetEnvironmentVariable("CONFIG_DIR");
-        if (!string.IsNullOrEmpty(configDirEnv))
-            options.ConfigDirectory = configDirEnv;
+        // CONFIG_DIR is not applied here: Program resolves it (see ConfigDirectoryResolver) and
+        // publishes the directory it actually uses as AppSettings:ConfigDirectory, so the options,
+        // the database and the DataProtection keys always agree.
 
         var basePath = Environment.GetEnvironmentVariable("BASE_PATH");
         if (!string.IsNullOrEmpty(basePath))

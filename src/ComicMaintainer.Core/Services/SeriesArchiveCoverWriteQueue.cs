@@ -27,6 +27,11 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
     // The latest consumer, which may still be draining after a stop.
     private Task _consumer = Task.CompletedTask;
 
+    // Completes once every consumer started so far has finished. A run whose wait
+    // for its predecessor was cancelled ends early, so the next run must not rely
+    // on that run alone to know the earlier ones are done.
+    private Task _allConsumersDone = Task.CompletedTask;
+
     public SeriesArchiveCoverWriteQueue(
         ISeriesArchiveCoverWriter writer,
         ILogger<SeriesArchiveCoverWriteQueue> logger)
@@ -73,9 +78,10 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
             // restart replacing the fields cannot affect a run already going.
             var stoppingCts = new CancellationTokenSource();
             var reader = _channel.Reader;
-            var previous = _consumer;
+            var previous = _allConsumersDone;
             _stoppingCts = stoppingCts;
             _consumer = Task.Run(() => ConsumeAsync(previous, reader, stoppingCts.Token), CancellationToken.None);
+            _allConsumersDone = Task.WhenAll(previous, _consumer);
         }
 
         return Task.CompletedTask;

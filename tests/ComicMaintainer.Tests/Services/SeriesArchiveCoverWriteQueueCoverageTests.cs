@@ -296,6 +296,60 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
         _writer.Verify(w => w.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task StartAsync_AfterARunStoppedWhileWaiting_StillWaitsForTheRunStillWriting()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thirdStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _writer
+            .Setup(w => w.WriteAsync("first", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+                firstFinished.TrySetResult();
+            });
+        _writer
+            .Setup(w => w.RemoveAsync("first", It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                thirdStarted.TrySetResult(firstFinished.Task.IsCompleted);
+                return Task.CompletedTask;
+            });
+
+        var queue = CreateQueue();
+
+        // Run A is writing; run B starts behind it and is stopped with an expired
+        // deadline while still waiting, then run C starts.
+        await queue.StartAsync();
+        queue.EnqueueWrite("first", "/cache/first.png", "image/png");
+        await firstStarted.Task.WaitAsync(WaitLimit);
+        var firstStop = queue.StopAsync();
+        await queue.StartAsync();
+        queue.EnqueueRemove("second");
+        using (var expired = new CancellationTokenSource())
+        {
+            expired.Cancel();
+            await queue.StopAsync(expired.Token).WaitAsync(WaitLimit);
+        }
+
+        await queue.StartAsync();
+        queue.EnqueueRemove("first");
+
+        // C must not rewrite the archive alongside A even though B has already finished.
+        await Task.Delay(200);
+        Assert.False(thirdStarted.Task.IsCompleted);
+
+        releaseFirst.SetResult();
+        await firstStop.WaitAsync(WaitLimit);
+        Assert.True(await thirdStarted.Task.WaitAsync(WaitLimit));
+        await queue.StopAsync().WaitAsync(WaitLimit);
+
+        _writer.Verify(w => w.RemoveAsync("second", It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private void VerifyLog(LogLevel level, string messageFragment, Exception? exception, Times times) =>
         _logger.Verify(
             l => l.Log(

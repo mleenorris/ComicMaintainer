@@ -192,6 +192,59 @@ public class ComicEmailQueueCoverageTests
     }
 
     [Fact]
+    public async Task StartAsync_AfterARunStoppedWhileWaiting_StillWaitsForTheRunStillSending()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thirdStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = new Mock<IComicEmailService>();
+        service.Setup(s => s.ProcessDeliveryAsync(1, It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+                firstFinished.TrySetResult();
+            });
+        service.Setup(s => s.ProcessDeliveryAsync(3, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                thirdStarted.TrySetResult(firstFinished.Task.IsCompleted);
+                return Task.CompletedTask;
+            });
+
+        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
+
+        // Run A is sending; run B starts behind it and is stopped with an expired
+        // deadline while still waiting, then run C starts.
+        await queue.StartAsync();
+        queue.Enqueue(1);
+        await firstStarted.Task.WaitAsync(Timeout);
+        var firstStop = queue.StopAsync();
+        await queue.StartAsync();
+        queue.Enqueue(2);
+        using (var deadline = new CancellationTokenSource())
+        {
+            deadline.Cancel();
+            await queue.StopAsync(deadline.Token).WaitAsync(Timeout);
+        }
+
+        await queue.StartAsync();
+        queue.Enqueue(3);
+
+        // C must not send alongside A even though B has already finished.
+        await Task.Delay(200);
+        Assert.False(thirdStarted.Task.IsCompleted);
+
+        releaseFirst.SetResult();
+        await firstStop.WaitAsync(Timeout);
+        Assert.True(await thirdStarted.Task.WaitAsync(Timeout));
+        await queue.StopAsync().WaitAsync(Timeout);
+
+        service.Verify(s => s.ProcessDeliveryAsync(2, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task StartAsync_AfterStop_DeliversWhatWasQueuedWhileStoppedAndAfterTheRestart()
     {
         var processed = new List<int>();

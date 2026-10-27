@@ -142,6 +142,79 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteFilesAsync_FilesOutsideAllowedDirectories_AreRejectedAsFailuresAndLeftUntouched()
+    {
+        var service = CreateService();
+        var inLibrary = WriteCbz("Series/doomed.cbz", Xml("Series", "1", "Chapter 1"));
+        var duplicate = WriteFile(Path.Combine(_settings.DuplicateDirectory, "Series", "doomed.cbz"));
+        var outside = WriteFile(Path.Combine(_root, "config", "victim.txt"));
+        var traversal = Path.Combine(_library, "..", "config", "victim.txt");
+
+        var jobId = await service.DeleteFilesAsync(new[] { inLibrary, duplicate, outside, traversal });
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(JobStatus.Completed, job.Status);
+        Assert.Equal(2, job.ProcessedFiles);
+        Assert.Equal(2, job.FailedFiles);
+        Assert.False(File.Exists(inLibrary));
+        Assert.False(File.Exists(duplicate));
+        Assert.Equal("keep me", await File.ReadAllTextAsync(outside));
+        Assert.True(_logger.Has(LogLevel.Warning, "DeleteFilesAsync: file is outside the allowed directories: {FilePath}"));
+        foreach (var rejected in new[] { outside, traversal })
+        {
+            Assert.Equal("Delete failed", job.Errors[rejected]);
+            _fileStore.Verify(f => f.RemoveFileAsync(rejected, It.IsAny<CancellationToken>()), Times.Never);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_PathThroughLinkedDirectoryOutsideLibrary_IsRejectedAndLeftUntouched()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var service = CreateService();
+        var outsideDir = Path.Combine(_root, "outside");
+        var outside = WriteFile(Path.Combine(outsideDir, "book.cbz"));
+        Directory.CreateSymbolicLink(Path.Combine(_library, "linked"), outsideDir);
+        var throughLink = Path.Combine(_library, "linked", "book.cbz");
+
+        var jobId = await service.DeleteFilesAsync(new[] { throughLink });
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(0, job.ProcessedFiles);
+        Assert.Equal("Delete failed", job.Errors[throughLink]);
+        Assert.Equal("keep me", await File.ReadAllTextAsync(outside));
+        _fileStore.Verify(f => f.RemoveFileAsync(throughLink, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_PathThroughLinkedDirectoryInsideLibrary_DeletesThePhysicalFile()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var service = CreateService();
+        var physical = WriteCbz("Series/book.cbz", Xml("Series", "1", "Chapter 1"));
+        var alias = Path.Combine(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Series"));
+        var throughAlias = Path.Combine(alias, "book.cbz");
+
+        var jobId = await service.DeleteFilesAsync(new[] { throughAlias });
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.False(File.Exists(physical));
+        Assert.NotNull(new DirectoryInfo(alias).LinkTarget);
+        _fileStore.Verify(f => f.RemoveFileAsync(throughAlias, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task NormalizeAndRenameFilesAsync_NormalizesThenRenames_AndReportsFilesThatCannotBeNormalized()
     {
         var service = CreateService();
@@ -427,6 +500,13 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
             stream.Write(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
         }
 
+        return path;
+    }
+
+    private static string WriteFile(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "keep me");
         return path;
     }
 

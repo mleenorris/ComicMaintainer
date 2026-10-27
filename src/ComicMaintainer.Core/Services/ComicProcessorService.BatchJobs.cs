@@ -118,13 +118,21 @@ public partial class ComicProcessorService
             {
                 try
                 {
-                    if (File.Exists(filePath))
+                    if (!TryResolveAllowedPath(filePath, out var resolvedPath))
+                    {
+                        _logger.LogWarning(
+                            "DeleteFilesAsync: file is outside the allowed directories: {FilePath}",
+                            LoggingHelper.SanitizePathForLog(filePath));
+                        return false;
+                    }
+
+                    if (File.Exists(resolvedPath))
                     {
                         // Remove from file store first (unlikely to fail), then
                         // delete the physical file. This order prevents orphaned
                         // file-store entries if the disk delete fails.
                         await _fileStore.RemoveFileAsync(filePath, token);
-                        File.Delete(filePath);
+                        File.Delete(resolvedPath);
                         await LogHistoryAsync(filePath, "Delete", true, null, token);
                         return true;
                     }

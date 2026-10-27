@@ -109,6 +109,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **`CONFIG_DIR` now holds the database and the DataProtection keys too.** The logs,
+  `user-settings.json` and backups followed `CONFIG_DIR`, but the SQLite database and the keys
+  stayed in `/Config` (or `AppSettings:ConfigDirectory`). In Docker, with the config volume
+  mounted at a custom `CONFIG_DIR`, the accounts, file state and history were therefore kept in
+  the container and lost when it was recreated. Outside Docker, a non-root user could not open
+  the database at all. The directory is now chosen once (`CONFIG_DIR`, then
+  `AppSettings:ConfigDirectory`, then `/Config`) and used for all of them, and the container
+  makes a custom `CONFIG_DIR` writable by `PUID`. If the directory cannot be created, everything
+  falls back to one temporary directory and a warning says so.
+  **Upgrade note:** move any state left in the old place before upgrading, or the app starts
+  with an empty database and asks for setup again:
+  - If `CONFIG_DIR` is not `/Config`, move `comicmaintainer.db` (with any `-wal`/`-shm` files
+    next to it) and `DataProtection-Keys` from `/Config` into it. In Docker they are inside the
+    container: stop it, copy them out with
+    `docker cp <container>:/Config/comicmaintainer.db <config volume>/` (likewise for the
+    others), then recreate it.
+  - Without `CONFIG_DIR`, `AppSettings:ConfigDirectory` now moves the logs and
+    `user-settings.json` too: move `user-settings.json` from `/Config` into it. The Docker image
+    sets `CONFIG_DIR=/Config`, which wins over `AppSettings__ConfigDirectory`. If that variable
+    is all you set, also set `CONFIG_DIR` to the same directory, then move `user-settings.json`
+    and `backups` there from `/Config`.
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
   check for administration read the Authelia settings without that variable, so when the admin
   groups were set only there (the documented way) every signed-in user who was not ReadOnly,

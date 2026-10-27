@@ -61,6 +61,15 @@ mkdir -p /watched_dir /duplicates /Config
 chown -R "$PUID:$PGID" /app /Config /watched_dir /duplicates 2>/dev/null || true
 chmod -R 755 /watched_dir /duplicates /Config 2>/dev/null || true
 
+# CONFIG_DIR holds the database, DataProtection keys, logs and settings, so a custom one must be
+# writable by PUID too. (/Config is prepared above either way: it is the default temp file location.)
+CONFIG_DIR="${CONFIG_DIR:-/Config}"
+if [ "$CONFIG_DIR" != "/Config" ]; then
+    mkdir -p "$CONFIG_DIR"
+    chown -R "$PUID:$PGID" "$CONFIG_DIR" 2>/dev/null || true
+    chmod -R 755 "$CONFIG_DIR" 2>/dev/null || true
+fi
+
 # Switch to the specified user and run the application
 echo "Switching to user $USER_NAME (UID=$PUID, GID=$PGID)"
 exec gosu "$USER_NAME" dotnet ComicMaintainer.WebApi.dll

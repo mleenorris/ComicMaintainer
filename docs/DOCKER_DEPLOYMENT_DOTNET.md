@@ -72,7 +72,7 @@ docker run -d \
 | `ASPNETCORE_URLS` | http://+:5000 | Server URLs |
 | `WATCHED_DIR` | /watched_dir | Directory to watch for comics |
 | `DUPLICATE_DIR` | /duplicates | Directory for duplicate files |
-| `CONFIG_DIR` | /Config | Configuration and database directory |
+| `CONFIG_DIR` | /Config | Directory for the database, DataProtection keys, logs and settings (mount your config volume here) |
 | `PUID` | 99 | User ID for file operations (dynamically created) |
 | `PGID` | 100 | Group ID for file operations (dynamically created) |
 | `MAX_WORKERS` | 4 | Maximum concurrent workers |
@@ -88,7 +88,7 @@ docker run -d \
 
 - `/watched_dir` - Directory containing comic files to process
 - `/duplicates` - Directory where duplicate files are moved
-- `/Config` - Configuration files and SQLite database
+- `/Config` - SQLite database, DataProtection keys, logs and settings (or wherever `CONFIG_DIR` points)
 
 ## Security Best Practices
 

@@ -243,7 +243,7 @@ Configuration can be set via:
 |---------|---------------------|---------|-------------|
 | WatchedDirectory | WATCHED_DIR | /watched_dir | Directory to watch for comic files |
 | DuplicateDirectory | DUPLICATE_DIR | /duplicates | Directory for duplicate files |
-| ConfigDirectory | CONFIG_DIR | /Config | Directory for configuration data |
+| ConfigDirectory | CONFIG_DIR | /Config | Directory for the database, DataProtection keys, logs, settings and backups (`CONFIG_DIR` wins) |
 | FilenameFormat | FILENAME_FORMAT | {series} - Chapter {issue} | Template for file naming |
 | IssueNumberPadding | ISSUE_NUMBER_PADDING | 4 | Number of digits for issue numbers |
 | MaxWorkers | MAX_WORKERS | 4 | Maximum concurrent processing jobs |

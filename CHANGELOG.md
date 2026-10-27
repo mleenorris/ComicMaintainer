@@ -205,6 +205,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cancelling a metadata search is no longer reported as a provider failure or a "no match"**:
   the provider health stays as it was, and the search endpoints stop logging an error and
   answering 500 when the browser gives up on the request.
+- **Cancelled requests, jobs and shutdowns are no longer swallowed or reported as other
+  failures.** Leaving the Library page while provider health loads no longer marks every
+  metadata provider "Timed out" for a minute. Applying a provider image that times out while
+  its host is checked answers 504 instead of 400 "Cannot resolve image host". Cancelling a
+  rename job during a series lookup no longer renames the file to its unresolved series name,
+  and a cancelled rename never moves the file. A cancelled metadata refresh no longer logs a
+  "refresh failed" warning. A library scan stopped by shutdown no longer queues normalize jobs
+  or reports one as "job record evicted". A series cover write that fails with a cancellation
+  the queue did not ask for is logged and skipped, instead of silently stopping all later cover
+  writes until restart.
 - **First sign-in through Authelia works without `Remote-Email` or `Remote-Name`.** The account
   gets `<username>@authelia.local` and the username as its name; before, sign-in failed with
   401.

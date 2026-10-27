@@ -12,6 +12,7 @@ using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace ComicMaintainer.Tests.Services;
@@ -968,6 +969,25 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task RenameFilesAsync_CancelledJustBeforeTheMove_LeavesTheFileWhereItIs()
+    {
+        var service = CreateService();
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        using var cts = new CancellationTokenSource();
+        _logger.On(RenamingTemplate, _ => cts.Cancel());
+
+        var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }, cts.Token));
+
+        Assert.Equal(JobStatus.Cancelled, job.Status);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.False(_logger.Has(LogLevel.Error, "RenameFileAsync: Error renaming file: {FilePath}"));
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.True(File.Exists(path));
+        Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
+        _fileStore.Verify(f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task RenameFilesAsync_FilenameGenerationFails_CountsAsFailedAndIsNotMarkedRenamed()
     {
         _settings.FilenameFormat = "{series}";
@@ -1369,6 +1389,27 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(1, job.ProcessedFiles);
         Assert.True(_logger.Has(LogLevel.Warning, "Failed to resolve external metadata for series {SeriesName}"));
         Assert.True(File.Exists(Path.Combine(_library, "Folder Name", "Meta Series - Chapter 0001.cbz")));
+    }
+
+    [Fact]
+    public async Task RenameFilesAsync_CancelledDuringSeriesLookup_DoesNotRenameToTheUnresolvedName()
+    {
+        using var cts = new CancellationTokenSource();
+        var cache = CreateCache();
+        var external = new Mock<IExternalSeriesMetadataService>();
+        external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback(() => cts.Cancel())
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var resolver = new SeriesNameResolver(
+            new TestOptionsMonitor<AppSettings>(_settings), NullLogger<SeriesNameResolver>.Instance, cache.Object, external.Object);
+        var service = CreateService(cache: cache.Object, resolver: resolver, external: external.Object);
+        var path = WriteCbz("Kaibutsu/source.cbz", Xml("Kaibutsu", "1", "Chapter 1"));
+
+        var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }, cts.Token));
+
+        Assert.Equal(JobStatus.Cancelled, job.Status);
+        Assert.True(File.Exists(path));
+        Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
     }
 
     [Theory]

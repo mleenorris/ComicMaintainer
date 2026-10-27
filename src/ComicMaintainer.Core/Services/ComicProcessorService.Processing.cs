@@ -294,6 +294,11 @@ public partial class ComicProcessorService
 
             return true;
         }
+        // A cancelled job didn't fail this file: leave it and its stored state as they are.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             // A single unprocessable archive is field noise, not a defect: the

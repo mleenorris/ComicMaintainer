@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.HealthChecks;
 using ComicMaintainer.WebApi.Infrastructure;
@@ -76,6 +77,10 @@ internal static class WebServiceCollectionExtensions
         });
 
         // Add rate limiting (ASP.NET Core 9 best practice)
+        // Behind a reverse proxy every request arrives from the proxy, so anonymous requests are counted per client
+        // address that a trusted proxy forwards in X-Forwarded-For, not per connection: otherwise one client could
+        // exhaust the anonymous limit for every visitor, and lock them all out of signing in.
+        var trustedProxies = LoadRateLimiterTrustedProxies(configuration);
         services.AddRateLimiter(options =>
         {
             options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
@@ -85,7 +90,7 @@ internal static class WebServiceCollectionExtensions
                 var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
                 var partitionKey = isAuthenticated
                     ? $"user:{context.User?.Identity?.Name ?? "authenticated"}"
-                    : $"ip:{context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+                    : $"ip:{ForwardedClientAddress.Resolve(context, trustedProxies)?.ToString() ?? "unknown"}";
 
                 return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: partitionKey,
@@ -171,5 +176,43 @@ internal static class WebServiceCollectionExtensions
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// The reverse proxies whose <c>X-Forwarded-For</c> the rate limiter uses (see <see cref="ForwardedClientAddress"/>):
+    /// <c>TRUSTED_PROXIES</c> (an unset or empty variable keeps <c>ReverseProxySettings:TrustedProxies</c>), plus
+    /// <c>AUTHELIA_TRUSTED_PROXIES</c> when Authelia is enabled, because the proxy that sends the Authelia headers
+    /// relays every request. Refuses to start on an entry that is not an IP address or CIDR range.
+    /// </summary>
+    private static TrustedProxyAllowlist LoadRateLimiterTrustedProxies(IConfiguration configuration)
+    {
+        const string variable = "TRUSTED_PROXIES";
+        var value = Environment.GetEnvironmentVariable(variable);
+        if (string.IsNullOrEmpty(value))
+        {
+            value = configuration["ReverseProxySettings:TrustedProxies"];
+        }
+
+        if (!TrustedProxyAllowlist.TryParseOptional(value, variable, out var trustedProxies, out var error))
+        {
+            throw new InvalidOperationException(error + " See docs/REVERSE_PROXY.md.");
+        }
+
+        // AddComicMaintainerAuth has already refused to start if Authelia is enabled with an invalid list.
+        var autheliaSettings = AutheliaSettingsBinder.Load(configuration);
+        if (autheliaSettings.Enabled
+            && TrustedProxyAllowlist.TryParse(autheliaSettings.TrustedProxies, out var autheliaProxies, out _))
+        {
+            trustedProxies = trustedProxies.Union(autheliaProxies);
+        }
+
+        if (trustedProxies.Networks.Count > 0)
+        {
+            Log.Information(
+                "Rate limiting counts anonymous requests from {TrustedProxies} per X-Forwarded-For client address",
+                string.Join(", ", trustedProxies.Networks));
+        }
+
+        return trustedProxies;
     }
 }

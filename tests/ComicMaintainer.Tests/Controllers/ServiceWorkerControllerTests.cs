@@ -9,7 +9,7 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Controllers;
 
-public class ServiceWorkerControllerTests
+public class ServiceWorkerControllerTests : IDisposable
 {
     private readonly Mock<IWebHostEnvironment> _mockEnvironment;
     private readonly Mock<ILogger<ServiceWorkerController>> _mockLogger;
@@ -42,6 +42,33 @@ public class ServiceWorkerControllerTests
         {
             HttpContext = httpContext
         };
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_tempDirectory, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best effort; a leftover temp directory must not fail the run.
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    [Fact]
+    public void Dispose_DeletesTheTempDirectory()
+    {
+        // Regression test for #876: every test used to leave its directory behind.
+        var tests = new ServiceWorkerControllerTests();
+        File.WriteAllText(Path.Combine(tests._tempDirectory, "sw.js"), "// Service Worker");
+
+        tests.Dispose();
+
+        Assert.False(Directory.Exists(tests._tempDirectory));
     }
 
     [Fact]

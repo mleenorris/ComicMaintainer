@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
@@ -32,6 +33,14 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
     // Prefix the file watcher ignores; an archive carries it while moving in.
     private const string StagingPrefix = ".tmp_";
+
+    // Not a comic extension, so nothing that lists the library's comics (the
+    // watcher's rescans, Library Scan, folder combining) sees a staged file.
+    private const string StagingExtension = ".suwayomi-import";
+
+    // Staged moves not yet published, kept in the config folder so a chapter
+    // staged when the process stopped is published on the next run.
+    private const string PendingMovesFileName = "suwayomi-import-pending.json";
 
     private const int MaxNameAttempts = 1000;
 
@@ -123,7 +132,12 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             var run = new ImportRun(settings, downloadsRoot, importRoot, watchedRoot, _timeProvider.GetUtcNow().UtcDateTime);
             run.Result.ImageFolders = imageFolders;
 
-            await ImportArchivesAsync(run, archives, cancellationToken);
+            RecoverPendingMoves(run);
+            if (!run.Result.PermissionDenied)
+            {
+                await ImportArchivesAsync(run, archives, cancellationToken);
+            }
+
             run.Result.RemovedFolders = RemoveEmptyFolders(run);
             return run.Result;
         }
@@ -246,13 +260,14 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     /// is still writing does not open.
     /// </summary>
     public static bool IsCompleteArchive(string path)
-        => ProbeArchive(path) == ArchiveState.Complete;
+        => ProbeArchive(path, Path.GetExtension(path)) == ArchiveState.Complete;
 
-    private static ArchiveState ProbeArchive(string path)
+    /// <param name="extension">The archive's real extension, which a staged file lacks.</param>
+    private static ArchiveState ProbeArchive(string path, string extension)
     {
         try
         {
-            if (ComicFileExtensions.NormalizeExtension(Path.GetExtension(path)) == ".cbz")
+            if (ComicFileExtensions.NormalizeExtension(extension) == ".cbz")
             {
                 using var zip = ZipFile.OpenRead(path);
                 return zip.Entries.Count > 0 ? ArchiveState.Complete : ArchiveState.Incomplete;
@@ -297,7 +312,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 continue;
             }
 
-            var state = ProbeArchive(archive);
+            var state = ProbeArchive(archive, Path.GetExtension(archive));
             if (state == ArchiveState.PermissionDenied)
             {
                 // Permissions rarely differ per file, so stop like a refused move.
@@ -321,7 +336,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 continue;
             }
 
-            switch (MoveIntoFolder(archive, target, out var destination))
+            switch (MoveIntoFolder(run, archive, target, out var destination))
             {
                 case MoveOutcome.Moved:
                     result.Imported.Add(new SuwayomiImportedChapter(archive, destination));
@@ -498,7 +513,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         }
     }
 
-    private MoveOutcome MoveIntoFolder(string sourcePath, string targetFolder, out string destinationPath)
+    private MoveOutcome MoveIntoFolder(ImportRun run, string sourcePath, string targetFolder, out string destinationPath)
     {
         destinationPath = string.Empty;
         var fileName = Path.GetFileName(sourcePath);
@@ -518,39 +533,75 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             return ex is UnauthorizedAccessException ? MoveOutcome.PermissionDenied : MoveOutcome.Failed;
         }
 
-        // Stage under a name the file watcher ignores so a copy across file
-        // systems is never processed half-written; the rename to the real
-        // name below stays within one folder and is atomic.
-        var stagingPath = Path.Combine(targetFolder, StagingPrefix + Guid.NewGuid().ToString("N") + extension);
+        // Stage under a name neither the file watcher nor any library scan
+        // treats as a comic, so a copy across file systems is never processed
+        // half-written; the rename to the real name below stays within one
+        // folder and is atomic. The move is journaled first so a restart
+        // between the two steps does not strand the chapter.
+        var stagingPath = Path.Combine(targetFolder, StagingPrefix + Guid.NewGuid().ToString("N") + StagingExtension);
+        var pending = new PendingMove(stagingPath, sourcePath);
+        run.PendingMoves.Add(pending);
+        if (!TrySavePendingMoves(run, out var journalError))
+        {
+            run.PendingMoves.Remove(pending);
+            return journalError is UnauthorizedAccessException ? MoveOutcome.PermissionDenied : MoveOutcome.Failed;
+        }
+
         try
         {
-            File.Move(sourcePath, stagingPath);
+            try
+            {
+                File.Move(sourcePath, stagingPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (File.Exists(sourcePath))
+                {
+                    // A move across file systems copies, then deletes the source.
+                    // If the delete was refused, drop the copy so the chapter does
+                    // not end up both in the library and in Suwayomi's folder.
+                    TryDeleteFile(stagingPath);
+                    _logger.LogWarning(
+                        ex,
+                        "Could not move Suwayomi chapter {File} into {Folder}; ComicMaintainer needs write access to both folders",
+                        LoggingHelper.SanitizePathForLog(sourcePath),
+                        LoggingHelper.SanitizeForLog(targetFolder));
+                    return ex is UnauthorizedAccessException ? MoveOutcome.PermissionDenied : MoveOutcome.Failed;
+                }
+
+                if (!File.Exists(stagingPath) || ProbeArchive(stagingPath, extension) != ArchiveState.Complete)
+                {
+                    // Deleted from Suwayomi's folder while it was being moved.
+                    TryDeleteFile(stagingPath);
+                    return MoveOutcome.Vanished;
+                }
+            }
+
+            return PublishStagedFile(stagingPath, fileName, sourcePath, out destinationPath);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        finally
         {
-            if (File.Exists(sourcePath))
+            // Still staged only when it could be neither published nor
+            // returned; the entry then stays for the next run to retry.
+            if (!File.Exists(stagingPath) && run.PendingMoves.Remove(pending))
             {
-                // A move across file systems copies, then deletes the source.
-                // If the delete was refused, drop the copy so the chapter does
-                // not end up both in the library and in Suwayomi's folder.
-                TryDeleteFile(stagingPath);
-                _logger.LogWarning(
-                    ex,
-                    "Could not move Suwayomi chapter {File} into {Folder}; ComicMaintainer needs write access to both folders",
-                    LoggingHelper.SanitizePathForLog(sourcePath),
-                    LoggingHelper.SanitizeForLog(targetFolder));
-                return ex is UnauthorizedAccessException ? MoveOutcome.PermissionDenied : MoveOutcome.Failed;
-            }
-
-            if (!File.Exists(stagingPath) || !IsCompleteArchive(stagingPath))
-            {
-                // Deleted from Suwayomi's folder while it was being moved.
-                TryDeleteFile(stagingPath);
-                return MoveOutcome.Vanished;
+                TrySavePendingMoves(run, out _);
             }
         }
+    }
 
+    /// <summary>
+    /// Renames a staged chapter to the first free name based on
+    /// <paramref name="fileName"/> in its folder. On failure the chapter goes
+    /// back to <paramref name="restorePath"/> when one is given.
+    /// </summary>
+    private MoveOutcome PublishStagedFile(string stagingPath, string fileName, string? restorePath, out string destinationPath)
+    {
+        destinationPath = string.Empty;
+        var targetFolder = Path.GetDirectoryName(stagingPath)!;
         var baseName = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        var outcome = MoveOutcome.Failed;
         for (var attempt = 1; attempt <= MaxNameAttempts; attempt++)
         {
             var candidate = Path.Combine(targetFolder, attempt == 1 ? fileName : $"{baseName} ({attempt}){extension}");
@@ -574,14 +625,23 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 _logger.LogWarning(
                     ex,
                     "Could not name imported Suwayomi chapter {File} in {Folder}",
-                    LoggingHelper.SanitizePathForLog(sourcePath),
+                    LoggingHelper.SanitizeForLog(fileName),
                     LoggingHelper.SanitizeForLog(targetFolder));
+                if (ex is UnauthorizedAccessException)
+                {
+                    outcome = MoveOutcome.PermissionDenied;
+                }
+
                 break;
             }
         }
 
-        RestoreStagedFile(stagingPath, sourcePath);
-        return MoveOutcome.Failed;
+        if (restorePath is not null)
+        {
+            RestoreStagedFile(stagingPath, restorePath);
+        }
+
+        return outcome;
     }
 
     private void RestoreStagedFile(string stagingPath, string sourcePath)
@@ -594,9 +654,142 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         {
             _logger.LogWarning(
                 ex,
-                "Could not return Suwayomi chapter {File} to the downloads folder; it was left at {StagingPath}",
+                "Could not return Suwayomi chapter {File} to the downloads folder; it was left at {StagingPath} and will be published on the next run",
                 LoggingHelper.SanitizePathForLog(sourcePath),
                 LoggingHelper.SanitizeForLog(stagingPath));
+        }
+    }
+
+    /// <summary>
+    /// Finishes the moves a previous run staged but never published, e.g.
+    /// because the process stopped in between. A chapter whose download is
+    /// still in place is imported afresh instead, so its staged copy is
+    /// dropped.
+    /// </summary>
+    private void RecoverPendingMoves(ImportRun run)
+    {
+        run.PendingMoves.AddRange(LoadPendingMoves(run.PendingMovesPath));
+        if (run.PendingMoves.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var move in run.PendingMoves.ToList())
+        {
+            var stagingName = Path.GetFileName(move.StagingPath ?? string.Empty);
+            var sourceName = Path.GetFileName(move.SourcePath ?? string.Empty);
+            if (!stagingName.StartsWith(StagingPrefix, StringComparison.Ordinal)
+                || !stagingName.EndsWith(StagingExtension, StringComparison.Ordinal)
+                || !ComicFileExtensions.IsComicArchive(sourceName)
+                || Path.GetDirectoryName(move.StagingPath) is not { } folder
+                || !TryConfineToLibrary(folder, run.Settings, out var confinedFolder))
+            {
+                _logger.LogWarning("Dropping invalid pending Suwayomi import entry for {File}", LoggingHelper.SanitizeForLog(stagingName));
+                run.PendingMoves.Remove(move);
+                continue;
+            }
+
+            var stagingPath = Path.Combine(confinedFolder, stagingName);
+            if (!File.Exists(stagingPath))
+            {
+                // Published or returned before the journal was updated.
+                run.PendingMoves.Remove(move);
+                continue;
+            }
+
+            // The download only goes back where this run imports from.
+            string? sourcePath = TryResolvePath(move.SourcePath, out var resolvedSource)
+                && IsInside(resolvedSource, run.DownloadsRoot)
+                && !PathsEqual(resolvedSource, run.DownloadsRoot)
+                    ? resolvedSource
+                    : null;
+
+            if ((sourcePath is not null && File.Exists(sourcePath))
+                || ProbeArchive(stagingPath, Path.GetExtension(sourceName)) != ArchiveState.Complete)
+            {
+                // Stopped mid-copy, or before the download was deleted: the
+                // download itself is imported below.
+                TryDeleteFile(stagingPath);
+                if (!File.Exists(stagingPath))
+                {
+                    run.PendingMoves.Remove(move);
+                }
+
+                continue;
+            }
+
+            var outcome = PublishStagedFile(stagingPath, sourceName, sourcePath, out var destination);
+            if (!File.Exists(stagingPath))
+            {
+                run.PendingMoves.Remove(move);
+            }
+
+            if (outcome == MoveOutcome.Moved)
+            {
+                run.Result.Imported.Add(new SuwayomiImportedChapter(move.SourcePath!, destination));
+                _logger.LogInformation(
+                    "Imported Suwayomi chapter {File} left staged by an earlier run",
+                    LoggingHelper.SanitizePathForLog(destination));
+                continue;
+            }
+
+            run.Result.Failed++;
+            if (outcome == MoveOutcome.PermissionDenied)
+            {
+                run.Result.PermissionDenied = true;
+                break;
+            }
+        }
+
+        TrySavePendingMoves(run, out _);
+    }
+
+    private List<PendingMove> LoadPendingMoves(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return [];
+            }
+
+            using var stream = File.OpenRead(path);
+            return JsonSerializer.Deserialize<List<PendingMove>>(stream)?.Where(move => move is not null).ToList() ?? [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _logger.LogWarning(ex, "Could not read the pending Suwayomi imports from {File}", LoggingHelper.SanitizeForLog(path));
+            return [];
+        }
+    }
+
+    private bool TrySavePendingMoves(ImportRun run, out Exception? error)
+    {
+        error = null;
+        var path = run.PendingMovesPath;
+        try
+        {
+            if (run.PendingMoves.Count == 0)
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+
+                return true;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var temporary = path + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(run.PendingMoves));
+            File.Move(temporary, path, overwrite: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            error = ex;
+            _logger.LogWarning(ex, "Could not record the pending Suwayomi imports in {File}", LoggingHelper.SanitizeForLog(path));
+            return false;
         }
     }
 
@@ -768,7 +961,8 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     {
         if (IsVolumeRoot(resolvedDirectory))
         {
-            return true;
+            // A volume root holds only the paths on that volume.
+            return PathsEqual(Path.GetPathRoot(resolvedPath) ?? string.Empty, resolvedDirectory);
         }
 
         var directory = Path.TrimEndingDirectorySeparator(resolvedDirectory);
@@ -788,6 +982,8 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             Path.TrimEndingDirectorySeparator(first),
             Path.TrimEndingDirectorySeparator(second),
             PathComparison);
+
+    private sealed record PendingMove(string? StagingPath, string? SourcePath);
 
     private enum MoveOutcome
     {
@@ -814,6 +1010,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             WatchedRoot = watchedRoot;
             Now = now;
             SettleTime = TimeSpan.FromSeconds(Math.Max(MinimumSettleTime.TotalSeconds, settings.WatcherFileStabilityDelaySeconds));
+            PendingMovesPath = Path.GetFullPath(Path.Combine(settings.ConfigDirectory ?? string.Empty, PendingMovesFileName));
         }
 
         public AppSettings Settings { get; }
@@ -823,6 +1020,12 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         public DateTime Now { get; }
         public TimeSpan SettleTime { get; }
         public SuwayomiImportResult Result { get; } = new();
+
+        /// <summary>Where staged, not yet published moves are journaled.</summary>
+        public string PendingMovesPath { get; }
+
+        /// <summary>Staged moves not yet published or returned.</summary>
+        public List<PendingMove> PendingMoves { get; } = [];
 
         /// <summary>Chosen library folder per normalized series name (null: refused).</summary>
         public Dictionary<string, string?> Targets { get; } = new(StringComparer.Ordinal);

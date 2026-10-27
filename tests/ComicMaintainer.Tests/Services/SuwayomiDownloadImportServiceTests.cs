@@ -391,6 +391,75 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.True(File.Exists(staging));
     }
 
+    private string PendingMovesPath => Path.Combine(_settings.ConfigDirectory, "suwayomi-import-pending.json");
+
+    private void WritePendingMove(string stagingPath, string sourcePath)
+    {
+        Directory.CreateDirectory(_settings.ConfigDirectory);
+        File.WriteAllText(PendingMovesPath, System.Text.Json.JsonSerializer.Serialize(new[]
+        {
+            new { StagingPath = stagingPath, SourcePath = sourcePath }
+        }));
+    }
+
+    [Fact]
+    public async Task ImportAsync_ClearsThePendingMoveJournalOnceAChapterIsPublished()
+    {
+        Download("Source", "Solo Leveling", "Chapter 1.cbz");
+
+        var result = await CreateService().ImportAsync();
+
+        Assert.Single(result.Imported);
+        Assert.False(File.Exists(PendingMovesPath));
+    }
+
+    [Fact]
+    public async Task ImportAsync_PublishesAChapterLeftStagedByAnInterruptedRun()
+    {
+        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var staging = WriteCbz(Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"), "staged");
+        WritePendingMove(staging, source);
+
+        var result = await CreateService().ImportAsync();
+
+        var destination = Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz");
+        var imported = Assert.Single(result.Imported);
+        Assert.Equal(destination, imported.DestinationPath);
+        Assert.Equal("staged", ReadPage(destination));
+        Assert.False(File.Exists(staging));
+        Assert.False(File.Exists(PendingMovesPath));
+    }
+
+    [Fact]
+    public async Task ImportAsync_DropsAStagedCopyWhoseDownloadIsStillInPlace()
+    {
+        var source = Download("Source", "Solo Leveling", "Chapter 1.cbz");
+        var staging = WriteCbz(Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"), "partial copy");
+        WritePendingMove(staging, source);
+
+        var result = await CreateService().ImportAsync();
+
+        var destination = Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz");
+        Assert.Single(result.Imported);
+        Assert.Equal("page", ReadPage(destination));
+        Assert.False(File.Exists(source));
+        Assert.Single(Directory.GetFiles(Path.Combine(_library, "Solo Leveling")));
+        Assert.False(File.Exists(PendingMovesPath));
+    }
+
+    [Fact]
+    public async Task ImportAsync_IgnoresPendingMovesOutsideTheLibrary()
+    {
+        var outside = WriteCbz(Path.Combine(_root, "elsewhere", ".tmp_0123456789abcdef.suwayomi-import"));
+        WritePendingMove(outside, Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz"));
+
+        var result = await CreateService().ImportAsync();
+
+        Assert.Empty(result.Imported);
+        Assert.True(File.Exists(outside));
+        Assert.False(File.Exists(PendingMovesPath));
+    }
+
     [Fact]
     public async Task ImportAsync_RemovesFoldersItEmptiedAndStaleEmptyFoldersButKeepsNewOnes()
     {

@@ -558,6 +558,8 @@ Suwayomi saves chapters as `<downloads>/<source>/<series>/<chapter>.cbz`. When a
 
 The series folder is, in order: a folder in the import folder named like the Suwayomi series folder (ignoring case, spacing and punctuation); the existing library folder of the one series whose title, canonical title or alias matches; or a new folder named after the Suwayomi series folder in the import folder. A name already taken gets a ` (2)`, ` (3)`, … suffix. Archives written in the last 30 seconds (or the watcher's stability delay, if longer), archives that cannot be opened, and archives directly in the downloads folder are left in place. Chapters saved as loose images are not imported; enable **Save as CBZ archive** in Suwayomi's download settings.
 
+Each archive is first moved under a hidden staging name (`.tmp_<id>.suwayomi-import`) that neither the file watcher nor Library Scan picks up, then renamed to its chapter name. Staged moves are recorded in `suwayomi-import-pending.json` in the config folder, so a chapter staged when ComicMaintainer stopped is published on the next run (or dropped, if its download is still in place, so that it is imported afresh). A permission error stops the run and is shown in its summary.
+
 The folders are set with `PUT /api/settings/suwayomi` (administrators only), alongside the server settings, or with the `SUWAYOMI_DOWNLOADS_DIR` and `SUWAYOMI_IMPORT_DIR` environment variables:
 
 ```json

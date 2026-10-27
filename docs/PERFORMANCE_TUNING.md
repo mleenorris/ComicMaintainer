@@ -161,11 +161,12 @@ lookup per file. Its options (JSON, editable via
 | `reprocessModified` | `false` | Re-normalize tracked files whose on-disk size or last-write time differs from the stored values (±2 s tolerance for coarse filesystem timestamps). |
 
 `reprocessModified` is useful when other tools replace or edit archives in
-place. Stored size/mtime are refreshed once a file's re-normalize succeeds (and
-after every in-place metadata write by ComicMaintainer), so the app's own
-writes never re-trigger the pass. A file whose re-normalize could not be queued,
-failed, or was cut short by a failed or cancelled job keeps its old values and
-is retried by the next scan. Leave it off for very large libraries on
+place. Stored size/mtime are refreshed after every in-place metadata write by
+ComicMaintainer and, once the re-normalize job completes, for each file it
+normalized successfully, so the app's own writes never re-trigger the pass. A
+changed file whose re-normalize failed or could not be queued, or that a
+failed or cancelled job didn't rewrite, keeps its old values and is retried
+by the next scan. Leave it off for very large libraries on
 slow network storage if the extra `stat` per file is noticeable.
 
 ## Web Interface Performance

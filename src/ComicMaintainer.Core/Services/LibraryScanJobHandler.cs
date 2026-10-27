@@ -254,8 +254,8 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         // Our own metadata writes change size/mtime; re-sync the stored
         // stats so the next scan doesn't see them as modified again. Only
         // files the job normalized successfully are re-synced: a file that
-        // couldn't be queued, failed, or sat in a failed or cancelled job
-        // keeps its old stats, so the next scan detects and retries it.
+        // failed or couldn't be queued, or that a failed or cancelled job
+        // didn't rewrite, keeps its old stats and is retried next scan.
         if (modifiedSucceeded.Count > 0)
         {
             await RefreshStatsSafeAsync(modifiedSucceeded, cancellationToken);

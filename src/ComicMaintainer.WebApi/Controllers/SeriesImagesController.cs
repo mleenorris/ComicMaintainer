@@ -232,7 +232,8 @@ public class SeriesImagesController : ControllerBase
             }
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't an apply error.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error applying provider image for {SeriesTitle}"),
                 LoggingHelper.SanitizeForLog(seriesTitle));

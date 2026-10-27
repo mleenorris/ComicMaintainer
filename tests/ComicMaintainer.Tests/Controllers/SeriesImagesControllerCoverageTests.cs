@@ -556,6 +556,31 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         Assert.Equal("Error applying provider image", obj.Value);
     }
 
+    [Fact]
+    public async Task ApplyFromProvider_CallerCancelled_LetsTheCancellationThrough()
+    {
+        _cts.Cancel();
+        _cache.Setup(c => c.ApplyExternalImageAsync("Batman", "https://img/a.jpg", It.IsAny<string?>(), _cts.Token))
+            .ThrowsAsync(new OperationCanceledException(_cts.Token));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CreateController().ApplyFromProvider(
+            "Batman", new SeriesImagesController.ApplyFromProviderRequest { ImageUrl = "https://img/a.jpg" }, _cts.Token));
+    }
+
+    [Fact]
+    public async Task ApplyFromProvider_CancellationTheCallerDidNotAskFor_Returns500()
+    {
+        _cache.Setup(c => c.ApplyExternalImageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("timed out"));
+
+        var result = await CreateController().ApplyFromProvider(
+            "Batman", new SeriesImagesController.ApplyFromProviderRequest { ImageUrl = "https://img/a.jpg" }, _cts.Token);
+
+        var obj = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(500, obj.StatusCode);
+        Assert.Equal("Error applying provider image", obj.Value);
+    }
+
     // ---- ApplyCurrentToAll / ApplyCurrentToSelected -------------------------------------
 
     [Fact]

@@ -220,13 +220,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cancelling a metadata search is no longer reported as a provider failure or a "no match"**:
   the provider health stays as it was, and the search endpoints stop logging an error and
   answering 500 when the browser gives up on the request.
+- **Cancelled requests, jobs and shutdowns are no longer swallowed or reported as other
+  failures.** Leaving the Library page while provider health loads no longer marks every
+  metadata provider "Timed out" for a minute. Applying a provider image that times out while
+  its host is checked answers 504 instead of 400 "Cannot resolve image host". Cancelling a
+  rename job during a series lookup no longer renames the file to its unresolved series name,
+  and a cancelled rename never moves the file. A cancelled metadata refresh no longer logs a
+  "refresh failed" warning. A library scan stopped by shutdown no longer queues normalize jobs
+  or reports one as "job record evicted". A series cover write that fails with a cancellation
+  the queue did not ask for is logged and skipped, instead of silently stopping all later cover
+  writes until restart.
 - **First sign-in through Authelia works without `Remote-Email` or `Remote-Name`.** The account
   gets `<username>@authelia.local` and the username as its name; before, sign-in failed with
   401.
+- **Authelia users whose username is an email address can sign in without `Remote-Email`.** For a
+  username such as `alice@corp.example`, the placeholder `<username>@authelia.local` is not a
+  valid address, so the account was never created and every request was answered with 401. Such
+  a username is now used as the account's email; in any other username, each `@` becomes `=` in
+  the placeholder. `=` can't appear in a username, and a username at `authelia.local` isn't used
+  as is, so two users never get the same email, which would lock out whoever signed in second.
 - **About 1 in 54 first sign-ins through Authelia no longer fail with 401.** The unused password
   generated for the new account sometimes lacked a digit, which the password policy requires.
 - **"Run now" on a scheduled job that is already running says so** instead of reporting that the
   job started; `POST /api/scheduled-jobs/{key}/run` answers `queued: false`.
+- **A scheduled job is no longer reported as skipped while its run is still going.** When the
+  schedule came due during a run (typically a long **Run now**), the card switched to "Skipped"
+  with a 0 ms duration, Run now was enabled again and the page announced "Library Scan: Skipped:
+  Skipped: previous run still in progress."; the run's own result was then never announced. The
+  skipped run is now only logged and counted (`outcome="skipped"` in
+  `comicmaintainer_scheduled_job_runs_total`), and the job's next run moves on by one interval.
 - **Database backups and restores work when the connection string is a `file:` URI**; such
   databases were mistaken for in-memory ones and never backed up.
 - **An error that happens soon after reconnecting is reported**; an error while offline used
@@ -402,6 +424,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session already existed (an Authelia session or a stored token), the login page redirected to
   both the setup page and the app, and network timing decided where the user ended up. It now
   sends the user to setup, and checks for an existing session only when setup is not required.
+
+- **Save Settings no longer saves part of the settings without saying so.** The settings are
+  saved in groups, one request each, and a failure stopped the save without undoing the groups
+  already saved or naming them; for most groups the server's reason became "HTTP error!
+  status: 400". Values the server would reject (a log size above 2047 MB, mail attachments
+  above 200 MB, an error reporting limit above 100 issues a day, a recurrence interval outside
+  1 to 720 hours) are now refused before anything is sent. If the server still rejects a
+  group, the message gives its reason and lists the groups that were saved, and the form keeps
+  your edits so you can correct the value and save again. An expired session during any group
+  now goes to the sign-in page, as it already did for the last three, instead of showing
+  "HTTP error! status: 401".
+
+- **A failed database reset reports the HTTP status when the error is not JSON.** A reverse
+  proxy's error page or an empty body (a 502 or 504, say) showed a JSON parse error such as
+  "Unexpected token '<'" instead.
 
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
@@ -3026,6 +3063,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.363] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.364] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.365] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.366] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.367] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.368] - 2026-10-27
 
 ### Changed
 - Automatic version bump on merge to master

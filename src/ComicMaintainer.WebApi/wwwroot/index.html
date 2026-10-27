@@ -768,7 +768,7 @@
                         </div>
                         <div class="form-group">
                            <label for="emailMaxAttachmentMb">Max Attachment Size (MB)</label>
-                           <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" step="1" autocomplete="off" placeholder="25">
+                           <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" max="200" step="1" autocomplete="off" placeholder="25">
                         </div>
                         <h4 class="settings-subheading">Rate Limit</h4>
                         <p class="form-hint">
@@ -866,7 +866,7 @@
                                 Maximum Log File Size (MB)
                                 <span class="setting-restart-badge" title="This setting is only applied when the service starts.">Restart required</span>
                             </label>
-                            <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off">
+                            <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="2047" step="1" placeholder="5" autocomplete="off">
                             <small class="form-hint">
                                 When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
                             </small>

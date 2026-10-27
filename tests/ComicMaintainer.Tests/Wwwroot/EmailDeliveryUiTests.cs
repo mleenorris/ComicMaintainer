@@ -311,7 +311,7 @@ public class EmailDeliveryUiTests
         var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Matches(
-            new Regex(@"if \(!emailSettingsResponse\.ok\).*emailStatusCache = null;", RegexOptions.Singleline),
+            new Regex(@"path: '/api/settings/email',.*?saved: \(\) => \{\s*emailStatusCache = null;", RegexOptions.Singleline),
             js);
     }
 

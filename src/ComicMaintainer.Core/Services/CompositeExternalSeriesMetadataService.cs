@@ -172,6 +172,10 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             {
                 results.Add(await provider.CheckHealthAsync(cancellationToken));
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Health check failed for provider {ProviderType}", provider.GetType().Name);

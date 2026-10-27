@@ -5,13 +5,17 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
 using ComicMaintainer.Tests.Helpers;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace ComicMaintainer.Tests.Services;
@@ -1025,6 +1029,63 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_SymlinkedWatchedRoot_RenamesAndUpdatesRealFileStoreToConfiguredPath()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var watchedRoot = Path.Combine(_root, "watched-root");
+        Directory.CreateSymbolicLink(watchedRoot, _library);
+        _settings.WatchedDirectory = watchedRoot;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        path = Path.Combine(watchedRoot, Path.GetRelativePath(_library, path));
+
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
+            options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
+        using var provider = services.BuildServiceProvider();
+        var fileStore = new FileStoreService(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            NullLogger<FileStoreService>.Instance,
+            provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
+        await fileStore.AddFileAsync(path);
+        var service = CreateService(fileStore: fileStore);
+
+        await service.ProcessFileAsync(path);
+
+        var expected = Path.Combine(watchedRoot, "Series", "Series - Chapter 0005.cbz");
+        Assert.True(File.Exists(expected));
+        var storedFile = Assert.Single(await fileStore.GetAllFilesAsync());
+        Assert.Equal(expected, storedFile.FilePath);
+        Assert.True(File.Exists(storedFile.FilePath));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_LiveDirectoryEndingInDeleted_RenamesSuccessfully()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var service = CreateService();
+        var path = WriteCbz("Series (deleted)/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var expected = Path.Combine(_library, "Series (deleted)", "Series - Chapter 0005.cbz");
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(File.Exists(expected));
+        Assert.False(File.Exists(path));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(path, expected, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_FileStoreThrows_ReturnsFalseAndExcludesFromErrorReports()
     {
         _fileStore.Setup(f => f.IsFileProcessedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -1626,12 +1687,13 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         ISeriesNameResolver? resolver = null,
         IExternalSeriesMetadataService? external = null,
         IComicEmailService? email = null,
-        ComicMaintainerMetrics? metrics = null)
+        ComicMaintainerMetrics? metrics = null,
+        IFileStoreService? fileStore = null)
     {
         var service = new ComicProcessorService(
             new TestOptionsMonitor<AppSettings>(_settings),
             _logger,
-            _fileStore.Object,
+            fileStore ?? _fileStore.Object,
             _history.Object,
             eventBroadcaster: _broadcaster.Object,
             externalSeriesMetadata: external,

@@ -243,7 +243,8 @@ public partial class ComicProcessorService
 
         var directoryPath = Path.GetDirectoryName(sourcePath)
             ?? throw new IOException("Cannot determine the source directory.");
-        var descriptor = OpenLinuxDirectory(directoryPath, 0x10000 | 0x80000);
+        var directoryFlag = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 0x4000 : 0x10000;
+        var descriptor = OpenLinuxDirectory(directoryPath, directoryFlag | 0x80000);
         if (descriptor < 0)
         {
             throw new IOException($"Could not open the source directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
@@ -311,12 +312,35 @@ public partial class ComicProcessorService
         }
 
         var path = Encoding.UTF8.GetString(buffer, 0, (int)length);
-        if (path.EndsWith(" (deleted)", StringComparison.Ordinal))
+        return path;
+    }
+
+    private string GetAllowedLogicalPath(string resolvedPath)
+    {
+        foreach (var allowedDirectory in new[] { _settings.WatchedDirectory, _settings.DuplicateDirectory })
         {
-            throw new IOException("The opened source directory no longer has a path.");
+            if (string.IsNullOrWhiteSpace(allowedDirectory))
+            {
+                continue;
+            }
+
+            var logicalRoot = Path.GetFullPath(allowedDirectory);
+            var resolvedRoot = LibraryPathValidator.ResolveRealPath(logicalRoot);
+            if (!LibraryPathValidator.IsWithin(resolvedPath, resolvedRoot))
+            {
+                continue;
+            }
+
+            var relativePath = Path.GetRelativePath(resolvedRoot, resolvedPath);
+            var logicalPath = Path.GetFullPath(Path.Combine(logicalRoot, relativePath));
+            if (TryResolveAllowedPath(logicalPath, out var verifiedPath) &&
+                string.Equals(verifiedPath, resolvedPath, StringComparison.Ordinal))
+            {
+                return logicalPath;
+            }
         }
 
-        return path;
+        throw new IOException("The renamed file does not resolve within a configured library directory.");
     }
 
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]

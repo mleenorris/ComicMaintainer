@@ -236,7 +236,8 @@ public partial class ComicProcessorService
                         else
                         {
                             _logger.LogDebug("ProcessFileAsync: Rename path validated: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                            newFilePath = MoveFileInRenameDirectory(renameDirectoryHandle, resolvedPath, newResolvedPath);
+                            var movedPath = MoveFileInRenameDirectory(renameDirectoryHandle, resolvedPath, newResolvedPath);
+                            newFilePath = GetAllowedLogicalPath(movedPath);
                             var oldFilePath = filePath;
                             var beforeFilename = Path.GetFileName(oldFilePath);
                             var afterFilename = Path.GetFileName(newFilePath);

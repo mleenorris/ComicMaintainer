@@ -82,9 +82,11 @@
             // migrate error entries — a 404/failure cached under the stale id
             // (e.g. from a race during a filter change) must not poison the
             // remapped id; leaving the new key empty lets renderSeriesDetail
-            // trigger a fresh fetch.
+            // trigger a fresh fetch. Nor entries still loading: their answer
+            // re-renders only the stale id, leaving the new one loading forever.
             const oldCached = seriesIssuesCache.get(currentSeriesDetailId);
-            if (oldCached && !oldCached.error && !seriesIssuesCache.has(remapped.id)) {
+            if (oldCached && !oldCached.error && !oldCached.loadingPages?.size
+                && !seriesIssuesCache.has(remapped.id)) {
                 seriesIssuesCache.set(remapped.id, oldCached);
             }
             seriesIssuesCache.delete(currentSeriesDetailId);

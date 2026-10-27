@@ -337,6 +337,26 @@ test('a renamed series is recognised by its title and refetched when its issues 
     assert.equal(page.evaluate("seriesIssuesCache.has('saga')"), false);
 });
 
+test('a renamed series whose issues are still loading fetches them under the new id', async () => {
+    const gate = deferred();
+    const page = await bootSeries({ routes: { [`GET ${ISSUES}`]: () => gate.promise } });
+    assert.equal(text(page.$('#seriesDetailPanel .loading')), 'Loading issues...');
+    const renamed = seriesCard({ id: 'saga-2' });
+    page.route(`GET ${issuesPath('saga-2')}`, issuesBody(renamed, [issue(1), issue(2)]));
+
+    await reloadLibrary(page, [renamed]);
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(callsTo(page, issuesPath('saga-2')).length, 1, 'the unfinished load is not carried over');
+    assert.equal(issueCards(page).length, 2);
+
+    // The old id's answer arriving afterwards changes nothing.
+    gate.resolve(issuesBody(seriesCard(), [issue(1), issue(2), issue(3)]));
+    await page.settle();
+    assert.equal(issueCards(page).length, 2);
+    assert.equal(page.evaluate("seriesIssuesCache.has('saga')"), false);
+});
+
 test('a series the reloaded library no longer lists stays open from its last snapshot', async () => {
     const page = await bootSeries({ series: seriesCard({ aliases: ['Saga Comic'] }) });
 

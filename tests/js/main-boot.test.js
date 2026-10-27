@@ -7,6 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { runWwwrootScript } = require('./support/sandbox');
+const { deferred } = require('./support/app');
 const { boot, loadApp, requests, consoleLines, preferences, press, seriesCard, seriesIssue, seriesIssues, seriesPage } = require('./support/core-helpers');
 
 const SAGA = seriesCard();
@@ -117,6 +118,31 @@ test('a series page opened before the preferences arrive lists its issues with t
     assert.equal(loads[0].query.filter, undefined, 'the page started loading before the preferences arrived');
     assert.equal(loads.at(-1).query.filter, 'unread');
     assert.equal(page.window.location.hash, `#/series/${SAGA.id}`, 'the series page stays open');
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issue-card[data-file-path]').map(card => card.dataset.filePath), ['Saga/Saga 002.cbz']);
+});
+
+test('a series page whose id changes under the saved filter still lists its issues', async () => {
+    // The filter groups the series under another id, and the filtered library
+    // answers before the filtered issues requested under the old id.
+    const filtered = seriesCard({ id: 'series-2' });
+    const read = seriesIssue({ read: true });
+    const unread = seriesIssue({ file_path: 'Saga/Saga 002.cbz', file_name: 'Saga 002.cbz', title: 'Chapter Two', issue: '2' });
+    const issuesFor = series => call => seriesIssues(series, call.query.filter === 'unread' ? [unread] : [read, unread]);
+    const gate = deferred();
+    const page = await boot({
+        hash: `#/series/${SAGA.id}`,
+        routes: libraryRoutes({
+            'GET /api/preferences': preferences({ filterMode: 'unread' }),
+            'GET /api/files/series': call => seriesPage(call.query.filter === 'unread' ? [filtered] : [SAGA]),
+            [`GET /api/files/series/${SAGA.id}/issues`]: call => (call.query.filter === 'unread' ? gate.promise : issuesFor(SAGA)(call)),
+            [`GET /api/files/series/${filtered.id}/issues`]: issuesFor(filtered)
+        })
+    });
+    gate.resolve(seriesIssues(filtered, [unread]));
+    await page.settle();
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'series-2');
+    assert.equal(page.$('#seriesDetailPanel .loading'), null, 'the page is not left loading');
     assert.deepEqual(page.$$('#seriesDetailPanel .series-issue-card[data-file-path]').map(card => card.dataset.filePath), ['Saga/Saga 002.cbz']);
 });
 

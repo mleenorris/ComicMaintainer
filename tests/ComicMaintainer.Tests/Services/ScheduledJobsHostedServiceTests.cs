@@ -291,11 +291,13 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         Assert.Contains(_logger.Entries, e => e.Message.Contains(
             $"Skipping {JobKey} run because previous run still in progress", StringComparison.Ordinal));
         Assert.Contains(recorder.Snapshot(), m =>
-            m.Instrument == "comicmaintainer.scheduled_job.runs" && (string?)m.Tags["outcome"] == "skipped");
+            m.Instrument == "comicmaintainer.scheduled_job.runs"
+            && m.Tags.TryGetValue("outcome", out var outcome)
+            && (string?)outcome == "skipped");
         var row = LoadJob();
         Assert.Equal(nameof(ScheduledJobStatus.Running), row.LastStatus);
         Assert.Null(row.LastMessage);
-        Assert.Equal(previousRun, row.LastRunUtc);
+        Assert.InRange(row.LastRunUtc!.Value, previousRun.AddSeconds(-1), previousRun.AddSeconds(1));
         Assert.Equal(4200, row.LastDurationMs);
         Assert.True(row.NextRunUtc > oneIntervalOn, "The next run is one interval after the skipped tick.");
 

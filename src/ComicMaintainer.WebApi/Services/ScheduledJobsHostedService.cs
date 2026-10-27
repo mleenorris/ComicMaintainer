@@ -182,8 +182,9 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             dueTime = TimeSpan.FromSeconds(5);
         }
 
+        var shutdownToken = _shutdownCts?.Token ?? CancellationToken.None;
         slot.Timer = new Timer(
-            _ => _ = ExecuteJobAsync(view.JobKey),
+            _ => _ = ExecuteJobAsync(view.JobKey, shutdownToken),
             null,
             dueTime,
             interval);
@@ -193,7 +194,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             LoggingHelper.SanitizeForLog(view.JobKey), dueTime.TotalSeconds, view.IntervalMinutes);
     }
 
-    private async Task ExecuteJobAsync(string jobKey)
+    private async Task ExecuteJobAsync(string jobKey, CancellationToken cancellationToken)
     {
         var handler = _service.GetHandler(jobKey);
         if (handler is null)
@@ -210,7 +211,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             _logger.LogInformation(
                 "Skipping {JobKey} run because previous run still in progress", LoggingHelper.SanitizeForLog(jobKey));
             _metrics?.RecordScheduledJobRun(handler.JobKey, "skipped", TimeSpan.Zero);
-            await _service.AdvanceNextRunAsync(jobKey);
+            await _service.AdvanceNextRunAsync(jobKey, cancellationToken);
             return;
         }
 

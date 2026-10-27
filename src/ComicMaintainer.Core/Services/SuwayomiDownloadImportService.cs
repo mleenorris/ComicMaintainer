@@ -524,6 +524,17 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
     private MoveOutcome MoveIntoFolder(ImportRun run, string sourcePath, string targetFolder, out string destinationPath)
     {
+        var result = SuwayomiImportSynchronization.Execute(() =>
+        {
+            var outcome = MoveIntoFolderCore(run, sourcePath, targetFolder, out var destination);
+            return (Outcome: outcome, Destination: destination);
+        });
+        destinationPath = result.Destination;
+        return result.Outcome;
+    }
+
+    private MoveOutcome MoveIntoFolderCore(ImportRun run, string sourcePath, string targetFolder, out string destinationPath)
+    {
         destinationPath = string.Empty;
         var fileName = Path.GetFileName(sourcePath);
         var extension = Path.GetExtension(fileName);
@@ -564,25 +575,63 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                if (File.Exists(sourcePath))
+                var sourceState = GetFilePathState(sourcePath);
+                if (sourceState == FilePathState.Present)
                 {
-                    // A move across file systems copies, then deletes the source.
-                    // If the delete was refused, drop the copy so the chapter does
-                    // not end up both in the library and in Suwayomi's folder.
-                    TryDeleteFile(stagingPath);
-                    _logger.LogWarning(
-                        ex,
-                        "Could not move Suwayomi chapter {File} into {Folder}; ComicMaintainer needs write access to both folders",
-                        LoggingHelper.SanitizePathForLog(sourcePath),
-                        LoggingHelper.SanitizeForLog(targetFolder));
-                    return ex is UnauthorizedAccessException ? MoveOutcome.PermissionDenied : MoveOutcome.Failed;
+                    var sourceArchive = ProbeArchive(sourcePath, extension);
+                    if (sourceArchive == ArchiveState.PermissionDenied)
+                    {
+                        return MoveOutcome.PermissionDenied;
+                    }
+
+                    if (sourceArchive == ArchiveState.Complete)
+                    {
+                        // The source is still a complete copy, so the staged
+                        // transfer can be discarded safely.
+                        TryDeleteFile(stagingPath);
+                        _logger.LogWarning(
+                            ex,
+                            "Could not move Suwayomi chapter {File} into {Folder}; ComicMaintainer needs write access to both folders",
+                            LoggingHelper.SanitizePathForLog(sourcePath),
+                            LoggingHelper.SanitizeForLog(targetFolder));
+                        return ex is UnauthorizedAccessException ? MoveOutcome.PermissionDenied : MoveOutcome.Failed;
+                    }
+
+                    var stagedCopyArchive = ProbeArchive(stagingPath, extension);
+                    if (stagedCopyArchive == ArchiveState.Complete)
+                    {
+                        return RestoreStagedFile(stagingPath, sourcePath, extension) == MoveOutcome.PermissionDenied
+                            ? MoveOutcome.PermissionDenied
+                            : MoveOutcome.Failed;
+                    }
+
+                    return stagedCopyArchive == ArchiveState.PermissionDenied
+                        ? MoveOutcome.PermissionDenied
+                        : MoveOutcome.Failed;
                 }
 
-                if (!File.Exists(stagingPath) || ProbeArchive(stagingPath, extension) != ArchiveState.Complete)
+                if (sourceState == FilePathState.PermissionDenied)
                 {
-                    // Deleted from Suwayomi's folder while it was being moved.
-                    TryDeleteFile(stagingPath);
-                    return MoveOutcome.Vanished;
+                    return MoveOutcome.PermissionDenied;
+                }
+
+                var stagingState = GetFilePathState(stagingPath);
+                if (stagingState == FilePathState.PermissionDenied)
+                {
+                    return MoveOutcome.PermissionDenied;
+                }
+
+                if (stagingState != FilePathState.Present)
+                {
+                    return sourceState == FilePathState.Missing ? MoveOutcome.Vanished : MoveOutcome.Failed;
+                }
+
+                var stagingArchive = ProbeArchive(stagingPath, extension);
+                if (stagingArchive != ArchiveState.Complete)
+                {
+                    return stagingArchive == ArchiveState.PermissionDenied
+                        ? MoveOutcome.PermissionDenied
+                        : MoveOutcome.Failed;
                 }
             }
 
@@ -592,7 +641,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         {
             // Still staged only when it could be neither published nor
             // returned; the entry then stays for the next run to retry.
-            if (!File.Exists(stagingPath) && run.PendingMoves.Remove(pending))
+            if (GetFilePathState(stagingPath) == FilePathState.Missing && run.PendingMoves.Remove(pending))
             {
                 TrySavePendingMoves(run, out _);
             }
@@ -647,25 +696,54 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
         if (restorePath is not null)
         {
-            RestoreStagedFile(stagingPath, restorePath);
+            if (RestoreStagedFile(stagingPath, restorePath, extension) == MoveOutcome.PermissionDenied)
+            {
+                outcome = MoveOutcome.PermissionDenied;
+            }
         }
 
         return outcome;
     }
 
-    private void RestoreStagedFile(string stagingPath, string sourcePath)
+    private MoveOutcome RestoreStagedFile(string stagingPath, string sourcePath, string extension)
     {
+        var sourceFolder = Path.GetDirectoryName(sourcePath);
+        if (string.IsNullOrEmpty(sourceFolder))
+        {
+            return MoveOutcome.Failed;
+        }
+
+        var temporaryPath = Path.Combine(
+            sourceFolder,
+            StagingPrefix + Guid.NewGuid().ToString("N") + ".suwayomi-restore");
         try
         {
-            File.Move(stagingPath, sourcePath);
+            Directory.CreateDirectory(sourceFolder);
+            File.Copy(stagingPath, temporaryPath);
+            var archiveState = ProbeArchive(temporaryPath, extension);
+            if (archiveState != ArchiveState.Complete)
+            {
+                return archiveState == ArchiveState.PermissionDenied
+                    ? MoveOutcome.PermissionDenied
+                    : MoveOutcome.Failed;
+            }
+
+            File.Move(temporaryPath, sourcePath, overwrite: true);
+            File.Delete(stagingPath);
+            return MoveOutcome.Moved;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.LogWarning(
                 ex,
-                "Could not return Suwayomi chapter {File} to the downloads folder; it was left at {StagingPath} and will be published on the next run",
+                "Could not atomically restore Suwayomi chapter {File} to the downloads folder; it was left at {StagingPath} and will be recovered on the next run",
                 LoggingHelper.SanitizePathForLog(sourcePath),
                 LoggingHelper.SanitizeForLog(stagingPath));
+            return ex is UnauthorizedAccessException ? MoveOutcome.PermissionDenied : MoveOutcome.Failed;
+        }
+        finally
+        {
+            TryDeleteFile(temporaryPath);
         }
     }
 
@@ -676,6 +754,17 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     /// dropped.
     /// </summary>
     private bool RecoverPendingMoves(ImportRun run, out string? error)
+    {
+        var result = SuwayomiImportSynchronization.Execute(() =>
+        {
+            var success = RecoverPendingMovesCore(run, out var recoveryError);
+            return (Success: success, Error: recoveryError);
+        });
+        error = result.Error;
+        return result.Success;
+    }
+
+    private bool RecoverPendingMovesCore(ImportRun run, out string? error)
     {
         if (!TryLoadPendingMoves(run.PendingMovesPath, out var pendingMoves, out error))
         {
@@ -704,10 +793,26 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             }
 
             var stagingPath = Path.Combine(confinedFolder, stagingName);
-            if (!File.Exists(stagingPath))
+            var stagingState = GetFilePathState(stagingPath);
+            if (stagingState == FilePathState.Missing)
             {
                 // Published or returned before the journal was updated.
                 run.PendingMoves.Remove(move);
+                continue;
+            }
+
+            if (stagingState == FilePathState.PermissionDenied)
+            {
+                _logger.LogWarning("Permission denied accessing staged Suwayomi chapter {File}", LoggingHelper.SanitizePathForLog(stagingPath));
+                run.Result.Failed++;
+                run.Result.PermissionDenied = true;
+                break;
+            }
+
+            if (stagingState != FilePathState.Present)
+            {
+                _logger.LogWarning("Could not access staged Suwayomi chapter {File}; leaving it staged for recovery", LoggingHelper.SanitizePathForLog(stagingPath));
+                run.Result.Unreadable++;
                 continue;
             }
 
@@ -718,17 +823,45 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                     ? resolvedSource
                     : null;
 
-            if (sourcePath is not null && File.Exists(sourcePath))
+            var sourceState = sourcePath is null ? FilePathState.Missing : GetFilePathState(sourcePath);
+            if (sourceState == FilePathState.PermissionDenied)
             {
-                // The original is recoverable, so discard a partial or duplicate
-                // staged copy and let the normal scan import the source.
-                TryDeleteFile(stagingPath);
-                if (!File.Exists(stagingPath))
+                _logger.LogWarning("Permission denied accessing Suwayomi download {File}", LoggingHelper.SanitizePathForLog(sourcePath!));
+                run.Result.Failed++;
+                run.Result.PermissionDenied = true;
+                break;
+            }
+
+            if (sourceState == FilePathState.Unavailable)
+            {
+                _logger.LogWarning("Could not access Suwayomi download {File}; leaving its staged chapter for recovery", LoggingHelper.SanitizePathForLog(sourcePath!));
+                run.Result.Unreadable++;
+                continue;
+            }
+
+            if (sourceState == FilePathState.Present)
+            {
+                var sourceArchive = ProbeArchive(sourcePath!, Path.GetExtension(sourceName));
+                if (sourceArchive == ArchiveState.PermissionDenied)
                 {
-                    run.PendingMoves.Remove(move);
+                    _logger.LogWarning("Permission denied reading Suwayomi download {File}", LoggingHelper.SanitizePathForLog(sourcePath!));
+                    run.Result.Failed++;
+                    run.Result.PermissionDenied = true;
+                    break;
                 }
 
-                continue;
+                if (sourceArchive == ArchiveState.Complete)
+                {
+                    // The original is still intact, so discard the staged
+                    // duplicate only after verifying that original.
+                    TryDeleteFile(stagingPath);
+                    if (GetFilePathState(stagingPath) == FilePathState.Missing)
+                    {
+                        run.PendingMoves.Remove(move);
+                    }
+
+                    continue;
+                }
             }
 
             var archiveState = ProbeArchive(stagingPath, Path.GetExtension(sourceName));
@@ -747,8 +880,31 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 continue;
             }
 
+            if (sourceState == FilePathState.Present)
+            {
+                var restoreOutcome = RestoreStagedFile(stagingPath, sourcePath!, Path.GetExtension(sourceName));
+                if (GetFilePathState(stagingPath) == FilePathState.Missing)
+                {
+                    run.PendingMoves.Remove(move);
+                }
+
+                if (restoreOutcome == MoveOutcome.PermissionDenied)
+                {
+                    run.Result.Failed++;
+                    run.Result.PermissionDenied = true;
+                    break;
+                }
+
+                if (restoreOutcome != MoveOutcome.Moved)
+                {
+                    run.Result.Failed++;
+                }
+
+                continue;
+            }
+
             var outcome = PublishStagedFile(stagingPath, sourceName, sourcePath, out var destination);
-            if (!File.Exists(stagingPath))
+            if (GetFilePathState(stagingPath) == FilePathState.Missing)
             {
                 run.PendingMoves.Remove(move);
             }
@@ -770,9 +926,39 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             }
         }
 
-        TrySavePendingMoves(run, out _);
+        if (!TrySavePendingMoves(run, out var saveError) && saveError is UnauthorizedAccessException)
+        {
+            run.Result.Failed++;
+            run.Result.PermissionDenied = true;
+        }
+
         error = null;
         return true;
+    }
+
+    private static FilePathState GetFilePathState(string path)
+    {
+        try
+        {
+            _ = File.GetAttributes(path);
+            return FilePathState.Present;
+        }
+        catch (FileNotFoundException)
+        {
+            return FilePathState.Missing;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return FilePathState.Missing;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return FilePathState.PermissionDenied;
+        }
+        catch (IOException)
+        {
+            return FilePathState.Unavailable;
+        }
     }
 
     private bool TryLoadPendingMoves(string path, out List<PendingMove> pendingMoves, out string? error)
@@ -1038,6 +1224,14 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         Complete,
         Incomplete,
         PermissionDenied
+    }
+
+    private enum FilePathState
+    {
+        Missing,
+        Present,
+        PermissionDenied,
+        Unavailable
     }
 
     private sealed class ImportRun

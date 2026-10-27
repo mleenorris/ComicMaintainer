@@ -494,6 +494,55 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportAsync_StopsWithAPermissionErrorWhenTheStagingDirectoryCannotBeTraversed()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return; // File modes are not enforced there.
+        }
+
+        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var stagingFolder = Directory.CreateDirectory(Path.Combine(_library, "Solo Leveling")).FullName;
+        var staging = WriteCbz(Path.Combine(stagingFolder, ".tmp_0123456789abcdef.suwayomi-import"));
+        WritePendingMove(staging, source);
+        File.SetUnixFileMode(stagingFolder, UnixFileMode.None);
+        try
+        {
+            var result = await CreateService().ImportAsync();
+
+            Assert.True(result.PermissionDenied);
+            Assert.Equal(1, result.Failed);
+            Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        }
+        finally
+        {
+            File.SetUnixFileMode(stagingFolder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Assert.True(File.Exists(staging));
+    }
+
+    [Fact]
+    public async Task ImportAsync_AtomicallyRestoresACompleteStageOverAPartialSource()
+    {
+        var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "partial source");
+        var staging = WriteCbz(
+            Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"),
+            "complete staged archive");
+        WritePendingMove(staging, source);
+        File.WriteAllBytes(source, [0x50, 0x4b, 0x03, 0x04]);
+
+        var result = await CreateService().ImportAsync();
+
+        var destination = Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz");
+        Assert.Equal("complete staged archive", ReadPage(destination));
+        Assert.Single(result.Imported);
+        Assert.False(File.Exists(source));
+        Assert.False(File.Exists(staging));
+        Assert.False(File.Exists(PendingMovesPath));
+    }
+
+    [Fact]
     public async Task ImportAsync_RestoresTheSourceWhenAllDestinationNamesAreOccupied()
     {
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "original chapter");
@@ -512,6 +561,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal("original chapter", ReadPage(source));
         Assert.Equal(1000, Directory.GetFiles(destinationFolder).Length);
         Assert.Empty(Directory.GetFiles(destinationFolder, ".tmp_*"));
+        Assert.Empty(Directory.GetFiles(destinationFolder, "*.suwayomi-import"));
         Assert.False(File.Exists(PendingMovesPath));
         foreach (var attempt in Enumerable.Range(1, 1000))
         {

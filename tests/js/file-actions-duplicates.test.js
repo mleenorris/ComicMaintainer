@@ -192,7 +192,7 @@ test('Review Duplicate on a duplicate issue opens the review on that file', asyn
 test('a modification time ahead of the browser\'s clock reads Just now, or the date when further ahead', async t => {
     // Written moments ago by a server whose clock is a few seconds ahead, and a file dated in the future.
     const justWritten = duplicateFile({ modified: Math.floor(Date.now() / 1000) + 5 });
-    const ahead = duplicateFile({ relative_path: C, name: 'Saga 002.cbz', modified: Date.UTC(2099, 0, 15, 12) / 1000 });
+    const ahead = duplicateFile({ relative_path: C, name: 'Saga 002.cbz', modified: new Date(2099, 0, 15, 12).getTime() / 1000 });
     const page = await bootSeriesPage({
         issues: [
             seriesIssue({ file_path: A, duplicate: true }),

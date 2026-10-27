@@ -1086,7 +1086,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ProcessFileAsync_Renameat2Unsupported_FallsBackToLinkAndUnlink()
+    public async Task ProcessFileAsync_Renameat2Unsupported_FallsBackWithoutHardLinks()
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -1105,6 +1105,29 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         _fileStore.Verify(
             f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndSourceReplaced_MovesReplacementWithoutUnlinkingIt()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service(() =>
+        {
+            File.Delete(path);
+            File.WriteAllText(path, "replacement archive");
+        });
+
+        await service.ProcessFileAsync(path);
+
+        Assert.False(File.Exists(path));
+        Assert.Equal("replacement archive", await File.ReadAllTextAsync(renamed));
     }
 
     [Fact]
@@ -1752,14 +1775,17 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         return service;
     }
 
-    private ComicProcessorService CreateUnsupportedRenameAt2Service()
+    private ComicProcessorService CreateUnsupportedRenameAt2Service(Action? beforeFallbackRename = null)
     {
         var service = new UnsupportedRenameAt2ComicProcessorService(
             _settings,
             _logger,
             _fileStore.Object,
             _history.Object,
-            _broadcaster.Object);
+            _broadcaster.Object)
+        {
+            BeforeFallbackRename = beforeFallbackRename
+        };
         _services.Add(service);
         return service;
     }
@@ -2005,6 +2031,8 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         {
         }
 
+        public Action? BeforeFallbackRename { get; set; }
+
         protected override int RenameLinuxNoReplace(
             int sourceDirectory,
             string sourceName,
@@ -2014,6 +2042,12 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         {
             System.Runtime.InteropServices.Marshal.SetLastPInvokeError(38);
             return -1;
+        }
+
+        protected override int RenameLinux(int sourceDirectory, string sourceName, int targetDirectory, string targetName)
+        {
+            BeforeFallbackRename?.Invoke();
+            return base.RenameLinux(sourceDirectory, sourceName, targetDirectory, targetName);
         }
     }
 

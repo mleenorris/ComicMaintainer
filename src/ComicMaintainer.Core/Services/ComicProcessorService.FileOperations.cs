@@ -302,16 +302,24 @@ public partial class ComicProcessorService
                 throw new IOException($"Could not rename the file: {new Win32Exception(error).Message}");
             }
 
-            if (LinkLinuxFile(directoryDescriptor, Path.GetFileName(sourcePath), directoryDescriptor, Path.GetFileName(targetPath), 0) != 0)
+            var targetName = Path.GetFileName(targetPath);
+            var reservation = OpenLinuxFileAt(
+                directoryDescriptor,
+                targetName,
+                0x40 | 0x80 | 0x1 | 0x80000,
+                0x180);
+            if (reservation < 0)
             {
                 error = Marshal.GetLastPInvokeError();
-                throw new IOException($"Could not link the file for rename: {new Win32Exception(error).Message}");
+                throw new IOException($"Could not reserve the rename destination: {new Win32Exception(error).Message}");
             }
 
-            if (UnlinkLinuxFile(directoryDescriptor, Path.GetFileName(sourcePath), 0) != 0)
+            using var reservationHandle = new SafeFileHandle((IntPtr)reservation, ownsHandle: true);
+            if (RenameLinux(directoryDescriptor, Path.GetFileName(sourcePath), directoryDescriptor, targetName) != 0)
             {
                 error = Marshal.GetLastPInvokeError();
-                throw new IOException($"Could not remove the source after linking for rename: {new Win32Exception(error).Message}");
+                UnlinkLinuxFile(directoryDescriptor, targetName, 0);
+                throw new IOException($"Could not rename the file: {new Win32Exception(error).Message}");
             }
         }
 
@@ -376,6 +384,23 @@ public partial class ComicProcessorService
         uint flags) =>
         RenameLinuxNoReplaceNative(sourceDirectory, sourceName, targetDirectory, targetName, flags);
 
+    protected virtual int RenameLinux(int sourceDirectory, string sourceName, int targetDirectory, string targetName) =>
+        RenameLinuxNative(sourceDirectory, sourceName, targetDirectory, targetName);
+
+    [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
+    private static extern int OpenLinuxFileAt(
+        int directory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        int flags,
+        int mode);
+
+    [DllImport("libc", EntryPoint = "renameat", SetLastError = true)]
+    private static extern int RenameLinuxNative(
+        int sourceDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceName,
+        int targetDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName);
+
     [DllImport("libc", EntryPoint = "renameat2", SetLastError = true)]
     private static extern int RenameLinuxNoReplaceNative(
         int sourceDirectory,
@@ -383,14 +408,6 @@ public partial class ComicProcessorService
         int targetDirectory,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName,
         uint flags);
-
-    [DllImport("libc", EntryPoint = "linkat", SetLastError = true)]
-    private static extern int LinkLinuxFile(
-        int sourceDirectory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceName,
-        int targetDirectory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName,
-        int flags);
 
     [DllImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
     private static extern int UnlinkLinuxFile(

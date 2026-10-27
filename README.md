@@ -342,7 +342,7 @@ ComicMaintainer/
 4. **Authentication**: ✅ ASP.NET Core Identity with JWT and API key support
 5. **Authorization**: ✅ Role-based access control with Admin, User, and ReadOnly roles
 6. **Security**: ✅ Path validation middleware, log sanitization, Docker hardening
-7. **User Preferences**: ✅ Per-user preferences (theme, page size, reading mode, library view, filter, sort) persisted in the database
+7. **User Preferences**: ✅ Per-user preferences (theme, page size, reading mode, library view, filter, sort field and direction) persisted in the database
 
 ### Roles and Authorization
 

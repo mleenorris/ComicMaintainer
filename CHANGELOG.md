@@ -181,6 +181,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **The library keeps its sort direction and filter after a reload.** Only the sort field was
+  saved, so a library sorted "Date ↓" came back as "Date ↑" after a reload or on another
+  device; the direction is now saved too (`sortDirection`, `asc` or `desc`, in
+  `/api/preferences`). A saved filter that was the only non-default preference was shown in the
+  header but not applied, so every series was listed until the filter was picked again. It now
+  applies to the library and to a series page opened directly, such as when coming back from
+  the reader.
 - **Offline use survives the browser restarting the service worker.** A restarted worker used
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or

@@ -10,11 +10,12 @@ This guide covers building and deploying the ComicMaintainer .NET application wi
 # Copy the example environment file
 cp .env.example .env
 
-# Generate a secure JWT secret
+# Optional: generate your own JWT secret. Without one, a random signing key is
+# generated on first start and kept in /Config/jwt-secret.key.
 openssl rand -base64 48 > jwt_secret.txt
 
 # Edit .env and update:
-# - JWT_SECRET with the generated value
+# - JWT_SECRET with the generated value, or leave it empty
 # - ADMIN_PASSWORD to a strong password
 # - Other settings as needed
 ```
@@ -77,10 +78,12 @@ docker run -d \
 | `PGID` | 100 | Group ID for file operations (dynamically created) |
 | `MAX_WORKERS` | 4 | Maximum concurrent workers |
 | `DB_CACHE_SIZE_MB` | 64 | Database cache size |
-| `JWT_SECRET` | *required* | JWT signing key (32+ chars) |
+| `JWT_SECRET` | *generated* | JWT signing key (32+ chars). When unset, a random key is generated on first start and kept in `/Config/jwt-secret.key` |
+| `JWT_SECRET_FILE` | | File holding `JWT_SECRET`, such as a Docker secret. Set only one of the two |
 | `ADMIN_USERNAME` | admin | Default admin username |
 | `ADMIN_EMAIL` | admin@local | Default admin email |
 | `ADMIN_PASSWORD` | *required* | Default admin password |
+| `ADMIN_PASSWORD_FILE` | | File holding `ADMIN_PASSWORD`, such as a Docker secret. Set only one of the two |
 
 **Note on PUID/PGID**: The application dynamically creates a user and group with the specified IDs at container startup. This ensures files created by the container have the correct ownership on the host system. Use `id -u` and `id -g` on your host to find your user/group IDs.
 
@@ -88,7 +91,7 @@ docker run -d \
 
 - `/watched_dir` - Directory containing comic files to process
 - `/duplicates` - Directory where duplicate files are moved
-- `/Config` - Configuration files and SQLite database
+- `/Config` - Configuration files, SQLite database and the generated JWT signing key (`jwt-secret.key`)
 
 ## Security Best Practices
 
@@ -102,11 +105,19 @@ openssl rand -base64 48
 openssl rand -base64 24
 ```
 
+Without `JWT_SECRET` (or `JWT_SECRET_FILE`), the app generates a random signing key on first start
+and keeps it in `/Config/jwt-secret.key`, readable only by the app's user, so sign-ins survive
+restarts. Keep that file private, like the database: anyone who has the key can sign in as any
+user. Delete it and restart the container to sign everyone out. The example secrets that earlier
+versions shipped in `appsettings.json`, `docker-compose.dotnet.yml` and `.env.example` are public,
+so the app ignores them, with a warning on the startup log. The startup log says which secret is
+in use.
+
 ### 2. Use Docker Secrets (Recommended for Production)
 
 ```bash
 # Create secrets
-echo "your-jwt-secret" | docker secret create jwt_secret -
+openssl rand -base64 48 | docker secret create jwt_secret -
 echo "your-admin-password" | docker secret create admin_password -
 
 # Run with secrets
@@ -119,6 +130,12 @@ docker service create \
   -p 5000:5000 \
   comicmaintainer-dotnet:latest
 ```
+
+`JWT_SECRET_FILE` and `ADMIN_PASSWORD_FILE` name files that hold the values of `JWT_SECRET` and
+`ADMIN_PASSWORD`; the line break at the end of the file is ignored. Set either a variable or its
+`_FILE` variant, not both: the app refuses to start when both are set, or when the file cannot be
+read or is empty. With Docker Compose, replace the `JWT_SECRET` and `ADMIN_PASSWORD` entries of
+`docker-compose.dotnet.yml` with their `_FILE` variants.
 
 ### 3. Set Proper Permissions
 

@@ -29,6 +29,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when `comicVineApiKey` is null or omitted (an empty string still clears it), and the settings
   page gains a "Clear stored API key on save" box. API clients that read `comicvine_api_key`,
   or that cleared the key by sending the settings back without it, must be updated.
+- **⚠️ Upgrade note: JWTs are no longer signed with a published secret, and `JWT_SECRET_FILE` is
+  read.** Unless `JWT_SECRET` was set, tokens were signed and validated with the secret shipped
+  in `appsettings.json`, and `docker-compose.dotnet.yml` and `.env.example` defaulted
+  `JWT_SECRET` to another published value, so anyone could sign a token for any user,
+  administrators included. `JWT_SECRET_FILE` and `ADMIN_PASSWORD_FILE`, which the Docker secrets
+  instructions recommend, were ignored. They now name files, such as Docker secrets, that hold
+  `JWT_SECRET` and `ADMIN_PASSWORD` (the line break at the end of the file is ignored). When no
+  secret is set, or it is one of the published values (now ignored, with a warning on the
+  startup log), a random key is generated on first start and kept in `jwt-secret.key` in the
+  config directory (`/Config`); the startup log says which secret is in use. **After upgrading,
+  users of such deployments must sign in again**, as their tokens were signed with the
+  published secret. The container now refuses to start when a variable and its `_FILE` variant
+  are both set, or when the file cannot be read or is empty: if you added a `_FILE` variable to
+  a compose file that still sets `JWT_SECRET` or `ADMIN_PASSWORD`, remove that line. A blank
+  `JWT_SECRET` now counts as not set. See
+  [Use Docker Secrets](docs/DOCKER_DEPLOYMENT_DOTNET.md#2-use-docker-secrets-recommended-for-production).
 
 ### Added
 - **`GET /api/files/folders/files`** lists the files directly in the library root, which the

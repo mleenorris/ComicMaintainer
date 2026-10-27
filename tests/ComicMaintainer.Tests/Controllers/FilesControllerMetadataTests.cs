@@ -566,6 +566,107 @@ public sealed class FilesControllerMetadataTests : IDisposable
         Assert.True(await backfillStarted.Task.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
+    [Theory]
+    [InlineData("Saga 002.cbz")]
+    [InlineData("Saga 001.cbz")]
+    public async Task PatchMetadata_WhileABackfillIsRunning_WritesTheEditBackAfterThatRun(string secondName)
+    {
+        // Regression test for #863: an edit made while a backfill was running never reached
+        // the archive. Its trigger was dropped because a run was in progress, and that run
+        // had read its batch before the edit. Covers editing another file, and editing again
+        // the file the running backfill is writing.
+        var first = InRoot("Saga 001.cbz");
+        var second = InRoot(secondName);
+
+        // Stands in for the files table: an edit bumps the file's version, and the file stays
+        // pending until the backfill marks that version (or a later one) as written.
+        var versions = new Dictionary<string, int>();
+        var pending = new Dictionary<string, ComicFile>();
+        var secondWrittenBack = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fileStore
+            .Setup(f => f.ApplyUserMetadataEditAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .Callback<string, ComicMetadata, ComicMetadataFieldFlags, CancellationToken>((path, patch, _, _) =>
+            {
+                lock (pending)
+                {
+                    versions[path] = versions.GetValueOrDefault(path) + 1;
+                    pending[path] = new ComicFile { FilePath = path, MetadataVersion = versions[path], Metadata = patch.Clone() };
+                }
+            })
+            .Returns(Task.CompletedTask);
+        _fileStore
+            .Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                lock (pending)
+                {
+                    return pending.Values.ToList();
+                }
+            });
+        _fileStore
+            .Setup(f => f.MarkFileBackfilledAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<string, int, CancellationToken>((path, version, _) =>
+            {
+                lock (pending)
+                {
+                    if (pending.TryGetValue(path, out var file) && file.MetadataVersion <= version)
+                    {
+                        pending.Remove(path);
+                        if (path == second)
+                        {
+                            secondWrittenBack.TrySetResult();
+                        }
+                    }
+                }
+            })
+            .Returns(Task.CompletedTask);
+
+        // The backfill started by the first edit is still writing the first archive when the
+        // second edit arrives.
+        var writingFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writes = 0;
+        _processor
+            .Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                if (Interlocked.Increment(ref writes) == 1)
+                {
+                    writingFirst.TrySetResult();
+                    await finishFirst.Task;
+                }
+                return true;
+            });
+        _resolver
+            .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesNameResolution());
+        var backfill = new MetadataBackfillJobHandler(
+            _fileStore.Object, _processor.Object, _resolver.Object, NullLogger<MetadataBackfillJobHandler>.Instance);
+        var dbFactory = new InMemoryDbFactory(new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase($"fc-n2a-patch-{Guid.NewGuid():N}")
+            .Options);
+        var jobService = new ScheduledJobService(dbFactory, new IScheduledJobHandler[] { backfill }, NullLogger<ScheduledJobService>.Instance);
+        var controller = CreateController(
+            scheduledJobs: new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance));
+
+        var firstResult = await controller.PatchMetadata(
+            first, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "One" } }, CancellationToken.None);
+        await writingFirst.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var secondResult = await controller.PatchMetadata(
+            second, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "Two" } }, CancellationToken.None);
+        finishFirst.TrySetResult();
+
+        Assert.IsType<AcceptedResult>(firstResult);
+        Assert.IsType<AcceptedResult>(secondResult);
+        await secondWrittenBack.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        _processor.Verify(p => p.UpdateMetadataAsync(
+            second, It.Is<ComicMetadata>(m => m.Title == "Two"), It.IsAny<CancellationToken>()), Times.Once);
+        lock (pending)
+        {
+            Assert.Empty(pending);
+        }
+    }
+
     [Fact]
     public async Task PatchMetadata_FileNoLongerTrackedAfterEdit_ReportsVersionZero()
     {

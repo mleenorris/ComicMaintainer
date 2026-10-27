@@ -239,6 +239,133 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RunNowOrAfterCurrentRunAsync_ForUnknownJob_ReturnsFalseAndRunsNothing()
+    {
+        var handler = new TestJobHandler(JobKey, (_, _) => Task.FromResult("ok"));
+        var (hosted, _) = CreateHostedService(handler);
+
+        var started = await hosted.RunNowOrAfterCurrentRunAsync("no-such-job");
+
+        Assert.False(started);
+        Assert.Equal(0, handler.Invocations);
+    }
+
+    [Fact]
+    public async Task RunNowOrAfterCurrentRunAsync_WhenNoRunIsInProgress_RunsTheJobRightAway()
+    {
+        SeedJob(enabled: false);
+        var handler = new TestJobHandler(JobKey, (_, _) => Task.FromResult("ran"));
+        var (hosted, _) = CreateHostedService(handler);
+        await hosted.StartAsync(CancellationToken.None);
+
+        var started = await hosted.RunNowOrAfterCurrentRunAsync(JobKey);
+        await _logger.WaitForAsync(e => e.Message.Contains("completed in", StringComparison.Ordinal));
+
+        Assert.True(started);
+        Assert.Equal(1, handler.Invocations);
+        Assert.Equal(nameof(ScheduledJobStatus.Success), LoadJob().LastStatus);
+    }
+
+    [Fact]
+    public async Task RunNowOrAfterCurrentRunAsync_WhileARunIsInProgress_RunsTheJobOnceMoreAfterThatRun()
+    {
+        SeedJob(enabled: false);
+        var started = NewGate();
+        var release = NewGate();
+        var handler = new TestJobHandler(JobKey, async (_, _) =>
+        {
+            if (started.TrySetResult())
+            {
+                await release.Task;
+                return "first run";
+            }
+            return "follow-up run";
+        });
+        var (hosted, _) = CreateHostedService(handler);
+        await hosted.StartAsync(CancellationToken.None);
+
+        // However the current run was started, requests made during it are kept.
+        Assert.True(await hosted.RunNowAsync(JobKey));
+        await started.Task.WaitAsync(SignalTimeout);
+        var duringTheRun = new[]
+        {
+            await hosted.RunNowOrAfterCurrentRunAsync(JobKey),
+            await hosted.RunNowOrAfterCurrentRunAsync(JobKey.ToUpperInvariant()),
+        };
+
+        Assert.Equal(new[] { false, false }, duringTheRun);
+        Assert.Equal(2, _logger.Entries.Count(e => e.Message.Contains(
+            "run requested while a run is in progress; it will run again when that run finishes", StringComparison.Ordinal)));
+        Assert.Equal(nameof(ScheduledJobStatus.Running), LoadJob().LastStatus);
+        Assert.Equal(1, handler.Invocations);
+
+        release.TrySetResult();
+        await _logger.WaitForAsync(e => e.Message.Contains("follow-up run", StringComparison.Ordinal));
+
+        // Both requests are served by the same follow-up run.
+        Assert.Equal(2, handler.Invocations);
+        var row = LoadJob();
+        Assert.Equal(nameof(ScheduledJobStatus.Success), row.LastStatus);
+        Assert.Equal("follow-up run", row.LastMessage);
+    }
+
+    [Fact]
+    public async Task RunNowOrAfterCurrentRunAsync_WhileTheRunRecordsItsOutcome_StillRunsTheJobAgain()
+    {
+        SeedJob(enabled: false);
+        var runs = 0;
+        var handler = new TestJobHandler(JobKey, (_, _) =>
+            Task.FromResult(Interlocked.Increment(ref runs) == 1 ? "first run" : "follow-up run"));
+        var (hosted, _) = CreateHostedService(handler);
+        await hosted.StartAsync(CancellationToken.None);
+        Task<bool>? requestedAsTheRunFinished = null;
+        _dbFactory.WhileSaving = saved =>
+        {
+            // The first run has done its work and is saving its outcome, so it still holds the job.
+            if (saved.LastStatus == nameof(ScheduledJobStatus.Success))
+            {
+                requestedAsTheRunFinished ??= hosted.RunNowOrAfterCurrentRunAsync(JobKey);
+            }
+        };
+
+        Assert.True(await hosted.RunNowOrAfterCurrentRunAsync(JobKey));
+        await _logger.WaitForAsync(e => e.Message.Contains("follow-up run", StringComparison.Ordinal));
+
+        Assert.NotNull(requestedAsTheRunFinished);
+        Assert.False(await requestedAsTheRunFinished);
+        Assert.Equal(2, handler.Invocations);
+        Assert.Equal("follow-up run", LoadJob().LastMessage);
+    }
+
+    [Fact]
+    public async Task RunNowOrAfterCurrentRunAsync_WhenTheHostStopsDuringTheRun_StartsNoFollowUpRun()
+    {
+        SeedJob(enabled: false);
+        var started = NewGate();
+        var handler = new TestJobHandler(JobKey, async (_, token) =>
+        {
+            started.TrySetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            return "unreachable";
+        });
+        var (hosted, _) = CreateHostedService(handler);
+        await hosted.StartAsync(CancellationToken.None);
+
+        Assert.True(await hosted.RunNowOrAfterCurrentRunAsync(JobKey));
+        await started.Task.WaitAsync(SignalTimeout);
+        Assert.False(await hosted.RunNowOrAfterCurrentRunAsync(JobKey));
+        await hosted.StopAsync(CancellationToken.None);
+        await _logger.WaitForAsync(e => e.Message.Contains("was cancelled", StringComparison.Ordinal));
+
+        // A follow-up run would start once the cancelled run releases its slot,
+        // just after the log line above, and be cancelled and logged in turn.
+        await Task.Delay(200);
+        Assert.Equal(1, handler.Invocations);
+        Assert.Single(_logger.Entries, e => e.Message.Contains("was cancelled", StringComparison.Ordinal));
+        Assert.Equal(nameof(ScheduledJobStatus.Cancelled), LoadJob().LastStatus);
+    }
+
+    [Fact]
     public async Task Timer_RunsADueJob_WithItsStoredOptions()
     {
         SeedJob(enabled: true, intervalMinutes: 60, nextRunUtc: DateTime.UtcNow.AddMilliseconds(100),
@@ -675,6 +802,12 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
 
         public volatile bool FailCreation;
 
+        /// <summary>
+        /// Called with every saved job row from inside the save itself, so it runs
+        /// before the code that saved the row carries on.
+        /// </summary>
+        public Action<SavedJob>? WhileSaving;
+
         public ComicMaintainerDbContext CreateDbContext()
         {
             if (FailCreation)
@@ -718,6 +851,7 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
 
         public void OnSaved(SavedJob saved)
         {
+            WhileSaving?.Invoke(saved);
             var matched = new List<TaskCompletionSource<SavedJob>>();
             lock (_gate)
             {

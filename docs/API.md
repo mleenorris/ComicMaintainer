@@ -182,17 +182,18 @@ Get metadata tags for a specific file.
 
 ### POST /api/files/tags
 
-Write the same metadata tags to one or more files. Blank entries in `files` are ignored.
+Write tags to one or more files. Blank entries in `files` are ignored.
+
+Each file's ComicInfo.xml is replaced by one built from `metadata` alone. Fields left out are removed, not kept, so sending only `publisher` to several issues erases their issue numbers and titles.
 
 **Request Body:**
 ```json
 {
-  "files": [
-    "/comics/Batman/Batman #001.cbz",
-    "/comics/Batman/Batman #002.cbz"
-  ],
+  "files": ["/comics/Batman/Batman #001.cbz"],
   "metadata": {
     "series": "Batman",
+    "issue": "1",
+    "title": "The Dark Knight",
     "publisher": "DC Comics",
     "year": 2023
   }
@@ -201,7 +202,7 @@ Write the same metadata tags to one or more files. Blank entries in `files` are 
 
 **Response (200 OK):** empty body; every file was updated.
 
-**Response (207 Multi-Status):** some files could not be updated (missing, not a comic archive, or unreadable); the rest were.
+**Response (207 Multi-Status):** some of the files could not be updated (missing, not a comic archive, or unreadable); the rest were.
 ```json
 {
   "failed": ["/comics/Batman/Batman #002.cbz"]
@@ -212,10 +213,7 @@ Write the same metadata tags to one or more files. Blank entries in `files` are 
 ```json
 {
   "error": "Failed to update tags",
-  "failed": [
-    "/comics/Batman/Batman #001.cbz",
-    "/comics/Batman/Batman #002.cbz"
-  ]
+  "failed": ["/comics/Batman/Batman #001.cbz"]
 }
 ```
 

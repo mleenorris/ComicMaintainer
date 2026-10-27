@@ -359,6 +359,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a proxy error page without an id showed an earlier, unrelated request's reference and sent
   support to the wrong log entries. An error now shows the id of its own request, or none.
 
+- **The ⋮ action menu stays on screen in very narrow windows, and closes when you leave the
+  page.** In a window 200 CSS px wide or less (for example at 400 % zoom) the menu was placed
+  past the left edge of the screen, cutting off the start of every item; it now stays at least
+  10 px inside both edges of the window, narrowing (and wrapping long labels) when the window
+  is too narrow for it. An open menu also stayed over the next page — still acting on the
+  previous page's issue — when the page changed without a click (browser Back/Forward, the
+  mouse back button, swipe-back, or the `g h` / `g l` / `g s` / `g j` shortcuts); it now
+  closes whenever the page changes.
+
 - **Sign-in and first-run setup messages stay up for their full time, and signing in redirects
   once.** Each message on the login and setup pages started a hide timer that was never
   cancelled, so an error shown again (such as a second failed sign-in three seconds after the

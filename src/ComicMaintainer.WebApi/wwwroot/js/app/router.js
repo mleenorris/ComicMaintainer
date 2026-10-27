@@ -72,6 +72,11 @@
 
         function handleRouteChange() {
             const route = parseHash();
+            // An open action menu is moved to <body>, so it would stay on
+            // screen over the new page, still acting on the previous page's
+            // item. A click closes it, but Back/Forward and the "g" shortcuts
+            // change the page without one.
+            closeAllDropdowns();
             if (route.view !== 'series' || currentSeriesDetailId !== route.seriesId) {
                 lastSelectedIssuePath = null;
                 seriesIssueRangeSelectArmed = false;

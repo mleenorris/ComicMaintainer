@@ -1,10 +1,15 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
+using ComicMaintainer.WebApi.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -133,6 +138,83 @@ public class JobStateStoreCoverageTests : IAsyncLifetime
 
         Assert.Equal(JobStatus.Interrupted, stored.Status);
         Assert.True(stored.IsTerminal);
+    }
+
+    [Theory]
+    [InlineData("1")]                 // Running's numeric value
+    [InlineData("0")]                 // Queued's numeric value
+    [InlineData("+1")]
+    [InlineData(" 1")]
+    [InlineData("42")]                // no such status
+    [InlineData("-1")]
+    [InlineData(" Running")]
+    [InlineData("Running ")]
+    [InlineData("running")]
+    [InlineData("Queued, Running")]   // combines to Running
+    [InlineData("Failed, Cancelled")] // combines to an undefined value
+    public async Task GetAllAsync_TreatsAStatusThatIsNotAnExactNameAsInterrupted(string status)
+    {
+        await SeedAsync(new ProcessingJobEntity
+        {
+            JobId = Guid.NewGuid(),
+            Status = status,
+            OperationName = "ProcessAll",
+            StartTime = DateTime.UtcNow
+        });
+
+        var stored = Assert.Single(await _store.GetAllAsync());
+
+        Assert.Equal(JobStatus.Interrupted, stored.Status);
+        Assert.True(stored.IsTerminal);
+    }
+
+    public static TheoryData<JobStatus> AllStatuses => new(Enum.GetValues<JobStatus>());
+
+    [Theory]
+    [MemberData(nameof(AllStatuses))]
+    public async Task GetAllAsync_RestoresEveryStatusThatSaveAsyncWrites(JobStatus status)
+    {
+        await _store.SaveAsync(NewJob(status));
+
+        var stored = Assert.Single(await _store.GetAllAsync());
+
+        Assert.Equal(status, stored.Status);
+    }
+
+    [Theory]
+    [InlineData("1")]
+    [InlineData("42")]
+    public async Task StartupReconciliation_RestoresACorruptStatusAsAnInterruptedJobThatCanBeDeleted(string status)
+    {
+        // Regression test for #865: "1" was restored as a Running job that was reported as the
+        // active job, and "42" as an undefined status. Neither was terminal, so neither could be
+        // deleted, and with nothing running them neither could be cancelled.
+        var jobId = Guid.NewGuid();
+        await SeedAsync(new ProcessingJobEntity
+        {
+            JobId = jobId,
+            Status = status,
+            OperationName = "ProcessAll",
+            StartTime = DateTime.UtcNow
+        });
+        using var processor = new ComicProcessorService(
+            new TestOptionsMonitor<AppSettings>(new AppSettings()),
+            NullLogger<ComicProcessorService>.Instance,
+            Mock.Of<IFileStoreService>(),
+            Mock.Of<IProcessingHistoryService>(),
+            jobStateStore: _store);
+        var reconciliation = new JobStateReconciliationHostedService(
+            _store,
+            processor,
+            NullLogger<JobStateReconciliationHostedService>.Instance);
+
+        await reconciliation.StartAsync(CancellationToken.None);
+
+        Assert.Equal(JobStatus.Interrupted, processor.GetJob(jobId)?.Status);
+        Assert.Null(processor.GetActiveJob());
+        Assert.True(await processor.DeleteJobAsync(jobId));
+        Assert.Null(processor.GetJob(jobId));
+        Assert.Empty(await _store.GetAllAsync());
     }
 
     [Theory]

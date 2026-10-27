@@ -17,6 +17,10 @@ const {
 const ISSUES = issuesPath('saga');
 const paths = page => issueCards(page).map(card => card.dataset.filePath);
 const selectionMeta = page => text(page.$('#seriesDetailPanel .series-detail-selection-meta'));
+// Ticks the issue card of `filePath`, as a user selecting it would.
+const tickIssue = (page, filePath) => page.click(issueCards(page)
+    .find(card => card.dataset.filePath === filePath)
+    .querySelector('.series-issue-select input[type="checkbox"]'));
 // The observer watching the issues grid's sentinel (not the cover-image or
 // library-scroll observers).
 const sentinelObserver = page => page.intersectionObservers.find(observer =>
@@ -234,6 +238,36 @@ test('a file deleted while paging shrinks the issue count to what the server rep
     assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz']);
     assert.equal(selectionMeta(page), '1 issue in this series');
     assert.equal(page.$('#seriesIssuesSentinel'), null, 'nothing is left to load');
+});
+
+// Regression test for #849: an issue missing from a partly loaded list may
+// still be on a later page.
+test('a reload that comes in pages unselects a vanished issue only once its last page is in', async () => {
+    const series = seriesCard({ issue_count: 4 });
+    let pages = twoPages(series);
+    const page = await bootSeries({ series, routes: { [`GET ${ISSUES}`]: call => pages[call.query.page] } });
+    sentinelObserver(page).trigger(true);
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+    tickIssue(page, '/comics/Saga/Saga 004.cbz');
+    assert.equal(text(page.$('#selectInfo')), '2 files selected');
+
+    // #4 is deleted; the processed-file event reloads the list from page 1.
+    pages = {
+        1: issuesBody(series, [issue(1), issue(2)], { issue_count: 3, total_pages: 2, per_page: 2 }),
+        2: issuesBody(series, [issue(3)], { issue_count: 3, total_pages: 2, per_page: 2, page: 2 })
+    };
+    page.eventSources.at(-1).emit('message', { type: 'file_processed', data: { filename: '/comics/Saga/Saga 004.cbz', success: true } });
+    await page.settle();
+    assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '2 files selected', '#4 may still be on the next page');
+
+    sentinelObserver(page).trigger(true);
+    await page.settle();
+    assert.deepEqual(pageRequests(page), ['1', '2', '1', '2']);
+    assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz', '/comics/Saga/Saga 003.cbz']);
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });
 
 test('a deep link to a series outside the loaded library renders from its issues response', async () => {

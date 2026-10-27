@@ -158,6 +158,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed with 401 unless signed in through Authelia.
 - **Uploading a series image from the series page works**; the request was sent as JSON instead
   of a file upload and always rejected.
+- **The series page no longer keeps renamed or deleted issues selected.** When its issues
+  reloaded (after the watcher renamed or moved a file, a job ran in another tab, or a ticked
+  issue was deleted from its own menu), the selection kept the vanished files: the count was too
+  high, the batch buttons stayed enabled with nothing ticked, "Select all" could not clear them,
+  and the next batch action was sent files that no longer exist. Issues the reloaded list no
+  longer has are now unselected once it has fully loaded, and a deleted issue is unselected
+  straight away.
 - **Metadata refresh progress finishes.** The job status was sent as a number, so the progress
   toast showed a digit, kept polling forever and never ran the final library refresh. Finished
   refresh jobs are now forgotten after 30 minutes (or once 50 newer ones finished) instead of

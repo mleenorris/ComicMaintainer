@@ -103,6 +103,8 @@
 
         async function loadSeriesIssues(seriesId, force = false, page = 1) {
             if (!seriesId) return;
+            // The list a forced reload, or a retry after a failure, replaces.
+            const previous = seriesIssuesCache.get(seriesId);
             if (force) {
                 seriesIssuesCache.delete(seriesId);
             }
@@ -132,7 +134,10 @@
                     loadedPages: new Set(),
                     loadingPages: new Set(),
                     allLoaded: false,
-                    error: false
+                    error: false,
+                    // Issues of the replaced list that this one has to list
+                    // again to stay selected (see pruneSeriesIssueSelection).
+                    unconfirmedPaths: takeSeriesIssuePathsToConfirm(previous)
                 };
                 seriesIssuesCache.set(seriesId, entry);
             }
@@ -208,6 +213,8 @@
                 entry.loadingPages.delete(page);
             }
 
+            const selectionPruned = pruneSeriesIssueSelection(entry);
+
             // Re-render only if the user is still on this series.
             if (currentSeriesDetailId === seriesId) {
                 if (page === 1 || entry.error) {
@@ -215,7 +222,45 @@
                 } else {
                     appendSeriesIssuePage(seriesId, page);
                 }
+            } else if (selectionPruned) {
+                updateSelectInfo();
             }
+        }
+
+        // Hands the issue paths a cached series list stands for over to the
+        // list replacing it: the issues it lists, plus any that an unfinished
+        // reload of it still has to confirm. Taking them leaves the replaced
+        // list nothing to prune, so a stale response landing after the newer
+        // one cannot unselect anything.
+        function takeSeriesIssuePathsToConfirm(cached) {
+            if (!cached) return null;
+            const paths = new Set(cached.unconfirmedPaths || []);
+            cached.unconfirmedPaths = null;
+            for (const issue of cached.issues) {
+                if (typeof issue.file_path === 'string' && issue.file_path.length > 0) {
+                    paths.add(issue.file_path);
+                }
+            }
+            return paths.size > 0 ? paths : null;
+        }
+
+        // Once a reloaded issue list is complete, unselects the issues of the
+        // list it replaced that it no longer has — renamed, moved or deleted
+        // meanwhile — so the selection stops counting them and no batch action
+        // is sent a path that is gone. Issues arrive in pages, and a path
+        // missing from a partial list may be on a page still to come, so this
+        // waits for the last one. Returns whether the selection changed.
+        function pruneSeriesIssueSelection(entry) {
+            if (!entry.unconfirmedPaths || !entry.allLoaded || entry.error) return false;
+            const listedPaths = new Set(entry.issues.map(issue => issue.file_path));
+            let pruned = false;
+            for (const path of entry.unconfirmedPaths) {
+                if (!listedPaths.has(path) && selectedFiles.delete(path)) {
+                    pruned = true;
+                }
+            }
+            entry.unconfirmedPaths = null;
+            return pruned;
         }
 
         // Re-renders the issue grid contents from the cache after a new page

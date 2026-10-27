@@ -1157,6 +1157,9 @@
                 }
                 
                 showMessage('File deleted successfully!', 'success');
+                // A deleted file must not stay selected for the next batch
+                // action.
+                toggleFileSelection(filepath, false);
                 await loadActiveLibraryView(1, true);
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');

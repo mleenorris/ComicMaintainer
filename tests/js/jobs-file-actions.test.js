@@ -2,7 +2,8 @@
 
 // Actions on one file from a series issue card's menu (js/app/jobs.js):
 // Process / Rename / Normalize start a background job tracked in the progress
-// modal; Delete and Remove Metadata act directly and refresh the library.
+// modal; Delete and Remove Metadata act directly and refresh the library, and
+// Delete also unselects the file.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,7 +11,7 @@ const { deferred } = require('./support/app');
 const { respond } = require('./support/dom');
 const h = require('./support/jobs-helpers');
 
-const { ISSUE_A, b64 } = h;
+const { ISSUE_A, ISSUE_B, b64 } = h;
 const forcePrompt = (description, status) =>
     `${description}\n\nClick OK to include files already marked as ${status}, or Cancel to skip them.`;
 
@@ -216,3 +217,57 @@ for (const action of DIRECT_FILE_ACTIONS) {
         assert.deepEqual(page.errors, []);
     });
 }
+
+// Regression test for #849, following its steps to reproduce.
+test('deleting a ticked issue from its menu unselects it for good', async (t) => {
+    let issues = [h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)];
+    let answerDelete = () => respond(500, 'Error');
+    const page = await h.bootSeriesDetail(t, {
+        routes: {
+            'GET /api/files/series/s1/issues': () => h.seriesIssues(issues),
+            [`DELETE /api/files/${b64(ISSUE_A)}`]: call => answerDelete(call),
+            'POST /api/jobs/process-selected': { job_id: h.JOB_ID, total_items: 1 },
+            [`GET /api/jobs/${h.JOB_ID}`]: h.jobStatus({ total_items: 1 })
+        }
+    });
+    const selection = () => ({
+        info: page.$('#selectInfo').textContent,
+        files: page.evaluate('[...selectedFiles].sort()'),
+        ticked: page.$$('.series-issue-card--selected').map(card => card.dataset.filePath)
+    });
+    h.selectIssue(page, ISSUE_A);
+    h.selectIssue(page, ISSUE_B);
+
+    // A delete that fails leaves the selection as it was.
+    h.chooseIssueAction(page, ISSUE_A, 'Delete');
+    await page.settle();
+    assert.deepEqual(selection(), { info: '2 files selected', files: [ISSUE_A, ISSUE_B], ticked: [ISSUE_A, ISSUE_B] });
+
+    answerDelete = () => undefined;
+    h.chooseIssueAction(page, ISSUE_A, 'Delete');
+    await page.settle();
+    assert.deepEqual(selection(), { info: '1 file selected', files: [ISSUE_B], ticked: [ISSUE_B] });
+
+    // The server reports the change and the issues grid refreshes.
+    issues = [h.seriesIssue(ISSUE_B)];
+    h.serverEvent(page, 'file_list_updated', {});
+    await h.tick(t, page, 500);
+    assert.deepEqual(page.$$('.series-issue-card[data-file-path]').map(card => card.dataset.filePath), [ISSUE_B]);
+    assert.deepEqual(selection(), { info: '1 file selected', files: [ISSUE_B], ticked: [ISSUE_B] });
+
+    // "Select all issues" off and on again, then back to the library: the
+    // deleted issue is neither left behind nor brought back...
+    page.input('#selectAll', false);
+    assert.deepEqual(selection(), { info: 'No files selected', files: [], ticked: [] });
+    page.input('#selectAll', true);
+    page.click('#seriesDetailPanel .series-detail-back');
+    await page.settle();
+    assert.equal(page.window.location.hash, '#/library');
+    assert.equal(page.$('#selectInfo').textContent, '1 file selected');
+
+    // ...and the next batch action is not sent it.
+    h.chooseMenuItem(page, 'processDropdown', 'Process Selected');
+    await page.settle();
+    assert.deepEqual(h.requests(page, 'POST', '/api/jobs/process-selected').map(call => call.body.Files), [[ISSUE_B]]);
+    assert.deepEqual(page.errors, []);
+});

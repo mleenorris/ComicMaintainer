@@ -191,6 +191,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or
   script requested offline answered with nothing instead of a network error.
+- **Background cache updates in the service worker are no longer cut off.** The worker stores
+  the scripts, stylesheets, icons, covers and pages it fetches, refreshes cached scripts and
+  stylesheets, and replaces or evicts a cached cover or page once the server has answered. All of
+  that ran after the page had its response, when the browser may already stop the worker, so a
+  refreshed file could stay stale, a cover or page the session may no longer read could stay
+  cached, and a cache could grow past its size limit. The worker now stays running until that
+  work is done.
 - **The cover-write and email queues can be stopped and started again.** A restart left them
   unable to accept work and could cancel the new run; nothing in the app restarts them today.
   A new run also waits for every earlier run still draining, so deliveries and archive

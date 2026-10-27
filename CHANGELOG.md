@@ -134,6 +134,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   batch endpoints reject the whole request when any path is outside it, instead of silently
   skipping it.
 - **Removing metadata is confined to the library**, like writing it already was.
+- **Deleting selected files is confined to the library.** `POST /api/jobs/delete-selected`,
+  behind the multi-select **Delete** and **Delete All Duplicates**, deleted any file the
+  service could write, such as the database in the config directory, for any signed-in user
+  who is not ReadOnly. It now answers 400 when any path is outside the watched and duplicate
+  directories, and the delete job skips such paths, including links that lead out of them,
+  and reports them as failed.
 - **Resetting the database cancels the jobs that are running**, which kept working on the data
   being deleted; **Reset Filename Format** restores the default instead of "undefined"; and the
   GitHub token setting is never written to the log.

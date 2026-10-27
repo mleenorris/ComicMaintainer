@@ -14,6 +14,8 @@ public sealed class SuwayomiServiceCoverageTests
 {
     private const string BaseUrl = "http://suwayomi.example:4567";
     private const string UnexpectedResponse = "The Suwayomi server returned an unexpected response.";
+    private const string UnexpectedChapterListResponse =
+        "The Suwayomi server returned an unexpected response: data.chapters.nodes must be an array.";
     private readonly ListLogger _logger = new();
 
     private static AppSettings Settings(bool enabled = true, string? baseUrl = BaseUrl + "/") => new()
@@ -179,21 +181,25 @@ public sealed class SuwayomiServiceCoverageTests
     }
 
     [Theory]
-    [InlineData("""{"data":{}}""")]
-    [InlineData("""{"data":{"chapters":null}}""")]
-    [InlineData("""{"data":{"chapters":[]}}""")]
-    [InlineData("""{"data":{"chapters":"Chapter 1"}}""")]
-    [InlineData("""{"data":{"chapters":{}}}""")]
-    [InlineData("""{"data":{"chapters":{"nodes":null}}}""")]
-    [InlineData("""{"data":{"chapters":{"nodes":{}}}}""")]
-    public async Task GetChaptersAsync_MalformedChapterList_Throws(string json)
+    [InlineData("null", UnexpectedResponse)]
+    [InlineData("[]", UnexpectedResponse)]
+    [InlineData("""{"data":null}""", UnexpectedResponse)]
+    [InlineData("""{"data":[]}""", UnexpectedResponse)]
+    [InlineData("""{"data":{}}""", UnexpectedChapterListResponse)]
+    [InlineData("""{"data":{"chapters":null}}""", UnexpectedChapterListResponse)]
+    [InlineData("""{"data":{"chapters":[]}}""", UnexpectedChapterListResponse)]
+    [InlineData("""{"data":{"chapters":"Chapter 1"}}""", UnexpectedChapterListResponse)]
+    [InlineData("""{"data":{"chapters":{}}}""", UnexpectedChapterListResponse)]
+    [InlineData("""{"data":{"chapters":{"nodes":null}}}""", UnexpectedChapterListResponse)]
+    [InlineData("""{"data":{"chapters":{"nodes":{}}}}""", UnexpectedChapterListResponse)]
+    public async Task GetChaptersAsync_MalformedChapterList_Throws(string json, string expectedMessage)
     {
         var handler = Server(chapters: json);
         var service = CreateService(handler);
 
         var exception = await Assert.ThrowsAsync<SuwayomiException>(() => service.GetChaptersAsync(5));
 
-        Assert.Equal(UnexpectedResponse, exception.Message);
+        Assert.Equal(expectedMessage, exception.Message);
         var request = Assert.Single(handler.Requests);
         Assert.Equal(5, Variables(request.Body).GetProperty("id").GetInt32());
     }
@@ -321,7 +327,7 @@ public sealed class SuwayomiServiceCoverageTests
         var exception = await Assert.ThrowsAsync<SuwayomiException>(
             () => service.DownloadMissingIssuesFromSnapshotAsync("Solo Leveling", new[] { 1 }, snapshot));
 
-        Assert.Equal(UnexpectedResponse, exception.Message);
+        Assert.Equal(UnexpectedChapterListResponse, exception.Message);
         Assert.DoesNotContain(handler.Requests, r => r.Body.Contains("enqueueChapterDownloads", StringComparison.Ordinal));
     }
 

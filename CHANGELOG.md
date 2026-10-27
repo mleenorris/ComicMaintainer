@@ -244,9 +244,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A malformed Suwayomi chapter list no longer fails the whole Missing Issues check.** When
   Suwayomi answered the chapter query with a `chapters` value that was not an object, such as
   `null`, reading it threw: the chapter list of that series failed with a 500, and the
-  scheduled Missing Issues check stopped for the whole library. The answer is now reported as
-  "The Suwayomi server returned an unexpected response.", so the chapter list answers 400 with
-  that message and the check logs a warning for that series and carries on with the rest. A
+  scheduled Missing Issues check stopped for the whole library. The answer now identifies
+  `data.chapters.nodes` as requiring an array, so the chapter list answers 400 with that detail
+  and the check logs a warning for that series and carries on with the rest. A
   chapter list without its `chapters` or `nodes` is reported the same way instead of being read
   as an empty list, which said every missing issue had no matching chapter.
 

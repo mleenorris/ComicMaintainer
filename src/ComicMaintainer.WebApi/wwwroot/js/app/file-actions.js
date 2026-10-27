@@ -223,6 +223,7 @@
                 showMessage('No duplicates to delete', 'error');
                 return;
             }
+            if (!canStartJob()) return;
 
             if (!confirm(`Are you sure you want to delete all ${paths.length} file(s) marked as duplicates?\n\nThis action cannot be undone!`)) {
                 return;
@@ -610,6 +611,7 @@
         async function confirmCombineFolders() {
             const body = buildCombineFoldersRequestBody();
             if (!body) return;
+            if (!canStartJob()) return;
             const group = getCurrentCombineFolderGroup();
             const sourceCount = group ? group.folders.length - 1 : 0;
             const message = `Combine ${sourceCount} folder${sourceCount === 1 ? '' : 's'} into:\n${combineFolderSelectedDestination}\n\nFiles will be moved on disk. Continue?`;
@@ -712,6 +714,8 @@
         
         async function saveTags() {
             if (!currentEditFile) return;
+            // Refused before the dialog closes, so the edits are not lost.
+            if (!canStartJob()) return;
 
             // Capture the target file path before calling closeModal(), which
             // resets currentEditFile to null. Without this snapshot, the
@@ -822,6 +826,8 @@
                 showMessage('Please enter at least one tag to update', 'error');
                 return;
             }
+            // Refused before the dialog closes, so the edits are not lost.
+            if (!canStartJob()) return;
             
             closeBatchModal();
             showProgressModal('Updating metadata...');

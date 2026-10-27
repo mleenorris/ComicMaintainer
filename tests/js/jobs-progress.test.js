@@ -279,7 +279,9 @@ test('a job started or resumed while minimized opens in the header indicator', a
     await page.settle();
     h.assertProgress(page, { open: false, indicatorText: '1 / 4 files (25%)', title: 'Renaming All Files...' });
 
-    // A new job started meanwhile stays minimized too.
+    // A new job started once it has ended, before its indicator goes away,
+    // stays minimized too.
+    await h.endTrackedJob(t, page);
     job.poll.answer = () => h.jobStatus();
     h.chooseMenuItem(page, 'processDropdown', 'Process Unmarked');
     h.assertProgress(page, { open: false, indicatorVisible: true, indicatorText: 'Starting async processing...', title: 'Starting async processing...' });
@@ -400,7 +402,8 @@ test('a reconnected event stream catches up on the tracked job', async (t) => {
     h.assertProgress(page, { text: '0 / 4 files', currentFile: 'Latest update: Batman 001.cbz', emptyResults: true });
 
     job.poll.answer = () => h.jobStatus({
-        processed_items: 2,
+        processed_items: 1,
+        failed_items: 1,
         current_file: 'Comics/Batman/Batman 003.cbz',
         results: [finished('Comics/Batman/Batman 001.cbz', true), finished('Comics/Batman/Batman 002.cbz', false, 'Corrupt archive')]
     });
@@ -435,7 +438,8 @@ test('a reconnected event stream catches up on the tracked job', async (t) => {
     // The job finished while the stream was down: the poll completes it.
     job.poll.answer = () => h.jobStatus({
         status: 'completed',
-        processed_items: 4,
+        processed_items: 3,
+        failed_items: 1,
         results: [
             finished('Comics/Batman/Batman 001.cbz', true),
             finished('Comics/Batman/Batman 002.cbz', false, 'Corrupt archive'),

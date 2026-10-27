@@ -190,6 +190,9 @@ for (const action of LIBRARY_ACTIONS) {
         h.jobUpdate(page, 'running', h.progress(2, 4));
         h.assertProgress(page, { title: action.tracked, text: '2 / 4 files', percent: '50%', succeeded: '2', failed: '0' });
 
+        // The action can start another job once this one has ended.
+        await h.endTrackedJob(t, page);
+
         if (action.force) {
             answer = () => ({ job_id: h.JOB_ID, total_items: 2 });
             h.answerConfirms(page, true, false);
@@ -198,6 +201,7 @@ for (const action of LIBRARY_ACTIONS) {
             assert.deepEqual(h.takeConfirms(page), [action.confirm, action.force]);
             assert.equal(starts().at(-1).url, `${action.path}?forceReprocess=false`, 'Cancel on the force prompt skips handled files');
             assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: action.started(2) }]);
+            await h.endTrackedJob(t, page);
         }
 
         // A server error closes the modal and says the job did not start.

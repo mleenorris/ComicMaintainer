@@ -207,6 +207,30 @@ test('a file\'s age reads as a relative time for the past week, then as a date',
     assert.deepEqual(shown, ['Just now', '5 min ago', '3h ago', 'Yesterday', '3 days ago', '03-01', '2023-12-25']);
 });
 
+test('a file dated ahead of the browser\'s clock reads Just now for up to a minute, then as a date', async () => {
+    const now = new Date(2024, 5, 15, 12, 0, 0).getTime();
+    const seconds = ms => Math.floor(ms / 1000);
+    const ages = {
+        'Ahead/a-second.cbz': seconds(now) + 1,
+        'Ahead/under-a-minute.cbz': seconds(now) + 59,
+        'Ahead/minutes.cbz': seconds(now) + 2 * 60,
+        'Ahead/hours.cbz': seconds(now) + 2 * 3600,
+        'Ahead/days.cbz': seconds(now) + 3 * 86400,
+        'Ahead/next-year.cbz': seconds(new Date(2025, 0, 2, 12).getTime())
+    };
+    const files = Object.entries(ages).map(([path, modified]) => makeFile(path, { modified }));
+    const page = await bootFilesView({ folders: [makeFolder('Ahead', { file_count: files.length })], files: { Ahead: files } });
+    page.run(`window.Date = class extends Date {
+        constructor(...args) { if (args.length) super(...args); else super(${now}); }
+        static now() { return ${now}; }
+    }`);
+
+    await expandFolder(page, 'Ahead');
+
+    const shown = page.$$('#fileList .file-item').map(row => row.children[4].textContent);
+    assert.deepEqual(shown, ['Just now', 'Just now', '06-15', '06-15', '06-18', '2025-01-02']);
+});
+
 test('long file names are shortened in the middle, keeping the extension', async () => {
     const names = [
         'Saga #001.cbz',

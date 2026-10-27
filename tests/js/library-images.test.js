@@ -2,8 +2,9 @@
 
 // Protected cover images in the series library (js/app/library.js): covers
 // are fetched with the session token once they near the viewport, shown from
-// blob URLs, cached (capped), retried once on transient failures and
-// replaced by the first issue's cover when an external image is missing.
+// blob URLs, cached (capped), retried once on transient failures, watched
+// again after a growing pause while they keep failing, and replaced by the
+// first issue's cover when an external image is missing.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -240,6 +241,125 @@ test('an unreadable image body is logged and the cover left empty', async () => 
     assert.equal(cover.getAttribute('src'), null);
     assert.equal(cover.dataset.protectedImageLoaded, undefined);
     assert.equal(page.objectUrls.size, objectUrlsBefore);
+});
+
+/** Show `cover` to the observer and let its request, and its quick retry, fail. */
+async function failToLoad(t, page, cover) {
+    imageObserver(page).trigger(true, [cover]);
+    await page.settle();
+    t.mock.timers.tick(250);
+    await page.settle();
+}
+
+test('a cover that failed to load is watched again after a pause and fetched when scrolled back into view', async t => {
+    const page = await bootWithCovers(makeSeriesList(1), sequence(503, 503, imageResponse()));
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const observer = imageObserver(page);
+    const [cover] = covers(page);
+
+    await failToLoad(t, page, cover);
+    assert.equal(coverCalls(page).length, 2);
+    assert.equal(cover.getAttribute('src'), null);
+    // Not watched again at once, which would refetch it in a loop while it stays in view...
+    assert.equal(observer.targets.has(cover), false);
+    t.mock.timers.tick(1999);
+    assert.equal(observer.targets.has(cover), false);
+    // ...but after a pause.
+    t.mock.timers.tick(1);
+    assert.equal(observer.targets.has(cover), true);
+
+    // Out of view nothing is fetched; back in view the cover loads.
+    observer.trigger(false, [cover]);
+    await page.settle();
+    assert.equal(coverCalls(page).length, 2);
+    observer.trigger(true, [cover]);
+    await page.settle();
+
+    assert.equal(coverCalls(page).length, 3);
+    assert.ok(cover.src.startsWith('blob:'));
+    assert.equal(observer.targets.has(cover), false);
+});
+
+test('a cover that keeps failing is watched again after pauses that double, five times at most', async t => {
+    const page = await bootWithCovers(makeSeriesList(1), 503);
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const observer = imageObserver(page);
+    const [cover] = covers(page);
+
+    await failToLoad(t, page, cover);
+    for (const pause of [2000, 4000, 8000, 16000, 32000]) {
+        t.mock.timers.tick(pause - 1);
+        assert.equal(observer.targets.has(cover), false, `before ${pause} ms`);
+        t.mock.timers.tick(1);
+        assert.equal(observer.targets.has(cover), true, `after ${pause} ms`);
+        await failToLoad(t, page, cover);
+    }
+    assert.equal(coverCalls(page).length, 12);
+
+    // Then it is left alone...
+    t.mock.timers.tick(10 * 60 * 1000);
+    assert.equal(observer.targets.has(cover), false);
+    assert.equal(coverCalls(page).length, 12);
+    assert.equal(cover.dataset.protectedImageLoaded, undefined);
+    // ...until the library is rendered again.
+    page.click('#seriesLayoutListBtn');
+    assert.ok(observer.targets.has(covers(page)[0]));
+});
+
+test('a cover loaded before its retry is due is not watched again', async t => {
+    const page = await bootWithCovers(makeSeriesList(1), sequence(503, 503, imageResponse()));
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const observer = imageObserver(page);
+    const [cover] = covers(page);
+    await failToLoad(t, page, cover);
+
+    page.run('hydrateProtectedImages()');
+    observer.trigger(true, [cover]);
+    await page.settle();
+    assert.ok(cover.src.startsWith('blob:'));
+    t.mock.timers.tick(2000);
+
+    assert.equal(observer.targets.has(cover), false);
+    assert.equal(coverCalls(page).length, 3);
+});
+
+test('a cover replaced by a re-render before its retry is due is not watched again', async t => {
+    const page = await bootWithCovers(makeSeriesList(1), 503);
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const observer = imageObserver(page);
+    const [cover] = covers(page);
+    await failToLoad(t, page, cover);
+
+    page.click('#seriesLayoutListBtn');
+    const [thumb] = covers(page);
+    assert.notEqual(thumb, cover);
+    t.mock.timers.tick(2000);
+
+    assert.equal(observer.targets.has(cover), false);
+    assert.equal(observer.targets.has(thumb), true);
+});
+
+test('a cover whose fallback failed to load is retried as well', async t => {
+    const series = makeSeries(1, { has_external_image: true, external_image_url: '/api/series-images/abc' });
+    const page = await bootWithCovers([series], sequence(503, 503, imageResponse()), {
+        routes: { 'GET /api/series-images/abc': respond(404, { error: 'not found' }) }
+    });
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const observer = imageObserver(page);
+    const [cover] = covers(page);
+
+    await failToLoad(t, page, cover);
+    assert.equal(coverCalls(page).length, 2);
+    assert.equal(cover.dataset.protectedImageLoaded, undefined);
+
+    t.mock.timers.tick(2000);
+    assert.equal(observer.targets.has(cover), true);
+    observer.trigger(true, [cover]);
+    await page.settle();
+
+    assert.equal(callsTo(page, '/api/series-images/abc').length, 2);
+    assert.equal(coverCalls(page).length, 3);
+    assert.ok(cover.src.startsWith('blob:'));
 });
 
 test('the cover cache keeps at most 150 images, evicting and revoking the oldest', async () => {

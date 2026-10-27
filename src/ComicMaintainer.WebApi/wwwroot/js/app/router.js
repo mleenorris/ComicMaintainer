@@ -161,6 +161,12 @@
             const layoutToolbarMobile = document.getElementById('seriesLayoutToolbarMobile');
             if (layoutToggle) layoutToggle.hidden = !isLibraryList;
             if (layoutToolbarMobile) layoutToolbarMobile.hidden = !isLibraryList;
+            // Mark the current layout's button. updateSeriesLayoutButtons()
+            // leaves the buttons alone while another page is shown — the app
+            // starts on the overview, and the layout can change there or on a
+            // series page — so without this the toggle could appear with no
+            // (or the wrong) button active.
+            if (isLibraryList) updateSeriesLayoutButtons();
         }
 
         function updateNavActiveState() {

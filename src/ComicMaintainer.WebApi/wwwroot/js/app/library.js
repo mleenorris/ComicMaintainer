@@ -675,6 +675,29 @@
             }, { rootMargin: '400px 0px' })
             : null;
 
+        // A cover that failed to load is watched again after a pause that
+        // doubles with each failure, so it is fetched once more when it is
+        // next near the viewport (at once if it still is) — e.g. after a
+        // short outage or a burst of rate-limited (429) requests. Watching it
+        // again straight away would refetch it in a loop while it stays in
+        // view; after the last retry it waits for the list to be re-rendered.
+        const PROTECTED_IMAGE_RETRY_DELAY_MS = 2000;   // First pause; doubled after each failure
+        const PROTECTED_IMAGE_MAX_RETRIES = 5;          // Pauses of 2, 4, 8, 16 and 32 seconds
+        const protectedImageFailures = new WeakMap();   // image element -> failed loads so far
+
+        function retryProtectedImageLater(image) {
+            if (!PROTECTED_IMAGE_OBSERVER) return;
+            const failures = protectedImageFailures.get(image) || 0;
+            if (failures >= PROTECTED_IMAGE_MAX_RETRIES) return;
+            protectedImageFailures.set(image, failures + 1);
+            setTimeout(() => {
+                // Not for a cover since removed from the page (the list was
+                // re-rendered) or loaded, or loading, by another hydration.
+                if (!image.isConnected || image.dataset.protectedImageLoaded === '1') return;
+                PROTECTED_IMAGE_OBSERVER.observe(image);
+            }, PROTECTED_IMAGE_RETRY_DELAY_MS * 2 ** failures);
+        }
+
         async function hydrateOneProtectedImage(image) {
             const primary = image.dataset.protectedImage;
             const fallback = image.dataset.protectedImageFallback;
@@ -741,12 +764,14 @@
             };
 
             const primaryResult = await tryLoad(primary);
-            if (primaryResult === 'missing' && fallback && fallback !== primary) {
-                await tryLoad(fallback);
-            } else if (primaryResult === 'failed') {
+            const result = (primaryResult === 'missing' && fallback && fallback !== primary)
+                ? await tryLoad(fallback)
+                : primaryResult;
+            if (result === 'failed') {
                 // Allow a future hydration attempt (e.g. when the element
                 // scrolls back into view after a transient network failure).
                 delete image.dataset.protectedImageLoaded;
+                retryProtectedImageLater(image);
             }
         }
 

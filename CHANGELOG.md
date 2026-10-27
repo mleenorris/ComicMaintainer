@@ -181,6 +181,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **The Library's List/Grid/Compact toggle highlights the current layout when the Library is
+  opened from another page.** The app starts on the Overview and the buttons were only updated
+  while the Library was shown, so none (or a stale one) was highlighted until a layout was
+  picked.
+- **Library covers that failed to load are fetched again when they come back into view**, for
+  example after a server restart or a dropped connection. A failed cover is watched again after
+  a pause that doubles with each failure (2 to 32 seconds, five times at most); before, it stayed
+  blank until the list was re-rendered.
+- **A modified time ahead of the browser's clock no longer reads "-1 days ago"** in the
+  duplicate review and the Files view. Up to a minute ahead reads "Just now"; further ahead
+  shows the date.
 - **Offline use survives the browser restarting the service worker.** A restarted worker used
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or

@@ -696,6 +696,32 @@ test("a job can't be started while another one is followed, whose progress stays
     assert.deepEqual(page.errors, []);
 });
 
+test("a job can't be started while another one's start is still waiting for the server", async (t) => {
+    // #846: with the progress minimized, the toolbar stays usable while a start is pending.
+    const job = h.trackedJob();
+    const start = deferred();
+    const page = await h.bootJobsApp(t, {
+        routes: { ...job.routes, 'POST /api/jobs/process-unmarked': () => start.promise, ...nextJobRoutes() },
+        localStorage: { progressModalMinimized: 'true' }
+    });
+    h.chooseMenuItem(page, 'processDropdown', 'Process Unmarked');
+    await page.settle();
+    h.takeConfirms(page);
+    h.assertProgress(page, { open: false, indicatorVisible: true, indicatorText: 'Starting async processing...' });
+
+    h.chooseMenuItem(page, 'renameDropdown', 'Rename Unmarked');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), []);
+    assert.deepEqual(h.takeMessages(page), [REFUSED]);
+    assert.equal(h.requests(page, 'POST', '/api/jobs/rename-unmarked').length, 0);
+
+    start.resolve({ job_id: JOB_ID, total_items: 4 });
+    await page.settle();
+    h.assertProgress(page, { open: false, indicatorText: '0 / 4 files (0%)', title: TRACKED_TITLE });
+    assert.equal(page.run('currentJobId'), JOB_ID);
+    assert.deepEqual(page.errors, []);
+});
+
 // Every action that starts a job followed in the progress modal, as the page calls it.
 const JOB_STARTERS = [
     'processAllFiles()',

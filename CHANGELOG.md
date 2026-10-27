@@ -158,8 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconnected, every file the job had not processed yet counted as failed. A job that had just
   ended could retitle and close the dialog of a job started within the next few seconds, which
   then ran with no progress, no Cancel and no library refresh when it finished. Starting
-  another action while a job runs, minimized or not, is now refused with a message instead of
-  taking the dialog over from the running job.
+  another action while a job is starting or running, minimized or not, is now refused with a
+  message instead of taking the dialog over from that job.
 - **Series metadata works for local (password) logins.** Refresh, match, search, rename,
   aliases, preferred language, apply match and removing a match sent no session token and
   failed with 401 unless signed in through Authelia.

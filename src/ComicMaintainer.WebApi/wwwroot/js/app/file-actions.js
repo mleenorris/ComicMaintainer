@@ -618,6 +618,10 @@
             if (!confirm(message)) {
                 return;
             }
+            // No other job can be started while the server plans the moves
+            // (canStartJob); released in `finally` unless this job gets tracked.
+            jobStarting = true;
+            let tracked = false;
             combineFolderActionInFlight = true;
             document.getElementById('combineFoldersPreviewBtn').disabled = true;
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
@@ -655,6 +659,7 @@
                 }
 
                 showMessage(`Combining ${totalItems} file(s) in background${skipped > 0 ? ` (${skipped} skipped)` : ''}`, 'info');
+                tracked = true;
                 showProgressModal(`Combining ${totalItems} file(s)...`);
                 await trackJobStatus(jobId, `Combining ${totalItems} file(s)...`);
 
@@ -668,6 +673,7 @@
                 console.error('Failed to combine folders:', error);
                 showMessage(`Failed to combine folders: ${error.message}`, 'error');
             } finally {
+                if (!tracked) jobStarting = false;
                 combineFolderActionInFlight = false;
                 renderCombineFolderGroup();
             }

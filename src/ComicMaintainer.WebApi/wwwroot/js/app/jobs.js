@@ -32,6 +32,9 @@
         // over the modal, and do nothing once their job is no longer the current one.
         let jobFinalizeTimer = null;
         let progressModalCloseTimer = null;
+        // Set while a job is being started: from showProgressModal() until the
+        // job is tracked (trackJobStatus) or its start is given up (closeProgressModal).
+        let jobStarting = false;
         window.addEventListener('beforeunload', function(event) {
             // Clean up SSE connection
             cleanupEventSource();
@@ -46,13 +49,13 @@
         });
 
         // The progress modal, its header indicator and its Cancel button follow
-        // one job at a time. Starting another job while one is tracked would
-        // take them over (or close them if the start failed), leaving the
-        // running job with no progress, no Cancel and no refresh when it ends,
-        // so every action that starts a tracked job checks this first.
+        // one job at a time. Starting another job while one is being started or
+        // tracked would take them over (or close them if the start failed),
+        // leaving the running job with no progress, no Cancel and no refresh
+        // when it ends, so every action that starts a tracked job checks this first.
         // hasActiveJob stays set until the tracked job's end has been handled.
         function canStartJob() {
-            if (!hasActiveJob) return true;
+            if (!hasActiveJob && !jobStarting) return true;
             showMessage('Another job is still running. Wait for it to finish, or cancel it, before starting a new one.', 'warning');
             return false;
         }
@@ -433,6 +436,7 @@
             hasActiveJob = true;
             currentJobId = jobId;  // Track for cancellation
             currentJobTitle = title;  // Track title for progress updates
+            jobStarting = false;
             // The modal now follows this job: a previous job's pending finish
             // must neither retitle nor close it.
             clearProgressModalTimers();
@@ -1456,9 +1460,11 @@
         function showProgressModal(title) {
             // The modal now belongs to a job that is only being started: no job
             // is current until trackJobStatus() names it, so the pending finish
-            // of a job that ended can neither retitle nor close it.
+            // of a job that ended can neither retitle nor close it, and no other
+            // job can be started meanwhile (canStartJob).
             clearProgressModalTimers();
             currentJobId = null;
+            jobStarting = true;
             const modal = document.getElementById('progressModal');
             const indicator = document.getElementById('progressIndicator');
             document.getElementById('progressTitle').textContent = title;
@@ -1638,6 +1644,7 @@
         function closeProgressModal() {
             clearTimeout(progressModalCloseTimer);
             progressModalCloseTimer = null;
+            jobStarting = false;
             document.getElementById('progressModal').classList.remove('active');
             setProgressIndicatorVisible(false);
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button

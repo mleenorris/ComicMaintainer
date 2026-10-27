@@ -137,6 +137,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Resetting the database cancels the jobs that are running**, which kept working on the data
   being deleted; **Reset Filename Format** restores the default instead of "undefined"; and the
   GitHub token setting is never written to the log.
+- **Saving the External Series Metadata settings or the series cover size limits changes all of
+  them or none.** Each field was written to `user-settings.json` separately, so a request that
+  was aborted or hit a write error partway through kept the fields saved so far (metadata
+  lookups could end up switched on with the old ComicVine key) and still answered 500. Each
+  group is now saved in one write. A cover size so small that it rounds to 0 bytes is rejected
+  with 400 instead of 500.
 - **Editing or removing a comic's metadata no longer deletes its large pages.** Rewriting
   ComicInfo.xml rebuilt the archive without any entry over 10 MB (or without a name) and then
   replaced the original, so big pages were lost for good. Archives are now streamed entry by

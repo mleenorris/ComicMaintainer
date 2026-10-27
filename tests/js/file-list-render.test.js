@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
-const { deferred } = require('./support/app');
+const { deferred, addReadOnlyGate, isDisplayed } = require('./support/app');
 const {
     makeFolder,
     makeFile,
@@ -179,6 +179,32 @@ test('file rows show the processing status, read state, size and age', async () 
     assert.ok(!actions(fresh).includes('Review Duplicate'));
     assert.ok(actions(normalized).includes('Mark Unread') && !actions(normalized).includes('Mark Read'));
     assert.ok(actions(fresh).includes('Mark Read') && !actions(fresh).includes('Mark Unread'));
+});
+
+test('read-only users are offered only the read actions of a file row', async () => {
+    const page = await bootFilesView({
+        user: { canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] },
+        folders: [makeFolder('Mixed')],
+        files: { Mixed: [makeFile('Mixed/new.cbz'), makeFile('Mixed/dupe.cbz', { duplicate: true, read: true })] },
+        beforeScripts: addReadOnlyGate
+    });
+    await expandFolder(page, 'Mixed');
+    assert.ok(page.document.body.classList.contains('user-read-only'));
+
+    // What each row's menu shows once opened (menus.js then moves it to
+    // <body>, out of its row); a divider reads as '—'.
+    const shown = page.$$('#fileList .file-item').map(row => {
+        page.click(row.querySelector('.dropdown-toggle'));
+        const items = [...page.$('body > .dropdown-menu.show').children]
+            .filter(isDisplayed)
+            .map(item => (item.classList.contains('dropdown-divider') ? '—' : item.textContent.trim()));
+        page.run('closeAllDropdowns()');
+        return items;
+    });
+    assert.deepEqual(shown, [
+        ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Read'],
+        ['Info', 'View/Edit', 'Read Comic', 'Review Duplicate', '—', 'Mark Unread']
+    ]);
 });
 
 test('a file\'s age reads as a relative time for the past week, then as a date', async () => {

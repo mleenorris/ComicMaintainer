@@ -9,7 +9,10 @@
 // Unrouted requests answer 404, which the boot tolerates; bootRoutes() only
 // answers the session checks.
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { loadPage } = require('./dom');
+const { WWWROOT } = require('./sandbox');
 
 function jwt(payload) {
     const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -68,4 +71,26 @@ function deferred() {
     return { promise, resolve, reject };
 }
 
-module.exports = { jwt, validToken, currentUser, bootRoutes, bootApp, deferred };
+// A loadPage() `beforeScripts` hook that adds css/main.css's read-only gate
+// (body.user-read-only hides every [data-requires-write] control) to the page,
+// for tests of what a ReadOnly user is shown: the harness loads no stylesheets.
+function addReadOnlyGate(window) {
+    const css = fs.readFileSync(path.join(WWWROOT, 'css', 'main.css'), 'utf8');
+    const rule = /body\.user-read-only \[data-requires-write\]\s*\{[^}]*\}/.exec(css);
+    if (!rule) throw new Error('css/main.css has no read-only gate rule');
+    const style = window.document.createElement('style');
+    style.textContent = rule[0];
+    window.document.head.appendChild(style);
+}
+
+// Whether `element` is displayed. jsdom's computed display doesn't account for
+// an ancestor's display: none, so the whole chain is checked.
+function isDisplayed(element) {
+    const view = element.ownerDocument.defaultView;
+    for (let node = element; node; node = node.parentElement) {
+        if (view.getComputedStyle(node).display === 'none') return false;
+    }
+    return true;
+}
+
+module.exports = { jwt, validToken, currentUser, bootRoutes, bootApp, deferred, addReadOnlyGate, isDisplayed };

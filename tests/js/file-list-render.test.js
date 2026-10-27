@@ -539,6 +539,75 @@ test('a plain reload keeps open folders; a refresh re-collapses them and reloads
     assert.equal(folderFileCalls(page).length, 2);
 });
 
+test('a new filter or sort lists open folders\' files again, and closed ones once reopened', async () => {
+    const page = await bootFilesView({ folders: [makeFolder('Batman'), makeFolder('Saga')] });
+    // Each folder holds one file, named after the filter it was listed for.
+    page.route(folderFilesMatcher, call => ({
+        path: call.folder,
+        files: [makeFile(`${call.folder}/${call.folder} ${call.query.filter || 'all'}.cbz`)]
+    }));
+    const requested = () => folderFileCalls(page).map(call => [call.folder, call.query]);
+    await expandFolder(page, 'Batman');
+    await expandFolder(page, 'Saga');
+    await expandFolder(page, 'Saga');
+    assert.deepEqual(requested(), [['Batman', {}], ['Saga', {}]]);
+
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    assert.deepEqual(folderSections(page).map(section => section.collapsed), [false, true]);
+    assert.deepEqual(rowNames(page), ['Batman unmarked.cbz']);
+    assert.deepEqual(requested().slice(2), [['Batman', { filter: 'unmarked' }]], 'the closed folder is not fetched yet');
+
+    await expandFolder(page, 'Saga');
+    assert.deepEqual(rowNames(page), ['Batman unmarked.cbz', 'Saga unmarked.cbz']);
+    assert.deepEqual(requested().slice(3), [['Saga', { filter: 'unmarked' }]]);
+
+    page.click('#headerSortMenu [data-sort="date"]');
+    await page.settle();
+    assert.deepEqual(requested().slice(4), [
+        ['Batman', { filter: 'unmarked', sort: 'date' }],
+        ['Saga', { filter: 'unmarked', sort: 'date' }]
+    ]);
+
+    // A plain reload for the same query keeps the files listed for it.
+    await page.run('loadActiveLibraryView()');
+    await page.settle();
+    assert.equal(folderFileCalls(page).length, 6);
+});
+
+test('a folder\'s checkbox and expand all fetch files listed for an earlier filter again', async () => {
+    const page = await bootFilesView({ folders: [makeFolder('Batman'), makeFolder('Saga')] });
+    page.route(folderFilesMatcher, call => ({
+        path: call.folder,
+        files: [makeFile(`${call.folder}/${call.folder} ${call.query.filter || 'all'}.cbz`)]
+    }));
+    const requested = () => folderFileCalls(page).map(call => [call.folder, call.query]);
+    const toggleAll = async () => {
+        page.click('#toggleAllBtn');
+        await page.settle();
+    };
+    await toggleAll();
+    await toggleAll();
+    assert.deepEqual(folderSections(page).map(section => section.collapsed), [true, true]);
+
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    assert.equal(folderFileCalls(page).length, 2, 'closed folders are not fetched for the new filter yet');
+
+    const batman = page.$$('#fileList .folder-section')
+        .find(section => section.querySelector('.directory-content').dataset.dir === 'Batman');
+    page.input(batman.querySelector('.directory-checkbox'), true);
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['Batman/Batman unmarked.cbz']);
+
+    await toggleAll();
+    assert.deepEqual(rowNames(page), ['Batman unmarked.cbz', 'Saga unmarked.cbz']);
+    assert.deepEqual(requested().slice(2), [
+        ['Batman', { filter: 'unmarked' }],
+        ['Saga', { filter: 'unmarked' }]
+    ], 'each folder is fetched once for the new filter');
+});
+
 test('loadFolders() still accepts the legacy boolean refresh flag', async () => {
     const page = await bootFilesView({ folders: [makeFolder('Batman')] });
 

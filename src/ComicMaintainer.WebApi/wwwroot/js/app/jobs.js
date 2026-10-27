@@ -234,9 +234,13 @@
                     `Cleared processed status on ${data.cleared} of ${data.requested} file(s). ` +
                     'Run Process / Rename / Normalize to reapply.',
                     'success');
-                // Refresh the file list so badges update.
-                if (typeof loadFiles === 'function') {
-                    loadFiles(true);
+                // Reload what is shown so the status badges update: the open
+                // series's issues in place, otherwise the library view.
+                if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                    await loadSeriesIssues(currentSeriesDetailId, true);
+                    scheduleLibraryHealthRefresh();
+                } else {
+                    await loadActiveLibraryView(1, true);
                 }
             } catch (err) {
                 console.error('clearSelectedProcessedStatus failed', err);

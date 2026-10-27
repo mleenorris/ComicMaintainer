@@ -356,6 +356,16 @@
                 if (rootArrived) {
                     ensureFolderLoaded('', true).catch(() => {});
                 }
+                // Open folders keep their cached files across a reload; fetch
+                // them again if those were listed for another filter, search
+                // or sort.
+                const query = folderFilesQuery();
+                for (const f of newFolders) {
+                    const entry = f && f.path ? folderFiles.get(f.path) : null;
+                    if (entry && entry.query !== query && !collapsedDirectories.has(f.path)) {
+                        ensureFolderLoaded(f.path).catch(() => {});
+                    }
+                }
                 updateButtonVisibility();
                 ensureScrollObserver();
                 if (refresh) {

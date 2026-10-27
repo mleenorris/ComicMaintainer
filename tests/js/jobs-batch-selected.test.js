@@ -9,12 +9,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { deferred } = require('./support/app');
 const { respond } = require('./support/dom');
+const { makeSeries } = require('./support/library-helpers');
 const h = require('./support/jobs-helpers');
 
 const { ISSUE_A, ISSUE_B } = h;
 const plural = n => (n > 1 ? 's' : '');
 const forcePrompt = (description, status) =>
     `${description}\n\nClick OK to include files already marked as ${status}, or Cancel to skip them.`;
+const clearStatusConfirm = n => `Clear the renamed/normalized flags on ${n} selected file${plural(n)}?\n\n`
+    + 'The files will then be re-processed on the next Process / Rename / Normalize run.';
 
 const SELECTED_ACTIONS = [
     {
@@ -278,13 +281,15 @@ test('Delete deletes the selected issues in a background job', async (t) => {
 
 test('Clear Processed Status clears the flags of the selected issues', async (t) => {
     let answer = _call => ({ cleared: 1, requested: 2 });
+    let issues = [h.seriesIssue(ISSUE_A, { duplicate: true }), h.seriesIssue(ISSUE_B)];
     const page = await h.bootSeriesDetail(t, {
-        routes: { 'POST /api/status/clear-selected': call => answer(call) }
+        routes: {
+            'GET /api/files/series/s1/issues': () => h.seriesIssues(issues),
+            'POST /api/status/clear-selected': call => answer(call)
+        }
     });
     const clears = () => h.requests(page, 'POST', '/api/status/clear-selected');
     const clearSelected = () => h.chooseMenuItem(page, 'processDropdown', 'Clear Processed Status');
-    const confirmText = n => `Clear the renamed/normalized flags on ${n} selected file${plural(n)}?\n\n`
-        + 'The files will then be re-processed on the next Process / Rename / Normalize run.';
 
     assert.equal(page.$('#clearSelectedStatusItem').disabled, true);
     page.run('clearSelectedProcessedStatus()');
@@ -295,14 +300,14 @@ test('Clear Processed Status clears the flags of the selected issues', async (t)
     h.answerConfirms(page, false);
     clearSelected();
     await page.settle();
-    assert.deepEqual(h.takeConfirms(page), [confirmText(1)]);
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(1)]);
     assert.equal(clears().length, 0);
 
     h.selectIssue(page, ISSUE_B);
     answer = () => respond(500, { error: 'Error clearing status' });
     clearSelected();
     await page.settle();
-    assert.deepEqual(h.takeConfirms(page), [confirmText(2)]);
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(2)]);
     assert.deepEqual(clears()[0].body, { Files: [ISSUE_A, ISSUE_B] });
     assert.equal(clears()[0].init.credentials, 'same-origin');
     assert.match(clears()[0].headers.authorization, /^Bearer /);
@@ -314,21 +319,70 @@ test('Clear Processed Status clears the flags of the selected issues', async (t)
     assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to clear processed status: Failed to fetch' }]);
 
     // The server reports how many of the requested files had flags to clear.
-    // The list refresh that follows is not asserted: it loads the folder view
-    // (loadFiles() → GET /api/files/folders) even on a series page, which
-    // looks like a bug.
+    // The open series then reloads its issues in place, so their badges show
+    // the cleared flags; the selection stays for processing them again.
+    issues = [h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)];
+    const issueLoads = () => h.requests(page, 'GET', '/api/files/series/s1/issues').length;
+    const healthLoads = () => h.requests(page, 'GET', '/api/files/counts').length;
+    const loadsBefore = issueLoads();
+    assert.equal(page.$$('.series-issue-duplicate-badge').length, 1);
     answer = () => ({ cleared: 1, requested: 2 });
     clearSelected();
     await page.settle();
-    assert.deepEqual(h.takeMessages(page)[0], {
+    assert.deepEqual(h.takeMessages(page), [{
         type: 'success',
         text: 'Cleared processed status on 1 of 2 file(s). Run Process / Rename / Normalize to reapply.'
-    });
+    }]);
+    assert.equal(issueLoads(), loadsBefore + 1, 'the open series reloads its issues in place');
+    assert.equal(page.$$('.series-issue-duplicate-badge').length, 0, 'the badges show the cleared flags');
+    assert.equal(page.window.location.hash, '#/series/s1');
+    assert.ok(page.$('#seriesDetailPanel'), 'the series stays open');
+    assert.equal(page.$('#fileList .folder-section'), null);
+    assert.equal(h.requests(page, 'GET', '/api/files/folders').length, 0, 'the retired folder view is not loaded');
+    assert.equal(h.requests(page, 'GET', h.LIBRARY_RELOAD).length, 0, 'the series library is not rebuilt');
+    assert.equal(page.$$('.series-issue-select input:checked').length, 2);
+    assert.equal(page.$('#selectInfo').textContent, '2 files selected');
+
+    // The library health counts change too, so they are refreshed shortly after.
+    const healthBefore = healthLoads();
+    await h.tick(t, page, page.run('LIBRARY_HEALTH_REFRESH_DELAY'));
+    assert.equal(healthLoads(), healthBefore + 1);
 
     answer = () => 401;
     page.run('clearSelectedProcessedStatus()');
     await page.settle();
     assert.equal(h.loginRedirects(page), 1);
     assert.deepEqual(h.messages(page), []);
+    assert.deepEqual(page.errors, []);
+});
+
+test('Clear Processed Status on series ticked in the library reloads the series list', async (t) => {
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            'GET /api/files/series': { series: [makeSeries(1)], total_series: 1, unmarked_count: 0 },
+            'GET /api/files/series/series-1/issues':
+                h.seriesIssues([h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)], { id: 'series-1' }),
+            'POST /api/status/clear-selected': { cleared: 2, requested: 2 }
+        }
+    });
+    const selectBox = () => page.$('#fileList .series-select-box[data-series-id="series-1"]');
+    page.click(selectBox());
+    await page.settle();
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+
+    h.chooseMenuItem(page, 'processDropdown', 'Clear Processed Status');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(2)]);
+    assert.deepEqual(h.requests(page, 'POST', '/api/status/clear-selected')[0].body, { Files: [ISSUE_A, ISSUE_B] });
+    assert.deepEqual(h.takeMessages(page), [{
+        type: 'success',
+        text: 'Cleared processed status on 2 of 2 file(s). Run Process / Rename / Normalize to reapply.'
+    }]);
+    assert.equal(h.requests(page, 'GET', h.LIBRARY_RELOAD).length, 1, 'the series list reloads');
+    assert.equal(h.requests(page, 'GET', '/api/files/folders').length, 0, 'the retired folder view is not loaded');
+    assert.equal(page.$('#fileList .file-list-header'), null);
+    assert.equal(page.window.location.hash, '#/library');
+    assert.equal(selectBox().getAttribute('aria-checked'), 'true', 'the reloaded series stays ticked');
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
     assert.deepEqual(page.errors, []);
 });

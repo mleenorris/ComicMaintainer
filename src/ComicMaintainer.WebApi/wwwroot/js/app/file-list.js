@@ -246,6 +246,10 @@
             // as the cache key makes the comparison exact by construction:
             // there is no hand-maintained list of fields that could drift out
             // of sync with the template.
+
+            // Bring the expand/collapse-all state up to date before its icon
+            // is drawn from it.
+            updateToggleAllButton();
             const headerHtml = `
                 <div class="file-list-header">
                     <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)" title="Select all loaded files">
@@ -340,7 +344,6 @@
 
             updateSelectInfo();
             updateSelectAllCheckbox();
-            updateToggleAllButton();
             ensureScrollObserver();
         }
         
@@ -528,41 +531,50 @@
             }
         }
 
+        // The search, filter and sort folder contents are listed for, as the
+        // query string of a folder's files request.
+        function folderFilesQuery() {
+            const params = [];
+            if (searchQuery) params.push(`search=${encodeURIComponent(searchQuery)}`);
+            if (filterMode !== 'all') params.push(`filter=${encodeURIComponent(filterMode)}`);
+            if (sortMode !== 'name') params.push(`sort=${encodeURIComponent(sortMode)}`);
+            if (sortDirection !== 'asc') params.push(`direction=${encodeURIComponent(sortDirection)}`);
+            return params.join('&');
+        }
+
         async function ensureFolderLoaded(dir, force = false) {
+            const query = folderFilesQuery();
             const existing = folderFiles.get(dir);
-            if (!force && existing && existing.status === 'loaded') return;
+            // Files listed for another filter, search or sort are stale.
+            const sameQuery = !!existing && existing.query === query;
+            if (!force && sameQuery && existing.status === 'loaded') return;
             // A forced load is for a changed filter, search or sort, so it
             // supersedes a request still in flight instead of joining it.
-            if (!force && existing && existing.status === 'loading') return existing.promise;
+            if (!force && sameQuery && existing.status === 'loading') return existing.promise;
 
             // The root folder's path is empty, and an empty path segment
             // (folders//files) routes nowhere, so the root has its own URL.
             let url = apiUrl(dir
                 ? `/api/files/folders/${encodeFolderPath(dir)}/files`
                 : '/api/files/folders/files');
-            const params = [];
-            if (searchQuery) params.push(`search=${encodeURIComponent(searchQuery)}`);
-            if (filterMode !== 'all') params.push(`filter=${encodeURIComponent(filterMode)}`);
-            if (sortMode !== 'name') params.push(`sort=${encodeURIComponent(sortMode)}`);
-            if (sortDirection !== 'asc') params.push(`direction=${encodeURIComponent(sortDirection)}`);
-            if (params.length) url += '?' + params.join('&');
+            if (query) url += '?' + query;
 
-            const entry = { status: 'loading', files: [], promise: null };
+            const entry = { status: 'loading', files: [], promise: null, query };
             folderFiles.set(dir, entry);
             entry.promise = (async () => {
                 let result;
                 try {
                     const response = await fetch(url, { headers: getAuthHeaders() });
                     if (handleAuthError(response)) {
-                        result = { status: 'error', files: [] };
+                        result = { status: 'error', files: [], query };
                     } else if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     } else {
                         const data = await response.json();
-                        result = { status: 'loaded', files: data.files || [] };
+                        result = { status: 'loaded', files: data.files || [], query };
                     }
                 } catch (err) {
-                    result = { status: 'error', files: [] };
+                    result = { status: 'error', files: [], query };
                 }
                 // A newer request for this folder has taken over: an older
                 // answer must not overwrite the latest one, so wait for it.
@@ -835,13 +847,15 @@
             allFoldersExpanded = true;
             renderFileList();
 
-            // Concurrency-limited loader for unloaded folders.
+            // Concurrency-limited loader for unloaded folders and for folders
+            // whose files were listed for another filter, search or sort.
             const concurrency = 4;
+            const query = folderFilesQuery();
             const queue = folderList
                 .map(f => f.path || '')
                 .filter(dir => {
                     const e = folderFiles.get(dir);
-                    return !e || e.status === 'error';
+                    return !e || e.status === 'error' || e.query !== query;
                 });
             let active = 0;
             let index = 0;
@@ -875,8 +889,11 @@
 
         function updateToggleAllButton() {
             // Only folders with a header can be collapsed; the root can't.
-            const totalDirs = folderList.filter(f => f.path).length;
-            if (totalDirs > 0 && collapsedDirectories.size >= totalDirs) {
+            // Folders no longer listed can still be marked collapsed, so only
+            // the listed ones are counted.
+            const dirs = folderList.filter(f => f.path);
+            const collapsedDirs = dirs.filter(f => collapsedDirectories.has(f.path)).length;
+            if (dirs.length > 0 && collapsedDirs >= dirs.length) {
                 allFoldersExpanded = false;
             } else {
                 allFoldersExpanded = true;
@@ -885,7 +902,7 @@
 
         async function toggleDirectorySelection(dir, checked) {
             const entry = folderFiles.get(dir);
-            if (!entry || entry.status !== 'loaded') {
+            if (!entry || entry.status !== 'loaded' || entry.query !== folderFilesQuery()) {
                 await ensureFolderLoaded(dir);
             }
             const refreshed = folderFiles.get(dir);

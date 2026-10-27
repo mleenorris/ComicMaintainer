@@ -181,6 +181,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **Process ▸ Clear Processed Status keeps the series page open and updates its badges.** It
+  replaced the series page or library grid with the retired folder list (not even refreshed)
+  while the address still showed the series, and never reloaded the series' status badges. The
+  open series now reloads its issues in place, and otherwise the library reloads. In the folder
+  list itself, open folders no longer show files listed for an earlier filter, search or sort,
+  and the expand/collapse-all button no longer shows, and does, the opposite of the folders'
+  state after one is closed or reopened or the list changes.
 - **Offline use survives the browser restarting the service worker.** A restarted worker used
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or

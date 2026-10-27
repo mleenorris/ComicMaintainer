@@ -79,6 +79,7 @@ public class UserPreferencesService : IUserPreferencesService
         if (update.LibraryViewMode is not null) entity.LibraryViewMode = update.LibraryViewMode;
         if (update.FilterMode is not null) entity.FilterMode = update.FilterMode;
         if (update.SortMode is not null) entity.SortMode = update.SortMode;
+        if (update.SortDirection is not null) entity.SortDirection = update.SortDirection;
         entity.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(cancellationToken);
@@ -98,6 +99,7 @@ public class UserPreferencesService : IUserPreferencesService
         ReadingMode = entity.ReadingMode,
         LibraryViewMode = entity.LibraryViewMode,
         FilterMode = entity.FilterMode,
-        SortMode = entity.SortMode
+        SortMode = entity.SortMode,
+        SortDirection = entity.SortDirection
     };
 }

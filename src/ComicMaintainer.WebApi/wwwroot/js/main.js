@@ -66,6 +66,7 @@
             prefsPromise.then(prefs => {
                 const oldPerPage = perPage;
                 const oldLibraryViewMode = libraryViewMode;
+                const oldFilterMode = filterMode;
                 perPage = prefs.perPage || DEFAULT_PER_PAGE;
                 
                 // Set the per-page selector to the saved value
@@ -91,10 +92,16 @@
                     });
                 }
 
-                // Restore sort mode from preferences
+                // Restore sort field and direction from preferences
                 const oldSortMode = sortMode;
+                const oldSortDirection = sortDirection;
                 if (prefs.sortMode) {
                     sortMode = prefs.sortMode;
+                }
+                if (prefs.sortDirection === 'asc' || prefs.sortDirection === 'desc') {
+                    sortDirection = prefs.sortDirection;
+                }
+                if (prefs.sortMode || prefs.sortDirection) {
                     applySortUi();
                 }
 
@@ -105,9 +112,18 @@
                 updateLibraryViewButtons();
                 updateLibraryViewLayout();
                 
-                // Reload files if perPage changed from default
-                if (libraryViewMode !== oldLibraryViewMode || sortMode !== oldSortMode || (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE)) {
+                // The library started loading with the defaults; reload it if
+                // the saved preferences change what it lists.
+                if (libraryViewMode !== oldLibraryViewMode || filterMode !== oldFilterMode
+                    || sortMode !== oldSortMode || sortDirection !== oldSortDirection
+                    || (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE)) {
                     loadActiveLibraryView(1);
+                }
+
+                // A series page opened before the preferences arrived listed
+                // its issues without the saved filter; fetch them with it.
+                if (filterMode !== oldFilterMode && currentSeriesDetailId) {
+                    loadSeriesIssues(currentSeriesDetailId, true);
                 }
             });
             

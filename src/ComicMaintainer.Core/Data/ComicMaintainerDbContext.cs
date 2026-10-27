@@ -195,6 +195,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.LibraryViewMode).HasMaxLength(32);
             entity.Property(e => e.FilterMode).HasMaxLength(64);
             entity.Property(e => e.SortMode).HasMaxLength(64);
+            entity.Property(e => e.SortDirection).HasMaxLength(32);
             entity.HasIndex(e => e.UserId).IsUnique();
         });
 
@@ -534,6 +535,7 @@ public class UserPreferencesEntity
     public string? LibraryViewMode { get; set; }
     public string? FilterMode { get; set; }
     public string? SortMode { get; set; }
+    public string? SortDirection { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

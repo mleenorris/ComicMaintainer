@@ -15,7 +15,7 @@ namespace ComicMaintainer.Core.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
 
             modelBuilder.Entity("ComicMaintainer.Core.Data.ComicEmailDeliveryEntity", b =>
                 {
@@ -845,6 +845,10 @@ namespace ComicMaintainer.Core.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("ReadingMode")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SortDirection")
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 

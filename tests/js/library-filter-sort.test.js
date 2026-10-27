@@ -99,7 +99,13 @@ test('sorting by the same field flips the direction; a new field starts ascendin
     assert.equal(page.$('#headerSortLabel').textContent, 'Name ↑');
     assert.deepEqual(seriesCalls(page).at(-1).query, { offset: '0', limit: '60' });
 
-    assert.deepEqual(savedPreferences(page), [{ sortMode: 'date' }, { sortMode: 'date' }, { sortMode: 'date' }, { sortMode: 'size' }, { sortMode: 'name' }]);
+    assert.deepEqual(savedPreferences(page), [
+        { sortMode: 'date', sortDirection: 'asc' },
+        { sortMode: 'date', sortDirection: 'desc' },
+        { sortMode: 'date', sortDirection: 'asc' },
+        { sortMode: 'size', sortDirection: 'asc' },
+        { sortMode: 'name', sortDirection: 'asc' }
+    ], 'the direction is saved with the field');
 });
 
 test('an unknown sort mode falls back to the "Name" label', async () => {

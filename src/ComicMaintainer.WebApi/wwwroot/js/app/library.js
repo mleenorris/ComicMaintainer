@@ -527,7 +527,7 @@
             document.getElementById('headerSortMenu').classList.remove('show');
 
             // Persist the chosen sort so it survives a refresh / other devices
-            setPreferences({ sortMode: sortMode });
+            setPreferences({ sortMode: sortMode, sortDirection: sortDirection });
 
             // If a series detail is open, keep the user inside it. Sorting
             // does not apply to issues within a series (issues are ordered by

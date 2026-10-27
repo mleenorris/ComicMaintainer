@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { runWwwrootScript } = require('./support/sandbox');
-const { boot, loadApp, requests, consoleLines, preferences, press, seriesCard, seriesIssues, seriesPage } = require('./support/core-helpers');
+const { boot, loadApp, requests, consoleLines, preferences, press, seriesCard, seriesIssue, seriesIssues, seriesPage } = require('./support/core-helpers');
 
 const SAGA = seriesCard();
 const PORTRAIT = '(max-width: 600px) and (orientation: portrait)';
@@ -62,11 +62,62 @@ test('the library reloads for a saved page size alone, but not for the defaults'
     assert.equal(custom.evaluate('perPage'), 25);
     assert.equal(seriesListLoads(custom).length, 2);
 
-    const defaults = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ perPage: 0, filterMode: '', sortMode: '' }) }) });
+    const defaults = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ perPage: 0, filterMode: '', sortMode: '', sortDirection: '' }) }) });
     assert.equal(defaults.evaluate('perPage'), 100, 'no saved size means the default');
     assert.equal(defaults.evaluate('filterMode'), 'all');
     assert.equal(defaults.evaluate('sortMode'), 'name');
+    assert.equal(defaults.evaluate('sortDirection'), 'asc');
     assert.equal(seriesListLoads(defaults).length, 1);
+});
+
+test('a saved filter alone is applied to the library, not just shown in the header', async () => {
+    const page = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ filterMode: 'unread' }) }) });
+
+    assert.equal(page.$('#headerFilterLabel').textContent, 'Unread');
+    assert.deepEqual(activeItems(page, 'headerFilterMenu'), ['unread']);
+    const loads = seriesListLoads(page);
+    assert.equal(loads.length, 2, 'the library started with the defaults, then reloads');
+    assert.deepEqual(loads.at(-1).query, { offset: '0', limit: '60', filter: 'unread' });
+    assert.ok(page.$('#fileList .series-card'), 'the filtered library is shown');
+});
+
+test('a saved descending sort is restored, and the library reloads in that order', async () => {
+    const page = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ sortMode: 'date', sortDirection: 'desc' }) }) });
+
+    assert.equal(page.$('#headerSortLabel').textContent, 'Date ↓');
+    assert.deepEqual(activeItems(page, 'headerSortMenu'), ['date']);
+    assert.deepEqual(seriesListLoads(page).at(-1).query, { offset: '0', limit: '60', sort: 'date', direction: 'desc' });
+});
+
+test('a saved direction alone reverses the default sort; one the app does not know is ignored', async () => {
+    const reversed = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ sortDirection: 'desc' }) }) });
+    assert.equal(reversed.$('#headerSortLabel').textContent, 'Name ↓');
+    assert.equal(seriesListLoads(reversed).length, 2);
+    assert.deepEqual(seriesListLoads(reversed).at(-1).query, { offset: '0', limit: '60', direction: 'desc' });
+
+    const unknown = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ sortMode: 'date', sortDirection: 'sideways' }) }) });
+    assert.equal(unknown.evaluate('sortDirection'), 'asc');
+    assert.equal(unknown.$('#headerSortLabel').textContent, 'Date ↑');
+    assert.equal(seriesListLoads(unknown).at(-1).query.direction, undefined);
+});
+
+test('a series page opened before the preferences arrive lists its issues with the saved filter', async () => {
+    const read = seriesIssue({ read: true });
+    const unread = seriesIssue({ file_path: 'Saga/Saga 002.cbz', file_name: 'Saga 002.cbz', title: 'Chapter Two', issue: '2' });
+    const issuesPath = `/api/files/series/${SAGA.id}/issues`;
+    const page = await boot({
+        hash: `#/series/${SAGA.id}`,
+        routes: libraryRoutes({
+            'GET /api/preferences': preferences({ filterMode: 'unread' }),
+            [`GET ${issuesPath}`]: call => seriesIssues(SAGA, call.query.filter === 'unread' ? [unread] : [read, unread])
+        })
+    });
+
+    const loads = requests(page, 'GET', issuesPath);
+    assert.equal(loads[0].query.filter, undefined, 'the page started loading before the preferences arrived');
+    assert.equal(loads.at(-1).query.filter, 'unread');
+    assert.equal(page.window.location.hash, `#/series/${SAGA.id}`, 'the series page stays open');
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issue-card[data-file-path]').map(card => card.dataset.filePath), ['Saga/Saga 002.cbz']);
 });
 
 test('a saved filter the app no longer knows is labelled "All"', async () => {

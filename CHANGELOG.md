@@ -175,6 +175,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   job started; `POST /api/scheduled-jobs/{key}/run` answers `queued: false`.
 - **Database backups and restores work when the connection string is a `file:` URI**; such
   databases were mistaken for in-memory ones and never backed up.
+- **SQLite connections keep their settings when switching to WAL fails.** All the PRAGMAs ran
+  as one command, so when `journal_mode=WAL` failed (a read-only database, or another connection
+  holding a lock during the first switch) the `busy_timeout`, `synchronous`, `temp_store`,
+  `cache_size` and `mmap_size` settings after it were skipped and the connection ran on SQLite's
+  defaults. The busy timeout is now applied first, so the switch also waits for a reader to
+  finish; the switch runs on its own and logs its own warning; and the other settings are
+  applied whether it works or not.
 - **An error that happens soon after reconnecting is reported**; an error while offline used
   up the reporting window.
 - **The Files view** shows its empty states instead of "Loading files..." forever, shows the

@@ -109,6 +109,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **A blank `JWT_SECRET` no longer stops the app from starting.** Startup took an empty
+  variable (`docker run -e JWT_SECRET=`, `JWT_SECRET=` in an env file, or
+  `-e JWT_SECRET="$(cat jwt_secret.txt)"` with a missing file) for the secret and exited with
+  "JWT_SECRET must be configured in appsettings.json or environment variable", even when
+  `JwtSettings:Secret` was set. A blank `JWT_SECRET` now counts as unset both where tokens are
+  signed and where they are validated, so `JwtSettings:Secret` is used; if that is not set
+  either, the error says that `JWT_SECRET` is blank.
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
   check for administration read the Authelia settings without that variable, so when the admin
   groups were set only there (the documented way) every signed-in user who was not ReadOnly,

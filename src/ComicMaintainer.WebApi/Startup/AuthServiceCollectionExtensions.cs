@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.WebApi.Authentication;
@@ -36,13 +35,17 @@ internal static class AuthServiceCollectionExtensions
         .AddEntityFrameworkStores<ComicMaintainerDbContext>()
         .AddDefaultTokenProviders();
 
-        // Configure JWT Authentication
-        var jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>() ?? new JwtSettings();
-        var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET") ?? jwtSettings.Secret;
+        // Configure JWT Authentication. Read through the same binder as IOptions<JwtSettings> (which AuthService signs
+        // tokens with), so tokens are validated with the secret they were signed with.
+        var jwtSettings = JwtSettingsBinder.Load(configuration);
+        var jwtSecret = jwtSettings.Secret;
 
-        if (string.IsNullOrEmpty(jwtSecret))
+        if (string.IsNullOrWhiteSpace(jwtSecret))
         {
-            throw new InvalidOperationException("JWT_SECRET must be configured in appsettings.json or environment variable");
+            throw new InvalidOperationException(JwtSettingsBinder.IsSecretVariableBlank()
+                ? "JWT_SECRET is set but blank, and JwtSettings:Secret is not configured either. Set JWT_SECRET to a " +
+                  "random secret of at least 32 characters, e.g. the output of `openssl rand -base64 48`."
+                : "JWT_SECRET must be configured in appsettings.json or environment variable");
         }
 
         // Warn if using default JWT secret

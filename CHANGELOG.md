@@ -109,6 +109,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **A conversion error for an unreadable page says which page and comic failed.** A page stored
+  with an unsupported compression method, or whose data was corrupt, failed the email delivery
+  or condensed-book build with the archive reader's bare message, such as "Unsupported
+  compression method: 255", leaving no way to tell which file to fix, least of all in a book
+  condensed from many issues. The error now names both ("Page '002.jpg' in Batman 012.cbz
+  could not be read: Unsupported compression method: 255"), and so does the error for a page
+  that cannot be decoded.
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
   check for administration read the Authelia settings without that variable, so when the admin
   groups were set only there (the documented way) every signed-in user who was not ReadOnly,

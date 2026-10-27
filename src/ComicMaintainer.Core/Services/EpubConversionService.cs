@@ -507,18 +507,29 @@ public class EpubConversionService : IEpubConversionService
 
                     var extension = NormalizeImageExtension(Path.GetExtension(pageKey) ?? ".jpg");
 
+                    // A corrupt entry, or one stored with a compression method the
+                    // archive reader does not support, fails with a bare message
+                    // such as "Unsupported compression method: 255" that names
+                    // neither the page nor the comic to fix.
                     byte[] imageBytes;
-                    using (var entryStream = page.OpenEntryStream())
-                    using (var buffer = new MemoryStream())
+                    try
                     {
+                        using var entryStream = page.OpenEntryStream();
+                        using var buffer = new MemoryStream();
                         entryStream.CopyTo(buffer);
                         imageBytes = buffer.ToArray();
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        throw new InvalidOperationException(
+                            $"Page '{pageKey}' in {Path.GetFileName(issue.FilePath)} could not be read: {ex.Message}",
+                            ex);
                     }
 
                     // A page that cannot be decoded (empty, truncated, or not an
                     // image at all) would silently render as a blank page on the
                     // device, so the whole conversion fails instead.
-                    var prepared = PrepareImage(imageBytes, extension, pageKey, tier);
+                    var prepared = PrepareImage(imageBytes, extension, pageKey, Path.GetFileName(issue.FilePath), tier);
                     var imageName = $"images/page{index:D4}{prepared.Extension}";
 
                     var imageEntry = epub.CreateEntry("OEBPS/" + imageName, CompressionLevel.NoCompression);
@@ -863,18 +874,20 @@ public class EpubConversionService : IEpubConversionService
     /// conversion instead of shipping a blank page, determines the real format
     /// from the bytes (archive file names routinely lie about it, and a wrong
     /// media type also renders blank) and re-encodes formats that ereaders do
-    /// not support as JPEG.
+    /// not support as JPEG. Failures name the comic as well as the page, since
+    /// every issue of a condensed book typically has its own '001.jpg'.
     /// </summary>
     private static PreparedImage PrepareImage(
         byte[] imageBytes,
         string fallbackExtension,
         string? entryKey,
+        string comicName,
         CompressionTier tier)
     {
         if (imageBytes.Length == 0)
         {
             throw new InvalidOperationException(
-                $"Page image '{entryKey}' is empty and would render as a blank page.");
+                $"Page image '{entryKey}' in {comicName} is empty and would render as a blank page.");
         }
 
         try
@@ -887,14 +900,14 @@ public class EpubConversionService : IEpubConversionService
             if (info.Height > 0 && info.Width > MaxDecodedPixels / info.Height)
             {
                 throw new InvalidOperationException(
-                    $"Page image '{entryKey}' dimensions ({info.Width}x{info.Height}) exceed the decode limit.");
+                    $"Page image '{entryKey}' in {comicName} has dimensions ({info.Width}x{info.Height}) that exceed the decode limit.");
             }
 
             using var image = new MagickImage(imageBytes);
             if (image.Width <= 0 || image.Height <= 0)
             {
                 throw new InvalidOperationException(
-                    $"Page image '{entryKey}' has no usable dimensions.");
+                    $"Page image '{entryKey}' in {comicName} has no usable dimensions.");
             }
 
             var extension = GetImageExtension(image.Format, fallbackExtension);
@@ -918,7 +931,7 @@ public class EpubConversionService : IEpubConversionService
         catch (Exception ex) when (ex is MagickException or NotSupportedException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"Page image '{entryKey}' could not be decoded and would render as a blank page.",
+                $"Page image '{entryKey}' in {comicName} could not be decoded and would render as a blank page.",
                 ex);
         }
     }

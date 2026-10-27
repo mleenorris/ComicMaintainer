@@ -80,13 +80,14 @@ public class EpubConversionServiceCoverageTests : IDisposable
         SetCompressionMethod(cbz, "cover.jpg", method: 0x00FF);
         var outputDir = Path.Combine(_workDir, "unreadable-cover");
 
-        await Assert.ThrowsAnyAsync<Exception>(() => _service.ConvertToEpubAsync(
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _service.ConvertToEpubAsync(
             new[] { cbz },
             outputDir,
             new EpubConversionOptions(SeriesImagePath: seriesImage)));
 
         // The unreadable entry is not mistaken for the series cover and dropped:
-        // it stays a page, and reading it fails the conversion.
+        // it stays a page, and reading it fails the conversion naming it.
+        Assert.StartsWith("Page 'cover.jpg' in Unreadable Cover.cbz could not be read: ", ex.Message);
         Assert.Contains(_logger.Entries, e =>
             e.Level == LogLevel.Debug &&
             e.Exception is not null &&
@@ -148,6 +149,45 @@ public class EpubConversionServiceCoverageTests : IDisposable
 
         Assert.True(rewritten);
         Assert.Equal("Page '001.jpg' is no longer present in Vanishing 1.cbz.", ex.Message);
+        Assert.Empty(Directory.GetFiles(outputDir));
+    }
+
+    [Theory]
+    [InlineData(0x00FF)] // A compression method the archive reader does not implement.
+    [InlineData(0x0008)] // Stored bytes that are not a valid deflate stream.
+    public async Task ConvertToEpubAsync_WhenAPageCannotBeRead_FailsNamingThePageAndTheComic(int method)
+    {
+        var cbz = CreateCbz("Unreadable Page.cbz", Page("001.jpg"), Page("002.jpg"));
+        SetCompressionMethod(cbz, "002.jpg", (ushort)method);
+        var outputDir = Path.Combine(_workDir, $"unreadable-page-{method}");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.ConvertToEpubAsync(new[] { cbz }, outputDir));
+
+        // The archive reader's own explanation is kept, after the page and comic it is about.
+        Assert.NotNull(ex.InnerException);
+        Assert.Equal(
+            $"Page '002.jpg' in Unreadable Page.cbz could not be read: {ex.InnerException.Message}",
+            ex.Message);
+        Assert.Empty(Directory.GetFiles(outputDir));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_CondensedBook_WhenAPageCannotBeDecoded_NamesItsIssue()
+    {
+        var first = CreateCbz("Condensed 1.cbz", Page("001.jpg"), Page("002.jpg"));
+        var second = CreateCbz("Condensed 2.cbz", Page("001.jpg"), ("002.jpg", Encoding.ASCII.GetBytes("not an image")));
+        var outputDir = Path.Combine(_workDir, "condensed-undecodable");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _service.ConvertToEpubAsync(
+            new[] { first, second },
+            outputDir,
+            new EpubConversionOptions(OutputFileName: "Condensed 1-2")));
+
+        // Every issue has a '002.jpg': only the comic name says which one to fix.
+        Assert.Equal(
+            "Page image '002.jpg' in Condensed 2.cbz could not be decoded and would render as a blank page.",
+            ex.Message);
         Assert.Empty(Directory.GetFiles(outputDir));
     }
 
@@ -302,7 +342,7 @@ public class EpubConversionServiceCoverageTests : IDisposable
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => _service.ConvertToEpubAsync(new[] { cbz }, outputDir));
 
-        Assert.Equal("Page image '001.png' dimensions (12000x12000) exceed the decode limit.", ex.Message);
+        Assert.Equal("Page image '001.png' in Bomb Page.cbz has dimensions (12000x12000) that exceed the decode limit.", ex.Message);
         Assert.Empty(Directory.GetFiles(outputDir));
     }
 

@@ -23,8 +23,10 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    const error = await response.text();
-                    showMessage('Failed to queue metadata refresh: ' + error, 'error');
+                    const errorData = await response.json().catch(() => null);
+                    showMessage(errorData && errorData.error
+                        ? 'Failed to queue metadata refresh: ' + errorData.error
+                        : 'Failed to queue metadata refresh', 'error');
                     return;
                 }
                 const data = await response.json();
@@ -51,8 +53,10 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    const error = await response.text();
-                    showMessage('Failed to queue match-unmatched: ' + error, 'error');
+                    const errorData = await response.json().catch(() => null);
+                    showMessage(errorData && errorData.error
+                        ? 'Failed to queue match-unmatched: ' + errorData.error
+                        : 'Failed to queue match-unmatched', 'error');
                     return;
                 }
                 const data = await response.json();

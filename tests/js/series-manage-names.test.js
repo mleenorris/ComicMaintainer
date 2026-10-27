@@ -334,6 +334,7 @@ test('a rejected series name is reported and the previous choice is restored', a
 
     const failures = [
         [respond(409, '"Name already in use"', { 'Content-Type': 'application/json' }), 'Name already in use'],
+        [respond(500, { error: 'Error setting series name' }), 'Error setting series name'],
         [respond(400, 'Bad Request'), 'Failed to update series name'],
         [respond(500), 'Failed to update series name']
     ];

@@ -74,9 +74,9 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
     [InlineData("missing-package", "The intermediate book is missing the entry 'OEBPS/content.opf' and cannot be converted to AZW3.")]
     [InlineData("missing-page", "The intermediate book is missing the entry 'OEBPS/text/page1.xhtml' and cannot be converted to AZW3.")]
     [InlineData("missing-image", "The intermediate book is missing the entry 'OEBPS/images/page1.jpg' and cannot be converted to AZW3.")]
-    [InlineData("no-manifest", "No pages could be read back from the intermediate book for Broken.azw3")]
-    [InlineData("no-spine", "No pages could be read back from the intermediate book for Broken.azw3")]
-    [InlineData("no-images", "No pages could be read back from the intermediate book for Broken.azw3")]
+    [InlineData("no-manifest", "No pages could be read back from the intermediate book for Broken.azw3.")]
+    [InlineData("no-spine", "No pages could be read back from the intermediate book for Broken.azw3.")]
+    [InlineData("no-images", "No pages could be read back from the intermediate book for Broken.azw3.")]
     public async Task ConvertToAzw3Async_RejectsAnIntermediateBookThatCannotBeReadBack(string kind, string expectedMessage)
     {
         var book = SimpleBook(Metadata(title: "Broken"));
@@ -109,7 +109,9 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => _service.ConvertToAzw3Async(new[] { "Broken.cbz" }, outputDir));
 
-        Assert.StartsWith(expectedMessage, ex.Message, StringComparison.Ordinal);
+        // The message names the requested book, not the temporary file it is
+        // written to.
+        Assert.Equal(expectedMessage, ex.Message);
 
         // Neither the intermediate book nor a partial AZW3 is left behind.
         Assert.Empty(Directory.GetFileSystemEntries(outputDir));
@@ -161,7 +163,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
         Assert.Equal(2, book.Resources.Count);
         Assert.Equal(png, book.Resources[0]);
         Assert.Equal(jpeg, book.Resources[1]);
-        Assert.StartsWith("Quirky", book.Title, StringComparison.Ordinal);
+        Assert.Equal("Quirky", book.Title);
         Assert.Equal(book.Title, book.Exth[503]);
         Assert.Equal("en", book.Exth[524]);
         Assert.Equal(9u, ReadLanguageCode(path));
@@ -188,7 +190,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
         var path = await _service.ConvertToAzw3Async(new[] { "Bare.cbz" }, outputDir);
 
         var book = Azw3Reader.Read(path);
-        Assert.StartsWith("Bare", book.Title, StringComparison.Ordinal);
+        Assert.Equal("Bare", book.Title);
         Assert.Equal("en", book.Exth[524]);
         Assert.Equal(9u, ReadLanguageCode(path));
         Assert.False(book.Exth.ContainsKey(100));

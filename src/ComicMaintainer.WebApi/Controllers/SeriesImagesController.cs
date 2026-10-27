@@ -72,9 +72,10 @@ public class SeriesImagesController : ControllerBase
             return NotFound();
         }
 
-        // Use the file's last-write time as a weak ETag so browsers can avoid
-        // re-downloading unchanged images. Image filenames already include a
-        // content hash, so the file mtime is a stable revalidation token.
+        // Use the file's last-write time and length as a strong ETag (no W/
+        // prefix) so browsers can avoid re-downloading unchanged images. Image
+        // filenames already include a content hash, so the file mtime is a
+        // stable revalidation token.
         var fileInfo = new FileInfo(path);
         var lastWriteUtc = fileInfo.LastWriteTimeUtc;
         var etag = $"\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}\"";

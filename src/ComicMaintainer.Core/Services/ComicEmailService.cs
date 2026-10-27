@@ -795,9 +795,7 @@ public class ComicEmailService : IComicEmailService
         var whole = separator < 0 ? raw : raw[..separator];
         var fraction = separator < 0 ? string.Empty : raw[separator..];
 
-        return whole.TrimStart('0').PadLeft(3, '0') is { Length: > 0 } padded
-            ? padded + fraction
-            : "000" + fraction;
+        return whole.TrimStart('0').PadLeft(3, '0') + fraction;
     }
 
     private async Task<string?> ResolveSeriesTitleAsync(string filePath, CancellationToken cancellationToken)

@@ -112,9 +112,6 @@ public partial class SeriesLibraryService
         return false;
     }
 
-    /// <summary>Drops every cached library snapshot (used by tests and diagnostics).</summary>
-    internal void InvalidateSnapshots() => _snapshotCache.Clear();
-
     private async Task<GroupsSnapshot> BuildGroupsSnapshotAsync(
         string? filter,
         bool allowDiskRead,

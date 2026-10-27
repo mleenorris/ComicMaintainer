@@ -49,6 +49,17 @@ public class ScheduledJobService : IScheduledJobService
     public IScheduledJobHandler? GetHandler(string jobKey) =>
         _handlers.TryGetValue(jobKey, out var h) ? h : null;
 
+    /// <summary>
+    /// Maps <paramref name="jobKey"/> to the registered handler's own
+    /// <see cref="IScheduledJobHandler.JobKey"/>. Handlers are found
+    /// case-insensitively, but rows are seeded under the handler's exact key and
+    /// the database compares keys case-sensitively, so every row lookup goes
+    /// through the canonical key to agree with <see cref="GetHandler"/>. A key
+    /// with no registered handler is returned unchanged.
+    /// </summary>
+    private string CanonicalKey(string jobKey) =>
+        _handlers.TryGetValue(jobKey, out var h) ? h.JobKey : jobKey;
+
     public event EventHandler<ScheduledJobChangedEventArgs>? JobChanged;
 
     public async Task SeedDefaultsAsync(CancellationToken cancellationToken = default)
@@ -131,8 +142,9 @@ public class ScheduledJobService : IScheduledJobService
         {
             return null;
         }
+        var canonicalKey = handler.JobKey;
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var row = await db.ScheduledJobs.AsNoTracking().FirstOrDefaultAsync(j => j.JobKey == jobKey, cancellationToken);
+        var row = await db.ScheduledJobs.AsNoTracking().FirstOrDefaultAsync(j => j.JobKey == canonicalKey, cancellationToken);
         if (row is null)
         {
             return null;
@@ -156,8 +168,9 @@ public class ScheduledJobService : IScheduledJobService
             throw new ArgumentOutOfRangeException(nameof(intervalMinutes), "Interval must be positive.");
         }
 
+        var canonicalKey = handler.JobKey;
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var row = await db.ScheduledJobs.FirstOrDefaultAsync(j => j.JobKey == jobKey, cancellationToken);
+        var row = await db.ScheduledJobs.FirstOrDefaultAsync(j => j.JobKey == canonicalKey, cancellationToken);
         if (row is null)
         {
             return null;
@@ -172,14 +185,15 @@ public class ScheduledJobService : IScheduledJobService
 
         await db.SaveChangesAsync(cancellationToken);
 
-        JobChanged?.Invoke(this, new ScheduledJobChangedEventArgs(jobKey));
+        JobChanged?.Invoke(this, new ScheduledJobChangedEventArgs(canonicalKey));
         return MapToView(row, handler.DisplayName, handler.Description);
     }
 
     public async Task MarkRunningAsync(string jobKey, CancellationToken cancellationToken = default)
     {
+        var canonicalKey = CanonicalKey(jobKey);
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var row = await db.ScheduledJobs.FirstOrDefaultAsync(j => j.JobKey == jobKey, cancellationToken);
+        var row = await db.ScheduledJobs.FirstOrDefaultAsync(j => j.JobKey == canonicalKey, cancellationToken);
         if (row is null)
         {
             return;
@@ -197,8 +211,9 @@ public class ScheduledJobService : IScheduledJobService
         long durationMs,
         CancellationToken cancellationToken = default)
     {
+        var canonicalKey = CanonicalKey(jobKey);
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var row = await db.ScheduledJobs.FirstOrDefaultAsync(j => j.JobKey == jobKey, cancellationToken);
+        var row = await db.ScheduledJobs.FirstOrDefaultAsync(j => j.JobKey == canonicalKey, cancellationToken);
         if (row is null)
         {
             return;

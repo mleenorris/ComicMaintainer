@@ -56,6 +56,8 @@ public class GitHubNameValidatorTests
     [InlineData("  ")]
     [InlineData(".")]
     [InlineData("..")]
+    [InlineData("...")]
+    [InlineData(".....")]
     [InlineData("owner/repo")]
     [InlineData("../user/repos")]
     [InlineData("repo name")]

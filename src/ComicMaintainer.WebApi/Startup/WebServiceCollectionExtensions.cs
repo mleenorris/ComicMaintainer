@@ -4,6 +4,7 @@ using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.HealthChecks;
 using ComicMaintainer.WebApi.Infrastructure;
 using ComicMaintainer.WebApi.Middleware;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.ResponseCompression;
 using Serilog;
 
@@ -12,7 +13,7 @@ namespace ComicMaintainer.WebApi.Startup;
 /// <summary>
 /// Registers MVC, Swagger, compression, request timeouts, rate limiting, output caching, SignalR, health checks, problem details and CORS.
 /// </summary>
-internal static class WebServiceCollectionExtensions
+public static class WebServiceCollectionExtensions
 {
     public static IServiceCollection AddComicMaintainerWeb(this IServiceCollection services, IConfiguration configuration)
     {
@@ -81,16 +82,16 @@ internal static class WebServiceCollectionExtensions
         // address that a trusted proxy forwards in X-Forwarded-For, not per connection: otherwise one client could
         // exhaust the anonymous limit for every visitor, and lock them all out of signing in.
         var trustedProxies = LoadRateLimiterTrustedProxies(configuration);
+        if (trustedProxies.Networks.Count > 0)
+        {
+            services.AddSingleton<IStartupFilter>(serviceProvider =>
+                new RateLimiterTrustedProxyLoggingStartupFilter(
+                    trustedProxies,
+                    serviceProvider.GetRequiredService<ILogger<RateLimiterTrustedProxyLoggingStartupFilter>>()));
+        }
+
         services.AddRateLimiter(options =>
         {
-            // Logged here, when the pipeline is built: Serilog is not configured yet while services are registered.
-            if (trustedProxies.Networks.Count > 0)
-            {
-                Log.Information(
-                    "Rate limiting counts anonymous requests from {TrustedProxies} per X-Forwarded-For client address",
-                    string.Join(", ", trustedProxies.Networks));
-            }
-
             options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
             {
                 // Allow generous per-minute limits for authenticated traffic to avoid
@@ -196,7 +197,7 @@ internal static class WebServiceCollectionExtensions
     {
         const string variable = "TRUSTED_PROXIES";
         var value = Environment.GetEnvironmentVariable(variable);
-        if (string.IsNullOrEmpty(value))
+        if (string.IsNullOrWhiteSpace(value))
         {
             value = configuration["ReverseProxySettings:TrustedProxies"];
         }
@@ -215,5 +216,18 @@ internal static class WebServiceCollectionExtensions
         }
 
         return trustedProxies;
+    }
+
+    private sealed class RateLimiterTrustedProxyLoggingStartupFilter(
+        TrustedProxyAllowlist trustedProxies,
+        ILogger<RateLimiterTrustedProxyLoggingStartupFilter> logger) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            logger.LogInformation(
+                "Rate limiting counts anonymous requests from {TrustedProxies} per X-Forwarded-For client address",
+                string.Join(", ", trustedProxies.Networks));
+            next(app);
+        };
     }
 }

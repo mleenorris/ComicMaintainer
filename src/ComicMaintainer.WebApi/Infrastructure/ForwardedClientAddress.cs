@@ -1,5 +1,6 @@
 using System.Net;
 using ComicMaintainer.WebApi.Authentication;
+using Microsoft.Extensions.Primitives;
 
 namespace ComicMaintainer.WebApi.Infrastructure;
 
@@ -45,8 +46,11 @@ public static class ForwardedClientAddress
             return address;
         }
 
-        var remaining = context.Request.Headers[ForwardedForHeader].ToString().AsSpan();
-        while (trustedProxies.Contains(address) && TryTakeLastEntry(ref remaining, out var entry))
+        var forwardedFor = context.Request.Headers[ForwardedForHeader];
+        var valueIndex = forwardedFor.Count - 1;
+        var end = -1;
+        while (trustedProxies.Contains(address)
+            && TryTakeLastEntry(forwardedFor, ref valueIndex, ref end, out var entry))
         {
             // A proxy that forwards "unknown" (or anything else that is not an address) is the furthest hop known.
             if (!IPEndPoint.TryParse(entry, out var endPoint))
@@ -60,14 +64,34 @@ public static class ForwardedClientAddress
         return address;
     }
 
-    /// <summary>Removes the right-most non-empty entry from the comma-separated <paramref name="remaining"/>.</summary>
-    private static bool TryTakeLastEntry(ref ReadOnlySpan<char> remaining, out ReadOnlySpan<char> entry)
+    /// <summary>Removes the right-most non-empty entry from the comma-separated <paramref name="values"/>.</summary>
+    private static bool TryTakeLastEntry(
+        StringValues values,
+        ref int valueIndex,
+        ref int end,
+        out ReadOnlySpan<char> entry)
     {
-        while (!remaining.IsEmpty)
+        while (valueIndex >= 0)
         {
-            var comma = remaining.LastIndexOf(',');
-            entry = remaining[(comma + 1)..].Trim();
-            remaining = comma < 0 ? ReadOnlySpan<char>.Empty : remaining[..comma];
+            var value = values[valueIndex].AsSpan();
+            var segmentEnd = end < 0 ? value.Length : end;
+            var segmentStart = segmentEnd;
+            while (segmentStart > 0 && value[segmentStart - 1] != ',')
+            {
+                segmentStart--;
+            }
+
+            entry = value[segmentStart..segmentEnd].Trim();
+            if (segmentStart == 0)
+            {
+                valueIndex--;
+                end = -1;
+            }
+            else
+            {
+                end = segmentStart - 1;
+            }
+
             if (!entry.IsEmpty)
             {
                 return true;

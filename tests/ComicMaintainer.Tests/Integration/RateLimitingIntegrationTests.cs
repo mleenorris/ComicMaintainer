@@ -29,7 +29,7 @@ public sealed class RateLimitingIntegrationTests : IAsyncLifetime
 
     private readonly string _root = Path.Join(Path.GetTempPath(), "ComicMaintainer.Tests", "RateLimiting-" + Guid.NewGuid().ToString("N"));
     private readonly WebApplicationFactory<Program> _baseFactory = new();
-    private WebApplicationFactory<Program> _factory = null!;
+    private WebApplicationFactory<Program>? _factory;
 
     public Task InitializeAsync()
     {
@@ -51,6 +51,10 @@ public sealed class RateLimitingIntegrationTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        if (_factory is not null)
+        {
+            await _factory.DisposeAsync();
+        }
         await _baseFactory.DisposeAsync();
         SqliteConnection.ClearAllPools();
         try
@@ -70,44 +74,61 @@ public sealed class RateLimitingIntegrationTests : IAsyncLifetime
     {
         const string clientA = "203.0.113.10";
         const string clientB = "198.51.100.20";
-        using var client = _factory.CreateClient();
+        using var client = _factory!.CreateClient();
 
         for (var i = 1; i <= AnonymousPermitLimit; i++)
         {
-            using var response = await client.SendAsync(AuthStatus(clientA));
+            using var request = AuthStatus(clientA);
+            using var response = await client.SendAsync(request);
             Assert.True(response.StatusCode == HttpStatusCode.OK, $"Request {i} of client A returned {response.StatusCode}.");
         }
 
         // The next ten requests of client A wait for the next window, and the one after them is rejected at once.
         using var cancellation = new CancellationTokenSource();
         var overLimit = Enumerable.Range(0, AnonymousQueueLimit + 1)
-            .Select(_ => client.SendAsync(AuthStatus(clientA), cancellation.Token))
+            .Select(_ => SendAndDisposeAsync(client, AuthStatus(clientA), cancellation.Token))
             .ToList();
         try
         {
             var rejected = await await Task.WhenAny(overLimit).WaitAsync(TimeSpan.FromSeconds(30));
-            Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+            Assert.Equal(HttpStatusCode.TooManyRequests, rejected);
 
             // Client B, behind the same proxy, still has its own limit: a wrong password, not 429.
-            using var login = await client.SendAsync(Login(clientB));
+            using var loginRequest = Login(clientB);
+            using var login = await client.SendAsync(loginRequest);
             Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
 
-            using var status = await client.SendAsync(AuthStatus(clientB));
+            using var statusRequest = AuthStatus(clientB);
+            using var status = await client.SendAsync(statusRequest);
             Assert.Equal(HttpStatusCode.OK, status.StatusCode);
         }
         finally
         {
             // Release the queued requests rather than leave them waiting for the window to reset.
             await cancellation.CancelAsync();
-            foreach (var request in overLimit)
+            await Task.WhenAll(overLimit);
+        }
+    }
+
+    private static async Task<HttpStatusCode?> SendAndDisposeAsync(
+        HttpClient client,
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        using (request)
+        {
+            try
             {
-                try
-                {
-                    (await request).Dispose();
-                }
-                catch (Exception exception) when (exception is OperationCanceledException or HttpRequestException)
-                {
-                }
+                using var response = await client.SendAsync(request, cancellationToken);
+                return response.StatusCode;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+            catch (HttpRequestException)
+            {
+                return null;
             }
         }
     }

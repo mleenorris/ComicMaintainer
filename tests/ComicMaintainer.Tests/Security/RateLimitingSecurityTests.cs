@@ -1,6 +1,6 @@
 using System.Net;
-using System.Reflection;
 using System.Threading.RateLimiting;
+using ComicMaintainer.WebApi.Startup;
 using ComicMaintainer.Tests.Startup;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
@@ -28,13 +28,6 @@ public sealed class RateLimitingSecurityTests : IDisposable
     private const string ClientB = "198.51.100.20";
 
     private static readonly IPAddress Proxy = IPAddress.Parse("172.18.0.2");
-
-    // The extension class is internal to the WebApi assembly (no InternalsVisibleTo).
-    private static readonly Func<IServiceCollection, IConfiguration, IServiceCollection> AddComicMaintainerWeb =
-        typeof(Program).Assembly
-            .GetType("ComicMaintainer.WebApi.Startup.WebServiceCollectionExtensions", throwOnError: true)!
-            .GetMethod("AddComicMaintainerWeb", BindingFlags.Static | BindingFlags.Public)!
-            .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
         new("TRUSTED_PROXIES", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES");
@@ -112,6 +105,8 @@ public sealed class RateLimitingSecurityTests : IDisposable
     [InlineData("172.18.0.0/16", "10.0.0.2", false)]     // the variable replaces the configured list
     [InlineData("", "10.0.0.2", true)]                    // an empty variable keeps the configured list
     [InlineData("", "172.18.0.2", false)]
+    [InlineData("   ", "10.0.0.2", true)]
+    [InlineData(" \t ", "172.18.0.2", false)]
     public void TrustedProxiesEnvironmentVariable_OverridesTheConfiguration(string environmentValue, string proxy, bool expected)
     {
         _environment.Set("TRUSTED_PROXIES", environmentValue);
@@ -189,7 +184,7 @@ public sealed class RateLimitingSecurityTests : IDisposable
             .AddInMemoryCollection(settings.Select(s => new KeyValuePair<string, string?>(s.Key, s.Value)))
             .Build();
         var services = new ServiceCollection();
-        AddComicMaintainerWeb(services, configuration);
+        services.AddComicMaintainerWeb(configuration);
         using var provider = services.BuildServiceProvider();
         return Assert.IsAssignableFrom<PartitionedRateLimiter<HttpContext>>(
             provider.GetRequiredService<IOptions<RateLimiterOptions>>().Value.GlobalLimiter);

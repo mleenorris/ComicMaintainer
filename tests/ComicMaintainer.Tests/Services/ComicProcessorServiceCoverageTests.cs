@@ -1086,6 +1086,53 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_Renameat2Unsupported_FallsBackToLinkAndUnlink()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service();
+
+        await service.ProcessFileAsync(path);
+
+        Assert.False(File.Exists(path));
+        Assert.True(File.Exists(renamed));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndTargetAppears_DoesNotOverwriteTarget()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service();
+        _logger.On("ProcessFileAsync: Rename path validated: {FilePath}", _ =>
+            File.WriteAllText(renamed, "pre-existing target"));
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(File.Exists(path));
+        Assert.Equal("pre-existing target", await File.ReadAllTextAsync(renamed));
+        _fileStore.Verify(f => f.MarkFileDuplicateAsync(path, true, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_FileStoreThrows_ReturnsFalseAndExcludesFromErrorReports()
     {
         _fileStore.Setup(f => f.IsFileProcessedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -1705,6 +1752,18 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         return service;
     }
 
+    private ComicProcessorService CreateUnsupportedRenameAt2Service()
+    {
+        var service = new UnsupportedRenameAt2ComicProcessorService(
+            _settings,
+            _logger,
+            _fileStore.Object,
+            _history.Object,
+            _broadcaster.Object);
+        _services.Add(service);
+        return service;
+    }
+
     private static Mock<ISeriesMetadataCacheService> CreateCache()
     {
         var cache = new Mock<ISeriesMetadataCacheService>();
@@ -1933,6 +1992,30 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     private sealed record EntrySnapshot(string Name, DateTime LastWriteTime, long Length, string Sha256);
 
     private sealed record LogEntry(LogLevel Level, string Template, IReadOnlyDictionary<string, object?> Properties, Exception? Exception);
+
+    private sealed class UnsupportedRenameAt2ComicProcessorService : ComicProcessorService
+    {
+        public UnsupportedRenameAt2ComicProcessorService(
+            AppSettings settings,
+            ILogger<ComicProcessorService> logger,
+            IFileStoreService fileStore,
+            IProcessingHistoryService history,
+            IEventBroadcaster eventBroadcaster)
+            : base(new TestOptionsMonitor<AppSettings>(settings), logger, fileStore, history, eventBroadcaster)
+        {
+        }
+
+        protected override int RenameLinuxNoReplace(
+            int sourceDirectory,
+            string sourceName,
+            int targetDirectory,
+            string targetName,
+            uint flags)
+        {
+            System.Runtime.InteropServices.Marshal.SetLastPInvokeError(38);
+            return -1;
+        }
+    }
 
     private sealed class HookLogger : ILogger<ComicProcessorService>
     {

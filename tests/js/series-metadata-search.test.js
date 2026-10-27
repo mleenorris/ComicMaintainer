@@ -333,6 +333,22 @@ test('Adopt as Canonical leaves the series name alone once Manage Names is close
     assert.equal(nameSelect(page).value, 'Saga');
 });
 
+test('Adopt as Canonical still pins the adopted title when the aliases are edited while they save', async () => {
+    const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'], series_name: 'My Saga' }));
+    const savingAliases = deferred();
+    page.route(`PUT ${ALIASES}`, () => savingAliases.promise);
+    page.route(`PUT ${NAME}`, metadataRecord({ series_name: 'Saga (Image Comics)' }));
+    await onResult(page, 0, 'Adopt as Canonical');
+
+    page.run('removeManageSeriesAlias(\'Saga Deluxe\')');
+    assert.equal(nameSelect(page).value, 'My Saga', 'removing an alias rebuilds the select');
+    savingAliases.resolve(metadataRecord());
+    await page.settle();
+
+    assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga (Image Comics)' }]);
+    assert.deepEqual(lastMessage(page), { text: 'Series name set to "Saga (Image Comics)"', type: 'success' });
+});
+
 test('candidates can still be adopted when the series record failed to load', async () => {
     const page = await searchedPage(respond(500));
 

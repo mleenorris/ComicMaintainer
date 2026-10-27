@@ -1144,23 +1144,27 @@
             if (mode === 'canonical' && result.canonical_title) {
                 const select = document.getElementById('manageSeriesName');
                 if (select) {
-                    if (![...select.options].some(o => o.value === result.canonical_title)) {
-                        const opt = document.createElement('option');
-                        opt.value = result.canonical_title;
-                        opt.textContent = result.canonical_title;
-                        select.appendChild(opt);
-                    }
-                    select.value = result.canonical_title;
-                    saveAdoptedSeriesNames();
+                    selectManageSeriesName(select, result.canonical_title);
+                    saveAdoptedSeriesNames(result.canonical_title);
                 }
             }
+        }
+
+        function selectManageSeriesName(select, name) {
+            if (![...select.options].some(o => o.value === name)) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                select.appendChild(opt);
+            }
+            select.value = name;
         }
 
         // Adopt as Canonical pins the series name, which saves straight away,
         // so the aliases it adopted are saved first instead of waiting for
         // Save. If they can't be saved the stored name is kept as well, and
         // the adopted aliases stay listed for Save.
-        async function saveAdoptedSeriesNames() {
+        async function saveAdoptedSeriesNames(name) {
             const state = manageSeriesState;
             const { seriesTitle, record } = state;
             if (!seriesTitle || !record) return;
@@ -1185,6 +1189,11 @@
                 if (select) select.value = (state.record && state.record.series_name) || '';
                 return;
             }
+            // Editing the aliases meanwhile rebuilds the select: pin the
+            // adopted name again so it is the one saved.
+            const select = document.getElementById('manageSeriesName');
+            if (!select) return;
+            selectManageSeriesName(select, name);
             await saveManageSeriesName();
         }
 

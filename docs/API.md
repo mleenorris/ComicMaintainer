@@ -182,27 +182,44 @@ Get metadata tags for a specific file.
 
 ### POST /api/files/tags
 
-Update metadata tags for a file.
+Write the same metadata tags to one or more files. Blank entries in `files` are ignored.
 
 **Request Body:**
 ```json
 {
-  "file": "/comics/Batman/Batman #001.cbz",
-  "tags": {
+  "files": [
+    "/comics/Batman/Batman #001.cbz",
+    "/comics/Batman/Batman #002.cbz"
+  ],
+  "metadata": {
     "series": "Batman",
-    "issue": "1",
-    "title": "The Dark Knight"
+    "publisher": "DC Comics",
+    "year": 2023
   }
 }
 ```
 
-**Response:**
+**Response (200 OK):** empty body; every file was updated.
+
+**Response (207 Multi-Status):** some files could not be updated (missing, not a comic archive, or unreadable); the rest were.
 ```json
 {
-  "success": true,
-  "file": "/comics/Batman/Batman #001.cbz"
+  "failed": ["/comics/Batman/Batman #002.cbz"]
 }
 ```
+
+**Error Response (400 - Bad Request):** none of the files could be updated.
+```json
+{
+  "error": "Failed to update tags",
+  "failed": [
+    "/comics/Batman/Batman #001.cbz",
+    "/comics/Batman/Batman #002.cbz"
+  ]
+}
+```
+
+A request naming any file outside the library is rejected with `400` before any file is updated.
 
 ### POST /api/files/cleanup-stale
 

@@ -110,6 +110,11 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             return SuwayomiImportResult.Skipped(error);
         }
 
+        if (!Directory.Exists(watchedRoot))
+        {
+            return SuwayomiImportResult.Skipped("The watched directory does not exist.");
+        }
+
         if (!await _gate.WaitAsync(0, cancellationToken))
         {
             return SuwayomiImportResult.Skipped("Another Suwayomi download import is already running.");
@@ -132,7 +137,11 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             var run = new ImportRun(settings, downloadsRoot, importRoot, watchedRoot, _timeProvider.GetUtcNow().UtcDateTime);
             run.Result.ImageFolders = imageFolders;
 
-            RecoverPendingMoves(run);
+            if (!RecoverPendingMoves(run, out var recoveryError))
+            {
+                return SuwayomiImportResult.Skipped(recoveryError!);
+            }
+
             if (!run.Result.PermissionDenied)
             {
                 await ImportArchivesAsync(run, archives, cancellationToken);
@@ -666,12 +675,17 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     /// still in place is imported afresh instead, so its staged copy is
     /// dropped.
     /// </summary>
-    private void RecoverPendingMoves(ImportRun run)
+    private bool RecoverPendingMoves(ImportRun run, out string? error)
     {
-        run.PendingMoves.AddRange(LoadPendingMoves(run.PendingMovesPath));
+        if (!TryLoadPendingMoves(run.PendingMovesPath, out var pendingMoves, out error))
+        {
+            return false;
+        }
+
+        run.PendingMoves.AddRange(pendingMoves);
         if (run.PendingMoves.Count == 0)
         {
-            return;
+            return true;
         }
 
         foreach (var move in run.PendingMoves.ToList())
@@ -704,17 +718,32 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                     ? resolvedSource
                     : null;
 
-            if ((sourcePath is not null && File.Exists(sourcePath))
-                || ProbeArchive(stagingPath, Path.GetExtension(sourceName)) != ArchiveState.Complete)
+            if (sourcePath is not null && File.Exists(sourcePath))
             {
-                // Stopped mid-copy, or before the download was deleted: the
-                // download itself is imported below.
+                // The original is recoverable, so discard a partial or duplicate
+                // staged copy and let the normal scan import the source.
                 TryDeleteFile(stagingPath);
                 if (!File.Exists(stagingPath))
                 {
                     run.PendingMoves.Remove(move);
                 }
 
+                continue;
+            }
+
+            var archiveState = ProbeArchive(stagingPath, Path.GetExtension(sourceName));
+            if (archiveState == ArchiveState.PermissionDenied)
+            {
+                _logger.LogWarning("Permission denied reading staged Suwayomi chapter {File}", LoggingHelper.SanitizePathForLog(stagingPath));
+                run.Result.Failed++;
+                run.Result.PermissionDenied = true;
+                break;
+            }
+
+            if (archiveState != ArchiveState.Complete)
+            {
+                _logger.LogWarning("Could not verify staged Suwayomi chapter archive {File}; leaving it staged for recovery", LoggingHelper.SanitizePathForLog(stagingPath));
+                run.Result.Unreadable++;
                 continue;
             }
 
@@ -742,24 +771,35 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         }
 
         TrySavePendingMoves(run, out _);
+        error = null;
+        return true;
     }
 
-    private List<PendingMove> LoadPendingMoves(string path)
+    private bool TryLoadPendingMoves(string path, out List<PendingMove> pendingMoves, out string? error)
     {
+        pendingMoves = [];
+        error = null;
         try
         {
-            if (!File.Exists(path))
-            {
-                return [];
-            }
-
             using var stream = File.OpenRead(path);
-            return JsonSerializer.Deserialize<List<PendingMove>>(stream)?.Where(move => move is not null).ToList() ?? [];
+            pendingMoves = JsonSerializer.Deserialize<List<PendingMove>>(stream)
+                ?? throw new JsonException("The pending Suwayomi import journal is empty.");
+            pendingMoves = pendingMoves.Where(move => move is not null).ToList();
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            return true;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             _logger.LogWarning(ex, "Could not read the pending Suwayomi imports from {File}", LoggingHelper.SanitizeForLog(path));
-            return [];
+            error = $"The pending Suwayomi import journal could not be read: {ex.Message}";
+            return false;
         }
     }
 

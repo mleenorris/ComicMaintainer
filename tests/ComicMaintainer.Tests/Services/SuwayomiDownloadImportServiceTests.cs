@@ -103,8 +103,8 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         return reader.ReadToEnd();
     }
 
-    private string Download(string source, string series, string chapter)
-        => WriteCbz(Path.Combine(_downloads, source, series, chapter));
+    private string Download(string source, string series, string chapter, string page = "page")
+        => WriteCbz(Path.Combine(_downloads, source, series, chapter), page);
 
     [Fact]
     public async Task ImportAsync_MovesAFinishedChapterIntoASeriesFolderAndRemovesTheEmptiedFolders()
@@ -448,6 +448,79 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportAsync_LeavesAnUnreadableStagedChapterAndItsJournalForRecovery()
+    {
+        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var staging = Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import");
+        Directory.CreateDirectory(Path.GetDirectoryName(staging)!);
+        File.WriteAllBytes(staging, [1, 2, 3]);
+        WritePendingMove(staging, source);
+
+        var result = await CreateService().ImportAsync();
+
+        Assert.Empty(result.Imported);
+        Assert.Equal(1, result.Unreadable);
+        Assert.False(result.PermissionDenied);
+        Assert.True(File.Exists(staging));
+        Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+    }
+
+    [Fact]
+    public async Task ImportAsync_StopsWithAPermissionErrorWhenAStagedChapterCannotBeRead()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return; // File modes are not enforced there.
+        }
+
+        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var staging = WriteCbz(Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"));
+        WritePendingMove(staging, source);
+        File.SetUnixFileMode(staging, UnixFileMode.None);
+        try
+        {
+            var result = await CreateService().ImportAsync();
+
+            Assert.True(result.PermissionDenied);
+            Assert.Equal(1, result.Failed);
+            Assert.Equal(0, result.Unreadable);
+            Assert.True(File.Exists(staging));
+            Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        }
+        finally
+        {
+            File.SetUnixFileMode(staging, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
+    public async Task ImportAsync_RestoresTheSourceWhenAllDestinationNamesAreOccupied()
+    {
+        var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "original chapter");
+        var destinationFolder = Directory.CreateDirectory(Path.Combine(_library, "Solo Leveling")).FullName;
+        foreach (var attempt in Enumerable.Range(1, 1000))
+        {
+            var name = attempt == 1 ? "Chapter 1.cbz" : $"Chapter 1 ({attempt}).cbz";
+            File.WriteAllText(Path.Combine(destinationFolder, name), $"existing file {attempt}");
+        }
+
+        var result = await CreateService().ImportAsync();
+
+        Assert.Equal(1, result.Failed);
+        Assert.False(result.PermissionDenied);
+        Assert.True(File.Exists(source));
+        Assert.Equal("original chapter", ReadPage(source));
+        Assert.Equal(1000, Directory.GetFiles(destinationFolder).Length);
+        Assert.Empty(Directory.GetFiles(destinationFolder, ".tmp_*"));
+        Assert.False(File.Exists(PendingMovesPath));
+        foreach (var attempt in Enumerable.Range(1, 1000))
+        {
+            var name = attempt == 1 ? "Chapter 1.cbz" : $"Chapter 1 ({attempt}).cbz";
+            Assert.Equal($"existing file {attempt}", File.ReadAllText(Path.Combine(destinationFolder, name)));
+        }
+    }
+
+    [Fact]
     public async Task ImportAsync_IgnoresPendingMovesOutsideTheLibrary()
     {
         var outside = WriteCbz(Path.Combine(_root, "elsewhere", ".tmp_0123456789abcdef.suwayomi-import"));
@@ -458,6 +531,22 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Empty(result.Imported);
         Assert.True(File.Exists(outside));
         Assert.False(File.Exists(PendingMovesPath));
+    }
+
+    [Fact]
+    public async Task ImportAsync_AbortsWithoutChangingDownloadsWhenThePendingJournalIsInvalid()
+    {
+        var source = Download("Source", "Solo Leveling", "Chapter 1.cbz");
+        Directory.CreateDirectory(_settings.ConfigDirectory);
+        const string invalidJournal = "{not valid json";
+        File.WriteAllText(PendingMovesPath, invalidJournal);
+
+        var result = await CreateService().ImportAsync();
+
+        Assert.Contains("pending Suwayomi import journal could not be read", result.SkippedReason);
+        Assert.Empty(result.Imported);
+        Assert.True(File.Exists(source));
+        Assert.Equal(invalidJournal, File.ReadAllText(PendingMovesPath));
     }
 
     [Fact]
@@ -503,6 +592,19 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
 
         Assert.False(result.NotConfigured);
         Assert.Contains("does not exist", result.SkippedReason);
+    }
+
+    [Fact]
+    public async Task ImportAsync_RefusesToImportWhenTheWatchedRootDoesNotExist()
+    {
+        var source = Download("Source", "Solo Leveling", "Chapter 1.cbz");
+        Directory.Delete(_library, recursive: true);
+
+        var result = await CreateService().ImportAsync();
+
+        Assert.Contains("watched directory does not exist", result.SkippedReason);
+        Assert.True(File.Exists(source));
+        Assert.False(Directory.Exists(_library));
     }
 
     [Fact]

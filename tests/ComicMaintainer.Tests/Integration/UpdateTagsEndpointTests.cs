@@ -32,11 +32,13 @@ public sealed class UpdateTagsEndpointTests : IDisposable
         {
             Directory.Delete(_root, recursive: true);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            Console.Error.WriteLine($"Failed to delete test directory '{_root}' due to IO error: {ex.Message}");
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
+            Console.Error.WriteLine($"Failed to delete test directory '{_root}' due to access error: {ex.Message}");
         }
     }
 

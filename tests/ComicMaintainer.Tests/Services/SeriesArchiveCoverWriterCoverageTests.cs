@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
@@ -17,8 +19,10 @@ namespace ComicMaintainer.Tests.Services;
 public class SeriesArchiveCoverWriterCoverageTests : IDisposable
 {
     private const string Key = "series-a";
+    private const int LargeEntrySize = 32 * 1024 * 1024;
     private static readonly byte[] PageBytes = [1, 2, 3, 4];
     private static readonly byte[] NewCover = [9, 8, 7, 6, 5];
+    private static readonly DateTimeOffset FixtureTimestamp = new(2021, 3, 4, 5, 6, 8, TimeSpan.Zero);
 
     private readonly string _root;
     private readonly string _source;
@@ -249,6 +253,78 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         Assert.Equal(["", "01.jpg", "cover.png"], result.Entries.Select(e => e.Key ?? "<null>").Order());
     }
 
+    // ---- streaming rewrite -------------------------------------------------------------
+
+    // Regression for #867: every entry used to be buffered in a MemoryStream before the new
+    // archive was written, so a rewrite allocated more than the archive's uncompressed size.
+    [Fact]
+    public void RewriteArchive_LargeEntry_AllocatesFarLessThanTheEntrySize()
+    {
+        var cbz = Path.Combine(_root, "issue1.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            // Zeros, so the archive itself stays tiny.
+            AddEntry(zip, "big.bin", new byte[LargeEntrySize], FixtureTimestamp);
+        }
+        // RewriteArchive is private (no InternalsVisibleTo). Calling it directly keeps the whole
+        // rewrite on this thread, so GC.GetAllocatedBytesForCurrentThread sees all of it;
+        // WriteAsync can resume on a pool thread after reading the source cover.
+        var rewrite = typeof(SeriesArchiveCoverWriter)
+            .GetMethod("RewriteArchive", BindingFlags.Static | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<string, string?, byte[]?, Action?, Action?>>();
+
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        rewrite(cbz, "cover.jpg", NewCover, null, null);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        Assert.True(
+            allocated < LargeEntrySize / 4,
+            $"Rewriting an archive with a {LargeEntrySize:N0} byte entry allocated {allocated:N0} bytes.");
+        Assert.Equal(["big.bin", "cover.jpg"], ListEntries(cbz));
+        Assert.Equal(NewCover, ReadEntry(cbz, "cover.jpg"));
+    }
+
+    [Fact]
+    public async Task WriteAsync_ArchiveWithLargeEntry_KeepsEveryOtherEntryByteForByte()
+    {
+        var cbz = Path.Combine(_root, "issue1.cbz");
+        var big = new byte[3 * 1024 * 1024];
+        new Random(867).NextBytes(big);
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            AddEntry(zip, "01.jpg", PageBytes, FixtureTimestamp);
+            AddEntry(zip, "cover.png", [3, 3], FixtureTimestamp.AddDays(1));
+            AddEntry(zip, "02.jpg", big, FixtureTimestamp.AddDays(2));
+            AddEntry(zip, "ComicInfo.xml", Encoding.UTF8.GetBytes("<ComicInfo />"), FixtureTimestamp.AddDays(3));
+        }
+        var before = SnapshotEntries(cbz);
+        SetupFirstArchive(cbz);
+
+        await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
+
+        var after = SnapshotEntries(cbz);
+        Assert.Equal(before.Where(e => e.Name != "cover.png"), after.SkipLast(1));
+        Assert.Equal("cover.jpg", after[^1].Name);
+        Assert.Equal(NewCover, ReadEntry(cbz, "cover.jpg"));
+    }
+
+    [Fact]
+    public async Task WriteAsync_EntryFailsMidStream_LeavesArchiveUntouchedAndRemovesTempFile()
+    {
+        // Relabelled as deflate, the stored 02.jpg starts with 0xFF (a reserved block type), so
+        // it fails while being copied, after 01.jpg was already written to the temp file.
+        var cbz = CreateCbz("issue1.cbz", ("01.jpg", PageBytes), ("02.jpg", [0xFF, 0xD8, 0xFF, 0xE0]));
+        PatchCompressionMethod(cbz, "02.jpg", 8);
+        var before = File.ReadAllBytes(cbz);
+        SetupFirstArchive(cbz);
+
+        await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
+
+        Assert.Equal(before, File.ReadAllBytes(cbz));
+        Assert.False(File.Exists(cbz + ".cover.tmp"));
+        _watcher.Verify(w => w.SuppressProcessing(It.IsAny<string>()), Times.Never);
+    }
+
     // ---- RemoveAsync -----------------------------------------------------------------
 
     [Theory]
@@ -392,6 +468,26 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         return zip.Entries.Select(e => e.FullName).ToList();
     }
 
+    private static void AddEntry(ZipArchive zip, string name, byte[] content, DateTimeOffset lastWriteTime)
+    {
+        var entry = zip.CreateEntry(name, CompressionLevel.Fastest);
+        entry.LastWriteTime = lastWriteTime;
+        using var stream = entry.Open();
+        stream.Write(content);
+    }
+
+    private static List<EntrySnapshot> SnapshotEntries(string cbzPath)
+    {
+        using var zip = ZipFile.OpenRead(cbzPath);
+        return zip.Entries
+            .Select(e =>
+            {
+                using var stream = e.Open();
+                return new EntrySnapshot(e.FullName, e.LastWriteTime.DateTime, e.Length, Convert.ToHexString(SHA256.HashData(stream)));
+            })
+            .ToList();
+    }
+
     private static byte[] ReadEntry(string cbzPath, string entryName)
     {
         using var zip = ZipFile.OpenRead(cbzPath);
@@ -437,4 +533,6 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         Assert.Equal(2, patched);
         File.WriteAllBytes(zipPath, bytes);
     }
+
+    private sealed record EntrySnapshot(string Name, DateTime LastWriteTime, long Length, string Sha256);
 }

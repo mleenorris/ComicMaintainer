@@ -433,6 +433,22 @@ test('an alias typed after a failed load is listed as a selectable name', async 
     assert.deepEqual(optionTexts(nameSelect(page)), [AUTOMATIC, 'Saga Reborn (your alias)']);
 });
 
+test('aliases typed after a failed load join the stored ones a later response brings', async () => {
+    const page = await bootSeries();
+    await openManageNames(page, respond(503));
+    page.route('POST /api/metadata/refresh/Saga', metadataRecord({ user_aliases: ['My Saga'], lookup_status: 'success' }));
+
+    addAlias(page, 'Saga Reborn');
+    await press(page, 'Refresh from Provider');
+
+    assert.deepEqual(userAliases(page), ['My Saga', 'Saga Reborn']);
+    page.click(removeButton(page, 'My Saga'));
+    page.route(`PUT ${RECORD}/aliases`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    await press(page, 'Save');
+    assert.deepEqual(callsTo(page, `${RECORD}/aliases`, 'PUT')[0].body, { aliases: ['Saga Reborn'] },
+        'once listed, a stored alias can be removed');
+});
+
 test('failing to save the aliases keeps the modal open', async () => {
     const page = await bootSeries();
     await openManageNames(page, metadataRecord({ user_aliases: ['My Saga'] }));

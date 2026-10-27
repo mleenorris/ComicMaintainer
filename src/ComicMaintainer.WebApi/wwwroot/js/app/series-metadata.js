@@ -10,18 +10,29 @@
         // External Series Metadata (manual refresh + alias management)
         // ====================================================================
 
-        let manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false };
+        let manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false };
 
         // Keep a record a Manage Names request sent back. The other controls
         // save straight away but alias edits wait for Save, so once the list
-        // has been edited it replaces the stored one in the record: Save then
-        // persists the list the modal shows.
+        // has been edited the edits replace the stored aliases in it, for Save
+        // to persist. Without a loaded record the stored aliases were never
+        // listed, so the aliases added meanwhile are merged into them instead.
         function setManageSeriesRecord(record) {
-            const current = manageSeriesState.record;
-            if (manageSeriesState.aliasesEdited && current && record) {
-                record.user_aliases = current.user_aliases || [];
+            const { record: current, aliasesEdited, recordLoaded } = manageSeriesState;
+            if (aliasesEdited && current && record) {
+                const edited = current.user_aliases || [];
+                if (recordLoaded) {
+                    record.user_aliases = edited;
+                } else {
+                    const merged = [...(record.user_aliases || [])];
+                    edited.forEach(alias => {
+                        if (!merged.some(a => a.toLowerCase() === alias.toLowerCase())) merged.push(alias);
+                    });
+                    record.user_aliases = merged;
+                }
             }
             manageSeriesState.record = record;
+            manageSeriesState.recordLoaded = Boolean(record);
         }
 
         async function refreshAllExternalMetadata() {
@@ -437,7 +448,7 @@
         }
 
         async function openManageSeriesNamesModal(seriesTitle) {
-            manageSeriesState = { seriesTitle, record: null, aliasesEdited: false };
+            manageSeriesState = { seriesTitle, record: null, aliasesEdited: false, recordLoaded: false };
             document.getElementById('manageSeriesTitle').textContent = seriesTitle;
             document.getElementById('manageSeriesProviderAliases').textContent = 'Loading...';
             document.getElementById('manageSeriesProviderSource').textContent = '';
@@ -457,7 +468,7 @@
 
         function closeManageSeriesNamesModal() {
             document.getElementById('manageSeriesNamesModal').classList.remove('active');
-            manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false };
+            manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false };
         }
 
         async function loadManageSeriesRecord() {
@@ -474,6 +485,7 @@
                 }
                 const record = await response.json();
                 manageSeriesState.record = record;
+                manageSeriesState.recordLoaded = true;
                 manageSeriesState.aliasesEdited = false;
                 const prefSelect = document.getElementById('manageSeriesPreferredLanguage');
                 if (prefSelect) {
@@ -1152,6 +1164,13 @@
             const state = manageSeriesState;
             const { seriesTitle, record } = state;
             if (!seriesTitle || !record) return;
+            // Without a loaded record the list lacks the stored aliases, which
+            // saving it would replace: pin the name alone (the server adds it
+            // to them) and leave the other adopted names for Save.
+            if (!state.recordLoaded) {
+                await saveManageSeriesName();
+                return;
+            }
             let saved = false;
             try {
                 saved = await putManageSeriesUserAliases(seriesTitle, record.user_aliases || []);

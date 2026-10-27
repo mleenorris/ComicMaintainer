@@ -1261,6 +1261,15 @@
             }
         }
 
+        // Server-side limits checked before Save Settings sends anything; the
+        // matching inputs' max attributes in index.html must agree.
+        const SETTINGS_SERVER_LIMITS = Object.freeze({
+            logMaxSizeMB: 2047,
+            emailMaxAttachmentMB: 200,
+            errorReportingMaxPerDay: 100,
+            errorReportingDedupeHours: 720
+        });
+
         async function saveFilenameFormat() {
             if (!settingsLoaded || !userCapabilities.canAdminister) return;
             const format = document.getElementById('filenameFormat').value.trim();
@@ -1292,7 +1301,9 @@
             const emailMaxAttachmentMb = emailMaxAttachmentValue ? parseFloat(emailMaxAttachmentValue) : null;
             // The error reporting section may be missing (its group is then skipped below).
             const errorReportingMaxPerDay = parseInt(document.getElementById('errorReportingMaxPerDay')?.value, 10) || 0;
-            const errorReportingDedupeHours = parseInt(document.getElementById('errorReportingDedupeHours')?.value, 10) || 24;
+            const errorReportingDedupeHoursValue = parseInt(document.getElementById('errorReportingDedupeHours')?.value, 10);
+            // Only an empty or missing field falls back to the default; 0 must reach validation.
+            const errorReportingDedupeHours = isNaN(errorReportingDedupeHoursValue) ? 24 : errorReportingDedupeHoursValue;
             
             // Check everything the server would reject before sending anything:
             // the groups are saved one by one, so a rejected group leaves the
@@ -1308,8 +1319,8 @@
             }
 
             // The server keeps the size in bytes as a 32-bit integer.
-            if (logMaxSize > 2047) {
-                showMessage('Log max size must be 2047 MB or less', 'error');
+            if (logMaxSize > SETTINGS_SERVER_LIMITS.logMaxSizeMB) {
+                showMessage(`Log max size must be ${SETTINGS_SERVER_LIMITS.logMaxSizeMB} MB or less`, 'error');
                 return;
             }
             
@@ -1353,18 +1364,18 @@
                 return;
             }
 
-            if (emailMaxAttachmentMb > 200) {
-                showMessage('Max email attachment size must be 200 MB or less', 'error');
+            if (emailMaxAttachmentMb > SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB) {
+                showMessage(`Max email attachment size must be ${SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB} MB or less`, 'error');
                 return;
             }
 
-            if (errorReportingMaxPerDay < 0 || errorReportingMaxPerDay > 100) {
-                showMessage('Maximum issues per day must be between 0 and 100', 'error');
+            if (errorReportingMaxPerDay < 0 || errorReportingMaxPerDay > SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay) {
+                showMessage(`Maximum issues per day must be between 0 and ${SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay}`, 'error');
                 return;
             }
 
-            if (errorReportingDedupeHours < 1 || errorReportingDedupeHours > 720) {
-                showMessage('Recurrence comment interval must be between 1 and 720 hours', 'error');
+            if (errorReportingDedupeHours < 1 || errorReportingDedupeHours > SETTINGS_SERVER_LIMITS.errorReportingDedupeHours) {
+                showMessage(`Recurrence comment interval must be between 1 and ${SETTINGS_SERVER_LIMITS.errorReportingDedupeHours} hours`, 'error');
                 return;
             }
 

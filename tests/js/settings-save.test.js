@@ -341,6 +341,7 @@ const INVALID_FORMS = [
     ['negative issues per day', { errorReportingMaxPerDay: '-1' }, 'Maximum issues per day must be between 0 and 100'],
     ['more than 100 issues per day', { errorReportingMaxPerDay: '101' }, 'Maximum issues per day must be between 0 and 100'],
     ['negative recurrence interval', { errorReportingDedupeHours: '-1' }, 'Recurrence comment interval must be between 1 and 720 hours'],
+    ['zero recurrence interval', { errorReportingDedupeHours: '0' }, 'Recurrence comment interval must be between 1 and 720 hours'],
     ['recurrence interval above 720 hours', { errorReportingDedupeHours: '721' },
         'Recurrence comment interval must be between 1 and 720 hours'],
     // One bad value among other edits: nothing is half-saved.

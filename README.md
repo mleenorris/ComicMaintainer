@@ -253,13 +253,13 @@ Settings are read from these sources; a later source overrides an earlier one:
 | ComicVineApiKey | COMICVINE_API_KEY | _(empty)_ | ComicVine API key used for external series alias enrichment |
 | ComicVineBaseUrl | COMICVINE_BASE_URL | https://comicvine.gamespot.com/api | Override the ComicVine API base URL if needed |
 
-### Settings Without an Environment Variable
+### Settings Without a Dedicated Environment Variable
 
 | Setting | Default | How to change it |
 |---------|---------|------------------|
 | FilenameFormat | `{series} - Chapter {issue}` | **Settings → Filename Format**, or `AppSettings__FilenameFormat` |
 | IssueNumberPadding | `4` | **Settings → Issue Number Padding**, or `AppSettings__IssueNumberPadding` |
-| WatcherEnableRename, WatcherEnableNormalize | `true` | **Settings → Watcher**, or `AppSettings__WatcherEnableRename` / `AppSettings__WatcherEnableNormalize`. New files are processed automatically while either is on; turn both off to stop automatic processing |
+| WatcherEnableRename, WatcherEnableNormalize | `true` | **Settings → Watcher**, or `AppSettings__WatcherEnableRename` / `AppSettings__WatcherEnableNormalize`. Each turns its step (rename, metadata normalize) on or off for all processing, manual included. New files are processed automatically while either is on; turn both off to stop automatic processing |
 | MaxWorkers | `4` | `AppSettings__MaxWorkers` (files processed in parallel). Read at startup, so restart after changing it |
 | Web server port | `5000` | Docker: publish a different host port, e.g. `-p 8080:5000`. Without Docker: `ASPNETCORE_URLS=http://+:8080` |
 

@@ -71,14 +71,16 @@ public class EpubConversionServiceCoverageTests : IDisposable
         Assert.False(Directory.Exists(outputDir));
     }
 
-    [Fact]
-    public async Task ConvertToEpubAsync_WhenAnEmbeddedCoverCannotBeRead_KeepsItAsAPageAndFails()
+    [Theory]
+    [InlineData(0x00FF)] // A compression method the archive reader does not implement.
+    [InlineData(0x0008)] // Stored bytes that are not a valid deflate stream.
+    public async Task ConvertToEpubAsync_WhenAnEmbeddedCoverCannotBeRead_KeepsItAsAPageAndFails(int method)
     {
         var seriesImage = Path.Combine(_workDir, "series.jpg");
         File.WriteAllBytes(seriesImage, CreateImage(MagickFormat.Jpeg, 12, 18));
         var cbz = CreateCbz("Unreadable Cover.cbz", Page("001.jpg"), Page("002.jpg"), Page("cover.jpg"));
-        SetCompressionMethod(cbz, "cover.jpg", method: 0x00FF);
-        var outputDir = Path.Combine(_workDir, "unreadable-cover");
+        SetCompressionMethod(cbz, "cover.jpg", (ushort)method);
+        var outputDir = Path.Combine(_workDir, $"unreadable-cover-{method}");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _service.ConvertToEpubAsync(
             new[] { cbz },

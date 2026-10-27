@@ -387,7 +387,7 @@ public class EpubConversionService : IEpubConversionService
             using var stream = entry.OpenEntryStream();
             return SHA256.HashData(stream).AsSpan().SequenceEqual(hash);
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogDebug(
                 ex,

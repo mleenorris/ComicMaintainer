@@ -862,6 +862,16 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
                     continue;
                 }
+
+                if (run.Now - new FileInfo(sourcePath!).LastWriteTimeUtc < run.SettleTime)
+                {
+                    // Suwayomi may be downloading the chapter again; replacing
+                    // the file now could discard what it is still writing.
+                    _logger.LogInformation(
+                        "Leaving staged Suwayomi chapter {File} for recovery while its download is still being written",
+                        LoggingHelper.SanitizePathForLog(stagingPath));
+                    continue;
+                }
             }
 
             var archiveState = ProbeArchive(stagingPath, Path.GetExtension(sourceName));

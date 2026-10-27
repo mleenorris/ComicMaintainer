@@ -543,6 +543,29 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportAsync_KeepsAStagedChapterWhileItsDownloadIsBeingWrittenAgain()
+    {
+        var source = Download("Source", "Solo Leveling", "Chapter 1.cbz");
+        var staging = WriteCbz(
+            Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"),
+            "complete staged archive");
+        WritePendingMove(staging, source);
+        byte[] partial = [0x50, 0x4b, 0x03, 0x04];
+        File.WriteAllBytes(source, partial);
+        _time = new FakeTimeProvider(File.GetLastWriteTimeUtc(source).AddSeconds(5));
+
+        var result = await CreateService().ImportAsync();
+
+        Assert.Empty(result.Imported);
+        Assert.Equal(0, result.Failed);
+        Assert.Equal(1, result.StillDownloading);
+        Assert.Equal(partial, File.ReadAllBytes(source));
+        Assert.Equal("complete staged archive", ReadPage(staging));
+        Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        Assert.False(File.Exists(Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz")));
+    }
+
+    [Fact]
     public async Task ImportAsync_RestoresTheSourceWhenAllDestinationNamesAreOccupied()
     {
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "original chapter");

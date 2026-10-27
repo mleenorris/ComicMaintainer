@@ -306,6 +306,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and every declared resource present and non-empty), and email delivery additionally rejects
   an empty attachment, so a bad conversion is recorded as a failed delivery rather than mailed
   to the device.
+- **Error messages no longer show another request's support reference.** The `(ref: …)` added
+  to an error was the correlation id of whichever API call had last failed with one in the
+  previous 15 seconds, so a request that never reached the server (offline, network error) or
+  a proxy error page without an id showed an earlier, unrelated request's reference and sent
+  support to the wrong log entries. An error now shows the id of its own request, or none.
 
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The

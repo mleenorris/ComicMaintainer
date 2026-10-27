@@ -197,34 +197,56 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
     }
 
-    [Fact]
-    public async Task Get_MatchingIfNoneMatch_Returns304WithEtag()
+    [Theory]
+    [InlineData("{etag}")]
+    [InlineData("W/{etag}")]
+    [InlineData("\"0-0\", {etag}")]
+    [InlineData("\"0-0\", W/{etag}")]
+    [InlineData("*")]
+    public async Task Get_MatchingIfNoneMatch_Returns304WithCacheHeaders(string ifNoneMatch)
     {
+        // Regression: If-None-Match was compared to the ETag as an exact string, so a weak tag,
+        // a list of tags or "*" downloaded the whole image again, and the 304 that an exact
+        // match did get lacked the Cache-Control of the 200 (RFC 9110 §13.1.2, §15.4.5).
         var path = WriteImage();
         var etag = ExpectedEtag(path);
         _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
-        var controller = CreateController(ifNoneMatch: etag);
+        var controller = CreateController(ifNoneMatch: ifNoneMatch.Replace("{etag}", etag, StringComparison.Ordinal));
 
         var result = await controller.Get("batman", CancellationToken.None);
 
         var status = Assert.IsType<StatusCodeResult>(result);
         Assert.Equal(StatusCodes.Status304NotModified, status.StatusCode);
         Assert.Equal(etag, controller.Response.Headers[HeaderNames.ETag].ToString());
+        Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
     }
 
-    [Fact]
-    public async Task Get_StaleIfNoneMatch_ReturnsFreshFile()
+    [Theory]
+    [InlineData("\"0-0\"")]
+    [InlineData("W/\"0-0\"")]
+    [InlineData("\"0-0\", W/\"1-1\"")]
+    public async Task Get_StaleIfNoneMatch_ReturnsFreshFile(string ifNoneMatch)
     {
         var path = WriteImage();
         _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
-        var controller = CreateController(ifNoneMatch: "\"0-0\"");
+        var controller = CreateController(ifNoneMatch: ifNoneMatch);
 
         var result = await controller.Get("batman", CancellationToken.None);
 
         Assert.IsType<PhysicalFileResult>(result);
         Assert.Equal(ExpectedEtag(path), controller.Response.Headers[HeaderNames.ETag].ToString());
+        Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
+    }
+
+    [Fact]
+    public async Task Get_IfNoneMatchStarWithoutImage_ReturnsNotFound()
+    {
+        // "*" matches only a current representation, and a series without an image has none.
+        var result = await CreateController(ifNoneMatch: "*").Get("batman", CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result);
     }
 
     // ---- Upload -------------------------------------------------------------------------

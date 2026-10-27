@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
@@ -79,16 +80,15 @@ public class SeriesImagesController : ControllerBase
         var lastWriteUtc = fileInfo.LastWriteTimeUtc;
         var etag = $"\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}\"";
 
-        var requestEtag = Request.Headers[HeaderNames.IfNoneMatch].ToString();
-        if (!string.IsNullOrEmpty(requestEtag)
-            && string.Equals(requestEtag, etag, StringComparison.Ordinal))
+        // A 304 must repeat the validator and caching directives the 200 would
+        // carry (RFC 9110 §15.4.5), so both responses share these headers.
+        Response.Headers[HeaderNames.ETag] = etag;
+        Response.Headers[HeaderNames.CacheControl] = "private, max-age=300";
+        if (ConditionalRequests.IfNoneMatchSatisfied(Request.Headers[HeaderNames.IfNoneMatch], etag))
         {
-            Response.Headers[HeaderNames.ETag] = etag;
             return StatusCode(StatusCodes.Status304NotModified);
         }
 
-        Response.Headers[HeaderNames.ETag] = etag;
-        Response.Headers[HeaderNames.CacheControl] = "private, max-age=300";
         return PhysicalFile(path, record.ImageContentType, enableRangeProcessing: false);
     }
 

@@ -158,6 +158,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed with 401 unless signed in through Authelia.
 - **Uploading a series image from the series page works**; the request was sent as JSON instead
   of a file upload and always rejected.
+- **Series images are revalidated like comic covers.** `GET /api/series-images/{key}` compared
+  `If-None-Match` with its ETag as an exact string, so a weakened tag (`W/"…"`, as some proxies
+  and CDNs send), a list of tags or `*` downloaded the whole image again instead of getting 304
+  Not Modified. Tags are now compared as RFC 9110 requires, by the check the cover endpoint
+  uses, and the 304 repeats the `Cache-Control: private, max-age=300` of the full response.
 - **Metadata refresh progress finishes.** The job status was sent as a number, so the progress
   toast showed a digit, kept polling forever and never ran the final library refresh. Finished
   refresh jobs are now forgotten after 30 minutes (or once 50 newer ones finished) instead of

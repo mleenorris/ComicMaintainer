@@ -622,6 +622,28 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_OldPathMissingFromDatabase_KeepsTheMovedFilesStateInMemory()
+    {
+        // The watcher can see a move as a delete plus a create and drop the old row before the
+        // move reaches the database, so the moved entry is re-added from the in-memory snapshot.
+        var oldPath = Path.Combine(_library, "Old.cbz");
+        await SeedAsync(Row(oldPath, renamed: true, normalized: true, configure: e => e.CreatedAt = Jan2020));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+        await DeleteRowAsync(oldPath);
+        var newPath = WriteComic(_library, "New.cbz");
+
+        await service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Regression: the re-add rebuilt it as unprocessed, with CreatedAt moved to now.
+        var file = Assert.Single(await service.GetAllFilesAsync());
+        Assert.Equal(newPath, file.FilePath);
+        Assert.True(file.IsProcessed);
+        Assert.Equal(Jan2020, file.CreatedAt);
+        Assert.Empty(await service.GetFilteredFilesAsync("unprocessed"));
+    }
+
+    [Fact]
     public async Task UpdateFilePathAsync_DatabaseUnavailable_MovesSnapshotAndStillBroadcasts()
     {
         var oldPath = Path.Combine(_library, "Old.cbz");

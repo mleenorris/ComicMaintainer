@@ -118,7 +118,7 @@ public class SeriesImagesController : ControllerBase
             // Replaced or cleared since it was resolved.
             Response.Headers.Remove(HeaderNames.ETag);
             Response.Headers.Remove(HeaderNames.LastModified);
-            Response.Headers.Remove(HeaderNames.CacheControl);
+            Response.Headers[HeaderNames.CacheControl] = "no-store, private";
             return NotFound();
         }
 

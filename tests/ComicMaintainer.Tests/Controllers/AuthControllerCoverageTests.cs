@@ -161,6 +161,13 @@ public class AuthControllerCoverageTests
 
     // ----- SetupAdmin -----------------------------------------------------
 
+    private void SetupRequired(bool required) =>
+        _authService.Setup(s => s.IsSetupRequiredAsync()).ReturnsAsync(required);
+
+    private void VerifyNoAdminCreated() =>
+        _authService.Verify(
+            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -168,13 +175,14 @@ public class AuthControllerCoverageTests
     [InlineData("ab")]
     public async Task SetupAdmin_WithInvalidUsername_ReturnsBadRequest(string? username)
     {
+        SetupRequired(true);
         var controller = CreateController(Anonymous());
 
         var result = await controller.SetupAdmin(new SetupRequest(username!, "LongEnough1", null));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Username must be at least 3 characters", Prop<string>(badRequest.Value, "error"));
-        _authService.VerifyNoOtherCalls();
+        VerifyNoAdminCreated();
     }
 
     [Theory]
@@ -184,18 +192,20 @@ public class AuthControllerCoverageTests
     [InlineData("1234567")]
     public async Task SetupAdmin_WithInvalidPassword_ReturnsBadRequest(string? password)
     {
+        SetupRequired(true);
         var controller = CreateController(Anonymous());
 
         var result = await controller.SetupAdmin(new SetupRequest("admin", password!, null));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Password must be at least 8 characters", Prop<string>(badRequest.Value, "error"));
-        _authService.VerifyNoOtherCalls();
+        VerifyNoAdminCreated();
     }
 
     [Fact]
     public async Task SetupAdmin_WithValidInput_CreatesFirstAdministrator()
     {
+        SetupRequired(true);
         _authService.Setup(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com")).ReturnsAsync((true, null));
         var controller = CreateController(Anonymous());
 
@@ -207,16 +217,46 @@ public class AuthControllerCoverageTests
     }
 
     [Fact]
-    public async Task SetupAdmin_WhenSetupAlreadyCompleted_ReturnsBadRequestWithServiceError()
+    public async Task SetupAdmin_WhenAConcurrentRequestCreatesTheAdminFirst_ReturnsBadRequestWithServiceError()
     {
+        // Setup was still required when checked; the service then finds an admin.
+        SetupRequired(true);
         _authService.Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
-            .ReturnsAsync((false, "Setup has already been completed"));
+            .ReturnsAsync((false, "Admin user already exists"));
         var controller = CreateController(Anonymous());
 
         var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal("Setup has already been completed", Prop<string>(badRequest.Value, "error"));
+        Assert.Equal("Admin user already exists", Prop<string>(badRequest.Value, "error"));
+    }
+
+    [Fact]
+    public async Task SetupAdmin_AfterSetup_LetsAnAdministratorThroughToTheService()
+    {
+        SetupRequired(false);
+        GrantPolicy(AuthorizationPolicies.CanAdminister);
+        _authService.Setup(s => s.SetupAdminAsync("admin2", "12345678", null))
+            .ReturnsAsync((false, "Admin user already exists"));
+        var controller = CreateController(SignedIn("admin-1", "admin"));
+
+        var result = await controller.SetupAdmin(new SetupRequest("admin2", "12345678", null));
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("Admin user already exists", Prop<string>(badRequest.Value, "error"));
+        _authService.Verify(s => s.SetupAdminAsync("admin2", "12345678", null), Times.Once);
+    }
+
+    [Fact]
+    public async Task SetupAdmin_AfterSetup_ChallengesAPrincipalWithoutAnIdentity()
+    {
+        SetupRequired(false);
+        var controller = CreateController(new ClaimsPrincipal());
+
+        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null));
+
+        Assert.IsType<ChallengeResult>(result);
+        VerifyNoAdminCreated();
     }
 
     // ----- GetAuthStatus --------------------------------------------------

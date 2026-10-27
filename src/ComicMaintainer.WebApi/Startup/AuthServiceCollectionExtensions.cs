@@ -46,7 +46,7 @@ internal static class AuthServiceCollectionExtensions
         if (JwtSettingsBinder.IsSecretVariableBlank() && (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret == defaultSecret))
         {
             throw new InvalidOperationException(
-                "JWT_SECRET is set but blank, and JwtSettings:Secret is not configured either (the placeholder shipped in " +
+                "JWT_SECRET is set but blank, and JwtSettings:Secret is missing or blank too (the placeholder shipped in " +
                 "appsettings.json does not count). Set JWT_SECRET to a random secret of at least 32 characters, e.g. the " +
                 "output of `openssl rand -base64 48`.");
         }

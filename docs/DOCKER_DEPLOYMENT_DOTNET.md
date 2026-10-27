@@ -77,7 +77,7 @@ docker run -d \
 | `PGID` | 100 | Group ID for file operations (dynamically created) |
 | `MAX_WORKERS` | 4 | Maximum concurrent workers |
 | `DB_CACHE_SIZE_MB` | 64 | Database cache size |
-| `JWT_SECRET` | *required* | JWT signing key (32+ chars). A blank value counts as unset |
+| `JWT_SECRET` | *required* | JWT signing key (32+ chars). A blank value counts as unset, and the app then refuses to start unless `JwtSettings__Secret` holds your own secret |
 | `ADMIN_USERNAME` | admin | Default admin username |
 | `ADMIN_EMAIL` | admin@local | Default admin email |
 | `ADMIN_PASSWORD` | *required* | Default admin password |

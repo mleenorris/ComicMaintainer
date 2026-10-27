@@ -39,17 +39,24 @@ internal static class AuthServiceCollectionExtensions
         // tokens with), so tokens are validated with the secret they were signed with.
         var jwtSettings = JwtSettingsBinder.Load(configuration);
         var jwtSecret = jwtSettings.Secret;
+        var defaultSecret = "YourSecretKeyHere-ChangeInProduction-MustBeAtLeast32CharactersLong!";
+
+        // A blank JWT_SECRET counts as unset, but it was meant to hold the secret (such as `$(cat jwt_secret.txt)` with
+        // the file missing), so it must not fall back to the public placeholder shipped in appsettings.json.
+        if (JwtSettingsBinder.IsSecretVariableBlank() && (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret == defaultSecret))
+        {
+            throw new InvalidOperationException(
+                "JWT_SECRET is set but blank, and JwtSettings:Secret is not configured either (the placeholder shipped in " +
+                "appsettings.json does not count). Set JWT_SECRET to a random secret of at least 32 characters, e.g. the " +
+                "output of `openssl rand -base64 48`.");
+        }
 
         if (string.IsNullOrWhiteSpace(jwtSecret))
         {
-            throw new InvalidOperationException(JwtSettingsBinder.IsSecretVariableBlank()
-                ? "JWT_SECRET is set but blank, and JwtSettings:Secret is not configured either. Set JWT_SECRET to a " +
-                  "random secret of at least 32 characters, e.g. the output of `openssl rand -base64 48`."
-                : "JWT_SECRET must be configured in appsettings.json or environment variable");
+            throw new InvalidOperationException("JWT_SECRET must be configured in appsettings.json or environment variable");
         }
 
         // Warn if using default JWT secret
-        var defaultSecret = "YourSecretKeyHere-ChangeInProduction-MustBeAtLeast32CharactersLong!";
         if (jwtSecret == defaultSecret)
         {
             Log.Warning("⚠️ WARNING: Using default JWT secret! Please set JWT_SECRET environment variable for production.");

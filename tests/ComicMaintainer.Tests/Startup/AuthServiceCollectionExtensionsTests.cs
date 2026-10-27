@@ -116,10 +116,9 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
     // AuthService signs tokens with IOptions<JwtSettings> and the bearer scheme validates them with the key read at
     // startup, so both must resolve JWT_SECRET the same way. Regression test for #875: a blank JWT_SECRET (as passed by
     // `docker run -e JWT_SECRET=` or an empty env-file entry) counts as unset in both, so the configured secret is used.
-    // Environment.SetEnvironmentVariable removes a variable set to "", so whitespace stands in for the empty value.
     [Theory]
     [InlineData(null, ConfiguredSecret)]
-    [InlineData(" ", ConfiguredSecret)]
+    [InlineData("", ConfiguredSecret)]
     [InlineData(" \t ", ConfiguredSecret)]
     [InlineData(EnvironmentSecret, EnvironmentSecret)]
     public void JwtSecretEnvironmentVariable_ResolvesTheSameSecretForSigningAndValidation(string? variable, string expectedSecret)
@@ -139,15 +138,36 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
 
     // Regression test for #875: the error names the blank variable instead of claiming that no secret is configured.
     [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void BlankJwtSecretEnvironmentVariable_WithoutAConfiguredSecret_ThrowsNamingTheBlankVariable(string? configuredSecret)
+    [InlineData("", null)]
+    [InlineData("", "")]
+    [InlineData("", "   ")]
+    [InlineData(" \t ", null)]
+    public void BlankJwtSecretEnvironmentVariable_WithoutAConfiguredSecret_ThrowsNamingTheBlankVariable(string variable, string? configuredSecret)
     {
-        _environment.Set("JWT_SECRET", " ");
+        _environment.Set("JWT_SECRET", variable);
 
         var exception = Assert.Throws<InvalidOperationException>(
             () => AddComicMaintainerAuth(new ServiceCollection(), BuildConfiguration(("JwtSettings:Secret", configuredSecret))));
+
+        Assert.StartsWith("JWT_SECRET is set but blank", exception.Message);
+    }
+
+    // A blank JWT_SECRET was meant to hold the secret (such as `-e JWT_SECRET="$(cat jwt_secret.txt)"` with the file
+    // missing), so it must not fall back to the placeholder secret shipped in appsettings.json: that one is public, and
+    // anyone could sign tokens with it. The shipped file (which the build copies next to the tests, as it is published
+    // next to the app) is read, so that a change to it is covered too.
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \t ")]
+    public void BlankJwtSecretEnvironmentVariable_WithOnlyTheShippedSecret_Throws(string variable)
+    {
+        _environment.Set("JWT_SECRET", variable);
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(Path.Join(AppContext.BaseDirectory, "appsettings.json"), optional: false)
+            .Build();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => AddComicMaintainerAuth(new ServiceCollection(), configuration));
 
         Assert.StartsWith("JWT_SECRET is set but blank", exception.Message);
     }

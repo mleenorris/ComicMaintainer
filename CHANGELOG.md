@@ -114,8 +114,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-e JWT_SECRET="$(cat jwt_secret.txt)"` with a missing file) for the secret and exited with
   "JWT_SECRET must be configured in appsettings.json or environment variable", even when
   `JwtSettings:Secret` was set. A blank `JWT_SECRET` now counts as unset both where tokens are
-  signed and where they are validated, so `JwtSettings:Secret` is used; if that is not set
-  either, the error says that `JWT_SECRET` is blank.
+  signed and where they are validated, so `JwtSettings:Secret` is used. If that is not set
+  either, or holds only the placeholder shipped in `appsettings.json` (which is public, so
+  anyone could sign tokens with it), the app still refuses to start, and the error now says
+  that `JWT_SECRET` is blank.
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
   check for administration read the Authelia settings without that variable, so when the admin
   groups were set only there (the documented way) every signed-in user who was not ReadOnly,

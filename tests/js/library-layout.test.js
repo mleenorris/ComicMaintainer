@@ -68,6 +68,45 @@ test('a saved layout is used from the start', async () => {
     assert.deepEqual(activeLayoutButtons(page), ['seriesLayoutGridBtn', 'seriesLayoutGridBtnMobile']);
 });
 
+test('opening the library from the overview marks the current layout', async () => {
+    for (const [localStorage, expected] of [
+        [{}, ['seriesLayoutCompactBtn', 'seriesLayoutCompactBtnMobile']],
+        [{ seriesLayout: 'grid' }, ['seriesLayoutGridBtn', 'seriesLayoutGridBtnMobile']]
+    ]) {
+        // A visit without a route lands on the overview: the library is not shown yet.
+        const page = await bootLibrary({ hash: '', series: makeSeriesList(1), localStorage });
+        try {
+            assert.equal(page.window.location.hash, '#/home');
+
+            page.click('#navLibraryBtn');
+            await page.settle();
+
+            assert.equal(page.$('#seriesLayoutToggle').hidden, false);
+            assert.equal(page.$('#seriesLayoutToolbarMobile').hidden, false);
+            assert.deepEqual(activeLayoutButtons(page), expected, JSON.stringify(localStorage));
+        } finally {
+            page.close();
+        }
+    }
+});
+
+test('a layout change made away from the library is marked when the library is shown again', async () => {
+    const media = { [PORTRAIT_QUERY]: false };
+    const page = await bootLibrary({ series: makeSeriesList(1), media });
+    assert.deepEqual(activeLayoutButtons(page), ['seriesLayoutCompactBtn', 'seriesLayoutCompactBtnMobile']);
+
+    page.click('#navOverviewBtn');
+    await page.settle();
+    // The phone turns to portrait on the overview, so the automatic layout becomes the list.
+    media[PORTRAIT_QUERY] = true;
+    page.mediaQueries.filter(list => list.media === PORTRAIT_QUERY).forEach(list => list.change(true));
+    page.click('#navLibraryBtn');
+    await page.settle();
+
+    assert.ok(page.$('#fileList .series-list'));
+    assert.deepEqual(activeLayoutButtons(page), ['seriesLayoutListBtn', 'seriesLayoutListBtnMobile']);
+});
+
 test('an unknown layout, saved or requested, is ignored', async () => {
     const page = await bootLibrary({ series: makeSeriesList(1), localStorage: { seriesLayout: 'mosaic' } });
     assert.ok(page.$('#fileList .series-grid--compact'));
@@ -140,6 +179,7 @@ test('the layout toggle is hidden on a series page; a layout chosen there applie
     await page.settle();
 
     assert.equal(page.$('#seriesLayoutToggle').hidden, false);
+    assert.deepEqual(activeLayoutButtons(page), ['seriesLayoutListBtn', 'seriesLayoutListBtnMobile']);
     assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
     assert.ok(page.$('#fileList .series-list'));
 });

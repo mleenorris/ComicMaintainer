@@ -358,8 +358,13 @@
             const diffMs = now - date;
             const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
             
-            // Show relative time for recent files
-            if (diffDays === 0) {
+            // Show relative time for recent files. A time in the future is
+            // never "N days ago": up to a minute ahead (the server's clock a
+            // little ahead of the browser's) is "Just now", and further ahead
+            // it is shown as a date.
+            if (diffMs < 0) {
+                if (diffMs >= -60 * 1000) return 'Just now';
+            } else if (diffDays === 0) {
                 const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
                 if (diffHours === 0) {
                     const diffMinutes = Math.floor(diffMs / (1000 * 60));
@@ -373,7 +378,7 @@
                 return `${diffDays} days ago`;
             }
             
-            // Show date for older files
+            // Show date for older (or future) files
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');

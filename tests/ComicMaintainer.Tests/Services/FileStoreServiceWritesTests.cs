@@ -136,6 +136,23 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         Assert.False(await service.FileExistsAsync(stray));
     }
 
+    [Fact]
+    public async Task AddFileAsync_BlankWatchedDirectory_IsSkippedLikeTheDuplicateDirectory()
+    {
+        // The store shares LibraryPathValidator's containment rule: a blank root is "not
+        // configured" and contains nothing, instead of throwing and rejecting every path.
+        var inDupes = WriteComic(_dupes, "Copy.cbz");
+        var inLibrary = WriteComic(_library, "Saga 001.cbz");
+        var service = CreateService(duplicateDirectory: _dupes, watchedDirectory: string.Empty);
+
+        await service.AddFileAsync(inDupes);
+        await service.AddFileAsync(inLibrary);
+
+        Assert.Equal(inDupes, Assert.Single(await service.GetAllFilesAsync()).FilePath);
+        Assert.True(_logger.Contains(LogLevel.Warning, "Attempted to add file outside allowed directories"));
+        Assert.False(_logger.Contains(LogLevel.Warning, "Error validating path"));
+    }
+
     [Theory]
     [InlineData("library2")]
     [InlineData("library-old")]

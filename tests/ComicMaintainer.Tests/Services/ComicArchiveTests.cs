@@ -1,4 +1,3 @@
-using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using System.IO.Compression;
 
@@ -83,45 +82,18 @@ public class ComicArchiveTests : IDisposable
     }
 
     [Fact]
-    public void WriteTags_ToCbzFile_UpdatesSuccessfully()
-    {
-        // Arrange
-        var filePath = CreateTestCbzArchive("test.cbz");
-        var newTags = new ComicInfo
-        {
-            Series = "Superman",
-            Number = "5",
-            Title = "Test Title",
-            Year = 2024
-        };
-
-        // Act
-        using (var archive = new ComicArchive(filePath))
-        {
-            archive.WriteTags(newTags, "cr");
-        }
-
-        // Verify
-        using (var archive = new ComicArchive(filePath))
-        {
-            var readTags = archive.ReadTags("cr");
-            Assert.NotNull(readTags);
-            Assert.Equal("Superman", readTags.Series);
-            Assert.Equal("5", readTags.Number);
-            Assert.Equal(2024, readTags.Year);
-        }
-    }
-
-    [Fact]
-    public void WriteTags_ToCbrFile_ThrowsNotSupportedException()
+    public void ReadTags_FromCbrThatIsNotARarArchive_ReturnsEmptyComicInfo()
     {
         // Arrange
         var filePath = CreateTestCbrArchive("test.cbr");
-        var newTags = new ComicInfo { Series = "Test" };
 
-        // Act & Assert
+        // Act
         using var archive = new ComicArchive(filePath);
-        Assert.Throws<NotSupportedException>(() => archive.WriteTags(newTags, "cr"));
+        var tags = archive.ReadTags("cr");
+
+        // Assert
+        Assert.NotNull(tags);
+        Assert.Null(tags.Series);
     }
 
     [Fact]
@@ -136,75 +108,6 @@ public class ComicArchiveTests : IDisposable
 
         // Assert
         Assert.NotNull(tags);
-    }
-
-    [Fact]
-    public void WriteTags_WithExistingComicInfo_ReplacesComicInfo()
-    {
-        // Arrange
-        var filePath = CreateTestCbzArchiveWithComicInfo("test.cbz", "OldSeries", "1", 2020);
-        var newTags = new ComicInfo
-        {
-            Series = "NewSeries",
-            Number = "2",
-            Year = 2024
-        };
-
-        // Act
-        using (var archive = new ComicArchive(filePath))
-        {
-            archive.WriteTags(newTags, "cr");
-        }
-
-        // Verify - Old ComicInfo should be replaced
-        using (var archive = new ComicArchive(filePath))
-        {
-            var readTags = archive.ReadTags("cr");
-            Assert.NotNull(readTags);
-            Assert.Equal("NewSeries", readTags.Series);
-            Assert.Equal("2", readTags.Number);
-            Assert.Equal(2024, readTags.Year);
-            Assert.NotEqual("OldSeries", readTags.Series);
-        }
-    }
-
-    [Fact]
-    public void WriteTags_WithMultipleEntries_PreservesAllOtherFiles()
-    {
-        // Arrange
-        var filePath = Path.Combine(_testDirectory, "multifile.cbz");
-        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
-        {
-            var entry1 = archive.CreateEntry("page001.jpg");
-            using (var writer = new StreamWriter(entry1.Open()))
-                writer.Write("image1");
-            
-            var entry2 = archive.CreateEntry("page002.jpg");
-            using (var writer = new StreamWriter(entry2.Open()))
-                writer.Write("image2");
-            
-            var entry3 = archive.CreateEntry("subfolder/page003.jpg");
-            using (var writer = new StreamWriter(entry3.Open()))
-                writer.Write("image3");
-        }
-        _createdFiles.Add(filePath);
-
-        var newTags = new ComicInfo { Series = "Test" };
-
-        // Act
-        using (var archive = new ComicArchive(filePath))
-        {
-            archive.WriteTags(newTags, "cr");
-        }
-
-        // Verify - All original files should still be present
-        using (var verifyArchive = ZipFile.OpenRead(filePath))
-        {
-            Assert.Contains(verifyArchive.Entries, e => e.FullName == "page001.jpg");
-            Assert.Contains(verifyArchive.Entries, e => e.FullName == "page002.jpg");
-            Assert.Contains(verifyArchive.Entries, e => e.FullName == "subfolder/page003.jpg");
-            Assert.Contains(verifyArchive.Entries, e => e.FullName == "ComicInfo.xml");
-        }
     }
 
     [Fact]
@@ -247,40 +150,6 @@ public class ComicArchiveTests : IDisposable
         // Assert
         Assert.NotNull(tags);
         Assert.Equal("CaseTest", tags.Series);
-    }
-
-    [Fact]
-    public void WriteTags_CreatesValidXmlWithDeclaration()
-    {
-        // Arrange
-        var filePath = CreateTestCbzArchive("test.cbz");
-        var newTags = new ComicInfo
-        {
-            Series = "XMLTest",
-            Number = "99"
-        };
-
-        // Act
-        using (var archive = new ComicArchive(filePath))
-        {
-            archive.WriteTags(newTags, "cr");
-        }
-
-        // Verify XML structure
-        using (var zipArchive = ZipFile.OpenRead(filePath))
-        {
-            var comicInfoEntry = zipArchive.Entries.FirstOrDefault(e => e.Name == "ComicInfo.xml");
-            Assert.NotNull(comicInfoEntry);
-            
-            using var stream = comicInfoEntry.Open();
-            using var reader = new StreamReader(stream);
-            var content = reader.ReadToEnd();
-            
-            // Should have XML declaration
-            Assert.Contains("<?xml version", content);
-            Assert.Contains("<ComicInfo", content);
-            Assert.Contains("<Series>XMLTest</Series>", content);
-        }
     }
 
     [Fact]

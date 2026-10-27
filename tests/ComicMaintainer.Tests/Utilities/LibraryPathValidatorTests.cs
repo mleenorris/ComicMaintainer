@@ -21,6 +21,8 @@ public sealed class LibraryPathValidatorTests : IDisposable
         _realOutside = LibraryPathValidator.ResolveRealPath(_outside);
     }
 
+    private static string Native(string path) => path.Replace('/', Path.DirectorySeparatorChar);
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -109,6 +111,69 @@ public sealed class LibraryPathValidatorTests : IDisposable
 
         Assert.False(LibraryPathValidator.IsWithin(Path.Combine(_realLibrary, "Issue 001.cbz"), fileSystemRoot));
         Assert.False(LibraryPathValidator.TryResolveWithin(Path.Combine(_library, "Issue 001.cbz"), out _, fileSystemRoot));
+    }
+
+    [Theory]
+    [InlineData("/comics", "/comics", true)]
+    [InlineData("/comics", "/comics/", true)]
+    [InlineData("/comics/", "/comics", true)]
+    [InlineData("/comics", "/comics/Saga/Saga 001.cbz", true)]
+    [InlineData("/comics", "/comics2/Saga 001.cbz", false)]
+    [InlineData("/comics", "/comic", false)]
+    [InlineData("/comics", "/elsewhere/comics/Saga 001.cbz", false)]
+    [InlineData("/", "/comics/Saga 001.cbz", false)]
+    [InlineData("//", "/comics/Saga 001.cbz", false)]
+    public void IsSameOrUnder_ContainsOnlyTheDirectoryAndItsChildren(string directory, string fullPath, bool expected)
+    {
+        Assert.Equal(expected, LibraryPathValidator.IsSameOrUnder(Native(fullPath), Native(directory)));
+    }
+
+    [Fact]
+    public void IsSameOrUnder_IgnoresCaseOnlyOnWindows()
+    {
+        Assert.Equal(
+            OperatingSystem.IsWindows(),
+            LibraryPathValidator.IsSameOrUnder(Native("/COMICS/Saga 001.cbz"), Native("/comics")));
+    }
+
+    [Fact]
+    public void IsLexicallyWithin_NormalizesThePathButNotTheRootsLinks()
+    {
+        // Unlike TryResolveWithin, a link is judged by where it is, not where it leads.
+        var linkedRoot = Path.Combine(_outside, "library-link");
+        Directory.CreateSymbolicLink(linkedRoot, _library);
+        var escape = Path.Combine(_library, "escape");
+        Directory.CreateSymbolicLink(escape, _outside);
+
+        Assert.True(LibraryPathValidator.IsLexicallyWithin(Path.Combine(escape, "secret.cbz"), _library));
+        Assert.False(LibraryPathValidator.IsLexicallyWithin(Path.Combine(_library, "Issue 001.cbz"), linkedRoot));
+        Assert.True(LibraryPathValidator.IsLexicallyWithin(Path.Combine(_library, "Series", "..", "Issue 001.cbz"), _library));
+        Assert.False(LibraryPathValidator.IsLexicallyWithin(Path.Combine(_library, "..", "outside", "x.cbz"), _library));
+    }
+
+    [Fact]
+    public void IsLexicallyWithin_ChecksEveryConfiguredRootAndSkipsBlankOnes()
+    {
+        var path = Path.Combine(_library, "Issue 001.cbz");
+
+        Assert.True(LibraryPathValidator.IsLexicallyWithin(path, null, string.Empty, "   ", _outside, _library));
+        Assert.False(LibraryPathValidator.IsLexicallyWithin(path, null, string.Empty, _outside));
+        Assert.False(LibraryPathValidator.IsLexicallyWithin(path));
+    }
+
+    [Fact]
+    public void IsLexicallyWithin_NeverTreatsTheFileSystemRootAsAContainer()
+    {
+        var fileSystemRoot = Path.GetPathRoot(_library)!;
+
+        Assert.False(LibraryPathValidator.IsLexicallyWithin(Path.Combine(_library, "Issue 001.cbz"), fileSystemRoot));
+    }
+
+    [Fact]
+    public void IsLexicallyWithin_ThrowsForAPathTheRuntimeCannotParse()
+    {
+        Assert.Throws<ArgumentException>(() => LibraryPathValidator.IsLexicallyWithin(string.Empty, _library));
+        Assert.Throws<ArgumentException>(() => LibraryPathValidator.IsLexicallyWithin(Path.Combine(_library, "bad\0name.cbz"), _library));
     }
 
     [Fact]

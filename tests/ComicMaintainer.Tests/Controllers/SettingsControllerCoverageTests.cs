@@ -369,6 +369,27 @@ public class SettingsControllerCoverageTests
     }
 
     [Theory]
+    [InlineData(false, null)]
+    [InlineData(false, "other")]
+    [InlineData(true, null)]
+    [InlineData(true, "other")]
+    public async Task UpdateIssueNumberPadding_UnrelatedArgumentFailure_Returns500(bool legacyPost, string? paramName)
+    {
+        var failure = new ArgumentException("Unexpected argument failure", paramName);
+        _settingsService.Setup(s => s.UpdateIssueNumberPaddingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+        var controller = CreateController();
+        var request = new SettingsController.IssueNumberPaddingRequest { Padding = 2 };
+
+        var result = legacyPost
+            ? await controller.SetIssueNumberPadding(request)
+            : await controller.UpdateIssueNumberPadding(request);
+
+        Assert.Equal("Failed to update issue number padding", ServerErrorJson(result).GetProperty("error").GetString());
+        VerifyLogged(LogLevel.Error, "Failed to update issue number padding", Times.Once(), failure);
+    }
+
+    [Theory]
     [InlineData(1.5, 1572864)]
     [InlineData(2047, 2146435072)]
     public async Task SetLogMaxBytes_LegacyPost_ConvertsMegabytesToBytes(double maxMb, int expectedBytes)

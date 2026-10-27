@@ -99,7 +99,7 @@ public sealed class ProgramTests : IDisposable
     public async Task Startup_WarnsWhenTheConfiguredIssueNumberPaddingIsOutOfRange(int padding, int effectivePadding)
     {
         await StartAsync(
-            settings => Assert.Equal(padding, settings.IssueNumberPadding),
+            settings => Assert.Equal(effectivePadding, settings.IssueNumberPadding),
             ("AppSettings:IssueNumberPadding", padding.ToString(CultureInfo.InvariantCulture)));
 
         var warning = Assert.Single(_logs.ProgramEntries(PaddingOutOfRangeTemplate));

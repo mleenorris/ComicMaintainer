@@ -167,7 +167,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateIssueNumberPaddingAsync(request.Padding, cancellationToken);
             return Ok(new { message = "Issue number padding updated successfully" });
         }
-        catch (ArgumentException ex)
+        catch (ArgumentException ex) when (ex.ParamName == "padding")
         {
             return BadRequest(new { error = ex.Message });
         }

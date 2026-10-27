@@ -87,6 +87,7 @@ if (effectiveIssueNumberPadding != appSettingsValue.IssueNumberPadding)
         appSettingsValue.IssueNumberPadding,
         AppSettings.MaxIssueNumberPadding,
         effectiveIssueNumberPadding);
+    appSettingsValue.IssueNumberPadding = effectiveIssueNumberPadding;
 }
 
 app.Run();

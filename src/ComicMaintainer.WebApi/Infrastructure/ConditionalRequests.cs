@@ -6,7 +6,7 @@ namespace ComicMaintainer.WebApi.Infrastructure;
 /// <summary>
 /// Conditional-request evaluation shared by the endpoints that compute their
 /// own entity tags (file covers and series images), so they answer
-/// revalidation the same way.
+/// revalidation requests the same way.
 /// </summary>
 public static class ConditionalRequests
 {

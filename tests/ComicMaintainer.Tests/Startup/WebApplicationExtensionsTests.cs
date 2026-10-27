@@ -17,7 +17,8 @@ namespace ComicMaintainer.Tests.Startup;
 /// Tests for <c>WebApplicationExtensions.InitializeComicMaintainerDatabaseAsync</c> (migrations,
 /// role seeding and the optional environment-seeded admin user). The app is built with the
 /// production data and auth registrations on a throw-away SQLite file. The admin seeding reads
-/// ADMIN_* environment variables, so the tests run in the non-parallel environment collection.
+/// ADMIN_* environment variables (ADMIN_PASSWORD_FILE included), so the tests run in the non-parallel
+/// environment collection.
 /// </summary>
 [Collection(AppSettingsEnvironmentPostConfigureTests.EnvironmentCollection.Name)]
 public sealed class WebApplicationExtensionsTests : IDisposable
@@ -45,7 +46,7 @@ public sealed class WebApplicationExtensionsTests : IDisposable
     private readonly string _configDirectory = Path.Combine(Path.GetTempPath(), "cm-dbinit-" + Guid.NewGuid().ToString("N"));
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
-        new("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_EMAIL", "JWT_SECRET", "AUTHELIA_ENABLED", "EFCORE_QUERY_LOGGING");
+        new("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "ADMIN_EMAIL", "JWT_SECRET", "JWT_SECRET_FILE", "AUTHELIA_ENABLED", "EFCORE_QUERY_LOGGING");
 
     public WebApplicationExtensionsTests()
     {
@@ -173,6 +174,59 @@ public sealed class WebApplicationExtensionsTests : IDisposable
 
         using var scope = app.Services.CreateScope();
         Assert.Empty(await scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>().Users.ToListAsync());
+    }
+
+    // The Docker-secrets setup of docs/DOCKER_DEPLOYMENT_DOTNET.md. Files made with `echo` end with a line break that
+    // is not part of the password.
+    [Theory]
+    [InlineData("")]
+    [InlineData("\n")]
+    public async Task SeedsTheAdminUserWithThePasswordInAdminPasswordFile(string lineBreak)
+    {
+        var passwordFile = Path.Combine(_configDirectory, "admin_password");
+        await File.WriteAllTextAsync(passwordFile, AdminPassword + lineBreak);
+        _environment.Set("ADMIN_USERNAME", "root-admin");
+        _environment.Set("ADMIN_PASSWORD_FILE", passwordFile);
+        await using var app = BuildApp();
+
+        await InitializeDatabase(app, NullLogger.Instance);
+
+        using var scope = app.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var admin = await users.FindByNameAsync("root-admin");
+        Assert.NotNull(admin);
+        Assert.True(await users.CheckPasswordAsync(admin, AdminPassword));
+        Assert.Equal(new[] { "Admin" }, await users.GetRolesAsync(admin));
+    }
+
+    [Fact]
+    public async Task RefusesToSeedFromBothAdminPasswordAndAdminPasswordFile()
+    {
+        var passwordFile = Path.Combine(_configDirectory, "admin_password");
+        await File.WriteAllTextAsync(passwordFile, AdminPassword);
+        _environment.Set("ADMIN_USERNAME", "root-admin");
+        _environment.Set("ADMIN_PASSWORD", "Oth3rPassword");
+        _environment.Set("ADMIN_PASSWORD_FILE", passwordFile);
+        await using var app = BuildApp();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => InitializeDatabase(app, NullLogger.Instance));
+
+        Assert.StartsWith("Both ADMIN_PASSWORD and ADMIN_PASSWORD_FILE are set. Set only one of them", exception.Message);
+        using var scope = app.Services.CreateScope();
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>().Users.ToListAsync());
+    }
+
+    [Fact]
+    public async Task RefusesToSeedFromAnAdminPasswordFileThatCannotBeRead()
+    {
+        var passwordFile = Path.Combine(_configDirectory, "missing", "admin_password");
+        _environment.Set("ADMIN_USERNAME", "root-admin");
+        _environment.Set("ADMIN_PASSWORD_FILE", passwordFile);
+        await using var app = BuildApp();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => InitializeDatabase(app, NullLogger.Instance));
+
+        Assert.StartsWith($"ADMIN_PASSWORD_FILE is set to '{passwordFile}', which cannot be read: ", exception.Message);
     }
 
     [Fact]

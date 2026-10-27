@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Claims;
 using System.Text;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using Microsoft.AspNetCore.Authentication;
@@ -14,51 +15,278 @@ using Microsoft.IdentityModel.Tokens;
 namespace ComicMaintainer.Tests.Startup;
 
 /// <summary>
-/// Tests for the Identity/JWT/Authelia registrations made by <c>AuthServiceCollectionExtensions</c>.
-/// The method also reads JWT_SECRET and the AUTHELIA_* variables (AUTHELIA_ENABLED, AUTHELIA_TRUSTED_PROXIES and
-/// AUTHELIA_ADMIN_GROUPS affect its registrations) from the process environment, so the tests run in the
-/// non-parallel environment collection with those variables cleared.
+/// Tests for the Identity/JWT/Authelia registrations made by <c>AuthServiceCollectionExtensions</c>, including which
+/// secret signs and validates the JWTs (<c>JwtSecretResolver</c>). The method also reads JWT_SECRET, JWT_SECRET_FILE
+/// and the AUTHELIA_* variables (AUTHELIA_ENABLED, AUTHELIA_TRUSTED_PROXIES and AUTHELIA_ADMIN_GROUPS affect its
+/// registrations) from the process environment, so the tests run in the non-parallel environment collection with
+/// those variables cleared. A key generated for want of a secret is saved in a temporary config directory.
 /// </summary>
 [Collection(AppSettingsEnvironmentPostConfigureTests.EnvironmentCollection.Name)]
 public sealed class AuthServiceCollectionExtensionsTests : IDisposable
 {
     private const string ConfiguredSecret = "configured-secret-configured-secret-0123456789";
     private const string EnvironmentSecret = "environment-secret-environment-secret-0123456789";
+    private const string FileSecret = "file-secret-file-secret-file-secret-0123456789";
+
+    // Published with ComicMaintainer, so anyone can sign tokens with them (#841): the "Secret" that appsettings.json
+    // shipped with, and the fallback of docker-compose.dotnet.yml and .env.example.
+    private const string PublishedAppSettingsSecret = "YourSecretKeyHere-ChangeInProduction-MustBeAtLeast32CharactersLong!";
+    private const string PublishedComposeSecret = "ChangeThisToASecureRandomString-MustBeAtLeast32CharactersLong!!";
 
     // Authelia refuses to start without an allowlist of reverse proxies (see AutheliaTrustedProxyStartupTests).
     private const string TrustedProxies = "172.18.0.0/16";
 
-    // The extension class is internal to the WebApi assembly (no InternalsVisibleTo).
+    // The extension classes are internal to the WebApi assembly (no InternalsVisibleTo).
     private static readonly Func<IServiceCollection, IConfiguration, IServiceCollection> AddComicMaintainerAuth = typeof(Program).Assembly
         .GetType("ComicMaintainer.WebApi.Startup.AuthServiceCollectionExtensions", throwOnError: true)!
         .GetMethod("AddComicMaintainerAuth", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
 
-    private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
-        new("JWT_SECRET", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES", "AUTHELIA_ADMIN_GROUPS");
+    private static readonly Func<IServiceCollection, IConfiguration, IServiceCollection> AddComicMaintainerSettings = typeof(Program).Assembly
+        .GetType("ComicMaintainer.WebApi.Startup.CoreServiceCollectionExtensions", throwOnError: true)!
+        .GetMethod("AddComicMaintainerSettings", BindingFlags.Static | BindingFlags.Public)!
+        .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
 
-    public void Dispose() => _environment.Dispose();
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "cm-auth-extensions-" + Guid.NewGuid().ToString("N"));
+
+    private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
+        new("JWT_SECRET", "JWT_SECRET_FILE", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES", "AUTHELIA_ADMIN_GROUPS");
+
+    // Created by the app when it generates a key.
+    private string ConfigDirectory => Path.Combine(_root, "config");
+
+    private string KeyFile => Path.Combine(ConfigDirectory, "jwt-secret.key");
+
+    public void Dispose()
+    {
+        _environment.Dispose();
+        try
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+        catch (DirectoryNotFoundException)
+        {
+        }
+    }
+
+    // Out of the box no secret is configured. Rather than refuse to start, or fall back to a published secret, the
+    // app generates a random key and keeps it in the config directory, next to the database.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void WithoutASecret_SignsAndValidatesWithAKeyGeneratedInTheConfigDirectory(string? configuredSecret)
+    {
+        using var provider = BuildProvider(("JwtSettings:Secret", configuredSecret), ("JwtSettings:Issuer", "issuer"));
+
+        var key = File.ReadAllText(KeyFile);
+        Assert.Equal(48, Convert.FromBase64String(key).Length);
+        AssertSignsAndValidatesWith(provider, key);
+    }
 
     [Fact]
-    public void WithoutAnyJwtConfiguration_Throws()
+    public void WithoutASecret_KeepsTheKeyGeneratedOnTheFirstStart()
     {
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => AddComicMaintainerAuth(new ServiceCollection(), BuildConfiguration()));
+        string firstKey;
+        using (var firstStart = BuildProvider())
+        {
+            firstKey = GetValidationSecret(firstStart);
+        }
 
-        Assert.Contains("JWT_SECRET must be configured", exception.Message);
+        using var secondStart = BuildProvider();
+
+        AssertSignsAndValidatesWith(secondStart, firstKey);
+        Assert.Equal(firstKey, File.ReadAllText(KeyFile));
+    }
+
+    [Theory]
+    [InlineData(FileSecret + "\n", FileSecret)]
+    [InlineData("\n", null)]
+    [InlineData("", null)]
+    public void WithoutASecret_UsesTheKeyFileUnlessItIsEmpty(string contents, string? expectedKey)
+    {
+        Directory.CreateDirectory(ConfigDirectory);
+        File.WriteAllText(KeyFile, contents);
+
+        using var provider = BuildProvider();
+
+        var key = File.ReadAllText(KeyFile);
+        if (expectedKey is null)
+        {
+            Assert.Equal(48, Convert.FromBase64String(key).Length);
+            expectedKey = key;
+        }
+
+        AssertSignsAndValidatesWith(provider, expectedKey);
+    }
+
+    [Fact]
+    public void WithoutASecret_SavesTheKeyForTheAppUserOnly()
+    {
+        using var provider = BuildProvider();
+
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(KeyFile));
+        }
+    }
+
+    // Instances that share a config directory may start together; they must all use the key that was saved.
+    [Fact]
+    public async Task WithoutASecret_ConcurrentStartsAgreeOnOneKey()
+    {
+        var keys = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            using var provider = BuildProvider();
+            return GetValidationSecret(provider);
+        })));
+
+        Assert.Equal(File.ReadAllText(KeyFile), Assert.Single(keys.Distinct()));
+        Assert.Equal([KeyFile], Directory.GetFiles(ConfigDirectory));
+    }
+
+    [Fact]
+    public void WithoutASecret_RefusesToStartWhenTheKeyCannotBeSaved()
+    {
+        // The config directory cannot be created: a file is in the way.
+        Directory.CreateDirectory(_root);
+        var blocker = Path.Combine(_root, "blocker");
+        File.WriteAllText(blocker, "");
+        var configDirectory = Path.Combine(blocker, "config");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => BuildProvider(("AppSettings:ConfigDirectory", configDirectory)));
+
+        Assert.StartsWith(
+            $"No JWT secret is configured, and the signing key generated in its place cannot be saved to or read from '{Path.Combine(configDirectory, "jwt-secret.key")}'",
+            exception.Message);
+        Assert.Contains("set JWT_SECRET (or JWT_SECRET_FILE) to a random secret", exception.Message);
+    }
+
+    // Wherever a published secret is set, it counts as not set.
+    [Theory]
+    [InlineData("JWT_SECRET", PublishedComposeSecret)]
+    [InlineData("JWT_SECRET", PublishedAppSettingsSecret)]
+    [InlineData("JWT_SECRET", " " + PublishedComposeSecret + " ")]
+    [InlineData("JWT_SECRET_FILE", PublishedComposeSecret)]
+    [InlineData("JwtSettings:Secret", PublishedAppSettingsSecret)]
+    [InlineData("JwtSettings:Secret", PublishedComposeSecret)]
+    public void PublishedSecrets_AreNeverUsed(string setIn, string publishedSecret)
+    {
+        (string, string?)[] settings = [];
+        switch (setIn)
+        {
+            case "JwtSettings:Secret":
+                settings = [(setIn, publishedSecret)];
+                break;
+            case "JWT_SECRET_FILE":
+                _environment.Set(setIn, WriteSecretFile(publishedSecret + "\n"));
+                break;
+            default:
+                _environment.Set(setIn, publishedSecret);
+                break;
+        }
+
+        using var provider = BuildProvider(settings);
+
+        var key = File.ReadAllText(KeyFile);
+        Assert.Equal(48, Convert.FromBase64String(key).Length);
+        AssertSignsAndValidatesWith(provider, key);
+    }
+
+    [Fact]
+    public void APublishedJwtSecret_GivesWayToTheConfiguredSecret()
+    {
+        _environment.Set("JWT_SECRET", PublishedComposeSecret);
+
+        using var provider = BuildProvider(("JwtSettings:Secret", ConfiguredSecret));
+
+        AssertSignsAndValidatesWith(provider, ConfiguredSecret);
+        Assert.False(File.Exists(KeyFile));
+    }
+
+    // A blank variable (`JWT_SECRET=` in an env file, or docker-compose.dotnet.yml with JWT_SECRET unset) counts as not
+    // set, so it neither replaces the configured secret nor clashes with the other variable.
+    [Theory]
+    [InlineData("JWT_SECRET")]
+    [InlineData("JWT_SECRET_FILE")]
+    public void BlankJwtSecretVariables_CountAsNotSet(string variable)
+    {
+        _environment.Set(variable, "  ");
+
+        using var provider = BuildProvider(("JwtSettings:Secret", ConfiguredSecret));
+
+        AssertSignsAndValidatesWith(provider, ConfiguredSecret);
+    }
+
+    [Fact]
+    public void JwtSecretFile_WorksNextToABlankJwtSecret()
+    {
+        _environment.Set("JWT_SECRET", " ");
+        _environment.Set("JWT_SECRET_FILE", WriteSecretFile(FileSecret));
+
+        using var provider = BuildProvider();
+
+        AssertSignsAndValidatesWith(provider, FileSecret);
+    }
+
+    // The Docker-secrets setup of docs/DOCKER_DEPLOYMENT_DOTNET.md. Files made with `echo` or `openssl rand` end with
+    // a line break that is not part of the secret.
+    [Theory]
+    [InlineData("")]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void JwtSecretFile_SignsAndValidatesWithTheSecretInTheFile(string lineBreak)
+    {
+        _environment.Set("JWT_SECRET_FILE", WriteSecretFile(FileSecret + lineBreak));
+
+        using var provider = BuildProvider(("JwtSettings:Secret", ConfiguredSecret));
+
+        AssertSignsAndValidatesWith(provider, FileSecret);
+        Assert.False(File.Exists(KeyFile));
+    }
+
+    [Fact]
+    public void JwtSecretAndJwtSecretFile_CannotBothBeSet()
+    {
+        _environment.Set("JWT_SECRET", EnvironmentSecret);
+        _environment.Set("JWT_SECRET_FILE", WriteSecretFile(FileSecret));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => BuildProvider());
+
+        Assert.StartsWith("Both JWT_SECRET and JWT_SECRET_FILE are set. Set only one of them", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void JwtSecretFile_ThatCannotBeRead_StopsTheStartup(bool isADirectory)
+    {
+        var path = Path.Combine(_root, "secrets", "jwt_secret");
+        if (isADirectory)
+        {
+            Directory.CreateDirectory(path);
+        }
+
+        _environment.Set("JWT_SECRET_FILE", path);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => BuildProvider(("JwtSettings:Secret", ConfiguredSecret)));
+
+        Assert.StartsWith($"JWT_SECRET_FILE is set to '{path}', which cannot be read: ", exception.Message);
+        Assert.False(File.Exists(KeyFile));
     }
 
     [Theory]
     [InlineData("")]
-    [InlineData(null)]
-    public void WithAJwtSectionButNoSecret_Throws(string? secret)
+    [InlineData("\n")]
+    [InlineData("  \r\n")]
+    public void JwtSecretFile_ThatIsEmpty_StopsTheStartup(string contents)
     {
-        var configuration = BuildConfiguration(("JwtSettings:Secret", secret), ("JwtSettings:Issuer", "issuer"));
+        var path = WriteSecretFile(contents);
+        _environment.Set("JWT_SECRET_FILE", path);
 
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => AddComicMaintainerAuth(new ServiceCollection(), configuration));
+        var exception = Assert.Throws<InvalidOperationException>(() => BuildProvider(("JwtSettings:Secret", ConfiguredSecret)));
 
-        Assert.Contains("JWT_SECRET must be configured", exception.Message);
+        Assert.Equal($"JWT_SECRET_FILE is set to '{path}', which is empty.", exception.Message);
     }
 
     [Fact]
@@ -87,8 +315,7 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
 
         using var provider = BuildProvider(("JwtSettings:Secret", ConfiguredSecret));
 
-        var key = Assert.IsType<SymmetricSecurityKey>(GetBearerOptions(provider).TokenValidationParameters.IssuerSigningKey);
-        Assert.Equal(Encoding.UTF8.GetBytes(EnvironmentSecret), key.Key);
+        AssertSignsAndValidatesWith(provider, EnvironmentSecret);
     }
 
     [Fact]
@@ -259,19 +486,49 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         return provider.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>().Get(JwtBearerDefaults.AuthenticationScheme);
     }
 
-    private static IConfiguration BuildConfiguration(params (string Key, string? Value)[] settings)
+    private static string GetValidationSecret(ServiceProvider provider)
     {
+        var key = Assert.IsType<SymmetricSecurityKey>(GetBearerOptions(provider).TokenValidationParameters.IssuerSigningKey);
+        return Encoding.UTF8.GetString(key.Key);
+    }
+
+    // Tokens are validated with the JwtBearer key, and signed by AuthService with IOptions<JwtSettings>.Secret.
+    private static void AssertSignsAndValidatesWith(ServiceProvider provider, string secret)
+    {
+        Assert.Equal(secret, GetValidationSecret(provider));
+        Assert.Equal(secret, provider.GetRequiredService<IOptions<JwtSettings>>().Value.Secret);
+    }
+
+    private string WriteSecretFile(string contents)
+    {
+        var path = Path.Combine(_root, "secrets", "jwt_secret");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, contents);
+        return path;
+    }
+
+    // Unless a test names another, the config directory (where a generated key is saved) is a temporary one.
+    private IConfiguration BuildConfiguration(params (string Key, string? Value)[] settings)
+    {
+        var values = settings.Select(s => new KeyValuePair<string, string?>(s.Key, s.Value)).ToList();
+        if (!values.Exists(v => v.Key == "AppSettings:ConfigDirectory"))
+        {
+            values.Add(new("AppSettings:ConfigDirectory", ConfigDirectory));
+        }
+
         return new ConfigurationBuilder()
-            .AddInMemoryCollection(settings.Select(s => new KeyValuePair<string, string?>(s.Key, s.Value)))
+            .AddInMemoryCollection(values)
             .Build();
     }
 
-    private static ServiceProvider BuildProvider(params (string Key, string? Value)[] settings)
+    private ServiceProvider BuildProvider(params (string Key, string? Value)[] settings)
     {
         var configuration = BuildConfiguration(settings);
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(configuration);
+        // As in Program: the settings (which bind the JwtSettings section) are registered before the auth services.
+        AddComicMaintainerSettings(services, configuration);
         AddComicMaintainerAuth(services, configuration);
         return services.BuildServiceProvider();
     }

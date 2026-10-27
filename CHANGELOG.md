@@ -388,6 +388,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both the setup page and the app, and network timing decided where the user ended up. It now
   sends the user to setup, and checks for an existing session only when setup is not required.
 
+- **Save Settings no longer saves part of the settings without saying so.** The settings are
+  saved in groups, one request each, and a failure stopped the save without undoing the groups
+  already saved or naming them; for most groups the server's reason became "HTTP error!
+  status: 400". Values the server would reject (a log size above 2047 MB, mail attachments
+  above 200 MB, an error reporting limit above 100 issues a day, a recurrence interval outside
+  1 to 720 hours) are now refused before anything is sent. If the server still rejects a
+  group, the message gives its reason and lists the groups that were saved, and the form keeps
+  your edits so you can correct the value and save again. An expired session during any group
+  now goes to the sign-in page, as it already did for the last three, instead of showing
+  "HTTP error! status: 401".
+
+- **A failed database reset reports the HTTP status when the error is not JSON.** A reverse
+  proxy's error page or an empty body (a 502 or 504, say) showed a JSON parse error such as
+  "Unexpected token '<'" instead.
+
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
   converter previously marked the first comic page as the cover and wrote the issue number

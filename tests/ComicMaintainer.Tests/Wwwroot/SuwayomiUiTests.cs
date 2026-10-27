@@ -49,7 +49,7 @@ public class SuwayomiUiTests
         var contents = ReadMainJs();
 
         Assert.Matches(
-            new Regex(@"const suwayomiResponse = await fetch\([\s\S]*?suwayomiStatusPromise = null;\s*await refreshSuwayomiAvailability\(\);"),
+            new Regex(@"path: '/api/settings/suwayomi',[\s\S]*?saved: async \(\) => \{\s*suwayomiStatusPromise = null;\s*await refreshSuwayomiAvailability\(\);"),
             contents);
     }
 }

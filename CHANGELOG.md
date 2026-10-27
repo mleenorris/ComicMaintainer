@@ -307,6 +307,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an empty attachment, so a bad conversion is recorded as a failed delivery rather than mailed
   to the device.
 
+- **Read-only users are no longer offered actions that change the library on a series page.**
+  An issue's menu listed Process, Rename, Normalize, Remove Metadata and Delete; the Actions
+  menu Manage Names, Manage Folders, Refresh Metadata, Refresh Folder, Update Covers and Reset
+  Processed Status; and the Edit Tags, Series Folders, Manage Series Names and Duplicate Review
+  windows had Save, Merge Folders, editing and Delete Duplicate buttons. Choosing one ended,
+  often after a confirmation, in a generic "Failed to …" error, because the server refuses them
+  to read-only accounts. They are now hidden like the selection toolbar: an issue offers only
+  Info, View/Edit, Read Comic, Mark Read/Unread and, for a duplicate, Review Duplicate; the
+  Actions menu is gone; and the file menus of the Files view match.
+
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
   converter previously marked the first comic page as the cover and wrote the issue number

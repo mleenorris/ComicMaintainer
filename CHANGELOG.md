@@ -169,6 +169,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **First sign-in through Authelia works without `Remote-Email` or `Remote-Name`.** The account
   gets `<username>@authelia.local` and the username as its name; before, sign-in failed with
   401.
+- **Authelia users whose username is an email address can sign in without `Remote-Email`.** For a
+  username such as `alice@corp.example`, the placeholder `<username>@authelia.local` is not a
+  valid address, so the account was never created and every request was answered with 401. Such
+  a username is now used as the account's email; in any other username, each `@` becomes `_` in
+  the placeholder.
 - **About 1 in 54 first sign-ins through Authelia no longer fail with 401.** The unused password
   generated for the new account sometimes lacked a digit, which the password policy requires.
 - **"Run now" on a scheduled job that is already running says so** instead of reporting that the

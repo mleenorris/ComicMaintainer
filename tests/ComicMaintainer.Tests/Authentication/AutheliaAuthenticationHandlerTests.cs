@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Reflection;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
@@ -309,6 +310,51 @@ public class AutheliaAuthenticationHandlerTests
         Assert.Equal("bob", result.Principal!.Identity!.Name);
         Assert.Equal("bob@authelia.local", result.Principal.FindFirstValue(ClaimTypes.Email));
         Assert.Equal(new[] { "User" }, result.Principal.FindAll(ClaimTypes.Role).Select(c => c.Value));
+    }
+
+    [Theory]
+    [InlineData("alice@corp.example", "alice@corp.example")]                // an email address: used as is
+    [InlineData("@alice", "_alice@authelia.local")]                         // otherwise every '@' becomes '_'
+    [InlineData("alice@", "alice_@authelia.local")]
+    [InlineData("alice@corp@example", "alice_corp_example@authelia.local")]
+    public async Task Authenticate_UnknownUserWithAnAtSignInTheUsernameAndNoEmailHeader_IsProvisionedWithAValidEmail(
+        string username, string expectedEmail)
+    {
+        // Regression test for #874: "<username>@authelia.local" has two '@' for such a username, so Identity
+        // rejected the account and every request from that user was answered with 401.
+        ApplicationUser? created = null;
+        _userManager.Setup(u => u.FindByNameAsync(username)).ReturnsAsync((ApplicationUser?)null);
+        _userManager
+            .Setup(u => u.CreateAsync(It.IsAny<ApplicationUser>(), It.IsAny<string>()))
+            .Callback((ApplicationUser user, string _) => created = user)
+            .ReturnsAsync(IdentityResult.Success);
+
+        var result = await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", username)));
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(created);
+        Assert.Equal(username, created!.UserName);
+        Assert.Equal(expectedEmail, created.Email);
+        // The check Identity's UserValidator applies to the email (RequireUniqueEmail is on).
+        Assert.True(new EmailAddressAttribute().IsValid(created.Email), created.Email);
+        Assert.Equal(username, result.Principal!.Identity!.Name);
+        Assert.Equal(expectedEmail, result.Principal.FindFirstValue(ClaimTypes.Email));
+    }
+
+    [Theory]
+    [InlineData("alice@corp.example", "alice@corp.example")]
+    [InlineData("alice@corp@example", "alice_corp_example@authelia.local")]
+    public async Task Authenticate_ExistingUserWithAnAtSignInTheUsernameAndNoEmail_ClaimsTheProvisioningFallbackEmail(
+        string username, string expectedEmail)
+    {
+        var existing = ExistingUser(username, email: null, fullName: null, "User");
+
+        var result = await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", username)));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(expectedEmail, result.Principal!.FindFirstValue(ClaimTypes.Email));
+        Assert.Null(existing.Email);
+        _userManager.Verify(u => u.UpdateAsync(It.IsAny<ApplicationUser>()), Times.Never);
     }
 
     [Fact]

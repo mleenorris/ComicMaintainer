@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Encodings.Web;
@@ -109,7 +110,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         {
             new(ClaimTypes.NameIdentifier, user.Id),
             new(ClaimTypes.Name, username),  // Always use the username from Authelia header
-            new(ClaimTypes.Email, user.Email ?? email ?? $"{username}@authelia.local"),
+            new(ClaimTypes.Email, user.Email ?? email ?? FallbackEmail(username)),
             new("auth_method", "authelia")
         };
 
@@ -205,7 +206,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             user = new ApplicationUser
             {
                 UserName = username,
-                Email = email ?? $"{username}@authelia.local",
+                Email = email ?? FallbackEmail(username),
                 FullName = displayName ?? username,
                 EmailConfirmed = true, // Authelia handles email verification
                 IsActive = true
@@ -284,6 +285,15 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     }
 
     private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>
+    /// The email of a user the proxy sends no email for. Identity only creates an account whose email it
+    /// accepts as an address (<c>RequireUniqueEmail</c>), so this is the username itself when it is one,
+    /// such as <c>alice@corp.example</c>, and otherwise <c>&lt;username&gt;@authelia.local</c> with every
+    /// '@' of the username replaced by '_'.
+    /// </summary>
+    private static string FallbackEmail(string username) =>
+        new EmailAddressAttribute().IsValid(username) ? username : $"{username.Replace('@', '_')}@authelia.local";
 
     /// <summary>
     /// A random password that satisfies <paramref name="policy"/>. It is never used to sign in,

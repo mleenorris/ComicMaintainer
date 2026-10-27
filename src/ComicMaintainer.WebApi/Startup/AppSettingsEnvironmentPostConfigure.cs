@@ -73,6 +73,14 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         if (!string.IsNullOrEmpty(suwayomiPassword))
             options.SuwayomiPassword = suwayomiPassword;
 
+        var suwayomiDownloadsDir = Environment.GetEnvironmentVariable("SUWAYOMI_DOWNLOADS_DIR");
+        if (!string.IsNullOrEmpty(suwayomiDownloadsDir))
+            options.SuwayomiDownloadsDirectory = suwayomiDownloadsDir;
+
+        var suwayomiImportDir = Environment.GetEnvironmentVariable("SUWAYOMI_IMPORT_DIR");
+        if (!string.IsNullOrEmpty(suwayomiImportDir))
+            options.SuwayomiImportDirectory = suwayomiImportDir;
+
         var mangaDexRps = Environment.GetEnvironmentVariable("MANGADEX_REQUESTS_PER_SECOND");
         if (!string.IsNullOrEmpty(mangaDexRps) && int.TryParse(mangaDexRps, out var mdRps) && mdRps > 0)
             options.MangaDexRequestsPerSecond = mdRps;

@@ -104,6 +104,7 @@ test('saving sends each settings group in order with the edited values', async (
     page.input('#emailMinSecondsBetweenSends', '90');
     page.input('#suwayomiBaseUrl', '');
     page.input('#suwayomiUsername', '  ');
+    page.input('#suwayomiImportDirectory', '  ');
     page.input('#errorReportingClearTokenCheckbox', true);
     page.input('#errorReportingToken', 'ghp_ignored_because_cleared');
     page.input('#errorReportingAssignee', '');
@@ -166,8 +167,16 @@ test('saving sends each settings group in order with the edited values', async (
     });
     // A blank rate-limit field is 0: no limit.
     assert.deepEqual(body(page, 'emailRateLimit', since), { maxSendsPerHour: 12, maxSendsPerDay: 0, minSecondsBetweenSends: 90 });
-    // A blank password keeps the stored one (null); blank fields are unset.
-    assert.deepEqual(body(page, 'suwayomi', since), { enabled: true, baseUrl: null, username: null, password: null });
+    // A blank password keeps the stored one (null); blank fields are unset,
+    // and a blank import folder is sent empty to clear it.
+    assert.deepEqual(body(page, 'suwayomi', since), {
+        enabled: true,
+        baseUrl: null,
+        username: null,
+        password: null,
+        downloadsDirectory: '/suwayomi/downloads/mangas',
+        importDirectory: ''
+    });
     // "Clear token" wins over a typed token; blank numbers fall back.
     assert.deepEqual(body(page, 'errorReporting', since), {
         enabled: true,
@@ -198,6 +207,7 @@ test('new secrets are sent, cleared secrets are sent empty', async () => {
     page.input('#suwayomiPassword', 'new-suwayomi-password');
     page.input('#suwayomiBaseUrl', ' http://suwayomi:4567 ');
     page.input('#enableSuwayomiCheckbox', false);
+    page.input('#suwayomiDownloadsDirectory', ' /downloads/mangas ');
     page.input('#errorReportingToken', 'ghp_new_token');
     page.input('#errorReportingMaxPerDay', '');
     page.input('#errorReportingDedupeHours', '6');
@@ -221,7 +231,9 @@ test('new secrets are sent, cleared secrets are sent empty', async () => {
         enabled: false,
         baseUrl: 'http://suwayomi:4567',
         username: 'reader',
-        password: 'new-suwayomi-password'
+        password: 'new-suwayomi-password',
+        downloadsDirectory: '/downloads/mangas',
+        importDirectory: 'Manga'
     });
     assert.deepEqual(body(page, 'errorReporting', since), {
         enabled: false,
@@ -266,7 +278,9 @@ test('a blank SMTP host and sender name are unset, and "clear password" clears t
         enabled: true,
         baseUrl: 'http://suwayomi.local:4567',
         username: 'reader',
-        password: ''
+        password: '',
+        downloadsDirectory: '/suwayomi/downloads/mangas',
+        importDirectory: 'Manga'
     });
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
     assert.equal(page.$('#suwayomiClearPasswordCheckbox').checked, false, 'the tick is reset by the reload');

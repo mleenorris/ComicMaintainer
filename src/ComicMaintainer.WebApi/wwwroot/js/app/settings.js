@@ -393,6 +393,10 @@
                         : 'Enter a password only if your Suwayomi server requires one.';
                 }
                 if (suwayomiClearPassword) suwayomiClearPassword.checked = false;
+                const suwayomiDownloadsDirectory = document.getElementById('suwayomiDownloadsDirectory');
+                const suwayomiImportDirectory = document.getElementById('suwayomiImportDirectory');
+                if (suwayomiDownloadsDirectory) suwayomiDownloadsDirectory.value = settingsData.suwayomi_downloads_directory || '';
+                if (suwayomiImportDirectory) suwayomiImportDirectory.value = settingsData.suwayomi_import_directory || '';
 
                 // Load default library view
                 const defaultLibraryViewSelect = document.getElementById('defaultLibraryViewSelect');
@@ -1493,17 +1497,23 @@
             if (suwayomiEnabledEl) {
                 const suwayomiPasswordInput = document.getElementById('suwayomiPassword').value;
                 const suwayomiClearPasswordChecked = document.getElementById('suwayomiClearPasswordCheckbox').checked;
+                const suwayomiDownloadsDirectoryEl = document.getElementById('suwayomiDownloadsDirectory');
+                const suwayomiImportDirectoryEl = document.getElementById('suwayomiImportDirectory');
+                const suwayomiBody = {
+                    enabled: suwayomiEnabledEl.checked,
+                    baseUrl: document.getElementById('suwayomiBaseUrl').value.trim() || null,
+                    username: document.getElementById('suwayomiUsername').value.trim() || null,
+                    // null keeps the stored password; '' clears it.
+                    password: suwayomiClearPasswordChecked ? '' : (suwayomiPasswordInput || null),
+                    // Import folders: '' clears (the downloads folder turns importing off).
+                    downloadsDirectory: suwayomiDownloadsDirectoryEl ? suwayomiDownloadsDirectoryEl.value.trim() : null,
+                    importDirectory: suwayomiImportDirectoryEl ? suwayomiImportDirectoryEl.value.trim() : null
+                };
                 groups.push({
                     name: 'Suwayomi settings',
                     method: 'PUT',
                     path: '/api/settings/suwayomi',
-                    body: {
-                        enabled: suwayomiEnabledEl.checked,
-                        baseUrl: document.getElementById('suwayomiBaseUrl').value.trim() || null,
-                        username: document.getElementById('suwayomiUsername').value.trim() || null,
-                        // null keeps the stored password; '' clears it.
-                        password: suwayomiClearPasswordChecked ? '' : (suwayomiPasswordInput || null)
-                    },
+                    body: suwayomiBody,
                     saved: async () => {
                         suwayomiStatusPromise = null;
                         await refreshSuwayomiAvailability();

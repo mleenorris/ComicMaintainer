@@ -46,6 +46,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         typeof(LibraryScanJobHandler),
         typeof(MetadataBackfillJobHandler),
         typeof(MissingIssuesCheckJobHandler),
+        typeof(SuwayomiDownloadImportJobHandler),
     ];
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "cm-coreservices-" + Guid.NewGuid().ToString("N"));

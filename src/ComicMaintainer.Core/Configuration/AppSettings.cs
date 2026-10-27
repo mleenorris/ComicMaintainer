@@ -75,8 +75,8 @@ public class AppSettings
 
     // Suwayomi (Tachiyomi server) download integration. When enabled, the
     // service can ask a Suwayomi server to download the issues a series is
-    // missing; Suwayomi's own download directory is expected to be visible to
-    // this service (e.g. mounted inside the watched directory).
+    // missing. The finished chapters reach the library through the Suwayomi
+    // download import (see SuwayomiDownloadsDirectory).
     public bool EnableSuwayomi { get; set; }
     public string SuwayomiBaseUrl { get; set; } = "http://localhost:4567";
 
@@ -85,6 +85,25 @@ public class AppSettings
 
     /// <summary>Optional password paired with <see cref="SuwayomiUsername"/>. Treated as a secret.</summary>
     public string? SuwayomiPassword { get; set; }
+
+    /// <summary>
+    /// Folder Suwayomi saves downloaded chapters into, as seen by this service
+    /// (Suwayomi lays them out as <c>&lt;source&gt;/&lt;series&gt;/&lt;chapter&gt;.cbz</c>).
+    /// When set, the "Suwayomi Download Import" scheduled job moves finished
+    /// chapter archives out of it into <see cref="SuwayomiImportDirectory"/>.
+    /// Must be an absolute path outside the watched, duplicate, config and
+    /// temp directories. Empty disables the import.
+    /// </summary>
+    public string? SuwayomiDownloadsDirectory { get; set; }
+
+    /// <summary>
+    /// Library folder that imported Suwayomi chapters are moved into, one
+    /// sub-folder per series. A relative path is resolved against
+    /// <see cref="WatchedDirectory"/>; an absolute path must lie inside it.
+    /// Empty means the watched directory itself. A chapter whose series
+    /// already has a folder in the library is moved into that folder instead.
+    /// </summary>
+    public string? SuwayomiImportDirectory { get; set; }
 
     /// <summary>
     /// Client-side rate limit for MangaDex API requests. MangaDex enforces a

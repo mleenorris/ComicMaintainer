@@ -52,4 +52,35 @@ public class SuwayomiUiTests
             new Regex(@"path: '/api/settings/suwayomi',[\s\S]*?saved: async \(\) => \{\s*suwayomiStatusPromise = null;\s*await refreshSuwayomiAvailability\(\);"),
             contents);
     }
+
+    [Fact]
+    public void SuwayomiSettings_LoadAndSaveTheDownloadImportFolders()
+    {
+        var contents = ReadMainJs();
+
+        Assert.Contains("suwayomiDownloadsDirectory.value = settingsData.suwayomi_downloads_directory || ''", contents);
+        Assert.Contains("suwayomiImportDirectory.value = settingsData.suwayomi_import_directory || ''", contents);
+
+        var body = Regex.Match(contents, @"const suwayomiBody = \{.*?\};", RegexOptions.Singleline);
+        Assert.True(body.Success, "Expected to find the Suwayomi settings request body.");
+        // Sent trimmed but not nulled: an emptied field must clear the stored folder.
+        Assert.Matches(@"downloadsDirectory: suwayomiDownloadsDirectoryEl \? suwayomiDownloadsDirectoryEl\.value\.trim\(\) : null", body.Value);
+        Assert.Matches(@"importDirectory: suwayomiImportDirectoryEl \? suwayomiImportDirectoryEl\.value\.trim\(\) : null", body.Value);
+    }
+
+    [Fact]
+    public void SettingsPage_OffersTheDownloadImportFoldersInsteadOfMountingInsideTheLibrary()
+    {
+        var html = WwwrootFiles.Read("index.html");
+
+        Assert.Contains("id=\"suwayomiDownloadsDirectory\"", html);
+        Assert.Contains("id=\"suwayomiImportDirectory\"", html);
+        Assert.DoesNotContain("mount that directory inside the watched directory", html);
+    }
+
+    [Fact]
+    public void ScheduledJobsPage_HasAnIconForTheDownloadImportJob()
+    {
+        Assert.Contains("case 'suwayomi-download-import': return uiIcon('download');", ReadMainJs());
+    }
 }

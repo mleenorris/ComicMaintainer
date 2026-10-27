@@ -236,6 +236,8 @@ public class SettingsService : ISettingsService
         string? baseUrl,
         string? username,
         string? password,
+        string? downloadsDirectory = null,
+        string? importDirectory = null,
         CancellationToken cancellationToken = default)
     {
         var normalizedUrl = string.IsNullOrWhiteSpace(baseUrl) ? null : baseUrl.Trim().TrimEnd('/');
@@ -249,6 +251,24 @@ public class SettingsService : ISettingsService
             throw new ArgumentException($"'{normalizedUrl}' is not a valid http(s) URL", nameof(baseUrl));
         }
 
+        // The import folders are validated against the current library
+        // directories so a typo or an overlapping folder is reported now
+        // rather than silently skipped by every scheduled import.
+        var currentSettings = _appSettings.CurrentValue;
+        var normalizedDownloadsDirectory = Normalize(downloadsDirectory);
+        if (normalizedDownloadsDirectory is not null
+            && !SuwayomiDownloadImportService.TryResolveDownloadsDirectory(normalizedDownloadsDirectory, currentSettings, out _, out var downloadsError))
+        {
+            throw new ArgumentException(downloadsError, nameof(downloadsDirectory));
+        }
+
+        var normalizedImportDirectory = Normalize(importDirectory);
+        if (normalizedImportDirectory is not null
+            && !SuwayomiDownloadImportService.TryResolveImportDirectory(normalizedImportDirectory, currentSettings, out _, out var importError))
+        {
+            throw new ArgumentException(importError, nameof(importDirectory));
+        }
+
         var values = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["EnableSuwayomi"] = enabled,
@@ -260,6 +280,18 @@ public class SettingsService : ISettingsService
         if (password is not null)
         {
             values["SuwayomiPassword"] = password.Length == 0 ? null : password;
+        }
+
+        // Likewise a null folder keeps the stored value, so API clients that
+        // predate the import settings do not wipe them on every save.
+        if (downloadsDirectory is not null)
+        {
+            values["SuwayomiDownloadsDirectory"] = normalizedDownloadsDirectory;
+        }
+
+        if (importDirectory is not null)
+        {
+            values["SuwayomiImportDirectory"] = normalizedImportDirectory;
         }
 
         await PersistSettingsAsync(values, cancellationToken);

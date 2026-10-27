@@ -53,6 +53,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`GET /api/files/folders/files`** lists the files directly in the library root, which the
   per-folder route cannot address (its folder segment would be empty). The Files view uses it
   to show those files.
+- **Suwayomi downloads can be moved into the library automatically.** Suwayomi saves chapters
+  as `<downloads>/<source>/<series>/<chapter>.cbz` and cannot be told to use another layout,
+  so they needed mounting inside the watched directory (leaving an extra source folder level)
+  or a separate script to move them. Set the Suwayomi downloads folder under **Settings →
+  Suwayomi Downloads → Import downloaded chapters** (or `SUWAYOMI_DOWNLOADS_DIR`), and the new
+  *Suwayomi Download Import* scheduled job (`suwayomi-download-import`, every 15 minutes)
+  moves each finished archive into `<series folder>/<chapter>.cbz` and removes the download
+  folders it emptied. A chapter joins the series' existing folder when the library already has
+  the series (matched on title, canonical title or alias, ignoring case and punctuation);
+  otherwise a folder named after the Suwayomi series is created in the optional import folder
+  (`SUWAYOMI_IMPORT_DIR`, relative to the watched directory; the watched directory itself by
+  default). Archives still being written or that do not open are left for the next run, a
+  clashing name gets a ` (2)` suffix, and the run summary flags chapters saved as loose images
+  (enable *Save as CBZ archive* in Suwayomi). The downloads folder must be outside the library
+  and writable by ComicMaintainer.
 - **Condensed sends can be delivered as AZW3.** Combining issues into one book used to pin
   the format picker to EPUB, so a Kindle could not receive a condensed book in its native
   format. The picker now stays available while a condense mode is selected and offers both

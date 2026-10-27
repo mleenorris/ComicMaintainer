@@ -77,6 +77,8 @@ public class SettingsController : ControllerBase
             suwayomi_username = _appSettings.CurrentValue.SuwayomiUsername,
             // As with the SMTP password, the password itself is never returned.
             suwayomi_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.SuwayomiPassword),
+            suwayomi_downloads_directory = _appSettings.CurrentValue.SuwayomiDownloadsDirectory,
+            suwayomi_import_directory = _appSettings.CurrentValue.SuwayomiImportDirectory,
             default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
             allow_registration = _appSettings.CurrentValue.AllowRegistration,
             default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage,
@@ -929,7 +931,9 @@ public class SettingsController : ControllerBase
 
     /// <summary>
     /// Updates the Suwayomi download-server settings. Omit <c>password</c> to
-    /// keep the stored password; send an empty string to clear it.
+    /// keep the stored password; send an empty string to clear it. The
+    /// <c>downloadsDirectory</c> and <c>importDirectory</c> import folders
+    /// follow the same omit-to-keep, empty-to-clear rule.
     /// </summary>
     [HttpPut("suwayomi")]
     public async Task<ActionResult> UpdateSuwayomiSettings([FromBody] SuwayomiSettingsRequest request, CancellationToken cancellationToken = default)
@@ -946,7 +950,9 @@ public class SettingsController : ControllerBase
                 request.BaseUrl,
                 request.Username,
                 request.Password,
-                cancellationToken);
+                downloadsDirectory: request.DownloadsDirectory,
+                importDirectory: request.ImportDirectory,
+                cancellationToken: cancellationToken);
 
             return Ok(new { message = "Suwayomi settings updated successfully" });
         }
@@ -973,6 +979,19 @@ public class SettingsController : ControllerBase
 
         /// <summary>Null keeps the stored password; empty string clears it.</summary>
         public string? Password { get; set; }
+
+        /// <summary>
+        /// Folder Suwayomi saves chapters into, as seen by this service. Null
+        /// keeps the stored value; empty string clears it (disabling the import).
+        /// </summary>
+        public string? DownloadsDirectory { get; set; }
+
+        /// <summary>
+        /// Library folder imported chapters are moved into (relative to the
+        /// watched directory or absolute inside it). Null keeps the stored
+        /// value; empty string clears it (the watched directory itself).
+        /// </summary>
+        public string? ImportDirectory { get; set; }
     }
 
     /// <summary>

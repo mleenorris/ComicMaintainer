@@ -282,6 +282,7 @@ internal static class CoreServiceCollectionExtensions
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
             });
         services.AddSingleton<ISuwayomiService, SuwayomiService>();
+        services.AddSingleton<ISuwayomiDownloadImportService, SuwayomiDownloadImportService>();
         services.AddSingleton<ComicVineSeriesMetadataService>();
         services.AddSingleton<MangaDexSeriesMetadataService>();
         services.AddSingleton<AniListManhwaSeriesMetadataService>();
@@ -384,6 +385,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IScheduledJobHandler, LibraryScanJobHandler>();
         services.AddSingleton<IScheduledJobHandler, MetadataBackfillJobHandler>();
         services.AddSingleton<IScheduledJobHandler, MissingIssuesCheckJobHandler>();
+        services.AddSingleton<IScheduledJobHandler, SuwayomiDownloadImportJobHandler>();
         // Only registered when the database is a file (see AddComicMaintainerData).
         if (services.Any(d => d.ServiceType == typeof(IDatabaseBackupService)))
         {

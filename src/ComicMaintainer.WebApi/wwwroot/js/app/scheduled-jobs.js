@@ -182,6 +182,7 @@
                 case 'series-language-audit': return uiIcon('globe');
                 case 'file-naming-audit': return uiIcon('pencil');
                 case 'missing-issues-check': return uiIcon('puzzle');
+                case 'suwayomi-download-import': return uiIcon('download');
                 case 'library-scan': return uiIcon('folder');
                 case 'metadata-backfill': return uiIcon('tag');
                 case 'database-backup': return uiIcon('hard-drive');

@@ -112,12 +112,18 @@ public interface ISettingsService
     /// Persist the Suwayomi download-server settings. A null
     /// <paramref name="password"/> leaves the stored password untouched so the
     /// UI never has to round-trip the secret; pass an empty string to clear it.
+    /// <paramref name="downloadsDirectory"/> and <paramref name="importDirectory"/>
+    /// configure the Suwayomi download import and follow the same rule: null
+    /// keeps the stored value, an empty string clears it.
     /// </summary>
+    /// <exception cref="ArgumentException">A value is invalid; the message says why.</exception>
     Task UpdateSuwayomiSettingsAsync(
         bool enabled,
         string? baseUrl,
         string? username,
         string? password,
+        string? downloadsDirectory = null,
+        string? importDirectory = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

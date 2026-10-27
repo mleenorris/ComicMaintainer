@@ -87,8 +87,19 @@ public partial class FilesController : ControllerBase
             out resolvedPath,
             _settings.CurrentValue.WatchedDirectory);
 
-    private static string DecodeBase64UrlSafe(string input)
+    private static string DecodeBase64UrlSafe(string input) =>
+        TryDecodeBase64UrlSafe(input, out var decoded) ? decoded : string.Empty;
+
+    /// <summary>
+    /// Decodes a URL-safe base64 path key. Returns false for a key that is not valid
+    /// base64, so callers can tell it apart from the library root's empty key.
+    /// </summary>
+    private static bool TryDecodeBase64UrlSafe(string? input, out string decoded)
     {
+        decoded = string.Empty;
+        if (input is null)
+            return false;
+
         try
         {
             // Convert URL-safe base64 back to standard base64
@@ -100,11 +111,12 @@ public partial class FilesController : ControllerBase
                 case 3: base64 += "="; break;
             }
             var bytes = Convert.FromBase64String(base64);
-            return System.Text.Encoding.UTF8.GetString(bytes);
+            decoded = System.Text.Encoding.UTF8.GetString(bytes);
+            return true;
         }
-        catch
+        catch (FormatException)
         {
-            return string.Empty;
+            return false;
         }
     }
 

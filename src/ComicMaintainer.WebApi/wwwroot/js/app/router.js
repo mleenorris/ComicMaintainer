@@ -138,7 +138,6 @@
             const isHome = view === 'home';
             const isSettings = view === 'settings';
             const isJobs = view === 'jobs';
-            const isLibraryList = view === 'library';
             const hideLibrary = isHome || isSettings || isJobs;
             const overview = document.getElementById('overviewView');
             const health = document.getElementById('libraryHealthDashboard');
@@ -162,10 +161,10 @@
 
             // The list/grid/compact layout toggle is only meaningful on the
             // full library grid (not the overview or a single series page).
-            const layoutToggle = document.getElementById('seriesLayoutToggle');
-            const layoutToolbarMobile = document.getElementById('seriesLayoutToolbarMobile');
-            if (layoutToggle) layoutToggle.hidden = !isLibraryList;
-            if (layoutToolbarMobile) layoutToolbarMobile.hidden = !isLibraryList;
+            // updateSeriesLayoutButtons() decides both its visibility and
+            // which button is active, so the toggle never appears with no
+            // (or the wrong) button marked.
+            updateSeriesLayoutButtons();
         }
 
         function updateNavActiveState() {

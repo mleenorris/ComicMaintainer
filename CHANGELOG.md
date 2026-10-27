@@ -133,6 +133,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/files/process-batch`, `POST /api/files/tags`), like their sibling endpoints. The
   batch endpoints reject the whole request when any path is outside it, instead of silently
   skipping it.
+- **`POST /api/files/tags` reports files whose tags it could not write.** It answered 200
+  whether or not anything was written, so a missing, non-archive or unreadable file looked
+  updated. It now answers `207 Multi-Status` listing the `failed` files when only some could
+  be updated, and `400` when none could, like the single-file `PUT /api/files/{path}/tags`.
+- **A malformed folder link in `GET /api/files/folders/{path}/files` is rejected** with `400`
+  instead of listing the files at the root of the library.
 - **Removing metadata is confined to the library**, like writing it already was.
 - **Resetting the database cancels the jobs that are running**, which kept working on the data
   being deleted; **Reset Filename Format** restores the default instead of "undefined"; and the
@@ -153,6 +159,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.
+- **Deleting selected files clears the selection on the page at once.** The selection bar kept
+  saying "N files selected" with its batch actions enabled, and the boxes stayed ticked, until a
+  live update redrew the library — never, if the job was cancelled before it deleted a file or
+  the event stream was down — and those actions then failed with "No files selected".
 - **Series metadata works for local (password) logins.** Refresh, match, search, rename,
   aliases, preferred language, apply match and removing a match sent no session token and
   failed with 401 unless signed in through Authelia.
@@ -181,10 +191,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **The Library's List/Grid/Compact toggle highlights the current layout when the Library is
+  opened from another page.** The app starts on the Overview and the buttons were only updated
+  while the Library was shown, so none (or a stale one) was highlighted until a layout was
+  picked.
+- **Library covers that failed to load are fetched again when they come back into view**, for
+  example after a server restart or a dropped connection. A failed cover is watched again after
+  a pause that doubles with each failure (2 to 32 seconds, five times at most); before, it stayed
+  blank until the list was re-rendered.
+- **A modified time ahead of the browser's clock no longer reads "-1 days ago"** in the
+  duplicate review and the Files view. Up to a minute ahead reads "Just now"; further ahead
+  shows the date.
 - **Offline use survives the browser restarting the service worker.** A restarted worker used
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or
   script requested offline answered with nothing instead of a network error.
+- **Background cache updates in the service worker are no longer cut off.** The worker stores
+  the scripts, stylesheets, icons, covers and pages it fetches, refreshes cached scripts and
+  stylesheets, and replaces or evicts a cached cover or page once the server has answered. All of
+  that ran after the page had its response, when the browser may already stop the worker, so a
+  refreshed file could stay stale, a cover or page the session may no longer read could stay
+  cached, and a cache could grow past its size limit. The worker now stays running until that
+  work is done.
 - **The cover-write and email queues can be stopped and started again.** A restart left them
   unable to accept work and could cancel the new run; nothing in the app restarts them today.
   A new run also waits for every earlier run still draining, so deliveries and archive
@@ -315,6 +343,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previous page's issue — when the page changed without a click (browser Back/Forward, the
   mouse back button, swipe-back, or the `g h` / `g l` / `g s` / `g j` shortcuts); it now
   closes whenever the page changes.
+
+- **Sign-in and first-run setup messages stay up for their full time, and signing in redirects
+  once.** Each message on the login and setup pages started a hide timer that was never
+  cancelled, so an error shown again (such as a second failed sign-in three seconds after the
+  first) vanished after about two seconds instead of five. After a successful sign-in the Login
+  button was enabled again while "Redirecting..." was shown, so a second click sent another
+  login request; it now stays disabled until the app opens. When setup was still required but a
+  session already existed (an Authelia session or a stored token), the login page redirected to
+  both the setup page and the app, and network timing decided where the user ended up. It now
+  sends the user to setup, and checks for an existing session only when setup is not required.
 
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
@@ -2879,6 +2917,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.353] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.354] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.355] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.356] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.357] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.358] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.359] - 2026-10-27
 
 ### Changed
 - Automatic version bump on merge to master

@@ -172,8 +172,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Authelia users whose username is an email address can sign in without `Remote-Email`.** For a
   username such as `alice@corp.example`, the placeholder `<username>@authelia.local` is not a
   valid address, so the account was never created and every request was answered with 401. Such
-  a username is now used as the account's email; in any other username, each `@` becomes `_` in
-  the placeholder.
+  a username is now used as the account's email; in any other username, each `@` becomes `=` in
+  the placeholder. `=` can't appear in a username, and a username at `authelia.local` isn't used
+  as is, so two users never get the same email, which would lock out whoever signed in second.
 - **About 1 in 54 first sign-ins through Authelia no longer fail with 401.** The unused password
   generated for the new account sometimes lacked a digit, which the password policy requires.
 - **"Run now" on a scheduled job that is already running says so** instead of reporting that the

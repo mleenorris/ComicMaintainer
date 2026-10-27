@@ -29,6 +29,9 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
 
     private static readonly string PasswordAlphabet = string.Concat(PasswordCharacterClasses);
 
+    // Domain of the placeholder email given to a user the proxy sends no email for.
+    private const string FallbackEmailDomain = "authelia.local";
+
     private readonly AutheliaSettings _autheliaSettings;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly RoleManager<ApplicationRole> _roleManager;
@@ -288,12 +291,17 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
 
     /// <summary>
     /// The email of a user the proxy sends no email for. Identity only creates an account whose email it
-    /// accepts as an address (<c>RequireUniqueEmail</c>), so this is the username itself when it is one,
-    /// such as <c>alice@corp.example</c>, and otherwise <c>&lt;username&gt;@authelia.local</c> with every
-    /// '@' of the username replaced by '_'.
+    /// accepts as an address and no other account has (<c>RequireUniqueEmail</c>), so this is the username
+    /// itself when it is an address, such as <c>alice@corp.example</c>, and otherwise
+    /// <c>&lt;username&gt;@authelia.local</c> with every '@' of the username replaced by '='. A username
+    /// cannot contain '=' (Identity's default <c>AllowedUserNameCharacters</c>) and is never used as is
+    /// at <c>authelia.local</c>, so no two usernames get the same email.
     /// </summary>
     private static string FallbackEmail(string username) =>
-        new EmailAddressAttribute().IsValid(username) ? username : $"{username.Replace('@', '_')}@authelia.local";
+        new EmailAddressAttribute().IsValid(username)
+            && !username.EndsWith("@" + FallbackEmailDomain, StringComparison.OrdinalIgnoreCase)
+            ? username
+            : $"{username.Replace('@', '=')}@{FallbackEmailDomain}";
 
     /// <summary>
     /// A random password that satisfies <paramref name="policy"/>. It is never used to sign in,

@@ -314,9 +314,10 @@ public class AutheliaAuthenticationHandlerTests
 
     [Theory]
     [InlineData("alice@corp.example", "alice@corp.example")]                // an email address: used as is
-    [InlineData("@alice", "_alice@authelia.local")]                         // otherwise every '@' becomes '_'
-    [InlineData("alice@", "alice_@authelia.local")]
-    [InlineData("alice@corp@example", "alice_corp_example@authelia.local")]
+    [InlineData("@alice", "=alice@authelia.local")]                         // otherwise every '@' becomes '='
+    [InlineData("alice@", "alice=@authelia.local")]
+    [InlineData("alice@corp@example", "alice=corp=example@authelia.local")]
+    [InlineData("bob@authelia.local", "bob=authelia.local@authelia.local")] // never used as is at the placeholder domain
     public async Task Authenticate_UnknownUserWithAnAtSignInTheUsernameAndNoEmailHeader_IsProvisionedWithAValidEmail(
         string username, string expectedEmail)
     {
@@ -342,8 +343,32 @@ public class AutheliaAuthenticationHandlerTests
     }
 
     [Theory]
+    [InlineData("@alice", "_alice")]
+    [InlineData("alice@", "alice_")]
+    [InlineData("a@b@c", "a_b_c")]
+    [InlineData("bob@authelia.local", "bob")]
+    [InlineData("bob@AUTHELIA.LOCAL", "bob")]
+    public async Task Authenticate_UnknownUsersWithoutEmailHeaders_AreProvisionedWithDistinctEmails(string username, string otherUsername)
+    {
+        // Identity also refuses an email that another account has (compared case-insensitively), so two usernames
+        // must never share a fallback email: whichever signed in second would be refused on every request.
+        var created = new List<ApplicationUser>();
+        _userManager.Setup(u => u.FindByNameAsync(It.IsAny<string>())).ReturnsAsync((ApplicationUser?)null);
+        _userManager
+            .Setup(u => u.CreateAsync(It.IsAny<ApplicationUser>(), It.IsAny<string>()))
+            .Callback((ApplicationUser user, string _) => created.Add(user))
+            .ReturnsAsync(IdentityResult.Success);
+
+        Assert.True((await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", username)))).Succeeded);
+        Assert.True((await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", otherUsername)))).Succeeded);
+
+        Assert.Equal(2, created.Count);
+        Assert.NotEqual(created[0].Email, created[1].Email, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Theory]
     [InlineData("alice@corp.example", "alice@corp.example")]
-    [InlineData("alice@corp@example", "alice_corp_example@authelia.local")]
+    [InlineData("alice@corp@example", "alice=corp=example@authelia.local")]
     public async Task Authenticate_ExistingUserWithAnAtSignInTheUsernameAndNoEmail_ClaimsTheProvisioningFallbackEmail(
         string username, string expectedEmail)
     {

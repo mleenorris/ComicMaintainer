@@ -122,7 +122,7 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
 
     [Theory]
     [InlineData("@corp.example", "@corp.example")]                  // an email address: the account uses it
-    [InlineData("@corp@example", "_corp_example@authelia.local")]   // not one: every '@' becomes '_' in the placeholder
+    [InlineData("@corp@example", "=corp=example@authelia.local")]   // not one: every '@' becomes '=' in the placeholder
     public async Task FirstSignInWithoutForwardedEmail_WhenTheUsernameContainsAnAtSign_ProvisionsAValidEmail(
         string usernameSuffix, string emailSuffix)
     {
@@ -144,6 +144,34 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
         var saved = await _host.FindUserAsync(body.GetProperty("userId").GetString()!);
         Assert.Equal(name, saved.UserName);
         Assert.Equal(expectedEmail, saved.Email);
+    }
+
+    [Theory]
+    [InlineData("@", "_")]
+    [InlineData("@authelia.local", "")]
+    [InlineData("@AUTHELIA.LOCAL", "")]
+    public async Task FirstSignInsWithoutForwardedEmail_OfUsernamesThatCouldShareAFallbackEmail_BothSucceed(
+        string usernameSuffix, string otherUsernameSuffix)
+    {
+        // Identity refuses an email that another account already has, so each of these accounts needs its own
+        // fallback email; otherwise whichever user signed in second was answered with 401 on every request.
+        var prefix = "authelia-pair-" + Guid.NewGuid().ToString("N")[..12];
+        var userIds = new List<string>();
+
+        foreach (var name in new[] { prefix + usernameSuffix, prefix + otherUsernameSuffix })
+        {
+            var (status, body) = await GetAsync("/api/auth/user", headers =>
+            {
+                headers.Add("Remote-User", name);
+                headers.Add("Remote-Groups", "users");
+            });
+
+            Assert.Equal(HttpStatusCode.OK, status);
+            Assert.Equal(name, body.GetProperty("username").GetString());
+            userIds.Add(body.GetProperty("userId").GetString()!);
+        }
+
+        Assert.NotEqual(userIds[0], userIds[1]);
     }
 
     [Fact]

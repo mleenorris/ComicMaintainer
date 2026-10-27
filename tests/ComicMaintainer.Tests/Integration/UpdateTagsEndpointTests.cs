@@ -21,7 +21,7 @@ namespace ComicMaintainer.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class UpdateTagsEndpointTests : IDisposable
 {
-    private readonly string _root = Path.Join(AppContext.BaseDirectory, "update-tags-endpoint-tests", Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(Path.GetTempPath(), "update-tags-endpoint-tests", Guid.NewGuid().ToString("N"));
 
     private string WatchedDirectory => Path.Join(_root, "watched");
 

@@ -70,7 +70,7 @@ public partial class FilesController
             // Validate every path before updating any file, so a rejected path fails the whole request
             foreach (var file in request.Files)
             {
-                if (!string.IsNullOrEmpty(file) && !IsPathSafe(file))
+                if (!string.IsNullOrWhiteSpace(file) && !IsPathSafe(file))
                 {
                     _logger.LogWarning("Attempt to update tags for file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(file)));
                     return BadRequest("One or more file paths are outside the allowed directory");
@@ -81,7 +81,7 @@ public partial class FilesController
             var failed = new List<string>();
             foreach (var file in request.Files)
             {
-                if (!string.IsNullOrEmpty(file))
+                if (!string.IsNullOrWhiteSpace(file))
                 {
                     attempted++;
                     if (!await _processor.UpdateMetadataAsync(file, request.Metadata))

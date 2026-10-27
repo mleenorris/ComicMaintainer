@@ -242,7 +242,7 @@ public sealed class FilesControllerFileActionsTests
         _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), metadata, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var request = new FilesController.UpdateTagsRequest
         {
-            Files = new List<string> { first, "", null!, second },
+            Files = new List<string> { first, "", " ", "\t", null!, second },
             Metadata = metadata
         };
 

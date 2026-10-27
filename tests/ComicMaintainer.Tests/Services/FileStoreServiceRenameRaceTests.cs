@@ -136,7 +136,7 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
         // the save of the in-place rename. The rename then matched no row, which surfaced as
         // a DbUpdateConcurrencyException logged at Error, left the moved file without a row
         // (losing its processing state) and skipped the read-status move.
-        var createdAt = await TrackFileAndMoveItAsync();
+        var originalRow = await TrackFileAndMoveItAsync();
 
         _interceptor.BeforeNextSave = () => _service.RemoveFileAsync(OldPath);
 
@@ -145,7 +145,7 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
 
         // The hook is one-shot, so a null value proves the race was actually injected.
         Assert.Null(_interceptor.BeforeNextSave);
-        await AssertMovedWithStateAsync(createdAt);
+        await AssertMovedWithStateAsync(originalRow);
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
         // An unpaired move is reported as Deleted (old path) plus Created (new path), so the
         // row restored at the new path can in turn collide with the stub row the Created
         // handler inserts there. The state must then be merged onto that row instead.
-        var createdAt = await TrackFileAndMoveItAsync();
+        var originalRow = await TrackFileAndMoveItAsync();
 
         _interceptor.BeforeNextSave = async () =>
         {
@@ -166,7 +166,7 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
         await _service.UpdateFilePathAsync(OldPath, NewPath);
 
         Assert.Null(_interceptor.BeforeNextSave);
-        await AssertMovedWithStateAsync(createdAt);
+        await AssertMovedWithStateAsync(originalRow);
     }
 
     [Fact]
@@ -206,7 +206,7 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
         // With a stub row already at the new path, the old row's state is merged onto the
         // stub and the old row deleted in the same save. If a concurrent writer deletes the
         // old row first, that delete matches no row; it must not take the merge down with it.
-        var createdAt = await TrackFileAndMoveItAsync();
+        var originalRow = await TrackFileAndMoveItAsync();
         await InsertWatcherStubRowAsync();
 
         _interceptor.BeforeNextSave = () => _service.RemoveFileAsync(OldPath);
@@ -215,15 +215,15 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
         await _service.UpdateFilePathAsync(OldPath, NewPath);
 
         Assert.Null(_interceptor.BeforeNextSave);
-        await AssertMovedWithStateAsync(createdAt);
+        await AssertMovedWithStateAsync(originalRow);
     }
 
     /// <summary>
     /// Tracks the file at <see cref="OldPath"/> with processing state, edited metadata and a
     /// read mark, then moves it to <see cref="NewPath"/> on disk the way the processor does
-    /// before updating the store. Returns the row's original creation stamp.
+    /// before updating the store. Returns the row's original persisted state.
     /// </summary>
-    private async Task<DateTime> TrackFileAndMoveItAsync()
+    private async Task<ComicFileEntity> TrackFileAndMoveItAsync()
     {
         await _service.AddFileAsync(OldPath);
         await _service.MarkFileNormalizedAsync(OldPath, true);
@@ -236,14 +236,21 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
         File.Move(OldPath, NewPath);
 
         await using var db = await _factory.CreateDbContextAsync();
-        return (await db.ComicFiles.SingleAsync(e => e.FilePath == OldPath)).CreatedAt;
+        var row = await db.ComicFiles.SingleAsync(e => e.FilePath == OldPath);
+        row.SeriesMetadataVersion = 7;
+        row.MetadataVersion = 8;
+        row.WrittenMetadataVersion = 6;
+        row.LastDbEditAt = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        row.LastWriteAt = new DateTime(2026, 1, 2, 3, 4, 6, DateTimeKind.Utc);
+        await db.SaveChangesAsync();
+        return row;
     }
 
     /// <summary>
     /// Asserts that the file's row, processing state and read state all followed it to
     /// <see cref="NewPath"/>, and that the race was not reported as an error.
     /// </summary>
-    private async Task AssertMovedWithStateAsync(DateTime createdAt)
+    private async Task AssertMovedWithStateAsync(ComicFileEntity originalRow)
     {
         await using var db = await _factory.CreateDbContextAsync();
 
@@ -252,7 +259,12 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
         Assert.True(row.IsNormalized);
         Assert.Equal("Monarch", row.Metadata?.Series);
         Assert.Equal(FileMetadataSource.UserEdit.ToString(), row.MetadataSource);
-        Assert.Equal(createdAt, row.CreatedAt);
+        Assert.Equal(originalRow.CreatedAt, row.CreatedAt);
+        Assert.Equal(originalRow.SeriesMetadataVersion, row.SeriesMetadataVersion);
+        Assert.Equal(originalRow.MetadataVersion, row.MetadataVersion);
+        Assert.Equal(originalRow.WrittenMetadataVersion, row.WrittenMetadataVersion);
+        Assert.Equal(originalRow.LastDbEditAt, row.LastDbEditAt);
+        Assert.Equal(originalRow.LastWriteAt, row.LastWriteAt);
 
         Assert.False(await db.UserFileReadStatuses.AnyAsync(e => e.FilePath == OldPath));
         Assert.True(await db.UserFileReadStatuses

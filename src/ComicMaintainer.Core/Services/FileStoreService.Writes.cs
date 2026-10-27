@@ -314,8 +314,7 @@ public partial class FileStoreService
                         MarkChanged();
                         _logger.LogDebug("Updated file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
                     }
-                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
-                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+                    catch (DbUpdateException ex) when (IsSqliteUniqueConstraintViolation(dbContext, ex))
                     {
                         // Race condition: another writer (typically the watcher observing the
                         // move as a Created event) inserted a row for the new path between the
@@ -464,6 +463,21 @@ public partial class FileStoreService
     private const int SqliteConstraintUnique = 2067;
     private const int SqliteConstraintPrimaryKey = 1555;
 
+    private bool IsSqliteUniqueConstraintViolation(ComicMaintainerDbContext dbContext, DbUpdateException exception)
+    {
+        // SQLite is the application's configured provider; other providers must not use
+        // SQLite result codes to classify a failed save as a recoverable path collision.
+        if (dbContext.Database.ProviderName != "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            _logger.LogDebug("File-path collision recovery requires SQLite; database provider is {Provider}",
+                dbContext.Database.ProviderName);
+            return false;
+        }
+
+        return exception.GetBaseException() is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
+            sqliteEx.SqliteExtendedErrorCode is SqliteConstraintUnique or SqliteConstraintPrimaryKey;
+    }
+
     /// <summary>
     /// Returns the tracked row at the path <paramref name="movedEntity"/> was being renamed to,
     /// inserting a copy of it when the old-path row was deleted concurrently and no other writer
@@ -484,28 +498,12 @@ public partial class FileStoreService
         // Carry the moved row's processing state, timestamps and metadata on the restored row
         // from its first save, so a concurrent reader never caches default flags for it and
         // nothing (e.g. LastWriteAt without metadata) depends on the later merge to survive.
-        var restored = new ComicFileEntity
-        {
-            FilePath = newPath,
-            FileName = movedEntity.FileName,
-            Directory = movedEntity.Directory,
-            FileSize = movedEntity.FileSize,
-            LastModified = movedEntity.LastModified,
-            IsProcessed = movedEntity.IsProcessed,
-            IsRenamed = movedEntity.IsRenamed,
-            IsNormalized = movedEntity.IsNormalized,
-            IsDuplicate = movedEntity.IsDuplicate,
-            IsRead = movedEntity.IsRead,
-            Metadata = movedEntity.Metadata?.Clone(),
-            SeriesMetadataVersion = movedEntity.SeriesMetadataVersion,
-            MetadataVersion = movedEntity.MetadataVersion,
-            WrittenMetadataVersion = movedEntity.WrittenMetadataVersion,
-            LastDbEditAt = movedEntity.LastDbEditAt,
-            LastWriteAt = movedEntity.LastWriteAt,
-            MetadataSource = movedEntity.MetadataSource,
-            CreatedAt = movedEntity.CreatedAt,
-            UpdatedAt = DateTime.UtcNow
-        };
+        var restored = new ComicFileEntity();
+        dbContext.Entry(restored).CurrentValues.SetValues(movedEntity);
+        // Preserve every scalar except the generated key and the last-update stamp.
+        restored.Id = 0;
+        restored.UpdatedAt = DateTime.UtcNow;
+        restored.Metadata = movedEntity.Metadata?.Clone();
         dbContext.ComicFiles.Add(restored);
 
         try
@@ -514,8 +512,7 @@ public partial class FileStoreService
             MarkChanged();
             return restored;
         }
-        catch (DbUpdateException ex) when (ex.GetBaseException() is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
-                                            sqliteEx.SqliteExtendedErrorCode is SqliteConstraintUnique or SqliteConstraintPrimaryKey)
+        catch (DbUpdateException ex) when (IsSqliteUniqueConstraintViolation(dbContext, ex))
         {
             // Another writer (e.g. the watcher) inserted the new-path row meanwhile; merge onto it.
             if (restored.Metadata != null)

@@ -314,6 +314,38 @@ test('a reload that finishes after the series page was left still corrects the s
     assert.equal(page.$('#selectInfo').textContent, '1 file selected');
 });
 
+test('a reload with another filter than the list it replaces unselects nothing that filter hides', async () => {
+    // The page's first request goes out before the saved "unmarked" filter
+    // is applied; that filter hides #4 and #5, which are still there.
+    const server = { unmarked: [1, 2] };
+    const page = await bootLibrary({
+        hash: '#/series/series-1',
+        series: makeSeriesList(2),
+        prefs: { filterMode: 'unmarked' },
+        routes: {
+            [`GET ${ISSUES_PATH}`]: call => issuesResponse(
+                (call.query.filter === 'unmarked' ? server.unmarked : [1, 2, 4, 5]).map(n => makeIssue(n)))
+        }
+    });
+    assert.equal(callsTo(page, ISSUES_PATH)[0].query.filter, undefined);
+    toggleIssue(page, 4);
+    toggleIssue(page, 5);
+
+    fileProcessed(page, filePath(1));
+    await page.settle();
+    assert.equal(callsTo(page, ISSUES_PATH).at(-1).query.filter, 'unmarked');
+    assert.deepEqual(selected(page), [filePath(4), filePath(5)]);
+    assert.equal(page.$('#selectInfo').textContent, '2 files selected');
+
+    // Under the filter of the list it replaces, a reload does unselect the
+    // issues it no longer lists.
+    toggleIssue(page, 2);
+    server.unmarked = [1];
+    fileProcessed(page, filePath(2));
+    await page.settle();
+    assert.deepEqual(selected(page), [filePath(4), filePath(5)]);
+});
+
 test('overlapping reloads unselect by the newest list, whichever answer arrives last', async () => {
     const { page } = await bootSeriesPage();
     toggleIssue(page, 2);

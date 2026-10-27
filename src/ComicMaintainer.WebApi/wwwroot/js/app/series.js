@@ -135,13 +135,20 @@
                     loadingPages: new Set(),
                     allLoaded: false,
                     error: false,
+                    // The filter the list is fetched with.
+                    filter: filterMode,
                     // Issues of the replaced list that this one has to list
                     // again to stay selected (see pruneSeriesIssueSelection).
-                    unconfirmedPaths: takeSeriesIssuePathsToConfirm(previous)
+                    unconfirmedPaths: takeSeriesIssuePathsToConfirm(previous, filterMode)
                 };
                 seriesIssuesCache.set(seriesId, entry);
             }
             entry.loadingPages.add(page);
+            // A page fetched with another filter than the list's makes it a
+            // mix that cannot tell which issues are gone.
+            if (entry.filter !== filterMode) {
+                entry.unconfirmedPaths = null;
+            }
 
             try {
                 let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=${page}`);
@@ -231,11 +238,15 @@
         // list replacing it: the issues it lists, plus any that an unfinished
         // reload of it still has to confirm. Taking them leaves the replaced
         // list nothing to prune, so a stale response landing after the newer
-        // one cannot unselect anything.
-        function takeSeriesIssuePathsToConfirm(cached) {
+        // one cannot unselect anything. Nothing is handed over to a list
+        // fetched with another filter, which may only hide an issue that is
+        // still there.
+        function takeSeriesIssuePathsToConfirm(cached, filter) {
             if (!cached) return null;
-            const paths = new Set(cached.unconfirmedPaths || []);
+            const pending = cached.unconfirmedPaths;
             cached.unconfirmedPaths = null;
+            if (cached.filter !== filter) return null;
+            const paths = new Set(pending || []);
             for (const issue of cached.issues) {
                 if (typeof issue.file_path === 'string' && issue.file_path.length > 0) {
                     paths.add(issue.file_path);

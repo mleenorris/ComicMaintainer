@@ -1,7 +1,9 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -76,20 +78,104 @@ public class SeriesImagesController : ControllerBase
         // re-downloading unchanged images. Image filenames already include a
         // content hash, so the file mtime is a stable revalidation token.
         var fileInfo = new FileInfo(path);
+        if (!fileInfo.Exists)
+        {
+            return NotFound();
+        }
         var lastWriteUtc = fileInfo.LastWriteTimeUtc;
         var etag = $"\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}\"";
+        // HTTP dates carry whole seconds, so validators compare at that precision.
+        var lastModified = new DateTimeOffset(
+            lastWriteUtc.Ticks - (lastWriteUtc.Ticks % TimeSpan.TicksPerSecond),
+            TimeSpan.Zero);
 
-        var requestEtag = Request.Headers[HeaderNames.IfNoneMatch].ToString();
-        if (!string.IsNullOrEmpty(requestEtag)
-            && string.Equals(requestEtag, etag, StringComparison.Ordinal))
+        var precondition = EvaluatePreconditions(etag, lastModified);
+        if (precondition == StatusCodes.Status412PreconditionFailed)
         {
-            Response.Headers[HeaderNames.ETag] = etag;
+            // An error must not carry the image's caching directives, so it
+            // keeps the API-wide no-store.
+            return StatusCode(StatusCodes.Status412PreconditionFailed);
+        }
+
+        // A 304 must repeat the validators and caching directives the 200 would
+        // carry (RFC 9110 §15.4.5), so both responses share these headers.
+        Response.Headers[HeaderNames.ETag] = etag;
+        Response.Headers[HeaderNames.LastModified] = HeaderUtilities.FormatDate(lastModified);
+        Response.Headers[HeaderNames.CacheControl] = "private, max-age=300";
+        if (precondition == StatusCodes.Status304NotModified)
+        {
             return StatusCode(StatusCodes.Status304NotModified);
         }
 
-        Response.Headers[HeaderNames.ETag] = etag;
-        Response.Headers[HeaderNames.CacheControl] = "private, max-age=300";
-        return PhysicalFile(path, record.ImageContentType, enableRangeProcessing: false);
+        FileStream stream;
+        try
+        {
+            stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // Replaced or cleared since it was resolved.
+            Response.Headers.Remove(HeaderNames.ETag);
+            Response.Headers.Remove(HeaderNames.LastModified);
+            Response.Headers[HeaderNames.CacheControl] = "no-store, private";
+            return NotFound();
+        }
+
+        // The preconditions are already decided above, so the file result gets no
+        // validators: ASP.NET Core's executor would otherwise re-evaluate them
+        // without RFC 9110's precedence (it applies If-Unmodified-Since alongside
+        // a passing If-Match, and lets a passing If-Match override a matching
+        // If-Modified-Since).
+        return File(stream, record.ImageContentType, enableRangeProcessing: false);
+    }
+
+    /// <summary>
+    /// Evaluates the request's preconditions against the image's validators in
+    /// the order RFC 9110 §13.2.2 requires: <c>If-Match</c> (strong comparison),
+    /// or <c>If-Unmodified-Since</c> when that is absent, can fail with 412; then
+    /// <c>If-None-Match</c> (weak comparison), or <c>If-Modified-Since</c> when
+    /// that is absent, can answer 304. Null means the image should be sent.
+    /// </summary>
+    private int? EvaluatePreconditions(string etag, DateTimeOffset lastModified)
+    {
+        var headers = Request.GetTypedHeaders();
+        var now = DateTimeOffset.UtcNow;
+
+        var ifMatch = headers.IfMatch;
+        if (ifMatch.Count > 0)
+        {
+            var current = new EntityTagHeaderValue(etag);
+            if (!ifMatch.Any(candidate =>
+                    candidate.Equals(EntityTagHeaderValue.Any)
+                    || candidate.Compare(current, useStrongComparison: true)))
+            {
+                return StatusCodes.Status412PreconditionFailed;
+            }
+        }
+        else if (headers.IfUnmodifiedSince is { } ifUnmodifiedSince
+            && ifUnmodifiedSince <= now
+            && ifUnmodifiedSince < lastModified)
+        {
+            return StatusCodes.Status412PreconditionFailed;
+        }
+
+        var ifNoneMatch = Request.Headers[HeaderNames.IfNoneMatch];
+        if (!StringValues.IsNullOrEmpty(ifNoneMatch))
+        {
+            return ConditionalRequests.IfNoneMatchSatisfied(ifNoneMatch, etag)
+                ? StatusCodes.Status304NotModified
+                : null;
+        }
+
+        if (headers.IfModifiedSince is { } ifModifiedSince
+            && ifModifiedSince <= now
+            && lastModified <= ifModifiedSince)
+        {
+            return StatusCodes.Status304NotModified;
+        }
+
+        return null;
     }
 
     /// <summary>

@@ -145,7 +145,7 @@ Some environment variables remain the same; others are replaced by settings (see
 | WEB_PORT | N/A | Change the host side of the port mapping (`-p 8080:5000`), or set `ASPNETCORE_URLS` outside Docker (default 5000) |
 | FILENAME_FORMAT | `AppSettings__FilenameFormat` | Or **Settings → Filename Format** in the web UI |
 | ISSUE_NUMBER_PADDING | `AppSettings__IssueNumberPadding` | Or **Settings → Issue Number Padding** in the web UI |
-| WATCHER_ENABLED | `AppSettings__WatcherEnableRename`, `AppSettings__WatcherEnableNormalize` | Or **Settings → Watcher**; turn both off to stop automatic processing (manual processing then skips both steps too) |
+| WATCHER_ENABLED | `AppSettings__WatcherEnableRename`, `AppSettings__WatcherEnableNormalize` | Or **Settings → Watcher**; turn both off to stop automatic processing |
 | MAX_WORKERS | `AppSettings__MaxWorkers` | Read at startup |
 | GUNICORN_WORKERS | N/A | Single process, nothing to tune |
 | DB_CACHE_SIZE_MB | N/A | SQLite page cache fixed at 64 MB per connection |

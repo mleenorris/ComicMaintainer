@@ -259,7 +259,7 @@ Settings are read from these sources; a later source overrides an earlier one:
 |---------|---------|------------------|
 | FilenameFormat | `{series} - Chapter {issue}` | **Settings → Filename Format**, or `AppSettings__FilenameFormat` |
 | IssueNumberPadding | `4` | **Settings → Issue Number Padding**, or `AppSettings__IssueNumberPadding` |
-| WatcherEnableRename, WatcherEnableNormalize | `true` | **Settings → Watcher**, or `AppSettings__WatcherEnableRename` / `AppSettings__WatcherEnableNormalize`. Each turns its step (rename, metadata normalize) on or off for all processing, manual included. New files are processed automatically while either is on; turn both off to stop automatic processing |
+| WatcherEnableRename, WatcherEnableNormalize | `true` | **Settings → Watcher**, or `AppSettings__WatcherEnableRename` / `AppSettings__WatcherEnableNormalize`. Each turns its step (rename, metadata normalize) on or off for automatic processing and the Process actions; the explicit Rename/Normalize actions ignore them. New files are processed automatically while either is on; turn both off to stop automatic processing |
 | MaxWorkers | `4` | `AppSettings__MaxWorkers` (files processed in parallel). Read at startup, so restart after changing it |
 | Web server port | `5000` | Docker: publish a different host port, e.g. `-p 8080:5000`. Without Docker: `ASPNETCORE_URLS=http://+:8080` |
 

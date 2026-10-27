@@ -208,9 +208,8 @@ test('on a phone the filter applies to the series list, which stays in series mo
     await page.settle();
 
     assert.equal(page.evaluate('libraryViewMode'), 'series');
-    assert.equal(page.evaluate('currentMobileLibraryView'), 'series');
     assert.equal(seriesCalls(page).at(-1).query.filter, 'missing');
-    // The coerced view switch does not save a view-mode preference.
+    // Only the filter is saved.
     assert.deepEqual(savedPreferences(page), [{ filterMode: 'missing' }]);
     assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
 });
@@ -222,11 +221,12 @@ const ISSUES = [
     { file_path: 'Series 001/Series 001 #002.cbz', file_name: 'Series 001 #002.cbz', issue: '2' }
 ];
 
-async function bootSeriesPage() {
+async function bootSeriesPage(options = {}) {
     const page = await bootLibrary({
         hash: '#/series/series-1',
         series: makeSeriesList(2),
-        routes: { 'GET /api/files/series/series-1/issues': { issues: ISSUES, issue_count: 2 } }
+        routes: { 'GET /api/files/series/series-1/issues': { issues: ISSUES, issue_count: 2 } },
+        ...options
     });
     assert.ok(page.$('#seriesDetailPanel .series-issues-grid'), 'the series page is open');
     return page;
@@ -248,6 +248,23 @@ test('a filter change on a series page re-fetches its issues and refreshes the l
     assert.equal(page.window.location.hash, '#/series/series-1');
     assert.ok(page.$('#seriesDetailPanel .series-issues-grid'));
     assert.equal(page.$('#fileList .series-grid--compact'), null);
+});
+
+test('on a phone a filter change on a series page also keeps the user on it', async () => {
+    // Phones used to switch to the retired Files view here, which closed the
+    // series before its issues could be re-fetched.
+    const page = await bootSeriesPage({ media: { [MOBILE_QUERY]: true } });
+    const issuesBefore = issueCalls(page).length;
+
+    page.click('#headerFilterMenu [data-filter="unread"]');
+    await page.settle();
+
+    assert.equal(issueCalls(page).length, issuesBefore + 1);
+    assert.equal(issueCalls(page).at(-1).query.filter, 'unread');
+    assert.equal(page.window.location.hash, '#/series/series-1');
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'series-1');
+    assert.ok(page.$('#seriesDetailPanel .series-issues-grid'));
+    assert.deepEqual(savedPreferences(page), [{ filterMode: 'unread' }]);
 });
 
 test('a search on a series page re-fetches its issues and refreshes the library behind it', async () => {

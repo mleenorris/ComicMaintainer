@@ -107,6 +107,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   administrators, and `/api/scheduled-jobs` now requires the `CanAdminister` policy for reads
   as well as changes. The jobs include database backups and library-wide auto-corrections,
   which other accounts could previously change or run.
+- **`/api/metadata` reports errors as `{ "error": "…" }`**, like the rest of the API. Its 400
+  and 500 responses had plain-text bodies, so some series metadata messages fell back to a
+  generic text. API clients that read these bodies as text must parse the JSON instead.
+- **Renaming a file or marking it read with a path outside the library** is answered with
+  "File path is outside the allowed directory" and logged, like the other file endpoints,
+  instead of "Invalid file path".
 
 ### Fixed
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
@@ -181,6 +187,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **Changing the filter on a phone keeps the open series on screen.** On screens up to 768 px
+  wide, every filter change still switched to the retired Files view: screen readers heard
+  "Files view selected." each time, and on a series page the library list replaced the series
+  (while the address still pointed at it) instead of its issues being re-filtered. Phones now
+  behave like larger screens.
 - **Offline use survives the browser restarting the service worker.** A restarted worker used
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or

@@ -120,8 +120,6 @@
         let libraryHealthRefreshPending = false;
         let fileListRefreshTimer = null;
         const MOBILE_LIBRARY_VIEW_BREAKPOINT = 768; // Matches the existing mobile CSS breakpoint.
-        const DEFAULT_MOBILE_LIBRARY_VIEW = 'files';
-        let currentMobileLibraryView = DEFAULT_MOBILE_LIBRARY_VIEW;
         let progressResults = [];
         let progressResultLookup = new Set();
         let progressResultElements = new Map();

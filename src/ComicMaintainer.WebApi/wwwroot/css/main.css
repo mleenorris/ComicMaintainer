@@ -838,34 +838,6 @@
             flex-direction: column;
             min-height: 0;
         }
-
-        .mobile-library-view-toggle {
-            display: none;
-            margin-bottom: 16px;
-            padding: 4px;
-            background: var(--bg-secondary);
-            border-radius: 999px;
-            box-shadow: var(--shadow-sm);
-            gap: 4px;
-        }
-
-        .mobile-library-view-btn {
-            flex: 1;
-            border: none;
-            background: transparent;
-            color: var(--text-secondary);
-            border-radius: 999px;
-            padding: 10px 14px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s ease, color 0.2s ease;
-        }
-
-        .mobile-library-view-btn.active {
-            background: var(--accent-primary);
-            color: #fff;
-        }
         
         .actions-bar {
             background: var(--bg-secondary);
@@ -3643,11 +3615,6 @@
                 flex: none;
             }
 
-            .mobile-library-view-toggle {
-                display: flex;
-                margin: 12px 12px 0;
-            }
-
             .library-health-grid {
                 /* 2×2 grid on mobile keeps stat cards from each consuming a full viewport. */
                 grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4668,11 +4635,6 @@
            Mirrors the rules in the (max-width: 768px) block above.
            ───────────────────────────────────────────────────────────────── */
         @media (orientation: landscape) and (max-height: 600px) {
-            /* Mobile Files/Series toggle stays usable. */
-            .mobile-library-view-toggle {
-                display: flex !important;
-                margin: 12px 12px 0;
-            }
             /* Hide the desktop "Files / Series" segmented control. */
             .header-view-toggle:not(.series-layout-toggle) {
                 display: none !important;

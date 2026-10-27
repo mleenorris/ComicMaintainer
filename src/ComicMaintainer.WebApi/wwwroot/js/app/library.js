@@ -92,12 +92,6 @@
             // call sites (preferences with `libraryViewMode === 'files'`, etc.)
             // still resolve to a valid state.
             mode = 'series';
-            if (isMobileLibraryViewport()) {
-                if (currentMobileLibraryView !== 'series') {
-                    currentMobileLibraryView = 'series';
-                    applyMobileLibraryView();
-                }
-            }
 
             if (libraryViewMode === mode && !(mode === 'series' && currentSeriesDetailId)) {
                 return;
@@ -480,12 +474,6 @@
             
             // Save filter mode to preferences
             await setPreferences({ filterMode: mode });
-
-            // Dashboard cards also use setHeaderFilter(), so switch back to the files view on mobile
-            // to immediately show the filtered list after a user taps a library health card.
-            if (isMobileLibraryViewport()) {
-                setMobileLibraryView('files');
-            }
 
             // If a series detail is open, stay inside the series and re-fetch
             // its issues with the new filter (the filter applies to the issue

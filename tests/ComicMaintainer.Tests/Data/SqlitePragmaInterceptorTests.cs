@@ -111,18 +111,10 @@ public sealed class SqlitePragmaInterceptorTests : IDisposable
         // The reader finishes once Default Timeout has run out but well within
         // busy_timeout, so the switch only waits for it when busy_timeout is
         // already set.
-        var readerFinished = Task.Factory.StartNew(
-            () =>
-            {
-                Thread.Sleep(TimeSpan.FromSeconds(2));
-                read.Commit();
-            },
-            CancellationToken.None,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
-
-        await OpenAsync(db, openAsync);
-        await readerFinished;
+        var opened = Task.Run(() => OpenAsync(db, openAsync));
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        read.Commit();
+        await opened;
 
         var connection = db.Database.GetDbConnection();
         Assert.Equal("wal", ExecuteScalar(connection, "PRAGMA journal_mode;"));
@@ -189,6 +181,20 @@ public sealed class SqlitePragmaInterceptorTests : IDisposable
             Assert.Equal(LogLevel.Warning, entry.Level);
             Assert.IsType<SqliteException>(entry.Exception);
         });
+    }
+
+    [Fact]
+    public async Task ConnectionOpenedAsync_PropagatesCancellation()
+    {
+        var logger = new CapturingLogger();
+        var interceptor = new SqlitePragmaInterceptor(logger);
+        await using var connection = new SqliteConnection($"Data Source={CreateRollbackJournalDatabase()};Pooling=False");
+        connection.Open();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => interceptor.ConnectionOpenedAsync(connection, eventData: null!, new CancellationToken(canceled: true)));
+
+        Assert.Empty(logger.Entries);
     }
 
     [Fact]

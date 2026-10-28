@@ -74,7 +74,7 @@ public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
             {
                 Execute(connection, JournalModePragma);
             }
-            catch (Exception ex)
+            catch (DbException ex)
             {
                 _logger?.LogWarning(ex, "Failed to switch SQLite journal mode to WAL");
             }
@@ -102,14 +102,14 @@ public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
             {
                 await ExecuteAsync(connection, JournalModePragma, cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (DbException ex)
             {
                 _logger?.LogWarning(ex, "Failed to switch SQLite journal mode to WAL");
             }
 
             await ExecuteAsync(connection, ConnectionPragmas, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger?.LogWarning(ex, "Failed to apply SQLite PRAGMAs");
         }

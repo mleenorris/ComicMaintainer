@@ -5,8 +5,10 @@ using System.Net.Sockets;
 namespace ComicMaintainer.WebApi.Authentication;
 
 /// <summary>
-/// The reverse proxies allowed to send Authelia forward-auth headers, parsed from
-/// <c>AUTHELIA_TRUSTED_PROXIES</c> (<see cref="ComicMaintainer.Core.Configuration.AutheliaSettings.TrustedProxies"/>).
+/// A list of trusted reverse proxies: the ones allowed to send Authelia forward-auth headers, parsed from
+/// <c>AUTHELIA_TRUSTED_PROXIES</c> (<see cref="ComicMaintainer.Core.Configuration.AutheliaSettings.TrustedProxies"/>),
+/// and the ones whose <c>X-Forwarded-For</c> the rate limiter uses, parsed from <c>TRUSTED_PROXIES</c>
+/// (see <see cref="ComicMaintainer.WebApi.Infrastructure.ForwardedClientAddress"/>).
 /// </summary>
 /// <remarks>
 /// Entries are IPv4/IPv6 addresses or CIDR ranges. IPv4-mapped IPv6 addresses (<c>::ffff:172.18.0.5</c>)
@@ -15,7 +17,7 @@ namespace ComicMaintainer.WebApi.Authentication;
 /// </remarks>
 public sealed class TrustedProxyAllowlist
 {
-    /// <summary>The environment variable that configures the allowlist.</summary>
+    /// <summary>The environment variable that configures the Authelia allowlist (see <see cref="TryParse"/>).</summary>
     public const string EnvironmentVariable = "AUTHELIA_TRUSTED_PROXIES";
 
     private readonly IPNetwork[] _networks;
@@ -37,32 +39,43 @@ public sealed class TrustedProxyAllowlist
         [NotNullWhen(true)] out TrustedProxyAllowlist? allowlist,
         [NotNullWhen(false)] out string? error)
     {
-        allowlist = null;
-        var entries = (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var entries = SplitEntries(value);
         if (entries.Length == 0)
         {
+            allowlist = null;
             error = $"{EnvironmentVariable} is required when Authelia is enabled. Set it to the IP address(es) or CIDR " +
                 $"range(s) of the reverse proxy that sends the Authelia headers, e.g. {EnvironmentVariable}=172.18.0.0/16 " +
                 "(comma-separated, IPv4 or IPv6, no hostnames). See docs/AUTHELIA.md.";
             return false;
         }
 
-        var networks = new IPNetwork[entries.Length];
-        for (var i = 0; i < entries.Length; i++)
+        if (!TryParseEntries(entries, EnvironmentVariable, out allowlist, out error))
         {
-            if (!TryParseEntry(entries[i], out networks[i]))
-            {
-                error = $"Invalid {EnvironmentVariable} entry '{entries[i]}'. Use an IPv4 or IPv6 address (e.g. 172.18.0.5) " +
-                    "or a CIDR range written with its network address (e.g. 172.18.0.0/16); hostnames are not supported. " +
-                    "See docs/AUTHELIA.md.";
-                return false;
-            }
+            error += " See docs/AUTHELIA.md.";
+            return false;
         }
 
-        allowlist = new TrustedProxyAllowlist(networks);
-        error = null;
         return true;
     }
+
+    /// <summary>
+    /// Parses an optional list in the format of <see cref="TryParse"/>: a missing or empty list is valid and trusts
+    /// no address.
+    /// </summary>
+    /// <param name="value">The comma-separated addresses and CIDR ranges.</param>
+    /// <param name="variable">The setting the list comes from, named in the <paramref name="error"/>.</param>
+    /// <param name="allowlist">The parsed list.</param>
+    /// <param name="error">Why an entry is invalid, naming the setting and the entry.</param>
+    public static bool TryParseOptional(
+        string? value,
+        string variable,
+        [NotNullWhen(true)] out TrustedProxyAllowlist? allowlist,
+        [NotNullWhen(false)] out string? error) =>
+        TryParseEntries(SplitEntries(value), variable, out allowlist, out error);
+
+    /// <summary>A list trusting every address of this list and of <paramref name="other"/>.</summary>
+    public TrustedProxyAllowlist Union(TrustedProxyAllowlist other) =>
+        new(_networks.Union(other._networks).ToArray());
 
     /// <summary>Whether <paramref name="address"/> belongs to one of the configured networks.</summary>
     public bool Contains(IPAddress? address)
@@ -79,6 +92,32 @@ public sealed class TrustedProxyAllowlist
     /// <summary>Converts an IPv4-mapped IPv6 address (<c>::ffff:a.b.c.d</c>) to IPv4; other addresses are returned as is.</summary>
     public static IPAddress Normalize(IPAddress address) =>
         address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+
+    private static string[] SplitEntries(string? value) =>
+        (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static bool TryParseEntries(
+        string[] entries,
+        string variable,
+        [NotNullWhen(true)] out TrustedProxyAllowlist? allowlist,
+        [NotNullWhen(false)] out string? error)
+    {
+        var networks = new IPNetwork[entries.Length];
+        for (var i = 0; i < entries.Length; i++)
+        {
+            if (!TryParseEntry(entries[i], out networks[i]))
+            {
+                allowlist = null;
+                error = $"Invalid {variable} entry '{entries[i]}'. Use an IPv4 or IPv6 address (e.g. 172.18.0.5) " +
+                    "or a CIDR range written with its network address (e.g. 172.18.0.0/16); hostnames are not supported.";
+                return false;
+            }
+        }
+
+        allowlist = new TrustedProxyAllowlist(networks);
+        error = null;
+        return true;
+    }
 
     private static bool TryParseEntry(string entry, out IPNetwork network)
     {

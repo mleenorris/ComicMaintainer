@@ -97,6 +97,23 @@ public sealed class FolderFilesRouteTests : IDisposable
         Assert.Equal(new[] { "abc #1.cbz" }, abc.Files);
     }
 
+    // "a" is the issue's example; "YWJjZ" is "YWJjZA" ("abcd") with its last
+    // character cut off. Both used to decode to the root's empty path.
+    [Theory]
+    [InlineData("a")]
+    [InlineData("YWJjZ")]
+    public async Task AnUndecodableFolderKeyIsRejectedInsteadOfListingTheRoot(string encodedPath)
+    {
+        await using var factory = CreateFactory(authorized: true);
+        await SeedAsync(factory, Path.Join(WatchedDirectory, "Root Issue.cbz"));
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync($"/api/files/folders/{encodedPath}/files");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("Invalid folder path", await response.Content.ReadAsStringAsync());
+    }
+
     [Fact]
     public async Task BothFolderRoutesRequireAuthentication()
     {

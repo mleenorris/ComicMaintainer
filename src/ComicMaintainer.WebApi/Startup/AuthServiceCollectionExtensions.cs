@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.WebApi.Authentication;
@@ -36,17 +35,28 @@ internal static class AuthServiceCollectionExtensions
         .AddEntityFrameworkStores<ComicMaintainerDbContext>()
         .AddDefaultTokenProviders();
 
-        // Configure JWT Authentication
-        var jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>() ?? new JwtSettings();
-        var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET") ?? jwtSettings.Secret;
+        // Configure JWT Authentication. Read through the same binder as IOptions<JwtSettings> (which AuthService signs
+        // tokens with), so tokens are validated with the secret they were signed with.
+        var jwtSettings = JwtSettingsBinder.Load(configuration);
+        var jwtSecret = jwtSettings.Secret;
+        var defaultSecret = "YourSecretKeyHere-ChangeInProduction-MustBeAtLeast32CharactersLong!";
 
-        if (string.IsNullOrEmpty(jwtSecret))
+        // A blank JWT_SECRET counts as unset, but it was meant to hold the secret (such as `$(cat jwt_secret.txt)` with
+        // the file missing), so it must not fall back to the public placeholder shipped in appsettings.json.
+        if (JwtSettingsBinder.IsSecretVariableBlank() && (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret == defaultSecret))
+        {
+            throw new InvalidOperationException(
+                "JWT_SECRET is set but blank, and JwtSettings:Secret is missing or blank too (the placeholder shipped in " +
+                "appsettings.json does not count). Set JWT_SECRET to a random secret of at least 32 characters, e.g. the " +
+                "output of `openssl rand -base64 48`.");
+        }
+
+        if (string.IsNullOrWhiteSpace(jwtSecret))
         {
             throw new InvalidOperationException("JWT_SECRET must be configured in appsettings.json or environment variable");
         }
 
         // Warn if using default JWT secret
-        var defaultSecret = "YourSecretKeyHere-ChangeInProduction-MustBeAtLeast32CharactersLong!";
         if (jwtSecret == defaultSecret)
         {
             Log.Warning("⚠️ WARNING: Using default JWT secret! Please set JWT_SECRET environment variable for production.");

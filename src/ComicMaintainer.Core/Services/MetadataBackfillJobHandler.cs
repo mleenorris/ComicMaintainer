@@ -73,6 +73,10 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
                     failed++;
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 failed++;

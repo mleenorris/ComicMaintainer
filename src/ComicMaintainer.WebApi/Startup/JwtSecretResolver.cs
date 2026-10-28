@@ -186,7 +186,11 @@ internal static class JwtSecretResolver
         string contents;
         try
         {
-            contents = File.ReadAllText(path);
+            // FileShare.ReadWrite: on Windows, File.ReadAllText's FileShare.Read conflicts with the write handle of an
+            // instance that is still saving the key, which would fail this start instead of waiting for the key.
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            contents = reader.ReadToEnd();
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {

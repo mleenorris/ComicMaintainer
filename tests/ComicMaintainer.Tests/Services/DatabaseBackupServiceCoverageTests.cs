@@ -173,7 +173,7 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
         var service = CreateService();
         var name = $"comicmaintainer-20261020-040000-{Guid.NewGuid().ToString("N")[..16]}.db";
         Assert.True(DatabaseBackupService.IsValidBackupName(name));
-        Assert.False(File.Exists(Path.Combine(fileSystemRoot, name)));
+        Assert.False(File.Exists(Path.Join(fileSystemRoot, name)));
 
         Assert.Equal(fileSystemRoot, service.BackupDirectory);
         Assert.Null(service.OpenBackup(name));

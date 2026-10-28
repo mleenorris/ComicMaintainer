@@ -44,6 +44,8 @@ public interface IComicProcessorService
 
     /// <summary>
     /// Get series-focused metadata, including alternate/grouping fields when available.
+    /// Returns null without opening the file when its path resolves outside the
+    /// watched and duplicate directories.
     /// </summary>
     Task<SeriesMetadata?> GetSeriesMetadataAsync(string filePath, CancellationToken cancellationToken = default);
 

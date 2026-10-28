@@ -356,6 +356,28 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task GetProviders_CallerCancelled_LetsTheCancellationThrough()
+    {
+        _cts.Cancel();
+        _external.Setup(e => e.CheckHealthAsync(_cts.Token))
+            .ThrowsAsync(new OperationCanceledException(_cts.Token));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CreateController().GetProviders(_cts.Token));
+    }
+
+    [Fact]
+    public async Task GetProviders_CancellationTheCallerDidNotAskFor_Returns500()
+    {
+        _external.Setup(e => e.CheckHealthAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("timed out"));
+
+        var result = await CreateController().GetProviders(_cts.Token);
+
+        Assert500(result.Result, "Error retrieving provider health");
+    }
+
+    [Fact]
     public async Task GetProviders_Composite_CollapsesAniListVariantsIntoOneEntryAtFirstPosition()
     {
         var comicVine = new ProviderHealth { Name = "ComicVine", Enabled = true, Configured = true, Reachable = true };

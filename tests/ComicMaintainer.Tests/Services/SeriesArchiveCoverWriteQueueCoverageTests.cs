@@ -93,6 +93,36 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
     }
 
     [Fact]
+    public async Task WriterCancellationTheQueueDidNotAskFor_IsLoggedAsAFailure_AndLaterRequestsStillRun()
+    {
+        var healthyProcessed = new TaskCompletionSource();
+        var writerTimeout = new TaskCanceledException("writer timed out");
+        _writer
+            .Setup(w => w.WriteAsync("slow", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(writerTimeout);
+        _writer
+            .Setup(w => w.WriteAsync("healthy", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                healthyProcessed.TrySetResult();
+                return Task.CompletedTask;
+            });
+
+        var queue = CreateQueue();
+        await queue.StartAsync();
+
+        queue.EnqueueWrite("slow", "/cache/slow.png", "image/png");
+        queue.EnqueueWrite("healthy", "/cache/healthy.png", "image/png");
+
+        // Only the queue's own stop may end the consumer.
+        await healthyProcessed.Task.WaitAsync(WaitLimit);
+        await queue.StopAsync().WaitAsync(WaitLimit);
+
+        VerifyLog(LogLevel.Debug, "Failed to write embedded first-archive series cover for slow", writerTimeout, Times.Once());
+        VerifyLog(LogLevel.Error, "terminated unexpectedly", null, Times.Never());
+    }
+
+    [Fact]
     public async Task StopAsync_WithExpiredDeadline_CancelsInFlightWriteAndSkipsPendingRequests()
     {
         var started = new TaskCompletionSource();

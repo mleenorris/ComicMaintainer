@@ -85,6 +85,7 @@ services:
       - WATCHED_DIR=/watched_dir
       - PUID=1000
       - PGID=1000
+      - TRUSTED_PROXIES=172.18.0.0/16  # swag-network's subnet: gives each client its own rate limit (see below)
       # No BASE_PATH needed for subdomain
     volumes:
       - /path/to/comics:/watched_dir
@@ -136,6 +137,7 @@ services:
       - BASE_PATH=/comics  # REQUIRED for subfolder deployment
       - PUID=1000
       - PGID=1000
+      - TRUSTED_PROXIES=172.18.0.0/16  # swag-network's subnet: gives each client its own rate limit (see below)
     volumes:
       - /path/to/comics:/watched_dir
       - /path/to/config:/Config
@@ -159,6 +161,15 @@ docker restart swag
 
 **4. Access your service:**
 Navigate to `https://yourdomain.com/comics`
+
+### Trusted Proxies (`TRUSTED_PROXIES`)
+
+Every request reaches ComicMaintainer from SWAG's address, so without `TRUSTED_PROXIES` all signed-out visitors share
+one rate limit (100 requests a minute), and a single client can stop everyone from signing in until the minute is
+over. Set it to the subnet of `swag-network` (`docker network inspect swag-network --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}'`)
+or to SWAG's fixed IP address: requests from SWAG are then counted per client, using the address that SWAG's
+`proxy.conf` appends to `X-Forwarded-For`. With Authelia enabled, `AUTHELIA_TRUSTED_PROXIES` already covers this. See
+[Trusted Proxies and Rate Limiting](../REVERSE_PROXY.md#trusted-proxies-and-rate-limiting).
 
 ## Authentication Options
 

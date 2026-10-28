@@ -241,7 +241,8 @@ public class MetadataController : ControllerBase
             }
             return Ok(new { providers = MergeAniListProviders(providers) });
         }
-        catch (Exception ex)
+        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a health error.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error retrieving provider health"));
             return StatusCode(500, "Error retrieving provider health");

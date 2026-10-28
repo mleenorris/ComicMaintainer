@@ -9,6 +9,11 @@ public enum ScheduledJobStatus
     Running,
     Success,
     Failed,
+    /// <summary>
+    /// No longer recorded: a scheduled run that finds another still in progress
+    /// is only logged and counted, so it cannot hide that run. Kept so rows
+    /// written by earlier versions still read back.
+    /// </summary>
     Skipped,
     Cancelled
 }

@@ -3,6 +3,10 @@ using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32.SafeHandles;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using SharpCompress.Archives;
@@ -252,4 +256,149 @@ public partial class ComicProcessorService
         entryPath = Path.Join(directory, Path.GetFileName(fullPath));
         return true;
     }
+
+    private static SafeFileHandle? OpenRenameDirectory(string sourcePath)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return null;
+        }
+
+        var directoryPath = Path.GetDirectoryName(sourcePath)
+            ?? throw new IOException("Cannot determine the source directory.");
+        var directoryFlag = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 0x4000 : 0x10000;
+        var descriptor = OpenLinuxDirectory(directoryPath, directoryFlag | 0x80000 | 0x200000);
+        if (descriptor < 0)
+        {
+            throw new IOException($"Could not open the source directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
+        }
+
+        var handle = new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
+        try
+        {
+            if (!string.Equals(ReadLinuxDirectoryPath(descriptor), directoryPath, StringComparison.Ordinal))
+            {
+                throw new IOException("The source directory changed while it was being opened.");
+            }
+
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    private string MoveFileInRenameDirectory(SafeFileHandle? directoryHandle, string sourcePath, string targetPath)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            File.Move(sourcePath, targetPath);
+            return targetPath;
+        }
+
+        if (directoryHandle is null || directoryHandle.IsInvalid)
+        {
+            throw new IOException("The source directory handle is unavailable.");
+        }
+
+        var directoryDescriptor = directoryHandle.DangerousGetHandle().ToInt32();
+        var currentDirectory = ReadLinuxDirectoryPath(directoryDescriptor);
+        if (!LibraryPathValidator.IsWithin(currentDirectory, _settings.WatchedDirectory) &&
+            !LibraryPathValidator.IsWithin(currentDirectory, _settings.DuplicateDirectory))
+        {
+            throw new IOException("The source directory is outside the allowed directories.");
+        }
+
+        var result = RenameLinuxNoReplace(
+            directoryDescriptor,
+            Path.GetFileName(sourcePath),
+            directoryDescriptor,
+            Path.GetFileName(targetPath),
+            1);
+        if (result != 0)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            if (error is not (22 or 38 or 95))
+            {
+                throw new IOException($"Could not rename the file: {new Win32Exception(error).Message}");
+            }
+
+            OnLinuxRenameFallback();
+            throw new IOException("Atomic no-overwrite rename is not supported by this filesystem.");
+        }
+
+        return Path.Combine(ReadLinuxDirectoryPath(directoryDescriptor), Path.GetFileName(targetPath));
+    }
+
+    private static string ReadLinuxDirectoryPath(int descriptor)
+    {
+        var buffer = new byte[4096];
+        var length = ReadLinuxLink($"/proc/self/fd/{descriptor}", buffer, (nuint)buffer.Length);
+        if (length <= 0 || length >= buffer.Length)
+        {
+            throw new IOException($"Could not resolve the opened directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
+        }
+
+        var path = Encoding.UTF8.GetString(buffer, 0, (int)length);
+        return path;
+    }
+
+    private string GetAllowedLogicalPath(string resolvedPath)
+    {
+        foreach (var allowedDirectory in new[] { _settings.WatchedDirectory, _settings.DuplicateDirectory })
+        {
+            if (string.IsNullOrWhiteSpace(allowedDirectory))
+            {
+                continue;
+            }
+
+            var logicalRoot = Path.GetFullPath(allowedDirectory);
+            var resolvedRoot = LibraryPathValidator.ResolveRealPath(logicalRoot);
+            if (!LibraryPathValidator.IsWithin(resolvedPath, resolvedRoot))
+            {
+                continue;
+            }
+
+            var relativePath = Path.GetRelativePath(resolvedRoot, resolvedPath);
+            var logicalPath = Path.GetFullPath(Path.Combine(logicalRoot, relativePath));
+            if (TryResolveAllowedPath(logicalPath, out var verifiedPath) &&
+                string.Equals(verifiedPath, resolvedPath, StringComparison.Ordinal))
+            {
+                return logicalPath;
+            }
+        }
+
+        throw new IOException("The renamed file does not resolve within a configured library directory.");
+    }
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenLinuxDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+
+    [DllImport("libc", EntryPoint = "readlink", SetLastError = true)]
+    private static extern nint ReadLinuxLink(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        [Out] byte[] buffer,
+        nuint bufferSize);
+
+    protected virtual int RenameLinuxNoReplace(
+        int sourceDirectory,
+        string sourceName,
+        int targetDirectory,
+        string targetName,
+        uint flags) =>
+        RenameLinuxNoReplaceNative(sourceDirectory, sourceName, targetDirectory, targetName, flags);
+
+    protected virtual void OnLinuxRenameFallback()
+    {
+    }
+
+    [DllImport("libc", EntryPoint = "renameat2", SetLastError = true)]
+    private static extern int RenameLinuxNoReplaceNative(
+        int sourceDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceName,
+        int targetDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName,
+        uint flags);
 }

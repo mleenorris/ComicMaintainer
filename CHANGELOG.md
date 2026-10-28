@@ -306,6 +306,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.
+- **Cancelling a job just as it finishes answers "already completed" instead of 500.** The
+  cancel request (`POST /api/jobs/{jobId}/cancel`) failed with "Error cancelling job" and logged
+  an error, a database reset at that moment failed the same way, and shutting down stopped
+  cancelling the remaining jobs.
 - **Deleting selected files clears the selection on the page at once.** The selection bar kept
   saying "N files selected" with its batch actions enabled, and the boxes stayed ticked, until a
   live update redrew the library — never, if the job was cancelled before it deleted a file or

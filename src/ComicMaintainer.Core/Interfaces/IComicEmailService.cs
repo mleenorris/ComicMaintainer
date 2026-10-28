@@ -126,4 +126,29 @@ public interface IComicEmailService
 
     /// <summary>Most recent deliveries, newest first.</summary>
     Task<IReadOnlyList<ComicEmailDeliveryDto>> GetRecentDeliveriesAsync(int limit, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// One page of the delivery history, newest first, with the total number
+    /// of deliveries and how many are still pending. <paramref name="limit"/>
+    /// is clamped to 1–500 and a negative <paramref name="offset"/> to 0.
+    /// </summary>
+    Task<ComicEmailDeliveryPage> GetDeliveriesPageAsync(int offset, int limit, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cancels a pending delivery. A delivery that is waiting in the queue is
+    /// cancelled immediately; one that is being converted is asked to stop and
+    /// reported as <see cref="EmailDeliveryCancelOutcome.Stopping"/> if the
+    /// conversion does not stop promptly. A message that is already being
+    /// handed to the mail server is never interrupted.
+    /// </summary>
+    Task<EmailDeliveryCancelResult> CancelDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default);
+
+    /// <summary>Cancels every pending delivery, including the one being prepared.</summary>
+    Task<EmailDeliveryBulkCancelResult> CancelPendingDeliveriesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// When the email rate limit is holding the next delivery back, the UTC
+    /// time it becomes eligible to be sent; otherwise null.
+    /// </summary>
+    DateTime? RateLimitedUntil { get; }
 }

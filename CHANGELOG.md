@@ -31,9 +31,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or that cleared the key by sending the settings back without it, must be updated.
 
 ### Added
+- **Pending email deliveries can be cancelled.** Email Delivery History gives every pending
+  delivery a **Cancel** button and adds **Cancel All Pending**, which covers every page. A
+  delivery still in the queue is cancelled at once; one being prepared (converted to EPUB/AZW3
+  or waiting for the rate limit) is stopped and its temporary file removed; one already being
+  handed to the mail server is reported as such and finishes normally. Cancelled deliveries get
+  the new `cancelled` status and do not count as delivered, so they can be sent again. API:
+  `POST /api/email/deliveries/{id}/cancel` and `POST /api/email/deliveries/cancel-pending`.
+  This is also the way to clear deliveries left `pending` by a restart, which are not resumed.
+- **Email Delivery History is paginated.** It used to show only the 50 most recent deliveries;
+  it now pages through the whole history, 50 at a time, and shows the total.
+  `GET /api/email/deliveries` accepts `offset` alongside `limit` and returns `total`, `offset`,
+  `limit`, `pending_count` and `rate_limited_until` next to `deliveries`.
+- **Email rate limiting.** **Settings → Email Delivery** can cap comic emails per rolling hour
+  (`EMAIL_MAX_SENDS_PER_HOUR`) and per rolling day (`EMAIL_MAX_SENDS_PER_DAY`), and enforce a
+  minimum gap between them (`EMAIL_MIN_SECONDS_BETWEEN_SENDS`); `0`, the default, disables each
+  limit. Deliveries over the limit stay pending, in order, and go out as it allows, and the
+  history shows when the limit is holding them back. Only emails actually sent count. API:
+  `PUT /api/settings/email-rate-limit`. See
+  [Rate limiting](docs/EMAIL_DELIVERY.md#rate-limiting).
 - **`GET /api/files/folders/files`** lists the files directly in the library root, which the
   per-folder route cannot address (its folder segment would be empty). The Files view uses it
   to show those files.
+- **Suwayomi downloads can be moved into the library automatically.** Suwayomi saves chapters
+  as `<downloads>/<source>/<series>/<chapter>.cbz` and cannot be told to use another layout,
+  so they needed mounting inside the watched directory (leaving an extra source folder level)
+  or a separate script to move them. Set the Suwayomi downloads folder under **Settings →
+  Suwayomi Downloads → Import downloaded chapters** (or `SUWAYOMI_DOWNLOADS_DIR`), and the new
+  *Suwayomi Download Import* scheduled job (`suwayomi-download-import`, every 15 minutes)
+  moves each finished archive into `<series folder>/<chapter>.cbz` and removes the download
+  folders it emptied. A chapter joins the series' existing folder when the library already has
+  the series (matched on title, canonical title or alias, ignoring case and punctuation);
+  otherwise a folder named after the Suwayomi series is created in the optional import folder
+  (`SUWAYOMI_IMPORT_DIR`, relative to the watched directory; the watched directory itself by
+  default). Archives still being written or that do not open are left for the next run, a
+  clashing name gets a ` (2)` suffix, and the run summary flags chapters saved as loose images
+  (enable *Save as CBZ archive* in Suwayomi). The downloads folder must be outside the library
+  and writable by ComicMaintainer.
 - **Condensed sends can be delivered as AZW3.** Combining issues into one book used to pin
   the format picker to EPUB, so a Kindle could not receive a condensed book in its native
   format. The picker now stays available while a condense mode is selected and offers both
@@ -116,6 +150,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in a book condensed from many issues. The error now names both:
   `Page '002.jpg' in Batman 012.cbz could not be read: Unsupported compression method: 255`.
   Pages that cannot be decoded include the same context.
+- **One client can no longer stop everyone from signing in behind a reverse proxy.** Signed-out
+  requests are rate-limited per client address, but behind a proxy every request comes from the
+  proxy's address, so one client sending more than about 110 requests a minute (a
+  password-guessing script, say) made signing in fail with `429 Too Many Requests` for every
+  user until the minute was over. Set the new `TRUSTED_PROXIES` to your proxy's address or its
+  Docker network's subnet (with Authelia enabled, `AUTHELIA_TRUSTED_PROXIES` is used too), and
+  requests from the proxy are counted per client, by the address it appends to
+  `X-Forwarded-For`; addresses a client writes into the header itself are ignored. An invalid
+  entry stops the app from starting. See
+  [Trusted Proxies and Rate Limiting](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting).
+- **A blank `JWT_SECRET` no longer prevents startup when `JwtSettings:Secret` is
+  configured.** Startup took an empty variable (`docker run -e JWT_SECRET=`, `JWT_SECRET=` in
+  an env file, or `-e JWT_SECRET="$(cat jwt_secret.txt)"` with a missing file) for the secret
+  and exited with
+  "JWT_SECRET must be configured in appsettings.json or environment variable", even when
+  `JwtSettings:Secret` was set. A blank `JWT_SECRET` now counts as unset both where tokens are
+  signed and where they are validated, so `JwtSettings:Secret` is used. If that is missing or
+  blank too, or holds only the placeholder shipped in `appsettings.json` (which is public, so
+  anyone could sign tokens with it), the app still refuses to start, and the error now says
+  that `JWT_SECRET` is blank.
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
   check for administration read the Authelia settings without that variable, so when the admin
   groups were set only there (the documented way) every signed-in user who was not ReadOnly,
@@ -140,16 +194,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/files/process-batch`, `POST /api/files/tags`), like their sibling endpoints. The
   batch endpoints reject the whole request when any path is outside it, instead of silently
   skipping it.
+- **`POST /api/files/tags` reports files whose tags it could not write.** It answered 200
+  whether or not anything was written, so a missing, non-archive or unreadable file looked
+  updated. It now answers `207 Multi-Status` listing the `failed` files when only some could
+  be updated, and `400` when none could, like the single-file `PUT /api/files/{path}/tags`.
+- **A malformed folder link in `GET /api/files/folders/{path}/files` is rejected** with `400`
+  instead of listing the files at the root of the library.
 - **Removing metadata is confined to the library**, like writing it already was.
+- **Reading series metadata is confined to the library**, like reading a comic's other metadata
+  already was.
+- **Processing a file renames the file that was checked.** The rename used the path as given,
+  so a folder on it replaced by a link during processing could redirect the rename outside the
+  library. It now moves the checked, link-resolved file, and skips the rename if a folder on
+  that path has been replaced by a link since the check.
 - **Resetting the database cancels the jobs that are running**, which kept working on the data
   being deleted; **Reset Filename Format** restores the default instead of "undefined"; and the
   GitHub token setting is never written to the log.
+- **Saving the External Series Metadata settings or the series cover size limits changes all of
+  them or none.** Each field was written to `user-settings.json` separately, so a request that
+  was aborted or hit a write error partway through kept the fields saved so far (metadata
+  lookups could end up switched on with the old ComicVine key) and still answered 500. Each
+  group is now saved in one write. A cover size so small that it rounds to 0 bytes is rejected
+  with 400 instead of 500.
 - **Editing or removing a comic's metadata no longer deletes its large pages.** Rewriting
   ComicInfo.xml rebuilt the archive without any entry over 10 MB (or without a name) and then
   replaced the original, so big pages were lost for good. Archives are now streamed entry by
   entry with nothing skipped, and if an entry cannot be copied the original is left untouched.
 - **Two simultaneous updates of a newly added file no longer lose one of them**, and renaming a
   file to its own path no longer deletes its database record.
+- **A file re-added while the database is briefly unavailable keeps its processed state.** When
+  its record could not be read (a transient error such as "database is locked"), the file was
+  rebuilt in memory as not renamed, not normalized and created just now, so until the next
+  restart it was listed as unprocessed, was processed again and could push its series to the top
+  of Series Updates. A duplicate could also lose its duplicate flag, in the database as well. The
+  file now keeps all of these, as it already kept its metadata.
+- **Saving the page and marking a comic read at the same moment no longer undoes one of them.**
+  The reader does both when the first page it shows is the last one (a one-page comic, say). If
+  the user had no read record for the comic yet, both requests created one and the request that
+  lost overwrote the other's change with its defaults, so the comic stayed unread or its saved
+  page went back to 1. Only each request's own change is applied now.
 - **An unrelated error while replacing a file is retried** instead of being mistaken for a
   cross-device move and falling back to a non-atomic copy.
 - **Comics whose names contain consecutive dots ("What If...?") are tracked and usable.** They
@@ -160,11 +243,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.
+- **Deleting selected files clears the selection on the page at once.** The selection bar kept
+  saying "N files selected" with its batch actions enabled, and the boxes stayed ticked, until a
+  live update redrew the library — never, if the job was cancelled before it deleted a file or
+  the event stream was down — and those actions then failed with "No files selected".
 - **Series metadata works for local (password) logins.** Refresh, match, search, rename,
   aliases, preferred language, apply match and removing a match sent no session token and
   failed with 401 unless signed in through Authelia.
 - **Uploading a series image from the series page works**; the request was sent as JSON instead
   of a file upload and always rejected.
+- **Series images are revalidated like comic covers.** `GET /api/series-images/{key}` compared
+  `If-None-Match` with its ETag as an exact string, so a client sending a weak tag (`W/"…"`), a
+  list of tags or `*` without `If-Modified-Since` downloaded the whole image again instead of
+  getting 304 Not Modified. Tags are now compared as RFC 9110 requires, by the check the cover
+  endpoint uses. The 304 repeats the `Cache-Control: private, max-age=300` of the full response
+  instead of the API-wide `no-store`, which told browsers not to keep the image, and a tag that
+  no longer matches gets the current image even when `If-Modified-Since` still matches.
+  `If-Match`, `If-Unmodified-Since` and `If-Modified-Since` are applied in RFC 9110 order, and a
+  412 keeps `no-store` instead of the image's `max-age`.
 - **Metadata refresh progress finishes.** The job status was sent as a number, so the progress
   toast showed a digit, kept polling forever and never ran the final library refresh. Finished
   refresh jobs are now forgotten after 30 minutes (or once 50 newer ones finished) instead of
@@ -173,25 +269,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cancelling a metadata search is no longer reported as a provider failure or a "no match"**:
   the provider health stays as it was, and the search endpoints stop logging an error and
   answering 500 when the browser gives up on the request.
+- **Cancelled requests, jobs and shutdowns are no longer swallowed or reported as other
+  failures.** Leaving the Library page while provider health loads no longer marks every
+  metadata provider "Timed out" for a minute. Applying a provider image that times out while
+  its host is checked answers 504 instead of 400 "Cannot resolve image host". Cancelling a
+  rename job during a series lookup no longer renames the file to its unresolved series name,
+  and a cancelled rename never moves the file. A cancelled metadata refresh no longer logs a
+  "refresh failed" warning. A library scan stopped by shutdown no longer queues normalize jobs
+  or reports one as "job record evicted". A series cover write that fails with a cancellation
+  the queue did not ask for is logged and skipped, instead of silently stopping all later cover
+  writes until restart.
 - **First sign-in through Authelia works without `Remote-Email` or `Remote-Name`.** The account
   gets `<username>@authelia.local` and the username as its name; before, sign-in failed with
   401.
+- **Authelia users whose username is an email address can sign in without `Remote-Email`.** For a
+  username such as `alice@corp.example`, the placeholder `<username>@authelia.local` is not a
+  valid address, so the account was never created and every request was answered with 401. Such
+  a username is now used as the account's email; in any other username, each `@` becomes `=` in
+  the placeholder. `=` can't appear in a username, and a username at `authelia.local` isn't used
+  as is, so two users never get the same email, which would lock out whoever signed in second.
 - **About 1 in 54 first sign-ins through Authelia no longer fail with 401.** The unused password
   generated for the new account sometimes lacked a digit, which the password policy requires.
 - **"Run now" on a scheduled job that is already running says so** instead of reporting that the
   job started; `POST /api/scheduled-jobs/{key}/run` answers `queued: false`.
+- **A scheduled job is no longer reported as skipped while its run is still going.** When the
+  schedule came due during a run (typically a long **Run now**), the card switched to "Skipped"
+  with a 0 ms duration, Run now was enabled again and the page announced "Library Scan: Skipped:
+  Skipped: previous run still in progress."; the run's own result was then never announced. The
+  skipped run is now only logged and counted (`outcome="skipped"` in
+  `comicmaintainer_scheduled_job_runs_total`), and the job's next run moves on by one interval.
 - **Database backups and restores work when the connection string is a `file:` URI**; such
   databases were mistaken for in-memory ones and never backed up.
+- **Backups can be downloaded, deleted and restored when the backup directory is the file system
+  root** (`AppSettings__DatabaseBackupDirectory=/`). They were created and listed, but every
+  action on one failed with 500 because its name was rejected as invalid.
+- **SQLite connections keep their settings when switching to WAL fails.** All the PRAGMAs ran
+  as one command, so when `journal_mode=WAL` failed (a read-only database, or another connection
+  holding a lock during the first switch) the `busy_timeout`, `synchronous`, `temp_store`,
+  `cache_size` and `mmap_size` settings after it were skipped and the connection ran on SQLite's
+  defaults. The busy timeout is now applied first, so the switch also waits for a reader to
+  finish; the switch runs on its own and logs its own warning; and the other settings are
+  applied whether it works or not.
 - **An error that happens soon after reconnecting is reported**; an error while offline used
   up the reporting window.
 - **The Files view** shows its empty states instead of "Loading files..." forever, shows the
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **The Library's List/Grid/Compact toggle highlights the current layout when the Library is
+  opened from another page.** The app starts on the Overview and the buttons were only updated
+  while the Library was shown, so none (or a stale one) was highlighted until a layout was
+  picked.
+- **Library covers that failed to load are fetched again when they come back into view**, for
+  example after a server restart or a dropped connection. A failed cover is watched again after
+  a pause that doubles with each failure (2 to 32 seconds, five times at most); before, it stayed
+  blank until the list was re-rendered.
+- **A modified time ahead of the browser's clock no longer reads "-1 days ago"** in the
+  duplicate review and the Files view. Up to a minute ahead reads "Just now"; further ahead
+  shows the date.
 - **Offline use survives the browser restarting the service worker.** A restarted worker used
   the wrong cache, and an update activated offline could delete the precache it had just built;
   runtime caching could also evict the precached app files, and an uncached stylesheet or
   script requested offline answered with nothing instead of a network error.
+- **Background cache updates in the service worker are no longer cut off.** The worker stores
+  the scripts, stylesheets, icons, covers and pages it fetches, refreshes cached scripts and
+  stylesheets, and replaces or evicts a cached cover or page once the server has answered. All of
+  that ran after the page had its response, when the browser may already stop the worker, so a
+  refreshed file could stay stale, a cover or page the session may no longer read could stay
+  cached, and a cache could grow past its size limit. The worker now stays running until that
+  work is done.
 - **The cover-write and email queues can be stopped and started again.** A restart left them
   unable to accept work and could cancel the new run; nothing in the app restarts them today.
   A new run also waits for every earlier run still draining, so deliveries and archive
@@ -313,6 +459,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and every declared resource present and non-empty), and email delivery additionally rejects
   an empty attachment, so a bad conversion is recorded as a failed delivery rather than mailed
   to the device.
+- **Error messages no longer show another request's support reference.** The `(ref: …)` added
+  to an error was the correlation id of whichever API call had last failed with one in the
+  previous 15 seconds, so a request that never reached the server (offline, network error) or
+  a proxy error page without an id showed an earlier, unrelated request's reference and sent
+  support to the wrong log entries. An error now shows the id of its own request, or none.
+
+- **The ⋮ action menu stays on screen in very narrow windows, and closes when you leave the
+  page.** In a window 200 CSS px wide or less (for example at 400 % zoom) the menu was placed
+  past the left edge of the screen, cutting off the start of every item; it now stays at least
+  10 px inside both edges of the window, narrowing (and wrapping long labels) when the window
+  is too narrow for it. An open menu also stayed over the next page — still acting on the
+  previous page's issue — when the page changed without a click (browser Back/Forward, the
+  mouse back button, swipe-back, or the `g h` / `g l` / `g s` / `g j` shortcuts); it now
+  closes whenever the page changes.
+
+- **Sign-in and first-run setup messages stay up for their full time, and signing in redirects
+  once.** Each message on the login and setup pages started a hide timer that was never
+  cancelled, so an error shown again (such as a second failed sign-in three seconds after the
+  first) vanished after about two seconds instead of five. After a successful sign-in the Login
+  button was enabled again while "Redirecting..." was shown, so a second click sent another
+  login request; it now stays disabled until the app opens. When setup was still required but a
+  session already existed (an Authelia session or a stored token), the login page redirected to
+  both the setup page and the app, and network timing decided where the user ended up. It now
+  sends the user to setup, and checks for an existing session only when setup is not required.
+
+- **Save Settings no longer saves part of the settings without saying so.** The settings are
+  saved in groups, one request each, and a failure stopped the save without undoing the groups
+  already saved or naming them; for most groups the server's reason became "HTTP error!
+  status: 400". Values the server would reject (a log size above 2047 MB, mail attachments
+  above 200 MB, an error reporting limit above 100 issues a day, a recurrence interval outside
+  1 to 720 hours) are now refused before anything is sent. If the server still rejects a
+  group, the message gives its reason and lists the groups that were saved, and the form keeps
+  your edits so you can correct the value and save again. An expired session during any group
+  now goes to the sign-in page, as it already did for the last three, instead of showing
+  "HTTP error! status: 401".
+
+- **A failed database reset reports the HTTP status when the error is not JSON.** A reverse
+  proxy's error page or an empty body (a 502 or 504, say) showed a JSON parse error such as
+  "Unexpected token '<'" instead.
 
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
@@ -2877,6 +3062,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.353] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.354] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.355] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.356] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.357] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.358] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.359] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.360] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.361] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.362] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.363] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.364] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.365] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.366] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.367] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.368] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.369] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.370] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.371] - 2026-10-27
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.372] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.373] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.374] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.375] - 2026-10-28
 
 ### Changed
 - Automatic version bump on merge to master

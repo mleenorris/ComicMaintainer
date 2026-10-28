@@ -239,6 +239,24 @@ public sealed class AniListMangaSeriesMetadataServiceCoverageTests : IDisposable
         _factory.Verify(f => f.CreateClient(It.IsAny<string>()), Times.Once());
     }
 
+    [Fact]
+    public async Task CheckHealthAsync_CallerCancelsMidProbe_RethrowsWithoutCachingTimedOut()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var service = CreateServiceWhoseClientThrows(new OperationCanceledException(cts.Token));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckHealthAsync(cts.Token));
+
+        // The next check probes again instead of reporting a cached "Timed out".
+        Assert.False(_cache.TryGetValue(ProbeCacheKey, out _));
+        _factory.Setup(f => f.CreateClient(It.IsAny<string>())).Throws(new HttpRequestException("connection refused"));
+        var health = await service.CheckHealthAsync();
+        Assert.False(health.Reachable);
+        Assert.Equal("Network error: connection refused", health.StatusMessage);
+        _factory.Verify(f => f.CreateClient(It.IsAny<string>()), Times.Exactly(2));
+    }
+
     // Real request 1 of 2. A successful search is also what lets a recent
     // lookup override a failed probe, so both behaviours share this request.
     [Fact]

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
@@ -473,13 +474,17 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
             "Held failed",
             async token =>
             {
-                if (onCancelled != null)
+                // A single registration runs onCancelled before the job unwinds, so disposing it
+                // afterwards can never drop a callback that has not run yet.
+                var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                using var registration = token.Register(() =>
                 {
-                    token.Register(onCancelled);
-                }
+                    onCancelled?.Invoke();
+                    cancelled.TrySetCanceled(token);
+                });
 
                 held.TrySetResult(token);
-                await release.WaitAsync(token);
+                await await Task.WhenAny(release, cancelled.Task);
             });
         var jobToken = await held.Task.WaitAsync(TimeSpan.FromSeconds(30));
         return (jobId, jobToken);
@@ -490,21 +495,29 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     /// </summary>
     private static void WaitUntilDisposed(CancellationToken jobToken)
     {
-        // Reading WaitHandle is how a token reports that its source has been disposed.
-        var disposed = SpinWait.SpinUntil(
-            () =>
+        // Reading WaitHandle is how a token reports that its source has been disposed. Poll with
+        // short sleeps rather than spinning so a slow CI agent is not starved of CPU.
+        static bool IsDisposed(CancellationToken token)
+        {
+            try
             {
-                try
-                {
-                    _ = jobToken.WaitHandle;
-                    return false;
-                }
-                catch (ObjectDisposedException)
-                {
-                    return true;
-                }
-            },
-            TimeSpan.FromSeconds(30));
+                _ = token.WaitHandle;
+                return false;
+            }
+            catch (ObjectDisposedException)
+            {
+                return true;
+            }
+        }
+
+        var timeout = Stopwatch.StartNew();
+        var disposed = IsDisposed(jobToken);
+        while (!disposed && timeout.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            Thread.Sleep(10);
+            disposed = IsDisposed(jobToken);
+        }
+
         Assert.True(disposed, "The job never disposed its cancellation token source.");
     }
 
@@ -613,8 +626,8 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         public ConcurrentQueue<LogEntry> Entries { get; } = new();
 
         /// <summary>
-        /// Runs inside each log call, on the logging thread, so a test can pause the service at
-        /// the point where it logs.
+        /// Runs synchronously inside each Log call, on the calling thread, so a test can pause the
+        /// service at the point where it logs.
         /// </summary>
         public Action<LogEntry>? OnLog { get; set; }
 

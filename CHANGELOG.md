@@ -256,6 +256,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ComicInfo.xml rebuilt the archive without any entry over 10 MB (or without a name) and then
   replaced the original, so big pages were lost for good. Archives are now streamed entry by
   entry with nothing skipped, and if an entry cannot be copied the original is left untouched.
+- **Embedding a series cover no longer loads the first issue's whole archive into memory.**
+  Writing the cover into the first archive copied every page into memory before saving the new
+  archive, so memory use grew with the archive's size and a very large archive could exhaust a
+  container's memory or fail to get its cover. Entries are now streamed one at a time, as
+  metadata rewrites already are.
 - **Two simultaneous updates of a newly added file no longer lose one of them**, and renaming a
   file to its own path no longer deletes its database record.
 - **A file re-added while the database is briefly unavailable keeps its processed state.** When

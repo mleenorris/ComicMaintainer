@@ -344,7 +344,7 @@ test('Delivery History opens on top of the devices modal; Escape and Close unwin
     page.click(buttonByText(page, '#emailDevicesModal .modal-footer', 'Delivery History'));
     await page.settle();
     assert.ok(isModalOpen(page, 'emailDeliveryHistoryModal'));
-    assert.deepEqual(callsTo(page, 'GET', '/api/email/deliveries').map(call => call.query), [{ limit: '50' }]);
+    assert.deepEqual(callsTo(page, 'GET', '/api/email/deliveries').map(call => call.query), [{ limit: '50', offset: '0' }]);
 
     await pressEscape(page);
     assert.ok(!isModalOpen(page, 'emailDeliveryHistoryModal'));

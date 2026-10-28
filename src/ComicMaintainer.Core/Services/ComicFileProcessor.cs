@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models;
 
 namespace ComicMaintainer.Core.Services;
@@ -136,6 +137,14 @@ public class ComicFileProcessor
     }
 
     /// <summary>
+    /// Limits issue-number padding to 0..<see cref="AppSettings.MaxIssueNumberPadding"/>. Configured values
+    /// are not range-checked, and the <c>"D{padding}"</c> format string turns a negative value into literal
+    /// text and throws for 1,000,000,000 and above.
+    /// </summary>
+    public static int ClampIssueNumberPadding(int padding) =>
+        Math.Clamp(padding, 0, AppSettings.MaxIssueNumberPadding);
+
+    /// <summary>
     /// Format filename based on template and tags
     /// Converted from Python's format_filename function
     /// </summary>
@@ -143,7 +152,7 @@ public class ComicFileProcessor
     /// <param name="tags">Comic metadata tags</param>
     /// <param name="issueNumber">Issue number</param>
     /// <param name="originalExtension">Original file extension (.cbz or .cbr)</param>
-    /// <param name="padding">Issue number padding (default: 4)</param>
+    /// <param name="padding">Issue number padding (default: 4), clamped by <see cref="ClampIssueNumberPadding"/></param>
     public static string FormatFilename(
         string template, 
         ComicInfo tags, 
@@ -158,11 +167,15 @@ public class ComicFileProcessor
         try
         {
             var issueStr = issueNumber;
-            if (float.TryParse(issueStr, out var issueFloat))
+            // ComicInfo numbers always use "." as the decimal separator, so parse and format
+            // them culture-invariantly; under e.g. de-DE "5.5" would otherwise be read as 55.
+            if (float.TryParse(issueStr, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var issueFloat))
             {
                 var integer = (int)issueFloat;
-                var formatString = $"D{padding}";
-                issueFormatted = integer.ToString(formatString);
+                var formatString = $"D{ClampIssueNumberPadding(padding)}";
+                issueFormatted = integer.ToString(formatString, System.Globalization.CultureInfo.InvariantCulture);
+                var integerNoPad = integer.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
                 // Check if there's a decimal part
                 if (issueStr.Contains('.'))
@@ -171,17 +184,17 @@ public class ComicFileProcessor
                     var decimalPart = parts[1].TrimEnd('0');
                     if (!string.IsNullOrEmpty(decimalPart))
                     {
-                        issueFormatted = $"{integer.ToString(formatString)}.{decimalPart}";
-                        issueNoPad = $"{integer}.{decimalPart}";
+                        issueFormatted = $"{issueFormatted}.{decimalPart}";
+                        issueNoPad = $"{integerNoPad}.{decimalPart}";
                     }
                     else
                     {
-                        issueNoPad = integer.ToString();
+                        issueNoPad = integerNoPad;
                     }
                 }
                 else
                 {
-                    issueNoPad = integer.ToString();
+                    issueNoPad = integerNoPad;
                 }
             }
             else

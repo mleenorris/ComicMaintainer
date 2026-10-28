@@ -10,6 +10,7 @@ issues can be condensed into a single EPUB or AZW3.
 ## Contents
 
 - [Configuring SMTP](#configuring-smtp)
+- [Rate limiting](#rate-limiting)
 - [E-reader devices](#e-reader-devices)
 - [Sending comics](#sending-comics)
 - [Condensing issues into one book](#condensing-issues-into-one-book)
@@ -17,6 +18,7 @@ issues can be condensed into a single EPUB or AZW3.
 - [EPUB conversion](#epub-conversion)
 - [AZW3 conversion](#azw3-conversion)
 - [Delivery pipeline](#delivery-pipeline)
+- [Delivery history and cancelling](#delivery-history-and-cancelling)
 - [API reference](#api-reference)
 - [Troubleshooting](#troubleshooting)
 
@@ -36,6 +38,9 @@ Email is disabled until an SMTP host and a from-address are configured. Set them
 | `EMAIL_FROM_ADDRESS` | `EmailFromAddress` | *(empty)* | Envelope sender. Must be an address your e-reader service accepts. |
 | `EMAIL_FROM_NAME` | `EmailFromName` | `ComicMaintainer` | Display name on outgoing mail. |
 | `EMAIL_MAX_ATTACHMENT_MB` | `EmailMaxAttachmentMegabytes` | `25` | Deliveries larger than this fail instead of being sent. |
+| `EMAIL_MAX_SENDS_PER_HOUR` | `EmailMaxSendsPerHour` | `0` | Most comic emails in any rolling 60 minutes (`0`–`10000`; `0` = no limit). See [Rate limiting](#rate-limiting). |
+| `EMAIL_MAX_SENDS_PER_DAY` | `EmailMaxSendsPerDay` | `0` | Most comic emails in any rolling 24 hours (`0`–`100000`; `0` = no limit). |
+| `EMAIL_MIN_SECONDS_BETWEEN_SENDS` | `EmailMinSecondsBetweenSends` | `0` | Minimum gap between two comic emails, in seconds (`0`–`86400`; `0` = no gap). |
 
 When `SMTP_USE_SSL` is `false` and `SMTP_ALLOW_INSECURE` is `false` (the defaults),
 STARTTLS is *required*: a server that does not offer it is refused rather than being
@@ -51,6 +56,51 @@ as for the rest of the application settings.
 Settings are updated through `PUT /api/settings/email` (administrators only). Omit
 `smtpPassword` from the request to keep the stored password; send an empty string to
 clear it.
+
+## Rate limiting
+
+Mail providers throttle or suspend accounts that send many messages in a short time, and
+e-reader services can reject a burst of documents. A whole-series send can queue hundreds
+of emails, so ComicMaintainer can spread comic emails out instead of sending them back to
+back. Set the limits in **Settings → Email Delivery** (or with the environment variables
+in the [table above](#configuring-smtp)). Each limit is off at `0`, the default, and any
+combination can be used:
+
+- **Max emails per hour** – at most this many comic emails in any rolling 60 minutes.
+- **Max emails per day** – at most this many comic emails in any rolling 24 hours.
+- **Minimum seconds between emails** – the shortest gap between two comic emails.
+
+How the limits are applied:
+
+- The windows are rolling, not calendar hours or days: with a limit of 10 per hour, the
+  11th email waits until the oldest of the last ten is an hour old. When several limits
+  apply, the delivery waits for the strictest one.
+- Only emails that were actually sent count. Failed and cancelled deliveries do not use up
+  the allowance, and a condensed book is one email however many issues it holds. Test
+  emails are neither counted nor held back.
+- Deliveries are sent one at a time, in the order they were queued. When the limit is
+  reached the next delivery waits *before* it is converted, so no converted book sits on
+  disk while it waits, and everything queued behind it waits too. The deliveries stay
+  `pending` and go out on their own as the limit allows.
+- New limits apply to a delivery that is already waiting within 30 seconds, so raising or
+  removing a limit releases it promptly.
+- While a delivery is held back, **Email Delivery History** shows *"⏸ The email rate
+  limit is holding pending deliveries back until …"*, and `GET /api/email/deliveries`
+  reports the same time as `rate_limited_until`. A waiting delivery can be
+  [cancelled](#delivery-history-and-cancelling).
+- When the application stops, a delivery waiting for the rate limit stops waiting and stays
+  `pending` (see [Delivery pipeline](#delivery-pipeline)).
+
+The rate limit is updated through `PUT /api/settings/email-rate-limit` (administrators
+only), which replaces all three values; an omitted field is set to `0`. Out-of-range values
+are rejected with a 400 and nothing is saved. Environment variables take precedence over
+the saved values, as for the SMTP settings.
+
+```sh
+curl -X PUT http://localhost:5000/api/settings/email-rate-limit \
+  -H "Content-Type: application/json" \
+  -d '{"maxSendsPerHour":20,"maxSendsPerDay":100,"minSecondsBetweenSends":60}'
+```
 
 ## E-reader devices
 
@@ -292,23 +342,57 @@ first and that book is rewritten as KF8, exactly as a single issue is.
 2. Delivery ids are pushed onto an in-process queue drained by a single background
    consumer, so SMTP work never blocks an API request or the file watcher, and the mail
    server is not hit concurrently.
-3. For each delivery the archive is converted if required, checked against
+3. For each delivery the consumer first waits for the [rate limit](#rate-limiting), if
+   one is configured; then the archive is converted if required, checked against
    `EmailMaxAttachmentMegabytes`, and sent.
-4. The row is marked `sent` or `failed` (with the error message) and any temporary file
-   is removed.
+4. The row is marked `sent` or `failed` (with the error message), or `cancelled` if it
+   was [cancelled](#delivery-history-and-cancelling) before it was sent, and any temporary
+   file is removed.
 
-Deliveries still queued when the application stops stay `pending` in the database; they
-are not resumed automatically, but re-sending is a no-op-free operation because
-`skipAlreadyDelivered` treats `pending` rows as already handled.
+Deliveries still queued when the application stops — including one waiting for the rate
+limit — stay `pending` in the database and are **not** resumed when it starts again.
+Because `skipAlreadyDelivered` treats `pending` rows as already handled, simply re-sending
+would skip them; use **Cancel All Pending** in Email Delivery History first (after a
+restart nothing is in progress, so they are cancelled immediately), then send again —
+cancelled deliveries do not count as delivered.
 
-Recent deliveries — including failures and their error text — are available from
+Deliveries — including failures and their error text — are listed by
 `GET /api/email/deliveries`, and are shown in the UI under
 **⋮ menu → 📨 Email Delivery History** (also reachable from the Ereader Devices dialog).
+
+## Delivery history and cancelling
+
+**⋮ menu → 📨 Email Delivery History** lists every delivery, newest first, 50 to a page.
+**Previous** and **Next** page through the whole history, and the page counter shows the
+total. Each entry shows its status — ⏳ Pending, ✅ Sent, ❌ Failed or 🚫 Cancelled —
+along with the device, the format and, for failures, the error.
+
+A delivery can be cancelled until its message is handed to the mail server:
+
+- Every pending delivery has a **Cancel** button. A delivery still waiting in the queue is
+  cancelled at once and will be skipped when its turn comes.
+- A delivery that is being *prepared* — waiting for the rate limit, or being converted to
+  EPUB or AZW3 — is asked to stop: the conversion is abandoned, its temporary file is
+  removed and the delivery is marked `cancelled`. If it has not stopped within five
+  seconds, the dialog says it is still stopping; it is marked `cancelled` as soon as the
+  current step finishes.
+- Once the message is being sent it can no longer be recalled. Cancelling then reports
+  that the delivery is already being sent, and it finishes as `sent` or `failed`.
+- **Cancel All Pending (N)** cancels every pending delivery on every page, not just the
+  page on display, and reports how many were cancelled, how many are still stopping and
+  how many were already being sent.
+
+Cancelling requires the `CanModifyLibrary` policy, like sending, so the buttons are hidden
+from read-only users.
+
+A cancelled delivery does not count as delivered, the same as a failed one: re-sending
+with `skipAlreadyDelivered` queues the file again, and a series subscription queues it
+again if the watcher processes the file again.
 
 ## API reference
 
 All routes are under `/api/email`. Write operations require the `CanModifyLibrary`
-policy; the SMTP settings endpoint requires `CanAdminister`.
+policy; the SMTP and rate-limit settings endpoints require `CanAdminister`.
 
 | Method | Route | Description |
 |---|---|---|
@@ -331,8 +415,11 @@ policy; the SMTP settings endpoint requires `CanAdminister`.
 | `GET` | `/api/email/subscriptions` | List subscriptions, optionally filtered by series. |
 | `PUT` | `/api/email/subscriptions` | Create or update a series subscription. |
 | `DELETE` | `/api/email/subscriptions/{id}` | Remove a subscription. |
-| `GET` | `/api/email/deliveries` | Recent delivery history. |
+| `GET` | `/api/email/deliveries` | One page of the delivery history, newest first. `limit` (default 50, clamped to 1–500) and `offset` (default 0) select the page. Returns `deliveries`, `total`, `offset`, `limit`, `pending_count` (pending deliveries on every page) and `rate_limited_until` (UTC time the rate limit is holding the next delivery until, otherwise `null`). |
+| `POST` | `/api/email/deliveries/{id}/cancel` | Cancel a delivery that has not been sent. `200` `{cancelled: true, delivery}` once cancelled; `202` `{cancelled: false, stopping: true, delivery}` while a delivery being prepared is still stopping; `404` for an unknown id; `409` `{error, delivery}` when it is already being sent or has finished. |
+| `POST` | `/api/email/deliveries/cancel-pending` | Cancel every pending delivery. Returns the counts `{cancelled, stopping, sending}`. |
 | `PUT` | `/api/settings/email` | Update SMTP settings. |
+| `PUT` | `/api/settings/email-rate-limit` | Update the [rate limit](#rate-limiting): `maxSendsPerHour`, `maxSendsPerDay`, `minSecondsBetweenSends` (`0` = no limit). |
 
 Example — queue two issues as EPUB:
 
@@ -371,3 +458,6 @@ curl -X POST http://localhost:5000/api/email/send-series \
 | "The SMTP server does not support the STARTTLS extension" | The server offers no TLS. Use implicit TLS (`SMTP_USE_SSL=true`, port 465) or, for a trusted local relay only, set `SMTP_ALLOW_INSECURE=true`. |
 | "Series has N issues, which exceeds the ... limit" | A whole-series send is capped at 1000 issues; select the issues to send instead. |
 | Send is disabled with "larger than the ... attachment limit" | The condensed book(s) exceed `EMAIL_MAX_ATTACHMENT_MB`. Download them instead, or condense fewer issues per book. |
+| Deliveries stay ⏳ Pending and the history says the rate limit is holding them back | The configured [rate limit](#rate-limiting) has been reached. They are sent automatically as it allows; raise or clear the limit in Settings (applied within 30 seconds), or cancel the ones you no longer want. |
+| Deliveries stay ⏳ Pending after a restart | Queued deliveries are not resumed when the application starts. Use **Cancel All Pending**, then send them again. |
+| Cancel reports "already being sent" | The message was already being handed to the mail server and cannot be recalled; it finishes as sent or failed. |

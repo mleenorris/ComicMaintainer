@@ -1,5 +1,7 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -20,7 +22,9 @@ public class JobsControllerTests
         _mockProcessor = new Mock<IComicProcessorService>();
         _mockFileStore = new Mock<IFileStoreService>();
         _mockLogger = new Mock<ILogger<JobsController>>();
-        _controller = new JobsController(_mockProcessor.Object, _mockFileStore.Object, _mockLogger.Object);
+        // The files these tests delete ("/path/...") live in the library.
+        var settings = new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = "/path" });
+        _controller = new JobsController(_mockProcessor.Object, _mockFileStore.Object, _mockLogger.Object, settings);
     }
 
     // Helper method to extract job response from OkObjectResult without reflection

@@ -55,7 +55,7 @@ public sealed class AutheliaSettingsBinderTests : IDisposable
     private readonly string _configDirectory = Path.Combine(Path.GetTempPath(), "cm-authelia-env-" + Guid.NewGuid().ToString("N"));
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
-        new([.. AutheliaVariables, "JWT_SECRET", "ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_EMAIL", "EFCORE_QUERY_LOGGING"]);
+        new([.. AutheliaVariables, "JWT_SECRET", "JWT_SECRET_FILE", "ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "ADMIN_EMAIL", "EFCORE_QUERY_LOGGING"]);
 
     public AutheliaSettingsBinderTests()
     {

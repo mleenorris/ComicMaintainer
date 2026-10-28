@@ -276,15 +276,16 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
     }
 
     /// <summary>
-    /// Reads a response body as UTF-8 JSON whatever charset it declares. JSON
-    /// exchanged between systems must be UTF-8 (RFC 8259 §8.1) and GitHub sends
-    /// nothing else, but <c>ReadFromJsonAsync</c> decodes with the declared
-    /// charset: a name .NET cannot resolve (<c>utf8</c>, or <c>windows-1252</c>
+    /// Reads a response body as UTF-8 JSON whatever charset it declares. GitHub's
+    /// REST API responses are UTF-8 JSON, so an incorrect charset declaration is
+    /// ignored to keep <c>ReadFromJsonAsync</c> from throwing while it resolves the
+    /// encoding: a name .NET cannot resolve (<c>utf8</c>, or <c>windows-1252</c>
     /// before anything has registered the code pages) throws
     /// <see cref="InvalidOperationException"/>, which would escape the
     /// transient/permanent classification, and any other non-UTF-8 charset
-    /// garbles non-ASCII text. A body that cannot be parsed still fails with
-    /// <see cref="JsonException"/>.
+    /// garbles non-ASCII text. A body that cannot be parsed, including an empty
+    /// one, still fails with <see cref="JsonException"/>, as it did with
+    /// <c>ReadFromJsonAsync</c>.
     /// </summary>
     private static async Task<T?> ReadJsonAsync<T>(HttpContent content, CancellationToken cancellationToken)
     {

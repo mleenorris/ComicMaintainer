@@ -115,15 +115,22 @@ public sealed class GitHubIssueClientTests
         Assert.IsAssignableFrom<JsonException>(ex.InnerException);
     }
 
-    // Charset names Encoding.GetEncoding never resolves. windows-1252 is not one of
-    // them: SharpCompress registers the code pages for the whole process the first
-    // time it reads an archive, so it resolves once any archive test has run.
+    // Charset names Encoding.GetEncoding does not resolve, which made ReadFromJsonAsync
+    // throw. Each test asserts that first (AssertUndecodable), so a runtime that starts
+    // accepting one fails loudly instead of silently testing nothing. windows-1252 is not
+    // used: SharpCompress registers the code pages for the whole process the first time
+    // it reads an archive, so it resolves once any archive test has run.
     public static TheoryData<string> UndecodableCharsets => new() { "utf8", "no-such-charset" };
+
+    private static void AssertUndecodable(string charset)
+        => Assert.Throws<ArgumentException>(() => Encoding.GetEncoding(charset));
 
     [Theory]
     [MemberData(nameof(UndecodableCharsets))]
     public async Task CreateIssueAsync_ReadsTheResponseWhateverTheDeclaredCharset(string charset)
     {
+        AssertUndecodable(charset);
+
         // GitHub always sends UTF-8 JSON, but a proxy can label the body with a charset
         // .NET cannot decode. That used to escape as a raw InvalidOperationException,
         // so an issue GitHub had created went unrecorded.
@@ -135,6 +142,19 @@ public sealed class GitHubIssueClientTests
         var issue = await CreateIssue(client);
 
         Assert.Equal(new GitHubIssueReference(42, "https://github.com/acme/comics/issues/42"), issue);
+    }
+
+    [Fact]
+    public async Task CreateIssueAsync_WrapsAnEmptyResponseAsUnparseable()
+    {
+        // ReadFromJsonAsync threw JsonException for an empty body; reading the body
+        // directly keeps that, so it is still classified as unparseable.
+        var (client, _, _) = CreateClient(_ => Json(HttpStatusCode.Created, ""));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.Equal("GitHub returned a response that could not be parsed", ex.Message);
+        Assert.IsAssignableFrom<JsonException>(ex.InnerException);
     }
 
     [Theory]
@@ -159,6 +179,8 @@ public sealed class GitHubIssueClientTests
     [MemberData(nameof(UndecodableCharsets))]
     public async Task CreateIssueAsync_WrapsAnUnparseableResponseWhateverTheDeclaredCharset(string charset)
     {
+        AssertUndecodable(charset);
+
         var (client, _, _) = CreateClient(_ => Json(HttpStatusCode.Created, "this is not json", charset));
 
         var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
@@ -337,6 +359,8 @@ public sealed class GitHubIssueClientTests
     [MemberData(nameof(UndecodableCharsets))]
     public async Task UnprocessableAssigneeValidationFailures_AreFlaggedWhateverTheDeclaredCharset(string charset)
     {
+        AssertUndecodable(charset);
+
         var (client, _, _) = CreateClient(_ => Json(
             HttpStatusCode.UnprocessableEntity,
             """{ "message": "Validation Failed", "errors": [ { "resource": "Issue", "field": "assignees", "code": "invalid" } ] }""",
@@ -351,6 +375,8 @@ public sealed class GitHubIssueClientTests
     [MemberData(nameof(UndecodableCharsets))]
     public async Task UnparseableUnprocessableResponses_AreNotAssigneeRejectionsWhateverTheDeclaredCharset(string charset)
     {
+        AssertUndecodable(charset);
+
         var (client, _, _) = CreateClient(_ => Json(HttpStatusCode.UnprocessableEntity, "<html>not json</html>", charset));
 
         var ex = await Assert.ThrowsAsync<GitHubIssuePermanentException>(() => CreateIssue(client, assignee: "octocat"));

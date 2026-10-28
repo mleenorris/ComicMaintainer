@@ -73,13 +73,13 @@ test('a completed reset is still reported when refreshing the library afterwards
     page.run(`
         window.refreshAttempts = [];
         loadLibraryHealth = async () => { refreshAttempts.push(['health']); throw new Error('counts unavailable'); };
-        loadActiveLibraryView = async (pageNumber, refresh) => { refreshAttempts.push(['view', pageNumber, refresh]); throw new Error('view unavailable'); };
+        loadActiveLibraryView = async (options) => { refreshAttempts.push(['view', options]); throw new Error('view unavailable'); };
     `);
     clearMessages(page);
 
     await page.run('confirmReset()');
 
-    assert.deepEqual(page.evaluate('refreshAttempts'), [['health'], ['view', 1, true]], 'the view is refreshed even after the counts fail');
+    assert.deepEqual(page.evaluate('refreshAttempts'), [['health'], ['view', { refresh: true }]], 'the view is refreshed even after the counts fail');
     assert.deepEqual(messages(page), [
         { type: 'info', text: 'Resetting database... This may take a moment.' },
         { type: 'success', text: 'Database reset completed successfully' }

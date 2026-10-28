@@ -240,7 +240,7 @@ test('a refresh reloads from the start with refresh=true and refreshes the libra
     await page.settle();
     const countsBefore = callsTo(page, '/api/files/counts').length;
 
-    await page.run('loadActiveLibraryView(1, true)');
+    await page.run('loadActiveLibraryView({ refresh: true })');
     await page.settle();
 
     assert.deepEqual(seriesCalls(page).at(-1).query, { offset: '0', limit: '60', refresh: 'true' });

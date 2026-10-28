@@ -39,9 +39,21 @@ public partial class ComicProcessorService
     {
         try
         {
-            if (!TryResolveAllowedPath(filePath, out _))
+            // File system I/O below uses the validated physical path so a linked
+            // path component cannot redirect it outside the library; the caller's
+            // path stays the key for the file store, history and series naming.
+            if (!TryResolveAllowedPath(filePath, out var resolvedPath))
             {
                 _logger.LogWarning("ProcessFileAsync: File is outside the allowed directories: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
+
+            if (new FileInfo(filePath).LinkTarget is not null)
+            {
+                _logger.LogWarning("ProcessFileAsync: File symlinks are not processed: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
+                await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                await LogHistoryAsync(filePath, "Process", false, "File symlinks are not processed", cancellationToken);
                 return false;
             }
 
@@ -57,7 +69,7 @@ public partial class ComicProcessorService
 
             _logger.LogDebug("ProcessFileAsync: Checking if file exists: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
-            if (!File.Exists(filePath))
+            if (!File.Exists(resolvedPath))
             {
                 _logger.LogWarning("ProcessFileAsync: File not found: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await LogHistoryAsync(filePath, "Process", false, "File not found", cancellationToken);
@@ -67,7 +79,7 @@ public partial class ComicProcessorService
             _logger.LogDebug("ProcessFileAsync: Verifying file is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             
             // Verify it's a comic archive
-            if (!IsComicArchive(filePath))
+            if (!IsComicArchive(resolvedPath))
             {
                 _logger.LogWarning("ProcessFileAsync: File is not a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await LogHistoryAsync(filePath, "Process", false, "File is not a comic archive", cancellationToken);
@@ -77,7 +89,7 @@ public partial class ComicProcessorService
             _logger.LogDebug("ProcessFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             
             // Extract metadata from the archive
-            var metadata = await GetMetadataAsync(filePath, cancellationToken);
+            var metadata = await GetMetadataAtResolvedPath(resolvedPath, filePath);
             
             if (metadata != null)
             {
@@ -121,7 +133,7 @@ public partial class ComicProcessorService
                     var beforeMetadata = metadata.Clone();
                     var normalizedMetadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
 
-                    normalizeSuccess = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, cancellationToken);
+                    normalizeSuccess = await UpdateMetadataCoreAsync(resolvedPath, normalizedMetadata, cancellationToken);
                     await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
                     if (normalizeSuccess)
                     {
@@ -165,16 +177,24 @@ public partial class ComicProcessorService
                 // generating the new filename. This guarantees that when rename
                 // preserves the chapter number in the filename, it also preserves
                 // it in the file's metadata.
-                await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
+                await EnsureChapterMetadataPreservedAsync(resolvedPath, metadata, cancellationToken);
 
                 _logger.LogDebug("ProcessFileAsync: Attempting to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var newFilePath = GenerateFileName(metadata, filePath);
-                if (newFilePath == null)
+                var newResolvedPath = GenerateFileName(metadata, resolvedPath);
+                if (newResolvedPath != null)
+                {
+                    _logger.LogInformation(
+                        "Renaming file from {OldPath} to {NewPath}",
+                        LoggingHelper.SanitizePathForLog(filePath),
+                        LoggingHelper.SanitizePathForLog(newResolvedPath));
+                }
+
+                if (newResolvedPath == null)
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, FilenameGenerationFailedMessage, cancellationToken);
                 }
-                else if (newFilePath == filePath)
+                else if (newResolvedPath == resolvedPath)
                 {
                     // File already has correct name, no rename needed
                     _logger.LogDebug("File already has correct name: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -184,51 +204,67 @@ public partial class ComicProcessorService
                         filename, filename, metadata, metadata, cancellationToken);
                     renameSuccess = true;
                 }
-                else if (TargetFileExists(newFilePath, filePath))
+                else if (TargetFileExists(newResolvedPath, resolvedPath))
                 {
                     // Target file already exists - treat as duplicate
-                    _logger.LogInformation("ProcessFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
+                    _logger.LogInformation("ProcessFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newResolvedPath));
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await _fileStore.MarkFileDuplicateAsync(filePath, true, cancellationToken);
                     await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
                     renameSuccess = false;
                 }
+                else if (!TryResolveAllowedPath(resolvedPath, out var currentPath) || currentPath != resolvedPath)
+                {
+                    // A folder on the validated path was replaced by a link while the file
+                    // was processed: abort rather than move whatever the link now leads to.
+                    _logger.LogWarning("ProcessFileAsync: File path changed during processing, not renaming: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                    await LogHistoryAsync(filePath, "Rename", false, "File path changed during processing", cancellationToken);
+                }
                 else
                 {
+                    var newFilePath = newResolvedPath;
                     try
                     {
-                        _logger.LogInformation(
-                            "Renaming file from {OldPath} to {NewPath}",
-                            LoggingHelper.SanitizePathForLog(filePath),
-                            LoggingHelper.SanitizePathForLog(newFilePath));
-                        var oldFilePath = filePath;
-                        var beforeFilename = Path.GetFileName(oldFilePath);
-                        var afterFilename = Path.GetFileName(newFilePath);
-                        
-                        File.Move(filePath, newFilePath);
-                        
-                        // Atomically move the database record to the new path, preserving all
-                        // processing state so the FileSystemWatcher rename event sees the entry
-                        // as already tracked and does not re-queue it for processing.
-                        await _fileStore.UpdateFilePathAsync(oldFilePath, newFilePath, cancellationToken);
-                        await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
-
-                        // The normalize phase above marked the (old-path) row normalized. Re-assert
-                        // that on the new path so the move can't drop it if the watcher removed the
-                        // old row before UpdateFilePathAsync migrated it (Delete+Create race),
-                        // which would otherwise leave the file showing as unprocessed.
-                        if (normalizeSuccess)
+                        using var renameDirectoryHandle = OpenRenameDirectory(resolvedPath);
+                        if (!TryResolveAllowedPath(resolvedPath, out currentPath) || currentPath != resolvedPath)
                         {
-                            await _fileStore.MarkFileNormalizedAsync(newFilePath, true, cancellationToken);
+                            _logger.LogWarning("ProcessFileAsync: File path changed during processing, not renaming: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                            await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                            await LogHistoryAsync(filePath, "Rename", false, "File path changed during processing", cancellationToken);
                         }
-                        
-                        await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null, 
-                            beforeFilename, afterFilename, metadata, metadata, cancellationToken);
-                        
-                        filePath = newFilePath;
-                        renameSuccess = true;
+                        else
+                        {
+                            _logger.LogDebug("ProcessFileAsync: Rename path validated: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                            var movedPath = MoveFileInRenameDirectory(renameDirectoryHandle, resolvedPath, newResolvedPath);
+                            newFilePath = GetAllowedLogicalPath(movedPath);
+                            var oldFilePath = filePath;
+                            var beforeFilename = Path.GetFileName(oldFilePath);
+                            var afterFilename = Path.GetFileName(newFilePath);
+
+                            // Atomically move the database record to the new path, preserving all
+                            // processing state so the FileSystemWatcher rename event sees the entry
+                            // as already tracked and does not re-queue it for processing.
+                            await _fileStore.UpdateFilePathAsync(oldFilePath, newFilePath, cancellationToken);
+                            await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
+
+                            // The normalize phase above marked the (old-path) row normalized. Re-assert
+                            // that on the new path so the move can't drop it if the watcher removed the
+                            // old row before UpdateFilePathAsync migrated it (Delete+Create race),
+                            // which would otherwise leave the file showing as unprocessed.
+                            if (normalizeSuccess)
+                            {
+                                await _fileStore.MarkFileNormalizedAsync(newFilePath, true, cancellationToken);
+                            }
+
+                            await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null,
+                                beforeFilename, afterFilename, metadata, metadata, cancellationToken);
+
+                            filePath = newFilePath;
+                            renameSuccess = true;
+                        }
                     }
-                    catch (IOException ex) when (TargetFileExists(newFilePath, filePath))
+                    catch (IOException ex) when (TargetFileExists(newResolvedPath, resolvedPath))
                     {
                         // Target file already exists - treat as duplicate
                         _logger.LogInformation(ex, "ProcessFileAsync: Duplicate detected - target file already exists during move: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
@@ -293,6 +329,11 @@ public partial class ComicProcessorService
             }
 
             return true;
+        }
+        // A cancelled job didn't fail this file: leave it and its stored state as they are.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

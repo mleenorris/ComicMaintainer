@@ -119,15 +119,11 @@
                     // Align to the right edge of the button
                     left = buttonRect.right - dropdownRect.width;
                     
-                    // Make sure dropdown doesn't go off the left edge of the viewport
-                    if (left < VIEWPORT_MARGIN) {
-                        left = VIEWPORT_MARGIN;
-                    }
-                    
-                    // Make sure dropdown doesn't go off the right edge of the viewport
-                    if (left + dropdownRect.width > viewportWidth - VIEWPORT_MARGIN) {
-                        left = viewportWidth - dropdownRect.width - VIEWPORT_MARGIN;
-                    }
+                    // Keep it inside the viewport. The left edge is clamped
+                    // last: a menu nearly as wide as a very narrow viewport (or
+                    // one at high zoom) can't clear both edges, and the start
+                    // of its items is what must stay on screen.
+                    left = Math.max(VIEWPORT_MARGIN, Math.min(left, viewportWidth - dropdownRect.width - VIEWPORT_MARGIN));
                     
                     // Apply the position
                     dropdown.style.top = `${top}px`;
@@ -136,13 +132,19 @@
             }
         }
         
-        function closeAllDropdowns() {
+        // Closes the Actions menus only (restoring any portaled one), leaving
+        // the filter menu alone, for redraws that replace the menus' hosts.
+        function closeActionDropdowns() {
             document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
                 menu.classList.remove('show');
                 menu.classList.remove('show-above');
             });
             // Return any portaled menu to its original location in the DOM.
             restorePortaledDropdown();
+        }
+
+        function closeAllDropdowns() {
+            closeActionDropdowns();
             // Also close filter dropdown
             const filterMenu = document.getElementById('filterDropdownMenu');
             if (filterMenu) {

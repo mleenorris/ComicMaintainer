@@ -156,6 +156,20 @@ public sealed class FilesControllerBrowseTests
         Assert.Same(dtos, Prop(ok.Value, "files"));
     }
 
+    // "a" and "YWJjZ" are truncated keys and "@@@" is not base64 at all. They used
+    // to decode to the empty path, which is the library root's key.
+    [Theory]
+    [InlineData("a")]
+    [InlineData("YWJjZ")]
+    [InlineData("@@@")]
+    public async Task GetFolderFiles_UndecodableKey_ReturnsBadRequestInsteadOfTheRootFolder(string encodedPath)
+    {
+        var result = await _controller.GetFolderFiles(encodedPath);
+
+        AssertStatus(result.Result, 400, "Invalid folder path");
+        _fileStore.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task GetFolderFiles_StoreThrows_Returns500()
     {

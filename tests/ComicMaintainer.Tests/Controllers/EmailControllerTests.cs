@@ -1107,14 +1107,111 @@ public sealed class EmailControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task GetDeliveries_ReturnsTheRecentDeliveries()
+    public async Task GetDeliveries_ReturnsTheRequestedPageWithTotals()
     {
-        _email.Setup(e => e.GetRecentDeliveriesAsync(10, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Delivery(1, "/lib/a.cbz"), Delivery(2, "/lib/b.cbz") });
+        var limitedUntil = new DateTime(2024, 6, 1, 13, 0, 0, DateTimeKind.Utc);
+        _email.Setup(e => e.GetDeliveriesPageAsync(20, 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicEmailDeliveryPage(
+                new[] { Delivery(1, "/lib/a.cbz"), Delivery(2, "/lib/b.cbz") },
+                Total: 42,
+                Offset: 20,
+                Limit: 10,
+                PendingCount: 3,
+                RateLimitedUntil: limitedUntil));
 
-        var json = OkJson(await CreateController().GetDeliveries(10, CancellationToken.None));
+        var json = OkJson(await CreateController().GetDeliveries(limit: 10, offset: 20, CancellationToken.None));
 
         Assert.Equal(new[] { 1, 2 }, json.GetProperty("deliveries").EnumerateArray().Select(d => d.GetProperty("Id").GetInt32()));
+        Assert.Equal(42, json.GetProperty("total").GetInt32());
+        Assert.Equal(20, json.GetProperty("offset").GetInt32());
+        Assert.Equal(10, json.GetProperty("limit").GetInt32());
+        Assert.Equal(3, json.GetProperty("pending_count").GetInt32());
+        Assert.Equal(limitedUntil, json.GetProperty("rate_limited_until").GetDateTime());
+    }
+
+    [Fact]
+    public async Task GetDeliveries_DefaultsToTheFirstFiftyDeliveries()
+    {
+        _email.Setup(e => e.GetDeliveriesPageAsync(0, 50, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicEmailDeliveryPage(Array.Empty<ComicEmailDeliveryDto>(), 0, 0, 50, 0, null));
+
+        var json = OkJson(await CreateController().GetDeliveries());
+
+        Assert.Empty(json.GetProperty("deliveries").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("rate_limited_until").ValueKind);
+    }
+
+    [Fact]
+    public async Task CancelDelivery_ReturnsTheCancelledDelivery()
+    {
+        var cancelled = Delivery(1, "/lib/a.cbz") with { Status = EmailDeliveryStatus.Cancelled };
+        _email.Setup(e => e.CancelDeliveryAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.Cancelled, cancelled));
+
+        var json = OkJson(await CreateController().CancelDelivery(1, CancellationToken.None));
+
+        Assert.True(json.GetProperty("cancelled").GetBoolean());
+        Assert.Equal(EmailDeliveryStatus.Cancelled, json.GetProperty("delivery").GetProperty("Status").GetString());
+    }
+
+    [Fact]
+    public async Task CancelDelivery_IsAcceptedWhileThePreparationStops()
+    {
+        _email.Setup(e => e.CancelDeliveryAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.Stopping, Delivery(1, "/lib/a.cbz")));
+
+        var result = await CreateController().CancelDelivery(1, CancellationToken.None);
+
+        var json = ToJson(Assert.IsType<AcceptedResult>(result.Result).Value);
+        Assert.False(json.GetProperty("cancelled").GetBoolean());
+        Assert.True(json.GetProperty("stopping").GetBoolean());
+        Assert.Equal(EmailDeliveryStatus.Pending, json.GetProperty("delivery").GetProperty("Status").GetString());
+    }
+
+    [Fact]
+    public async Task CancelDelivery_UnknownDeliveryIsNotFound()
+    {
+        _email.Setup(e => e.CancelDeliveryAsync(404, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.NotFound, null));
+
+        var result = await CreateController().CancelDelivery(404, CancellationToken.None);
+
+        Assert.Equal("Delivery not found", ErrorOf<NotFoundObjectResult>(result.Result));
+    }
+
+    [Theory]
+    [InlineData(EmailDeliveryCancelOutcome.Sending, EmailDeliveryStatus.Pending, "The delivery is already being sent and can no longer be cancelled.")]
+    [InlineData(EmailDeliveryCancelOutcome.AlreadyFinished, EmailDeliveryStatus.Sent, "The delivery has already been sent.")]
+    [InlineData(EmailDeliveryCancelOutcome.AlreadyFinished, EmailDeliveryStatus.Failed, "The delivery has already failed.")]
+    [InlineData(EmailDeliveryCancelOutcome.AlreadyFinished, EmailDeliveryStatus.Cancelled, "The delivery has already been cancelled.")]
+    [InlineData(EmailDeliveryCancelOutcome.AlreadyFinished, "unknown", "The delivery has already finished.")]
+    public async Task CancelDelivery_DeliveryThatCanNoLongerBeCancelledIsAConflict(
+        EmailDeliveryCancelOutcome outcome,
+        string status,
+        string expectedError)
+    {
+        var delivery = Delivery(1, "/lib/a.cbz") with { Status = status };
+        _email.Setup(e => e.CancelDeliveryAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EmailDeliveryCancelResult(outcome, delivery));
+
+        var result = await CreateController().CancelDelivery(1, CancellationToken.None);
+
+        Assert.Equal(expectedError, ErrorOf<ConflictObjectResult>(result.Result));
+        var json = ToJson(Assert.IsType<ConflictObjectResult>(result.Result).Value);
+        Assert.Equal(status, json.GetProperty("delivery").GetProperty("Status").GetString());
+    }
+
+    [Fact]
+    public async Task CancelPendingDeliveries_ReportsWhatWasCancelled()
+    {
+        _email.Setup(e => e.CancelPendingDeliveriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EmailDeliveryBulkCancelResult(Cancelled: 4, Stopping: 1, Sending: 2));
+
+        var json = OkJson(await CreateController().CancelPendingDeliveries(CancellationToken.None));
+
+        Assert.Equal(4, json.GetProperty("cancelled").GetInt32());
+        Assert.Equal(1, json.GetProperty("stopping").GetInt32());
+        Assert.Equal(2, json.GetProperty("sending").GetInt32());
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────

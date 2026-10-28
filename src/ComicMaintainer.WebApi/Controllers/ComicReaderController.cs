@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Models;
 using ComicMaintainer.Core.Reader.Services;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
@@ -197,7 +198,7 @@ public class ComicReaderController : ControllerBase
             }
 
             var etag = BuildCoverETag(entry.Value);
-            if (IfNoneMatchSatisfied(Request.Headers.IfNoneMatch, etag))
+            if (ConditionalRequests.IfNoneMatchSatisfied(Request.Headers.IfNoneMatch, etag))
             {
                 Response.Headers.ETag = etag;
                 Response.Headers.CacheControl = "public, max-age=3600";
@@ -227,36 +228,6 @@ public class ComicReaderController : ControllerBase
         // Keep the opaque-tag to safe token characters.
         var safeVariant = new string(variant.Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.').ToArray());
         return "\"" + entry.LastModified.UtcTicks.ToString("x") + "-" + entry.Data.Length.ToString("x") + "-" + safeVariant + "\"";
-    }
-
-    /// <summary>
-    /// Evaluates an <c>If-None-Match</c> header against <paramref name="etag"/>
-    /// using the weak comparison mandated by RFC 9110 §13.1.2. Handles
-    /// <c>*</c>, comma-separated lists, multiple header values and
-    /// <c>W/</c>-prefixed tags.
-    /// </summary>
-    [NonAction]
-    public static bool IfNoneMatchSatisfied(Microsoft.Extensions.Primitives.StringValues ifNoneMatch, string etag)
-    {
-        if (Microsoft.Extensions.Primitives.StringValues.IsNullOrEmpty(ifNoneMatch))
-        {
-            return false;
-        }
-        if (!Microsoft.Net.Http.Headers.EntityTagHeaderValue.TryParseList(ifNoneMatch, out var candidates)
-            || candidates is null)
-        {
-            return false;
-        }
-        var current = new Microsoft.Net.Http.Headers.EntityTagHeaderValue(etag);
-        foreach (var candidate in candidates)
-        {
-            if (candidate.Tag.Equals("*", StringComparison.Ordinal)
-                || candidate.Compare(current, useStrongComparison: false))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     /// <summary>

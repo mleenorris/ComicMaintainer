@@ -113,7 +113,16 @@ test('the Actions menu flips above its button and stays inside the viewport', as
         ['exactly at the left margin', [1200, 800], { top: 100, bottom: 130, left: 130, right: 210 }, { width: 200, height: 300 },
             { shown: true, above: false, top: '132px', left: '10px' }],
         ['would overflow on the right', [1000, 800], { top: 100, bottom: 130, left: 1020, right: 1100 }, { width: 200, height: 300 },
-            { shown: true, above: false, top: '132px', left: '790px' }]
+            { shown: true, above: false, top: '132px', left: '790px' }],
+        // In a very narrow window (200 CSS px is an 800 px window at 400 %
+        // zoom) keeping the menu off the right edge must not push the start
+        // of its items past the left one.
+        ['nearly as wide as the viewport', [200, 800], { top: 100, bottom: 130, left: 150, right: 190 }, { width: 195, height: 300 },
+            { shown: true, above: false, top: '132px', left: '10px' }],
+        ['as wide as the viewport less its margins', [200, 800], { top: 100, bottom: 130, left: 10, right: 50 }, { width: 180, height: 300 },
+            { shown: true, above: false, top: '132px', left: '10px' }],
+        ['wider than the viewport', [140, 800], { top: 100, bottom: 130, left: 100, right: 130 }, { width: 150, height: 300 },
+            { shown: true, above: false, top: '132px', left: '10px' }]
     ];
     for (const [name, [width, height], button, menu, expected] of cases) {
         setViewport(page, width, height);

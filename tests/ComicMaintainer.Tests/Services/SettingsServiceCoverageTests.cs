@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging;
@@ -313,6 +314,54 @@ public sealed class SettingsServiceCoverageTests : IDisposable
             "smtp.example.com", 25, null, null, true, false, fromAddress, null, 10));
 
         Assert.Equal("fromAddress", ex.ParamName);
+        Assert.False(File.Exists(_settingsPath));
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettingsAsync_PersistsAllThreeLimits()
+    {
+        await _service.UpdateEmailRateLimitSettingsAsync(maxSendsPerHour: 20, maxSendsPerDay: 200, minSecondsBetweenSends: 30);
+
+        var section = ReadSection();
+        Assert.Equal(20, section["EmailMaxSendsPerHour"].GetInt32());
+        Assert.Equal(200, section["EmailMaxSendsPerDay"].GetInt32());
+        Assert.Equal(30, section["EmailMinSecondsBetweenSends"].GetInt32());
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettingsAsync_AcceptsZeroAndTheUpperBounds()
+    {
+        await _service.UpdateEmailRateLimitSettingsAsync(
+            EmailRateLimitBounds.MaxSendsPerHour,
+            EmailRateLimitBounds.MaxSendsPerDay,
+            EmailRateLimitBounds.MaxMinSecondsBetweenSends);
+        await _service.UpdateEmailRateLimitSettingsAsync(0, 0, 0);
+
+        var section = ReadSection();
+        Assert.Equal(0, section["EmailMaxSendsPerHour"].GetInt32());
+        Assert.Equal(0, section["EmailMaxSendsPerDay"].GetInt32());
+        Assert.Equal(0, section["EmailMinSecondsBetweenSends"].GetInt32());
+    }
+
+    [Theory]
+    [InlineData(-1, 0, 0, "maxSendsPerHour", "Maximum emails per hour must be between 0 and 10000")]
+    [InlineData(10_001, 0, 0, "maxSendsPerHour", "Maximum emails per hour must be between 0 and 10000")]
+    [InlineData(0, -1, 0, "maxSendsPerDay", "Maximum emails per day must be between 0 and 100000")]
+    [InlineData(0, 100_001, 0, "maxSendsPerDay", "Maximum emails per day must be between 0 and 100000")]
+    [InlineData(0, 0, -1, "minSecondsBetweenSends", "Minimum seconds between emails must be between 0 and 86400")]
+    [InlineData(0, 0, 86_401, "minSecondsBetweenSends", "Minimum seconds between emails must be between 0 and 86400")]
+    public async Task UpdateEmailRateLimitSettingsAsync_RejectsOutOfRangeValuesWithoutSavingAny(
+        int maxSendsPerHour,
+        int maxSendsPerDay,
+        int minSecondsBetweenSends,
+        string parameterName,
+        string expectedMessage)
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateEmailRateLimitSettingsAsync(
+            maxSendsPerHour, maxSendsPerDay, minSecondsBetweenSends));
+
+        Assert.Equal(parameterName, ex.ParamName);
+        Assert.StartsWith(expectedMessage, ex.Message);
         Assert.False(File.Exists(_settingsPath));
     }
 

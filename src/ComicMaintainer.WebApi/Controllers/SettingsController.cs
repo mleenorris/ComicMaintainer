@@ -77,6 +77,8 @@ public class SettingsController : ControllerBase
             suwayomi_username = _appSettings.CurrentValue.SuwayomiUsername,
             // As with the SMTP password, the password itself is never returned.
             suwayomi_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.SuwayomiPassword),
+            suwayomi_downloads_directory = _appSettings.CurrentValue.SuwayomiDownloadsDirectory,
+            suwayomi_import_directory = _appSettings.CurrentValue.SuwayomiImportDirectory,
             default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
             allow_registration = _appSettings.CurrentValue.AllowRegistration,
             default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage,
@@ -97,6 +99,9 @@ public class SettingsController : ControllerBase
             email_from_address = _appSettings.CurrentValue.EmailFromAddress,
             email_from_name = _appSettings.CurrentValue.EmailFromName,
             email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes,
+            email_max_sends_per_hour = _appSettings.CurrentValue.EmailMaxSendsPerHour,
+            email_max_sends_per_day = _appSettings.CurrentValue.EmailMaxSendsPerDay,
+            email_min_seconds_between_sends = _appSettings.CurrentValue.EmailMinSecondsBetweenSends,
             error_reporting_enabled = _appSettings.CurrentValue.ErrorReportingEnabled,
             // The destination is fixed, not a setting. It is still returned so
             // the UI can name the repository it files issues in without
@@ -878,8 +883,57 @@ public class SettingsController : ControllerBase
     }
 
     /// <summary>
+    /// Updates the email rate limit. Each value is a non-negative integer and
+    /// 0 disables that limit.
+    /// </summary>
+    [HttpPut("email-rate-limit")]
+    public async Task<ActionResult> UpdateEmailRateLimitSettings(
+        [FromBody] EmailRateLimitSettingsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        try
+        {
+            await _settingsService.UpdateEmailRateLimitSettingsAsync(
+                request.MaxSendsPerHour,
+                request.MaxSendsPerDay,
+                request.MinSecondsBetweenSends,
+                cancellationToken);
+
+            return Ok(new { message = "Email rate limit updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            _logger.LogError(ex, "Failed to update email rate limit");
+            return StatusCode(500, new { error = "Failed to update email rate limit" });
+        }
+    }
+
+    public class EmailRateLimitSettingsRequest
+    {
+        /// <summary>Most comic emails in any rolling 60-minute window; 0 for no limit.</summary>
+        public int MaxSendsPerHour { get; set; }
+
+        /// <summary>Most comic emails in any rolling 24-hour window; 0 for no limit.</summary>
+        public int MaxSendsPerDay { get; set; }
+
+        /// <summary>Minimum gap between two comic emails; 0 to send back to back.</summary>
+        public int MinSecondsBetweenSends { get; set; }
+    }
+
+    /// <summary>
     /// Updates the Suwayomi download-server settings. Omit <c>password</c> to
-    /// keep the stored password; send an empty string to clear it.
+    /// keep the stored password; send an empty string to clear it. The
+    /// <c>downloadsDirectory</c> and <c>importDirectory</c> import folders
+    /// follow the same omit-to-keep, empty-to-clear rule.
     /// </summary>
     [HttpPut("suwayomi")]
     public async Task<ActionResult> UpdateSuwayomiSettings([FromBody] SuwayomiSettingsRequest request, CancellationToken cancellationToken = default)
@@ -896,7 +950,9 @@ public class SettingsController : ControllerBase
                 request.BaseUrl,
                 request.Username,
                 request.Password,
-                cancellationToken);
+                downloadsDirectory: request.DownloadsDirectory,
+                importDirectory: request.ImportDirectory,
+                cancellationToken: cancellationToken);
 
             return Ok(new { message = "Suwayomi settings updated successfully" });
         }
@@ -923,6 +979,19 @@ public class SettingsController : ControllerBase
 
         /// <summary>Null keeps the stored password; empty string clears it.</summary>
         public string? Password { get; set; }
+
+        /// <summary>
+        /// Folder Suwayomi saves chapters into, as seen by this service. Null
+        /// keeps the stored value; empty string clears it (disabling the import).
+        /// </summary>
+        public string? DownloadsDirectory { get; set; }
+
+        /// <summary>
+        /// Library folder imported chapters are moved into (relative to the
+        /// watched directory or absolute inside it). Null keeps the stored
+        /// value; empty string clears it (the watched directory itself).
+        /// </summary>
+        public string? ImportDirectory { get; set; }
     }
 
     /// <summary>

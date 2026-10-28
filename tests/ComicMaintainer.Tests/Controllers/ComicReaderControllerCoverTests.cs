@@ -135,17 +135,4 @@ public class ComicReaderControllerCoverTests : IDisposable
         var result = await BuildController(oldEtag).GetCover(_file);
         Assert.Equal(200, StatusOf(result));
     }
-
-    [Theory]
-    [InlineData("", false)]
-    [InlineData("\"abc\"", true)]
-    [InlineData("W/\"abc\"", true)]
-    [InlineData("\"x\",\"abc\"", true)]
-    [InlineData("*", true)]
-    [InlineData("\"abcd\"", false)]
-    [InlineData("abc", false)]
-    public void IfNoneMatchSatisfied_ParsesHeader(string header, bool expected)
-    {
-        Assert.Equal(expected, ComicReaderController.IfNoneMatchSatisfied(header, "\"abc\""));
-    }
 }

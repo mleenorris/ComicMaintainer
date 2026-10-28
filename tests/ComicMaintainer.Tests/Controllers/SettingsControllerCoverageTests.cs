@@ -1000,7 +1000,8 @@ public class SettingsControllerCoverageTests
                 break;
             case "suwayomi":
                 _settingsService.Setup(s => s.UpdateSuwayomiSettingsAsync(
-                        It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                        It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                        It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                     .ThrowsAsync(failure);
                 break;
             case "error-reporting":
@@ -1095,6 +1096,75 @@ public class SettingsControllerCoverageTests
             null, 587, null, null, false, false, null, null, 25, It.IsAny<CancellationToken>()), Times.Once());
     }
 
+    // ---------------------------------------------------------------- email rate limit
+
+    [Fact]
+    public void GetAllSettings_ReturnsTheEmailRateLimit()
+    {
+        _settings.EmailMaxSendsPerHour = 20;
+        _settings.EmailMaxSendsPerDay = 200;
+        _settings.EmailMinSecondsBetweenSends = 30;
+
+        var json = OkJson(CreateController().GetAllSettings());
+
+        Assert.Equal(20, json.GetProperty("email_max_sends_per_hour").GetInt32());
+        Assert.Equal(200, json.GetProperty("email_max_sends_per_day").GetInt32());
+        Assert.Equal(30, json.GetProperty("email_min_seconds_between_sends").GetInt32());
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettings_PassesEveryFieldToSettingsService()
+    {
+        var request = new SettingsController.EmailRateLimitSettingsRequest
+        {
+            MaxSendsPerHour = 20,
+            MaxSendsPerDay = 200,
+            MinSecondsBetweenSends = 30,
+        };
+
+        var result = await CreateController().UpdateEmailRateLimitSettings(request);
+
+        Assert.Equal("Email rate limit updated successfully", OkJson(result).GetProperty("message").GetString());
+        _settingsService.Verify(s => s.UpdateEmailRateLimitSettingsAsync(20, 200, 30, It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettings_NullBody_ReturnsBadRequest()
+    {
+        var result = await CreateController().UpdateEmailRateLimitSettings(null!);
+
+        Assert.Equal("Request body is required", BadRequestError(result));
+        _settingsService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettings_ValidationFailure_ReturnsBadRequestWithServiceMessage()
+    {
+        _settingsService.Setup(s => s.UpdateEmailRateLimitSettingsAsync(
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("Maximum emails per hour must be between 0 and 10000"));
+
+        var result = await CreateController().UpdateEmailRateLimitSettings(
+            new SettingsController.EmailRateLimitSettingsRequest { MaxSendsPerHour = -1 });
+
+        Assert.Equal("Maximum emails per hour must be between 0 and 10000", BadRequestError(result));
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettings_UnexpectedFailure_Returns500()
+    {
+        var failure = new IOException("disk full");
+        _settingsService.Setup(s => s.UpdateEmailRateLimitSettingsAsync(
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        var result = await CreateController().UpdateEmailRateLimitSettings(
+            new SettingsController.EmailRateLimitSettingsRequest());
+
+        Assert.Equal("Failed to update email rate limit", ServerErrorJson(result).GetProperty("error").GetString());
+        VerifyLogged(LogLevel.Error, "Failed to update email rate limit", Times.Once(), failure);
+    }
+
     [Fact]
     public async Task UpdateSuwayomiSettings_PassesEveryFieldToSettingsService()
     {
@@ -1104,12 +1174,15 @@ public class SettingsControllerCoverageTests
             BaseUrl = "http://suwayomi.local:4567",
             Username = "reader",
             Password = Secret,
+            DownloadsDirectory = "/suwayomi/downloads/mangas",
+            ImportDirectory = "Manga",
         };
 
         await CreateController().UpdateSuwayomiSettings(request);
 
         _settingsService.Verify(s => s.UpdateSuwayomiSettingsAsync(
-            true, "http://suwayomi.local:4567", "reader", Secret, It.IsAny<CancellationToken>()), Times.Once());
+            true, "http://suwayomi.local:4567", "reader", Secret,
+            "/suwayomi/downloads/mangas", "Manga", It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
@@ -1118,7 +1191,7 @@ public class SettingsControllerCoverageTests
         await CreateController().UpdateSuwayomiSettings(new SettingsController.SuwayomiSettingsRequest());
 
         _settingsService.Verify(s => s.UpdateSuwayomiSettingsAsync(
-            false, null, null, null, It.IsAny<CancellationToken>()), Times.Once());
+            false, null, null, null, null, null, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]

@@ -720,11 +720,64 @@ public class EmailController : ControllerBase
     [HttpGet("deliveries")]
     public async Task<ActionResult<object>> GetDeliveries(
         [FromQuery] int limit = 50,
+        [FromQuery] int offset = 0,
         CancellationToken cancellationToken = default)
     {
-        var deliveries = await _email.GetRecentDeliveriesAsync(limit, cancellationToken);
-        return Ok(new { deliveries });
+        var page = await _email.GetDeliveriesPageAsync(offset, limit, cancellationToken);
+        return Ok(new
+        {
+            deliveries = page.Deliveries,
+            total = page.Total,
+            offset = page.Offset,
+            limit = page.Limit,
+            pending_count = page.PendingCount,
+            rate_limited_until = page.RateLimitedUntil
+        });
     }
+
+    /// <summary>
+    /// Cancels a delivery that has not been sent yet. 202 when it is being
+    /// prepared and has been asked to stop but has not stopped yet; 409 when it
+    /// is already being sent or has finished.
+    /// </summary>
+    [HttpPost("deliveries/{deliveryId:int}/cancel")]
+    public async Task<ActionResult<object>> CancelDelivery(int deliveryId, CancellationToken cancellationToken)
+    {
+        var result = await _email.CancelDeliveryAsync(deliveryId, cancellationToken);
+        return result.Outcome switch
+        {
+            EmailDeliveryCancelOutcome.NotFound => NotFound(new { error = "Delivery not found" }),
+            EmailDeliveryCancelOutcome.Cancelled => Ok(new { cancelled = true, delivery = result.Delivery }),
+            EmailDeliveryCancelOutcome.Stopping => Accepted(new { cancelled = false, stopping = true, delivery = result.Delivery }),
+            EmailDeliveryCancelOutcome.Sending => Conflict(new
+            {
+                error = "The delivery is already being sent and can no longer be cancelled.",
+                delivery = result.Delivery
+            }),
+            _ => Conflict(new { error = DescribeFinishedDelivery(result.Delivery?.Status), delivery = result.Delivery }),
+        };
+    }
+
+    /// <summary>Cancels every delivery that has not been sent yet.</summary>
+    [HttpPost("deliveries/cancel-pending")]
+    public async Task<ActionResult<object>> CancelPendingDeliveries(CancellationToken cancellationToken)
+    {
+        var result = await _email.CancelPendingDeliveriesAsync(cancellationToken);
+        return Ok(new
+        {
+            cancelled = result.Cancelled,
+            stopping = result.Stopping,
+            sending = result.Sending
+        });
+    }
+
+    private static string DescribeFinishedDelivery(string? status) => status switch
+    {
+        EmailDeliveryStatus.Sent => "The delivery has already been sent.",
+        EmailDeliveryStatus.Failed => "The delivery has already failed.",
+        EmailDeliveryStatus.Cancelled => "The delivery has already been cancelled.",
+        _ => "The delivery has already finished.",
+    };
 
     public class DeviceRequest
     {

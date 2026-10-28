@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { deferred } = require('./support/app');
-const { boot, requests, seriesCard, seriesIssue, seriesIssues, seriesPage } = require('./support/core-helpers');
+const { boot, press, requests, seriesCard, seriesIssue, seriesIssues, seriesPage } = require('./support/core-helpers');
 
 const SAGA = seriesCard();
 const ISSUES = `/api/files/series/${SAGA.id}/issues`;
@@ -273,6 +273,49 @@ test('browser back and forward move between pages', async () => {
     page.window.history.forward();
     await page.waitFor(() => page.evaluate('currentView') === 'settings');
     assert.deepEqual(pageState(page), SETTINGS);
+});
+
+test('an Actions menu left open on a series page closes when the page changes without a click', async () => {
+    // An open menu is moved to <body> (js/app/menus.js), so it stayed on
+    // screen over the next page, still acting on the previous page's issue.
+    // A click anywhere else closes it, but Back/Forward (also the mouse back
+    // button and swipe-back) and the "g" shortcuts change the page without one.
+    const page = await boot({ hash: '#/library', routes: libraryRoutes() });
+    const keys = async (...sequence) => {
+        for (const key of sequence) {
+            await press(page, key, {}, page.document.body);
+        }
+    };
+    const leftOpen = () => page.$$('body > .dropdown-menu, .dropdown-menu.show');
+
+    async function leaveWithMenuOpen(name, leave, view) {
+        const toggle = page.$('#seriesDetailPanel .series-issue-actions-toggle');
+        const menu = toggle.nextElementSibling;
+        page.click(toggle);
+        assert.deepEqual(leftOpen(), [menu], `${name}: the menu is open, in <body>`);
+
+        await leave();
+        await page.waitFor(() => page.evaluate('currentView') === view);
+        assert.deepEqual(leftOpen(), [], name);
+    }
+
+    for (const [name, leave, view] of [
+        ['Back', () => page.window.history.back(), 'library'],
+        ['g l', async () => await keys('g', 'l'), 'library'],
+        ['g h', async () => await keys('g', 'h'), 'home'],
+        ['g s', async () => await keys('g', 's'), 'settings'],
+        ['g j', async () => await keys('g', 'j'), 'jobs']
+    ]) {
+        await go(page, `#/series/${SAGA.id}`);
+        await leaveWithMenuOpen(name, leave, view);
+    }
+
+    await go(page, `#/series/${SAGA.id}`);
+    await go(page, '#/settings');
+    page.window.history.back();
+    await page.waitFor(() => page.evaluate('currentView') === 'series');
+    await page.settle();
+    await leaveWithMenuOpen('Forward', () => page.window.history.forward(), 'settings');
 });
 
 test('the issue range selection is reset only when leaving the open series', async () => {

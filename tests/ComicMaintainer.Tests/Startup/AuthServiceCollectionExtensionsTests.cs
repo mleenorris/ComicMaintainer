@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Claims;
 using System.Text;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using Microsoft.AspNetCore.Authentication;
@@ -28,10 +29,15 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
     // Authelia refuses to start without an allowlist of reverse proxies (see AutheliaTrustedProxyStartupTests).
     private const string TrustedProxies = "172.18.0.0/16";
 
-    // The extension class is internal to the WebApi assembly (no InternalsVisibleTo).
+    // The extension classes are internal to the WebApi assembly (no InternalsVisibleTo).
     private static readonly Func<IServiceCollection, IConfiguration, IServiceCollection> AddComicMaintainerAuth = typeof(Program).Assembly
         .GetType("ComicMaintainer.WebApi.Startup.AuthServiceCollectionExtensions", throwOnError: true)!
         .GetMethod("AddComicMaintainerAuth", BindingFlags.Static | BindingFlags.Public)!
+        .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
+
+    private static readonly Func<IServiceCollection, IConfiguration, IServiceCollection> AddComicMaintainerSettings = typeof(Program).Assembly
+        .GetType("ComicMaintainer.WebApi.Startup.CoreServiceCollectionExtensions", throwOnError: true)!
+        .GetMethod("AddComicMaintainerSettings", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
@@ -51,6 +57,7 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
     [Theory]
     [InlineData("")]
     [InlineData(null)]
+    [InlineData("   ")]
     public void WithAJwtSectionButNoSecret_Throws(string? secret)
     {
         var configuration = BuildConfiguration(("JwtSettings:Secret", secret), ("JwtSettings:Issuer", "issuer"));
@@ -104,6 +111,65 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         Assert.Equal("ComicMaintainer", parameters.ValidIssuer);
         Assert.Equal("ComicMaintainerAPI", parameters.ValidAudience);
         await AssertJwtOnlyAsync(provider);
+    }
+
+    // AuthService signs tokens with IOptions<JwtSettings> and the bearer scheme validates them with the key read at
+    // startup, so both must resolve JWT_SECRET the same way. Regression test for #875: a blank JWT_SECRET (as passed by
+    // `docker run -e JWT_SECRET=` or an empty env-file entry) counts as unset in both, so the configured secret is used.
+    [Theory]
+    [InlineData(null, ConfiguredSecret)]
+    [InlineData("", ConfiguredSecret)]
+    [InlineData(" \t ", ConfiguredSecret)]
+    [InlineData(EnvironmentSecret, EnvironmentSecret)]
+    public void JwtSecretEnvironmentVariable_ResolvesTheSameSecretForSigningAndValidation(string? variable, string expectedSecret)
+    {
+        _environment.Set("JWT_SECRET", variable);
+        var configuration = BuildConfiguration(("JwtSettings:Secret", ConfiguredSecret));
+        var services = new ServiceCollection();
+        services.AddLogging();
+        AddComicMaintainerSettings(services, configuration);
+        AddComicMaintainerAuth(services, configuration);
+        using var provider = services.BuildServiceProvider();
+
+        Assert.Equal(expectedSecret, provider.GetRequiredService<IOptions<JwtSettings>>().Value.Secret);
+        var key = Assert.IsType<SymmetricSecurityKey>(GetBearerOptions(provider).TokenValidationParameters.IssuerSigningKey);
+        Assert.Equal(Encoding.UTF8.GetBytes(expectedSecret), key.Key);
+    }
+
+    // Regression test for #875: the error names the blank variable instead of claiming that no secret is configured.
+    [Theory]
+    [InlineData("", null)]
+    [InlineData("", "")]
+    [InlineData("", "   ")]
+    [InlineData(" \t ", null)]
+    public void BlankJwtSecretEnvironmentVariable_WithoutAConfiguredSecret_ThrowsNamingTheBlankVariable(string variable, string? configuredSecret)
+    {
+        _environment.Set("JWT_SECRET", variable);
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => AddComicMaintainerAuth(new ServiceCollection(), BuildConfiguration(("JwtSettings:Secret", configuredSecret))));
+
+        Assert.StartsWith("JWT_SECRET is set but blank", exception.Message);
+    }
+
+    // A blank JWT_SECRET was meant to hold the secret (such as `-e JWT_SECRET="$(cat jwt_secret.txt)"` with the file
+    // missing), so it must not fall back to the placeholder secret shipped in appsettings.json: that one is public, and
+    // anyone could sign tokens with it. The shipped file (which the build copies next to the tests, as it is published
+    // next to the app) is read, so that a change to it is covered too.
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \t ")]
+    public void BlankJwtSecretEnvironmentVariable_WithOnlyTheShippedSecret_Throws(string variable)
+    {
+        _environment.Set("JWT_SECRET", variable);
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(Path.Join(AppContext.BaseDirectory, "appsettings.json"), optional: false)
+            .Build();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => AddComicMaintainerAuth(new ServiceCollection(), configuration));
+
+        Assert.StartsWith("JWT_SECRET is set but blank", exception.Message);
     }
 
     [Fact]

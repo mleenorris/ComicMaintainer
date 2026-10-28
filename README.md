@@ -13,7 +13,7 @@ ComicMaintainer is a service that automatically watches a directory for new or c
 - **File Watching**: Automatically monitors directories for comic file changes
 - **Comic Processing**: Processes `.cbz` and `.cbr` files
 - **Web Interface**: Full-featured web UI for managing comics
-- **Scheduled Jobs**: Manage recurring background jobs (interval, enable/disable, options, run now) from the **Scheduled Jobs** page (`#/jobs`, in the sidebar and ⋮ menu; administrators only). Ships with a *Metadata Audit* job that walks every tracked file and reports any with a missing chapter/issue number or a series tag that doesn't match the expected resolved series name, plus a *Library Scan* job (`library-scan`) that reconciles additions/deletions and re-normalizes files whose series-metadata stamp is stale (opt-in `reprocessModified` also re-normalizes files changed on disk by other tools; see [Performance Tuning](docs/PERFORMANCE_TUNING.md#incremental-library-scans)). New jobs can be added by registering a class that implements `IScheduledJobHandler`.
+- **Scheduled Jobs**: Manage recurring background jobs (interval, enable/disable, options, run now) from the **Scheduled Jobs** page (`#/jobs`, in the sidebar and ⋮ menu; administrators only). Ships with a *Metadata Audit* job that walks every tracked file and reports any with a missing chapter/issue number or a series tag that doesn't match the expected resolved series name, plus a *Library Scan* job (`library-scan`) that reconciles additions/deletions and re-normalizes files whose series-metadata stamp is stale (opt-in `reprocessModified` also re-normalizes files changed on disk by other tools; see [Performance Tuning](docs/PERFORMANCE_TUNING.md#incremental-library-scans)), and a *Suwayomi Download Import* job (`suwayomi-download-import`) that moves chapters Suwayomi saved as `source/series/chapter.cbz` into the library as `series/chapter.cbz` once a Suwayomi downloads folder is set in Settings (see [API docs](docs/API.md#importing-suwayomi-downloads)). New jobs can be added by registering a class that implements `IScheduledJobHandler`.
 - **Batch Processing**: Process multiple files at once
 - **Metadata Management**: View and edit comic metadata
 - **Series Library View**: Browse comics as cover-based series cards and drill into issue lists
@@ -290,6 +290,9 @@ For a complete, ready-to-use API collection with all endpoints, see:
 - `POST /api/email/send` - Queue specific files for delivery
 - `POST /api/email/send-series` - Queue every issue of a series
 - `GET|PUT /api/email/subscriptions` - Manage automatic per-series delivery
+- `GET /api/email/deliveries` - Page through the delivery history (`limit`, `offset`)
+- `POST /api/email/deliveries/{id}/cancel` / `POST /api/email/deliveries/cancel-pending` - Cancel deliveries that have not been sent yet
+- `PUT /api/settings/email-rate-limit` - Limit how many comic emails are sent per hour or day, and how far apart
 
 See [Email to E-Reader](docs/EMAIL_DELIVERY.md) for the full endpoint list and configuration.
 

@@ -148,12 +148,16 @@ public partial class FilesController
                     {
                         try
                         {
-                            if (System.IO.Directory.Exists(sourceDir) &&
-                                !DirectoryContainsComicArchives(sourceDir))
+                            SuwayomiImportSynchronization.Execute(() =>
                             {
-                                System.IO.Directory.Delete(sourceDir, recursive: true);
-                                removedDirectories.Add(sourceDir);
-                            }
+                                if (System.IO.Directory.Exists(sourceDir) &&
+                                    !DirectoryContainsComicArchives(sourceDir) &&
+                                    !DirectoryContainsSuwayomiStagingFiles(sourceDir))
+                                {
+                                    System.IO.Directory.Delete(sourceDir, recursive: true);
+                                    removedDirectories.Add(sourceDir);
+                                }
+                            });
                         }
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                         {
@@ -428,6 +432,13 @@ public partial class FilesController
         return System.IO.Directory
             .EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Any(ComicFileExtensions.IsComicArchive);
+    }
+
+    private static bool DirectoryContainsSuwayomiStagingFiles(string directory)
+    {
+        return System.IO.Directory
+            .EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Any(path => string.Equals(Path.GetExtension(path), ".suwayomi-import", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

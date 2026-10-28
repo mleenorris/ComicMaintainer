@@ -267,6 +267,12 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
             }
             return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller gave up; that says nothing about the provider, so
+            // nothing is cached and the next check probes again.
+            throw;
+        }
         catch (OperationCanceledException)
         {
             return (false, "Timed out");

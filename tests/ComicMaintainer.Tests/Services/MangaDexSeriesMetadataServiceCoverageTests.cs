@@ -284,6 +284,38 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchSeriesAsync_SkipsEntriesThatAreNotObjects_AndRecordsASuccess()
+    {
+        // Regression: reading an entry (or its attributes) that is not an object threw, which
+        // discarded the whole page of matches and recorded a provider failure.
+        const string json = """
+        {
+          "data": [
+            null,
+            "Solo Leveling",
+            7,
+            [ { "id": "nested", "attributes": { "title": { "en": "Nested" } } } ],
+            { "id": "null-attributes", "attributes": null },
+            { "id": "string-attributes", "attributes": "Solo Leveling" },
+            { "id": "array-attributes", "attributes": [ { "title": { "en": "Array" } } ] },
+            { "id": "1", "type": "manga", "attributes": { "title": { "en": "Solo Leveling" } } }
+          ]
+        }
+        """;
+        var service = CreateService(new StubHandler(_ => Json(json)));
+
+        var result = Assert.Single(await service.SearchSeriesAsync("Solo Leveling"));
+
+        Assert.Equal("Solo Leveling", result.CanonicalTitle);
+        Assert.Empty(_logger.Entries);
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.Equal(1, health.SuccessCount);
+        Assert.Equal(0, health.FailureCount);
+        Assert.Null(health.LastError);
+    }
+
+    [Fact]
     public async Task SearchSeriesAsync_DescriptionFallsBackToTheFirstNonBlankLanguage()
     {
         const string json = """
@@ -331,6 +363,29 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
         });
         Assert.Equal("https://uploads.mangadex.org/covers/abc-123/cover.jpg", results[3].ImageUrl);
         Assert.Equal("https://uploads.mangadex.org/covers/abc-123/cover.jpg.256.jpg", results[3].ThumbnailUrl);
+    }
+
+    [Fact]
+    public async Task SearchSeriesAsync_CoverUrlsSkipRelationshipsThatAreNotObjects()
+    {
+        const string json = """
+        {
+          "data": [
+            {
+              "id": "abc-123",
+              "attributes": { "title": { "en": "With Cover" } },
+              "relationships": [ null, "cover_art", [ { "type": "cover_art" } ], { "type": "cover_art", "attributes": { "fileName": "cover.jpg" } } ]
+            }
+          ]
+        }
+        """;
+        var service = CreateService(new StubHandler(_ => Json(json)));
+
+        var result = Assert.Single(await service.SearchSeriesAsync("With Cover"));
+
+        Assert.Equal("https://uploads.mangadex.org/covers/abc-123/cover.jpg", result.ImageUrl);
+        Assert.Equal("https://uploads.mangadex.org/covers/abc-123/cover.jpg.256.jpg", result.ThumbnailUrl);
+        Assert.Empty(_logger.Entries);
     }
 
     public static TheoryData<string, double, double> RetryAfterCases => new()
@@ -462,6 +517,28 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
 
         Assert.False(health.Reachable);
         Assert.Equal("Timed out", health.StatusMessage);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_CallerCancelsMidProbe_RethrowsWithoutCachingTimedOut()
+    {
+        using var cts = new CancellationTokenSource();
+        var handler = new StubHandler(_ =>
+        {
+            if (cts.IsCancellationRequested) return Json("""{"data":[]}""");
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        var service = CreateService(handler);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckHealthAsync(cts.Token));
+
+        // The next check probes again instead of reporting a cached "Timed out".
+        Assert.False(_cache.TryGetValue(ProbeCacheKey, out _));
+        var health = await service.CheckHealthAsync();
+        Assert.True(health.Reachable);
+        Assert.Equal("Reachable", health.StatusMessage);
+        Assert.Equal(2, handler.Requests.Count);
     }
 
     [Fact]

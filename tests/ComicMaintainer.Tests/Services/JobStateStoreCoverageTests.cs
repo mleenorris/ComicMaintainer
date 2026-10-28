@@ -1,3 +1,4 @@
+using System.Globalization;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
@@ -140,9 +141,14 @@ public class JobStateStoreCoverageTests : IAsyncLifetime
         Assert.True(stored.IsTerminal);
     }
 
+    public static TheoryData<string> NumericValuesOfActiveStatuses => new()
+    {
+        ((int)JobStatus.Running).ToString(CultureInfo.InvariantCulture),
+        ((int)JobStatus.Queued).ToString(CultureInfo.InvariantCulture)
+    };
+
     [Theory]
-    [InlineData("1")]                 // Running's numeric value
-    [InlineData("0")]                 // Queued's numeric value
+    [MemberData(nameof(NumericValuesOfActiveStatuses))]
     [InlineData("+1")]
     [InlineData(" 1")]
     [InlineData("42")]                // no such status
@@ -168,7 +174,19 @@ public class JobStateStoreCoverageTests : IAsyncLifetime
         Assert.True(stored.IsTerminal);
     }
 
-    public static TheoryData<JobStatus> AllStatuses => new(Enum.GetValues<JobStatus>());
+    public static TheoryData<JobStatus> AllStatuses
+    {
+        get
+        {
+            var data = new TheoryData<JobStatus>();
+            foreach (var status in Enum.GetValues<JobStatus>())
+            {
+                data.Add(status);
+            }
+
+            return data;
+        }
+    }
 
     [Theory]
     [MemberData(nameof(AllStatuses))]
@@ -209,12 +227,18 @@ public class JobStateStoreCoverageTests : IAsyncLifetime
             NullLogger<JobStateReconciliationHostedService>.Instance);
 
         await reconciliation.StartAsync(CancellationToken.None);
-
-        Assert.Equal(JobStatus.Interrupted, processor.GetJob(jobId)?.Status);
-        Assert.Null(processor.GetActiveJob());
-        Assert.True(await processor.DeleteJobAsync(jobId));
-        Assert.Null(processor.GetJob(jobId));
-        Assert.Empty(await _store.GetAllAsync());
+        try
+        {
+            Assert.Equal(JobStatus.Interrupted, processor.GetJob(jobId)?.Status);
+            Assert.Null(processor.GetActiveJob());
+            Assert.True(await processor.DeleteJobAsync(jobId));
+            Assert.Null(processor.GetJob(jobId));
+            Assert.Empty(await _store.GetAllAsync());
+        }
+        finally
+        {
+            await reconciliation.StopAsync(CancellationToken.None);
+        }
     }
 
     [Theory]

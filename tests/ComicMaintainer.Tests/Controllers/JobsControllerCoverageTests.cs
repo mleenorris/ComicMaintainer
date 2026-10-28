@@ -1,5 +1,7 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,7 +18,9 @@ public class JobsControllerCoverageTests
 
     public JobsControllerCoverageTests()
     {
-        _controller = new JobsController(_processor.Object, _fileStore.Object, NullLogger<JobsController>.Instance);
+        var settings = new AppSettings { WatchedDirectory = "/c", DuplicateDirectory = "/duplicates" };
+        _controller = new JobsController(
+            _processor.Object, _fileStore.Object, NullLogger<JobsController>.Instance, new TestOptionsMonitor<AppSettings>(settings));
     }
 
     private static List<ComicFile> Files(params string[] paths) =>
@@ -527,6 +531,84 @@ public class JobsControllerCoverageTests
 
         Assert.Equal("No files specified", ErrorOf(result, 400));
         _processor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("/Config/victim.txt")]
+    [InlineData("/c/../Config/victim.txt")]
+    [InlineData("/c-private/a.cbz")]
+    [InlineData("../../etc/passwd")]
+    [InlineData("/c/a.cbz/")]
+    [InlineData("/c/a.cbz/.")]
+    [InlineData("/c/series/..")]
+    [InlineData("/c/missing/../a.cbz")]
+    public async Task DeleteSelected_PathOutsideTheLibrary_RejectsTheWholeBatch(string path)
+    {
+        var request = new JobsController.ProcessSelectedRequest { Files = new() { "/c/a.cbz", path } };
+
+        var result = await _controller.DeleteSelected(request);
+
+        Assert.Equal(JobsController.OutsideAllowedDirectoryError, ErrorOf(result, 400));
+        _processor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteSelected_LinkOutsideTheLibraryToAComicInIt_RejectsTheWholeBatch()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var root = Path.Join(Path.GetTempPath(), "jobs-delete-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var library = Directory.CreateDirectory(Path.Join(root, "library")).FullName;
+            var outside = Directory.CreateDirectory(Path.Join(root, "outside")).FullName;
+            var comic = Path.Join(library, "a.cbz");
+            File.WriteAllText(comic, "keep me");
+            var link = Path.Join(outside, "a.cbz");
+            File.CreateSymbolicLink(link, comic);
+            var controller = new JobsController(
+                _processor.Object, _fileStore.Object, NullLogger<JobsController>.Instance,
+                new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = library }));
+
+            var result = await controller.DeleteSelected(
+                new JobsController.ProcessSelectedRequest { Files = new() { comic, link } });
+
+            Assert.Equal(JobsController.OutsideAllowedDirectoryError, ErrorOf(result, 400));
+            _processor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteSelected_FilesInTheWatchedAndDuplicateDirectories_QueueTheJob()
+    {
+        var jobId = Guid.NewGuid();
+        var files = new List<string> { "/c/a.cbz", "/duplicates/a.cbz" };
+        _processor.Setup(p => p.DeleteFilesAsync(files, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
+
+        var result = await _controller.DeleteSelected(new JobsController.ProcessSelectedRequest { Files = files });
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(jobId.ToString(), JObject.FromObject(ok.Value!)["job_id"]!.ToString());
+    }
+
+    [Fact]
+    public async Task DeleteSelected_LeavesBlankEntriesToTheBatchJob()
+    {
+        var jobId = Guid.NewGuid();
+        var files = new List<string> { "/c/a.cbz", "", "  ", null! };
+        _processor.Setup(p => p.DeleteFilesAsync(files, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
+
+        var result = await _controller.DeleteSelected(new JobsController.ProcessSelectedRequest { Files = files });
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(jobId.ToString(), JObject.FromObject(ok.Value!)["job_id"]!.ToString());
     }
 
     // ---- CancelJob ----------------------------------------------------------------------

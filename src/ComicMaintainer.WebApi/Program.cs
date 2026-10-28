@@ -61,6 +61,10 @@ logger.LogInformation("║         Comic Maintainer - .NET Edition          ║"
 logger.LogInformation("║                  Version {Version}║", version.PadRight(24));
 logger.LogInformation("╚══════════════════════════════════════════════════╝");
 
+// Report where the JWT signing secret came from (see Startup/JwtSecretResolver.cs). It was resolved while the
+// services were registered, before this logger existed.
+app.Services.GetRequiredService<JwtSigningSecret>().LogSource(logger);
+
 // Initialize database and seed roles
 await app.InitializeComicMaintainerDatabaseAsync(logger);
 

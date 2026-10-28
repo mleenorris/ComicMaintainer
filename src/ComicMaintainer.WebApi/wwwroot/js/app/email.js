@@ -31,6 +31,14 @@
         let emailCondenseBuildPollInFlight = false;
         const EMAIL_CONDENSE_BUILD_POLL_MS = 2000;
         let currentEmailSubscriptionSeriesTitle = '';
+        // Delivery History paging. Refresh and cancelling keep the page the
+        // user is on; opening the dialog starts from the newest deliveries.
+        const EMAIL_DELIVERY_HISTORY_PAGE_SIZE = 50;
+        let emailDeliveryHistoryPage = 1;
+        let emailDeliveryHistoryTotal = 0;
+        let emailDeliveryHistoryPendingCount = 0;
+        // Guards against an out-of-order history response overwriting a newer one.
+        let emailDeliveryHistoryToken = 0;
 
         async function fetchEmailJson(path, options = {}) {
             const response = await fetch(apiUrl(path), {
@@ -869,6 +877,13 @@
             const modal = document.getElementById('emailDeliveryHistoryModal');
             if (!modal) return;
             modal.classList.add('active');
+            // Nothing from an earlier visit is shown until the first page loads.
+            emailDeliveryHistoryPage = 1;
+            emailDeliveryHistoryTotal = 0;
+            emailDeliveryHistoryPendingCount = 0;
+            renderEmailDeliveryRateLimit(null);
+            renderEmailDeliveryCancelAll();
+            renderEmailDeliveryHistoryPaging();
             await loadEmailDeliveryHistory();
         }
 
@@ -879,13 +894,141 @@
         async function loadEmailDeliveryHistory() {
             const list = document.getElementById('emailDeliveryHistoryList');
             if (!list) return;
+            const token = ++emailDeliveryHistoryToken;
             renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Loading deliveries...</p></div>`);
+            setEmailDeliveryHistoryPagingEnabled(false);
             try {
-                const data = await fetchEmailJson('/api/email/deliveries?limit=50');
-                renderEmailDeliveryHistory(Array.isArray(data.deliveries) ? data.deliveries : []);
+                const offset = (emailDeliveryHistoryPage - 1) * EMAIL_DELIVERY_HISTORY_PAGE_SIZE;
+                const data = await fetchEmailJson(`/api/email/deliveries?limit=${EMAIL_DELIVERY_HISTORY_PAGE_SIZE}&offset=${offset}`);
+                if (token !== emailDeliveryHistoryToken) return;
+                const deliveries = Array.isArray(data.deliveries) ? data.deliveries : [];
+                const total = Math.max(Number(data.total) || 0, offset + deliveries.length);
+                const lastPage = Math.max(1, Math.ceil(total / EMAIL_DELIVERY_HISTORY_PAGE_SIZE));
+                if (!deliveries.length && emailDeliveryHistoryPage > lastPage) {
+                    // The history shrank under this page; show its last page instead.
+                    emailDeliveryHistoryPage = lastPage;
+                    await loadEmailDeliveryHistory();
+                    return;
+                }
+                emailDeliveryHistoryTotal = total;
+                emailDeliveryHistoryPendingCount = Number(data.pending_count) || 0;
+                renderEmailDeliveryHistory(deliveries);
+                renderEmailDeliveryRateLimit(data.rate_limited_until);
+                renderEmailDeliveryCancelAll();
             } catch (error) {
+                if (token !== emailDeliveryHistoryToken) return;
                 renderHtml(list, html`<div class="empty-state"><p>Failed to load delivery history: ${error.message}</p></div>`);
+                renderEmailDeliveryCancelAll();
             }
+            renderEmailDeliveryHistoryPaging();
+        }
+
+        function setEmailDeliveryHistoryPagingEnabled(enabled) {
+            const totalPages = Math.max(1, Math.ceil(emailDeliveryHistoryTotal / EMAIL_DELIVERY_HISTORY_PAGE_SIZE));
+            const prev = document.getElementById('emailDeliveryHistoryPrevBtn');
+            const next = document.getElementById('emailDeliveryHistoryNextBtn');
+            if (prev) prev.disabled = !enabled || emailDeliveryHistoryPage <= 1;
+            if (next) next.disabled = !enabled || emailDeliveryHistoryPage >= totalPages;
+        }
+
+        function renderEmailDeliveryHistoryPaging() {
+            const totalPages = Math.max(1, Math.ceil(emailDeliveryHistoryTotal / EMAIL_DELIVERY_HISTORY_PAGE_SIZE));
+            const pagination = document.getElementById('emailDeliveryHistoryPagination');
+            const pageInfo = document.getElementById('emailDeliveryHistoryPageInfo');
+            // A single page needs no pager, unless the user is past it.
+            if (pagination) pagination.hidden = totalPages <= 1 && emailDeliveryHistoryPage <= 1;
+            if (pageInfo) {
+                pageInfo.textContent = `Page ${emailDeliveryHistoryPage} of ${Math.max(totalPages, emailDeliveryHistoryPage)} (${emailDeliveryHistoryTotal} total)`;
+            }
+            setEmailDeliveryHistoryPagingEnabled(true);
+        }
+
+        async function loadPreviousEmailDeliveryHistoryPage() {
+            if (emailDeliveryHistoryPage <= 1) return;
+            emailDeliveryHistoryPage--;
+            await loadEmailDeliveryHistory();
+        }
+
+        async function loadNextEmailDeliveryHistoryPage() {
+            const totalPages = Math.ceil(emailDeliveryHistoryTotal / EMAIL_DELIVERY_HISTORY_PAGE_SIZE);
+            if (emailDeliveryHistoryPage >= totalPages) return;
+            emailDeliveryHistoryPage++;
+            await loadEmailDeliveryHistory();
+        }
+
+        /** Says when the email rate limit is holding pending deliveries back. */
+        function renderEmailDeliveryRateLimit(until) {
+            const notice = document.getElementById('emailDeliveryHistoryRateLimit');
+            if (!notice) return;
+            const date = until ? new Date(until) : null;
+            if (!date || Number.isNaN(date.getTime())) {
+                notice.hidden = true;
+                notice.textContent = '';
+                return;
+            }
+            notice.textContent = `⏸ The email rate limit is holding pending deliveries back until ${date.toLocaleString()}.`;
+            notice.hidden = false;
+        }
+
+        function renderEmailDeliveryCancelAll() {
+            const button = document.getElementById('emailDeliveryCancelAllBtn');
+            if (!button) return;
+            button.hidden = emailDeliveryHistoryPendingCount <= 0;
+            button.disabled = false;
+            button.textContent = `Cancel All Pending (${emailDeliveryHistoryPendingCount})`;
+        }
+
+        /** Cancels one delivery that has not been sent yet. */
+        async function cancelEmailDelivery(id, button) {
+            if (button) button.disabled = true;
+            try {
+                const result = await fetchEmailJson(`/api/email/deliveries/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+                if (result.cancelled) {
+                    showMessage('Delivery cancelled.', 'success');
+                } else {
+                    showMessage('Stopping the delivery. It will be cancelled as soon as the current step finishes.', 'info');
+                }
+            } catch (error) {
+                showMessage('Failed to cancel the delivery: ' + error.message, 'error');
+            }
+            await loadEmailDeliveryHistory();
+        }
+
+        /** Cancels every delivery that has not been sent yet, on every page. */
+        async function cancelAllPendingEmailDeliveries() {
+            const count = emailDeliveryHistoryPendingCount;
+            const prompt = count === 1
+                ? 'Cancel the pending delivery?'
+                : `Cancel all ${count} pending deliveries?`;
+            if (!confirm(`${prompt} A delivery already being handed to the mail server is still sent.`)) return;
+            const button = document.getElementById('emailDeliveryCancelAllBtn');
+            if (button) button.disabled = true;
+            try {
+                const result = await fetchEmailJson('/api/email/deliveries/cancel-pending', { method: 'POST' });
+                const cancelled = Number(result.cancelled) || 0;
+                showMessage(describeEmailBulkCancel(result), cancelled > 0 ? 'success' : 'info');
+            } catch (error) {
+                showMessage('Failed to cancel pending deliveries: ' + error.message, 'error');
+            }
+            await loadEmailDeliveryHistory();
+        }
+
+        function describeEmailBulkCancel(result) {
+            const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+            const cancelled = Number(result.cancelled) || 0;
+            const stopping = Number(result.stopping) || 0;
+            const sending = Number(result.sending) || 0;
+            const parts = [];
+            if (cancelled > 0) {
+                parts.push(`Cancelled ${plural(cancelled, 'pending delivery', 'pending deliveries')}.`);
+            }
+            if (stopping > 0) {
+                parts.push(`${plural(stopping, 'delivery is', 'deliveries are')} still stopping.`);
+            }
+            if (sending > 0) {
+                parts.push(`${plural(sending, 'delivery was', 'deliveries were')} already being sent.`);
+            }
+            return parts.length ? parts.join(' ') : 'There were no pending deliveries to cancel.';
         }
 
         function formatEmailDeliveryStatus(status) {
@@ -893,6 +1036,7 @@
             if (normalized === 'sent') return '✅ Sent';
             if (normalized === 'failed') return '❌ Failed';
             if (normalized === 'pending') return '⏳ Pending';
+            if (normalized === 'cancelled') return '🚫 Cancelled';
             return status || 'Unknown';
         }
 
@@ -911,6 +1055,9 @@
                     </div>
                     ${delivery.errorMessage
                         ? html`<div class="combine-folders-meta" style="color: var(--text-error, #d9534f);">${delivery.errorMessage}</div>`
+                        : ''}
+                    ${String(delivery.status || '').toLowerCase() === 'pending'
+                        ? html`<button class="btn btn-small" type="button" data-requires-write onclick="cancelEmailDelivery('${jsArg(delivery.id)}', this)">Cancel</button>`
                         : ''}
                 </div>
             `));

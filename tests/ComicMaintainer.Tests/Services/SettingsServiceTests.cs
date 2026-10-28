@@ -73,6 +73,11 @@ public class SettingsServiceTests : IDisposable
         {
             Directory.Delete(_testConfigDir, true);
         }
+
+        if (Directory.Exists(_testConfigDir + "-suwayomi"))
+        {
+            Directory.Delete(_testConfigDir + "-suwayomi", true);
+        }
     }
 
     [Fact]
@@ -466,6 +471,68 @@ public class SettingsServiceTests : IDisposable
     {
         await Assert.ThrowsAsync<ArgumentException>(
             () => _service.UpdateSuwayomiSettingsAsync(true, "ftp://suwayomi.example", null, null));
+    }
+
+    // Outside the config directory, which the downloads folder must not overlap.
+    private string CreateSuwayomiDownloadsFolder() =>
+        Directory.CreateDirectory(_testConfigDir + "-suwayomi").FullName;
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_PersistsTheImportFoldersAndKeepsThemWhenOmitted()
+    {
+        var downloads = CreateSuwayomiDownloadsFolder();
+
+        await _service.UpdateSuwayomiSettingsAsync(
+            false, null, null, null, downloadsDirectory: $" {downloads} ", importDirectory: " Manga ");
+        await _service.UpdateSuwayomiSettingsAsync(false, null, null, null);
+
+        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        Assert.Equal(downloads, settings["SuwayomiDownloadsDirectory"].GetString());
+        Assert.Equal("Manga", settings["SuwayomiImportDirectory"].GetString());
+    }
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_ClearsTheImportFoldersOnEmptyString()
+    {
+        var downloads = CreateSuwayomiDownloadsFolder();
+        await _service.UpdateSuwayomiSettingsAsync(
+            false, null, null, null, downloadsDirectory: downloads, importDirectory: "Manga");
+
+        await _service.UpdateSuwayomiSettingsAsync(
+            false, null, null, null, downloadsDirectory: string.Empty, importDirectory: " ");
+
+        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        Assert.Equal(JsonValueKind.Null, settings["SuwayomiDownloadsDirectory"].ValueKind);
+        Assert.Equal(JsonValueKind.Null, settings["SuwayomiImportDirectory"].ValueKind);
+    }
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_RejectsADownloadsFolderInsideTheLibrary()
+    {
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateSuwayomiSettingsAsync(
+                false, null, null, null, downloadsDirectory: Path.Combine(_appSettings.WatchedDirectory, "suwayomi")));
+
+        Assert.Contains("watched directory", exception.Message);
+        Assert.False(File.Exists(Path.Combine(_testConfigDir, "user-settings.json")));
+    }
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_RejectsAMissingDownloadsFolder()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateSuwayomiSettingsAsync(
+                false, null, null, null, downloadsDirectory: _testConfigDir + "-not-mounted"));
+    }
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_RejectsAnImportFolderOutsideTheLibrary()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateSuwayomiSettingsAsync(
+                false, null, null, null, importDirectory: Path.Combine("..", "elsewhere")));
+
+        Assert.False(File.Exists(Path.Combine(_testConfigDir, "user-settings.json")));
     }
 
     [Fact]

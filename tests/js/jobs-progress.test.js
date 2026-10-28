@@ -645,7 +645,7 @@ test("a completed job's library reload doesn't close the progress of a job start
     assert.deepEqual(page.errors, []);
 });
 
-const REFUSED = { type: 'warning', text: 'Another job is still running. Wait for it to finish, or cancel it, before starting a new one.' };
+const REFUSED = { type: 'warning', text: 'Another job is already in progress (starting, running or finishing). Wait for it to finish, or cancel it, before starting a new one.' };
 
 test("a job can't be started while another one is followed, whose progress stays as it was", async (t) => {
     // #846: starting a second job took the shared progress modal over, and

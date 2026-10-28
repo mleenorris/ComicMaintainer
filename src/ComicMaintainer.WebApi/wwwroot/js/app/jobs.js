@@ -32,9 +32,13 @@
         // over the modal, and do nothing once their job is no longer the current one.
         let jobFinalizeTimer = null;
         let progressModalCloseTimer = null;
-        // Set while a job is being started: from showProgressModal() until the
-        // job is tracked (trackJobStatus) or its start is given up (closeProgressModal).
+        // Set while a job is being started: from beginJobStart() (or
+        // showProgressModal()) until the job is tracked (trackJobStatus) or its
+        // start is given up (endJobStart / closeProgressModal). Only jobs.js
+        // changes it; other scripts go through the jobProgress API below.
         let jobStarting = false;
+        // Bumped by every start, so a stale endJobStart() cannot release a newer one.
+        let jobStartGeneration = 0;
         window.addEventListener('beforeunload', function(event) {
             // Clean up SSE connection
             cleanupEventSource();
@@ -56,8 +60,20 @@
         // hasActiveJob stays set until the tracked job's end has been handled.
         function canStartJob() {
             if (!hasActiveJob && !jobStarting) return true;
-            showMessage('Another job is still running. Wait for it to finish, or cancel it, before starting a new one.', 'warning');
+            showMessage('Another job is already in progress (starting, running or finishing). Wait for it to finish, or cancel it, before starting a new one.', 'warning');
             return false;
+        }
+
+        // Blocks other job starts (canStartJob) while the server is asked to
+        // start a job. Returns a token for endJobStart(), which releases the
+        // block unless the job got tracked or another start took over since.
+        function beginJobStart() {
+            jobStarting = true;
+            return ++jobStartGeneration;
+        }
+
+        function endJobStart(token) {
+            if (token === jobStartGeneration) jobStarting = false;
         }
         
         async function processAllFiles() {
@@ -437,6 +453,7 @@
             currentJobId = jobId;  // Track for cancellation
             currentJobTitle = title;  // Track title for progress updates
             jobStarting = false;
+            jobStartGeneration++;
             // The modal now follows this job: a previous job's pending finish
             // must neither retitle nor close it.
             clearProgressModalTimers();
@@ -1464,7 +1481,7 @@
             // job can be started meanwhile (canStartJob).
             clearProgressModalTimers();
             currentJobId = null;
-            jobStarting = true;
+            beginJobStart();
             const modal = document.getElementById('progressModal');
             const indicator = document.getElementById('progressIndicator');
             document.getElementById('progressTitle').textContent = title;
@@ -1645,6 +1662,7 @@
             clearTimeout(progressModalCloseTimer);
             progressModalCloseTimer = null;
             jobStarting = false;
+            jobStartGeneration++;
             document.getElementById('progressModal').classList.remove('active');
             setProgressIndicatorVisible(false);
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button
@@ -1668,6 +1686,16 @@
             }, delay);
         }
 
+        // Finish the progress modal of a job that ended after `delay` ms, unless
+        // another job has taken the modal over by then (clearProgressModalTimers).
+        function scheduleJobFinalize(jobId, finalize, delay) {
+            clearTimeout(jobFinalizeTimer);
+            jobFinalizeTimer = setTimeout(async () => {
+                jobFinalizeTimer = null;
+                if (currentJobId === jobId) await finalize();
+            }, delay);
+        }
+
         // Drop the pending finish (and close) of a job that ended, when another
         // job takes the progress modal over.
         function clearProgressModalTimers() {
@@ -1676,6 +1704,16 @@
             clearTimeout(progressModalCloseTimer);
             progressModalCloseTimer = null;
         }
+
+        // The job-tracking API used by other scripts (events.js, file-actions.js,
+        // series-metadata.js); the state behind it stays owned by jobs.js.
+        window.jobProgress = Object.freeze({
+            canStartJob,
+            beginJobStart,
+            endJobStart,
+            scheduleJobFinalize,
+            scheduleProgressModalClose
+        });
         
         function minimizeProgressModal() {
             const modal = document.getElementById('progressModal');

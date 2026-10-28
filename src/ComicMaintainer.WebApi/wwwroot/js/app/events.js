@@ -340,10 +340,7 @@
                 // job takes the progress modal over and does nothing once this
                 // job is no longer the current one, so it never retitles,
                 // deactivates or closes the next job's progress.
-                clearTimeout(jobFinalizeTimer);
-                jobFinalizeTimer = setTimeout(async () => {
-                    jobFinalizeTimer = null;
-                    if (currentJobId !== jobId) return;
+                jobProgress.scheduleJobFinalize(jobId, async () => {
                     if (status === 'completed') {
                         // Update modal title and call completeProgress to show close button
                         document.getElementById('progressTitle').textContent = `Completed! All ${total} items processed (${successCount} succeeded, ${errorCount} failed)`;
@@ -366,19 +363,19 @@
                         }
                         // Close modal after refresh completes, unless another job
                         // was started meanwhile
-                        scheduleProgressModalClose(jobId, 1000);
+                        jobProgress.scheduleProgressModalClose(jobId, 1000);
                     } else if (status === 'failed') {
                         document.getElementById('progressTitle').textContent = 'Failed - Job processing failed';
                         completeProgress();
                         hasActiveJob = false;
                         currentJobTitle = null;
-                        scheduleProgressModalClose(jobId, 3000);
+                        jobProgress.scheduleProgressModalClose(jobId, 3000);
                     } else if (status === 'cancelled') {
                         document.getElementById('progressTitle').textContent = 'Cancelled - Job was cancelled';
                         completeProgress();
                         hasActiveJob = false;
                         currentJobTitle = null;
-                        scheduleProgressModalClose(jobId, 2000);
+                        jobProgress.scheduleProgressModalClose(jobId, 2000);
                     } else if (status === 'interrupted') {
                         document.getElementById('progressTitle').textContent =
                             `Interrupted - the server restarted after ${processed} of ${total} items`;
@@ -387,7 +384,7 @@
                         currentJobTitle = null;
                         // Left open longer than the other outcomes: the job did not finish and
                         // the user may need to re-run it, so the message should not flash past.
-                        scheduleProgressModalClose(jobId, 5000);
+                        jobProgress.scheduleProgressModalClose(jobId, 5000);
                     }
                 }, 500);
             }

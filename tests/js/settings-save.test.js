@@ -357,6 +357,8 @@ const INVALID_FORMS = [
     ['zero log size', { logMaxSize: '0' }, 'Log max size must be a positive number'],
     ['missing padding', { issueNumberPadding: '' }, 'Issue number padding must be between 0 and 10'],
     ['negative padding', { issueNumberPadding: '-1' }, 'Issue number padding must be between 0 and 10'],
+    ['fractional padding', { issueNumberPadding: '10.5' }, 'Issue number padding must be between 0 and 10'],
+    ['exponent padding', { issueNumberPadding: '1e9' }, 'Issue number padding must be between 0 and 10'],
     ['padding above 10', { issueNumberPadding: '11' }, 'Issue number padding must be between 0 and 10'],
     ['log size above the server limit', { logMaxSize: '2048' }, 'Log max size must be 2047 MB or less'],
     ['missing cleanup interval', { dbCleanupInterval: '' }, 'Database cleanup interval must be 0 or greater'],

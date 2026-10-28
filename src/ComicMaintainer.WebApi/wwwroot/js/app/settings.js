@@ -1295,7 +1295,7 @@
             if (!settingsLoaded || !userCapabilities.canAdminister) return;
             const format = document.getElementById('filenameFormat').value.trim();
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
-            const issueNumberPadding = parseInt(document.getElementById('issueNumberPadding').value);
+            const issueNumberPadding = document.getElementById('issueNumberPadding').valueAsNumber;
             const dbCleanupInterval = parseInt(document.getElementById('dbCleanupInterval').value);
             const enableExternalSeriesMetadata = document.getElementById('enableExternalSeriesMetadata').checked;
             const comicVineApiKey = document.getElementById('comicVineApiKey').value.trim();
@@ -1354,7 +1354,7 @@
                 return;
             }
             
-            if (isNaN(issueNumberPadding) || issueNumberPadding < 0 || issueNumberPadding > 10) {
+            if (!Number.isInteger(issueNumberPadding) || issueNumberPadding < 0 || issueNumberPadding > 10) {
                 showMessage('Issue number padding must be between 0 and 10', 'error');
                 return;
             }

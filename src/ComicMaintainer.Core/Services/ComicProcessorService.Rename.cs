@@ -281,6 +281,15 @@ public partial class ComicProcessorService
             return filenameStem;
         }
 
+        // FormatFilename keeps an issue it cannot read as a number (e.g. "1,000", "1,5",
+        // "Extra") verbatim, so such a value already rendered into the name is preserved.
+        if (!float.TryParse(chapterToPreserve, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out _) &&
+            ContainsStandaloneToken(filenameStem, chapterToPreserve))
+        {
+            return filenameStem;
+        }
+
         // Format the chapter number with the configured padding so the
         // appended value is consistent with how the rest of the codebase
         // renders chapter numbers.
@@ -293,6 +302,24 @@ public partial class ComicProcessorService
 
         var separator = string.IsNullOrEmpty(filenameStem) ? string.Empty : " - ";
         return $"{filenameStem}{separator}Chapter {formattedChapter}";
+    }
+
+    private static bool ContainsStandaloneToken(string text, string token)
+    {
+        var index = text.IndexOf(token, StringComparison.Ordinal);
+        while (index >= 0)
+        {
+            var end = index + token.Length;
+            if ((index == 0 || !char.IsLetterOrDigit(text[index - 1])) &&
+                (end == text.Length || !char.IsLetterOrDigit(text[end])))
+            {
+                return true;
+            }
+
+            index = text.IndexOf(token, index + 1, StringComparison.Ordinal);
+        }
+
+        return false;
     }
 
     private static string FormatChapterForFilename(string chapter, int padding)

@@ -1059,7 +1059,27 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         }
 
         Assert.Equal(1, job.ProcessedFiles);
-        Assert.Equal(new[] { expectedName }, Directory.GetFiles(Path.Combine(_library, "S")).Select(Path.GetFileName));
+        Assert.Equal(new[] { expectedName }, Directory.GetFiles(Path.GetDirectoryName(path)!).Select(Path.GetFileName));
+        Assert.False(_logger.Has(LogLevel.Warning,
+            "Chapter number '{Chapter}' would be lost from filename during rename of {OriginalPath}; appending it to preserve the chapter."));
+    }
+
+    // Regression test for issue #843: an issue containing "," is kept verbatim by the rename
+    // template, so the chapter-preservation check must not append it a second time
+    // (e.g. "S - Chapter 1,000 - Chapter 1,000.cbz").
+    [Theory]
+    [InlineData("1,000", "S - Chapter 1,000.cbz")]
+    [InlineData("1,5", "S - Chapter 1,5.cbz")]
+    public async Task RenameFilesAsync_WithCommaInIssue_DoesNotDuplicateChapter_Issue843(
+        string issue, string expectedName)
+    {
+        var service = CreateService();
+        var path = WriteCbz("S/orig.cbz", Xml("S", issue, title: null));
+
+        var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
+
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(new[] { expectedName }, Directory.GetFiles(Path.GetDirectoryName(path)!).Select(Path.GetFileName));
         Assert.False(_logger.Has(LogLevel.Warning,
             "Chapter number '{Chapter}' would be lost from filename during rename of {OriginalPath}; appending it to preserve the chapter."));
     }

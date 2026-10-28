@@ -143,6 +143,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **Automated error reporting works when GitHub's response is labelled with a charset .NET
+  cannot decode.** When something in between, such as a proxy, labelled the response
+  `charset=utf8` or another name .NET does not recognise, filing an issue failed with a raw
+  error: the report was dropped, **Send Test Report** answered 500, and an issue GitHub had
+  already created was never recorded and could be filed again. Responses are now always read
+  as UTF-8, which JSON requires and GitHub sends, so the issue is recorded and a rejected
+  assignee falls back to an unassigned issue.
 - **One client can no longer stop everyone from signing in behind a reverse proxy.** Signed-out
   requests are rate-limited per client address, but behind a proxy every request comes from the
   proxy's address, so one client sending more than about 110 requests a minute (a

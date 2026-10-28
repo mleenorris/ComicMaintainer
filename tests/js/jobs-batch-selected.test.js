@@ -9,7 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { deferred } = require('./support/app');
 const { respond } = require('./support/dom');
-const { makeSeries } = require('./support/library-helpers');
+const { makeSeries, makeSeriesList, seriesPages } = require('./support/library-helpers');
 const h = require('./support/jobs-helpers');
 
 const { ISSUE_A, ISSUE_B } = h;
@@ -444,5 +444,35 @@ test('Clear Processed Status on series ticked in the library reloads the series 
     assert.equal(page.window.location.hash, '#/library');
     assert.equal(selectBox().getAttribute('aria-checked'), 'true', 'the reloaded series stays ticked');
     assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+    assert.deepEqual(page.errors, []);
+});
+
+test('Clear Processed Status keeps a series ticked beyond the first page of the library selected', async (t) => {
+    const all = makeSeriesList(70);
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            'GET /api/files/series': seriesPages(all),
+            'GET /api/files/series/series-65/issues':
+                h.seriesIssues([h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)], { id: 'series-65' }),
+            'POST /api/status/clear-selected': { cleared: 2, requested: 2 }
+        }
+    });
+    page.run('loadSeriesLibrary({ append: true })');
+    await page.settle();
+    assert.equal(page.$$('#fileList .series-card').length, 70);
+    const selectBox = () => page.$('#fileList .series-select-box[data-series-id="series-65"]');
+    page.click(selectBox());
+    await page.settle();
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+
+    h.chooseMenuItem(page, 'processDropdown', 'Clear Processed Status');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(2)]);
+    const reloads = h.requests(page, 'GET', /^\/api\/files\/series\?offset=0&limit=70&refresh=true$/);
+    assert.equal(reloads.length, 1, 'every loaded page of the series list reloads');
+    assert.equal(page.$$('#fileList .series-card').length, 70);
+    assert.equal(selectBox().getAttribute('aria-checked'), 'true', 'the series beyond the first page stays ticked');
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+    assert.equal(page.$('#processSelectedItem').disabled, false, 'the series can be processed again right away');
     assert.deepEqual(page.errors, []);
 });

@@ -6,9 +6,9 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
-        async function loadActiveLibraryView({ refresh = false } = {}) {
+        async function loadActiveLibraryView({ refresh = false, keepLoaded = false } = {}) {
             if (libraryViewMode === 'series') {
-                return loadSeriesLibrary({ refresh });
+                return loadSeriesLibrary({ refresh, keepLoaded });
             }
 
             return loadFolders({ refresh });
@@ -136,9 +136,14 @@
             // ?refresh=true query, and re-trigger library-health stats.
             let append = false;
             let refresh = false;
+            // keepLoaded: a same-query refresh re-fetches every series already
+            // loaded (not just the first page), so series selected further
+            // down the list stay selected and the list keeps its length.
+            let keepLoaded = false;
             if (typeof opts === 'object' && opts !== null) {
                 append = !!opts.append;
                 refresh = !!opts.refresh;
+                keepLoaded = !!opts.keepLoaded;
             } else if (typeof opts === 'boolean') {
                 refresh = opts;
             } else if (typeof opts === 'number') {
@@ -154,12 +159,17 @@
                 // (label updated, content stale) until a manual page refresh.
                 if (!append) {
                     seriesReloadPending = true;
+                    seriesReloadKeepLoaded = keepLoaded;
                     if (seriesLoadController) {
                         seriesLoadController.abort();
                     }
                 }
                 return;
             }
+
+            const limit = (keepLoaded && !append)
+                ? Math.max(SERIES_PAGE_SIZE, seriesLibrary.length)
+                : SERIES_PAGE_SIZE;
 
             if (refresh || !append) {
                 seriesLibrary = [];
@@ -187,7 +197,7 @@
             const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
             seriesLoadController = controller;
             try {
-                let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${SERIES_PAGE_SIZE}`);
+                let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${limit}`);
                 if (refresh) {
                     url += '&refresh=true';
                 }
@@ -250,7 +260,9 @@
                     // flight. Re-run with the latest selection so the displayed
                     // series match the current filter without a page refresh.
                     seriesReloadPending = false;
-                    loadSeriesLibrary({ refresh: false });
+                    const reloadKeepLoaded = seriesReloadKeepLoaded;
+                    seriesReloadKeepLoaded = false;
+                    loadSeriesLibrary({ refresh: false, keepLoaded: reloadKeepLoaded });
                 }
             }
         }

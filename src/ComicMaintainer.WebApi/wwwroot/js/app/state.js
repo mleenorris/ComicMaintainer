@@ -92,6 +92,7 @@
         // must re-fetch once it settles; otherwise the list stays on the old
         // filter (label updated, content stale) until a manual page refresh.
         let seriesReloadPending = false;
+        let seriesReloadKeepLoaded = false;
         let scrollObserver = null;
         let currentSeriesDetailId = null;
         // Title-based identity for the open series detail. The series id is a

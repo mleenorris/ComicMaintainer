@@ -237,13 +237,15 @@
                 // Reload what is shown so the status badges update: an open
                 // series's issues in place, then the library view (kept
                 // behind an open series), which also updates the
-                // "… Unmarked" actions and the library health.
+                // "… Unmarked" actions and the library health. Every loaded
+                // series page is reloaded so series selected beyond the
+                // first page stay selected for reprocessing.
                 if (libraryViewMode === 'series' && currentSeriesDetailId &&
                     typeof loadSeriesIssues === 'function') {
                     await loadSeriesIssues(currentSeriesDetailId, true);
                 }
                 if (typeof loadActiveLibraryView === 'function') {
-                    await loadActiveLibraryView({ refresh: true });
+                    await loadActiveLibraryView({ refresh: true, keepLoaded: true });
                 }
             } catch (err) {
                 console.error('clearSelectedProcessedStatus failed', err);

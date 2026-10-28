@@ -531,7 +531,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     public async Task DeleteFilesAsync_DirectoryCasedDifferentlyOnACaseInsensitiveVolume_DeletesTheFile()
     {
         var service = CreateService();
-        var comic = WriteCbz("Series/book.cbz", Xml("Series", "1", "Chapter 1"));
+        var comic = Path.GetFullPath(WriteCbz("Series/book.cbz", Xml("Series", "1", "Chapter 1")));
         var recased = Path.Join(_library, "series", "book.cbz");
         if (!File.Exists(recased))
         {

@@ -80,7 +80,7 @@ public class EpubConversionServiceCoverageTests : IDisposable
         File.WriteAllBytes(seriesImage, CreateImage(MagickFormat.Jpeg, 12, 18));
         var cbz = CreateCbz("Unreadable Cover.cbz", Page("001.jpg"), Page("002.jpg"), Page("cover.jpg"));
         SetCompressionMethod(cbz, "cover.jpg", method: (ushort)method);
-        var outputDir = Path.Combine(_workDir, $"unreadable-cover-{method}");
+        var outputDir = Path.Join(_workDir, $"unreadable-cover-{method}");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _service.ConvertToEpubAsync(
             new[] { cbz },
@@ -161,7 +161,7 @@ public class EpubConversionServiceCoverageTests : IDisposable
     {
         var cbz = CreateCbz("Unreadable Page.cbz", Page("001.jpg"), Page("002.jpg"));
         SetCompressionMethod(cbz, "002.jpg", (ushort)method);
-        var outputDir = Path.Combine(_workDir, $"unreadable-page-{method}");
+        var outputDir = Path.Join(_workDir, $"unreadable-page-{method}");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => _service.ConvertToEpubAsync(new[] { cbz }, outputDir));
@@ -179,7 +179,7 @@ public class EpubConversionServiceCoverageTests : IDisposable
     {
         var first = CreateCbz("Condensed 1.cbz", Page("001.jpg"), Page("002.jpg"));
         var second = CreateCbz("Condensed 2.cbz", Page("001.jpg"), ("002.jpg", Encoding.ASCII.GetBytes("not an image")));
-        var outputDir = Path.Combine(_workDir, "condensed-undecodable");
+        var outputDir = Path.Join(_workDir, "condensed-undecodable");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _service.ConvertToEpubAsync(
             new[] { first, second },

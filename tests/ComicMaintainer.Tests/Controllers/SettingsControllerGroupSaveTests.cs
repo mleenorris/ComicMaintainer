@@ -1,4 +1,3 @@
-using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
@@ -9,7 +8,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -21,8 +19,6 @@ namespace ComicMaintainer.Tests.Controllers;
 /// </summary>
 public sealed class SettingsControllerGroupSaveTests : IDisposable
 {
-    private const int BytesPerMb = 1048576;
-
     private const string SeededSettings = """
         {
           "AppSettings": {
@@ -42,22 +38,23 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
 
     private readonly string _configDir;
     private readonly string _settingsPath;
-    private readonly HookLogger _serviceLogger = new();
+    private readonly InterruptibleSettingsService _settingsService;
     private readonly SettingsController _controller;
 
     public SettingsControllerGroupSaveTests()
     {
-        _configDir = Path.Combine(Path.GetTempPath(), $"SettingsGroupSave_{Guid.NewGuid():N}");
-        _settingsPath = Path.Combine(_configDir, "user-settings.json");
+        _configDir = Path.Join(Path.GetTempPath(), $"SettingsGroupSave_{Guid.NewGuid():N}");
+        _settingsPath = Path.Join(_configDir, "user-settings.json");
 
         var options = new TestOptionsMonitor<AppSettings>(new AppSettings { ConfigDirectory = _configDir });
+        _settingsService = new InterruptibleSettingsService(options);
         _controller = new SettingsController(
             options,
             NullLogger<SettingsController>.Instance,
             Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>(),
             Mock.Of<IComicProcessorService>(),
             Mock.Of<IFileStoreService>(),
-            new SettingsService(_serviceLogger, options),
+            _settingsService,
             Mock.Of<IHostApplicationLifetime>());
 
         File.WriteAllText(_settingsPath, SeededSettings);
@@ -102,23 +99,15 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
     [Theory]
     [InlineData(Interruption.Abort)]
     [InlineData(Interruption.WriteFailure)]
-    public async Task UpdateExternalSeriesMetadata_InterruptedOnceASettingIsSaved_HasSavedTheWholeGroup(Interruption interruption)
+    public async Task UpdateExternalSeriesMetadata_InterruptedBetweenFields_ChangesNothing(Interruption interruption)
     {
         using var request = new CancellationTokenSource();
-        InterruptAfterFirstSavedSetting(interruption, request);
+        InterruptBeforeSecondStagedSetting(interruption, request);
 
         var result = await _controller.UpdateExternalSeriesMetadata(NewMetadataSettings(), request.Token);
 
-        Assert.IsType<OkObjectResult>(result);
-        var section = ReadSection();
-        Assert.True(section["EnableExternalSeriesMetadata"].GetBoolean());
-        Assert.Equal("new-key", section["ComicVineApiKey"].GetString());
-        Assert.Equal("https://comicvine.example/api", section["ComicVineBaseUrl"].GetString());
-        Assert.True(section["EnableMangaDexMetadata"].GetBoolean());
-        Assert.Equal("https://mangadex.example", section["MangaDexBaseUrl"].GetString());
-        Assert.True(section["EnableAniListMetadata"].GetBoolean());
-        Assert.Equal("https://anilist.example/graphql", section["AniListBaseUrl"].GetString());
-        Assert.Equal(1000, section["SeriesImageMaxDimension"].GetInt32());
+        Assert.Equal(StatusCodes.Status500InternalServerError, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Equal(SeededSettings, File.ReadAllText(_settingsPath));
     }
 
     [Theory]
@@ -138,19 +127,15 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
     [Theory]
     [InlineData(Interruption.Abort)]
     [InlineData(Interruption.WriteFailure)]
-    public async Task UpdateSeriesImageLimits_InterruptedOnceALimitIsSaved_HasSavedAllThree(Interruption interruption)
+    public async Task UpdateSeriesImageLimits_InterruptedBetweenLimits_ChangesNothing(Interruption interruption)
     {
         using var request = new CancellationTokenSource();
-        InterruptAfterFirstSavedSetting(interruption, request);
+        InterruptBeforeSecondStagedSetting(interruption, request);
 
         var result = await _controller.UpdateSeriesImageLimits(NewImageLimits(), request.Token);
 
-        Assert.IsType<OkObjectResult>(result);
-        var section = ReadSection();
-        Assert.Equal(4 * BytesPerMb, section["SeriesImageMaxBytes"].GetInt32());
-        Assert.Equal(16 * BytesPerMb, section["SeriesImageMaxDownloadBytes"].GetInt32());
-        Assert.Equal(3000, section["SeriesImageMaxDimension"].GetInt32());
-        Assert.Equal("old-key", section["ComicVineApiKey"].GetString());
+        Assert.Equal(StatusCodes.Status500InternalServerError, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Equal(SeededSettings, File.ReadAllText(_settingsPath));
     }
 
     [Theory]
@@ -168,17 +153,17 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
     }
 
     /// <summary>
-    /// Interrupts the save as soon as the service reports the first setting it
-    /// has written — the point where a field-by-field save had stored only
-    /// part of the group.
+    /// Interrupts the save inside persistence, after the first field of the
+    /// group has been staged and before the second one is. A field-by-field
+    /// save has already written the first field by then, so it would leave
+    /// the group half-saved; an atomic save writes nothing.
     /// </summary>
-    private void InterruptAfterFirstSavedSetting(Interruption interruption, CancellationTokenSource request)
+    private void InterruptBeforeSecondStagedSetting(Interruption interruption, CancellationTokenSource request)
     {
-        var interrupted = 0;
-        _serviceLogger.OnMessage = message =>
+        var staged = 0;
+        _settingsService.OnStaging = _ =>
         {
-            if (message.StartsWith("Updated setting ", StringComparison.Ordinal)
-                && Interlocked.Exchange(ref interrupted, 1) == 0)
+            if (Interlocked.Increment(ref staged) == 2)
             {
                 Interrupt(interruption, request);
             }
@@ -202,28 +187,11 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
         }
     }
 
-    private Dictionary<string, JsonElement> ReadSection()
+    private sealed class InterruptibleSettingsService(TestOptionsMonitor<AppSettings> options)
+        : SettingsService(NullLogger<SettingsService>.Instance, options)
     {
-        using var document = JsonDocument.Parse(File.ReadAllText(_settingsPath));
-        return document.RootElement.GetProperty("AppSettings")
-            .EnumerateObject()
-            .ToDictionary(p => p.Name, p => p.Value.Clone(), StringComparer.Ordinal);
-    }
+        public Action<string>? OnStaging { get; set; }
 
-    private sealed class HookLogger : ILogger<SettingsService>
-    {
-        public Action<string>? OnMessage { get; set; }
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel,
-            EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter)
-            => OnMessage?.Invoke(formatter(state, exception));
+        protected override void OnStagingSetting(string settingName) => OnStaging?.Invoke(settingName);
     }
 }

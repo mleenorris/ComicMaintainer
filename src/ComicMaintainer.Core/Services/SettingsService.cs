@@ -173,7 +173,7 @@ public class SettingsService : ISettingsService
 
         if (maxDownloadBytes < maxBytes)
         {
-            throw new ArgumentException("Max download size must be greater than or equal to max stored size", nameof(maxDownloadBytes));
+            throw new ArgumentException("Series image max download bytes must be greater than or equal to series image max bytes", nameof(maxDownloadBytes));
         }
 
         await UpdateSettingsAsync(
@@ -672,6 +672,7 @@ public class SettingsService : ISettingsService
             // Update the settings
             foreach (var (settingName, value) in values)
             {
+                OnStagingSetting(settingName);
                 appSettingsSection[settingName] = value;
             }
 
@@ -696,6 +697,14 @@ public class SettingsService : ISettingsService
         {
             _lock.Release();
         }
+    }
+
+    /// <summary>
+    /// Called inside <see cref="PersistSettingsAsync"/> just before each setting is
+    /// staged for the write, so tests can interrupt a save between two fields.
+    /// </summary>
+    protected virtual void OnStagingSetting(string settingName)
+    {
     }
 
     /// <summary>

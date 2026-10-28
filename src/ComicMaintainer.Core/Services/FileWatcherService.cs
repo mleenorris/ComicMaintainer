@@ -650,7 +650,10 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     {
         var ex = e.GetException();
 
-        var starting = sender != null && ReferenceEquals(sender, _startingWatcher);
+        // Only a startup callback runs on the starting thread, which holds _lock while
+        // _startingWatcher is set; an error the started watcher raises on its own thread in the
+        // meantime may be terminal and is handled below.
+        var starting = sender != null && ReferenceEquals(sender, _startingWatcher) && Monitor.IsEntered(_lock);
         if (starting || ex is InternalBufferOverflowException)
         {
             _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(

@@ -759,7 +759,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
             {
                 service.StopAsync().GetAwaiter().GetResult();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
             {
                 hookFailures.Enqueue(ex);
             }
@@ -895,7 +895,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         {
             Directory.Delete(_library, recursive: true);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             hookFailures.Enqueue(ex);
         }

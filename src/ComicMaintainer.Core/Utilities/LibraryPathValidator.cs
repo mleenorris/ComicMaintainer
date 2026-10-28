@@ -48,6 +48,43 @@ public static class LibraryPathValidator
     }
 
     /// <summary>
+    /// Like <see cref="TryResolveWithin"/>, but for an operation on the directory entry
+    /// <paramref name="path"/> names, such as deleting it: both what the entry leads to and
+    /// the directory holding it must be inside one of <paramref name="allowedDirectories"/>.
+    /// <paramref name="entryPath"/> is the entry in that resolved directory, so acting on it
+    /// affects a link rather than the file the link points to. A path ending in a directory
+    /// separator, "." or ".." is rejected, since the OS would follow a link it ends in.
+    /// </summary>
+    public static bool TryResolveEntryWithin(string? path, out string entryPath, params string?[] allowedDirectories)
+    {
+        entryPath = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(path) ||
+            Path.EndsInDirectorySeparator(path) ||
+            Path.GetFileName(path) is "." or "..")
+            return false;
+
+        if (!TryResolveWithin(path, out _, allowedDirectories))
+            return false;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var name = Path.GetFileName(fullPath);
+            if (string.IsNullOrEmpty(name) ||
+                !TryResolveWithin(Path.GetDirectoryName(fullPath), out var directory, allowedDirectories))
+                return false;
+
+            entryPath = Path.Join(directory, name);
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Returns true when the already resolved <paramref name="fullPath"/> is the
     /// resolved <paramref name="directory"/> itself or lives beneath it.
     /// </summary>

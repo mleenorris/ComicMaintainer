@@ -239,22 +239,65 @@ public partial class ComicProcessorService
     /// directory entry itself: only the directories leading to it are resolved, so
     /// deleting the result removes a link rather than the file it points to.
     /// </summary>
-    private bool TryResolveAllowedEntry(string filePath, out string entryPath)
+    private bool TryResolveAllowedEntry(string filePath, out string entryPath) =>
+        LibraryPathValidator.TryResolveEntryWithin(
+            filePath,
+            out entryPath,
+            _settings.WatchedDirectory,
+            _settings.DuplicateDirectory);
+
+    /// <summary>
+    /// True when a directory entry exists at <paramref name="path"/> that deleting a file
+    /// removes: a file, or a link to anything, including a link whose target is missing.
+    /// </summary>
+    private static bool FileEntryExists(string path) =>
+        Path.Exists(path) && (!Directory.Exists(path) || new FileInfo(path).LinkTarget is not null);
+
+    /// <summary>
+    /// The path of <paramref name="entryPath"/> as seen through the opened directory, so it
+    /// keeps naming the entry in the checked directory even if that directory is moved or
+    /// replaced by a link afterwards.
+    /// </summary>
+    private static string GetEntryPathInDirectory(SafeFileHandle? directoryHandle, string entryPath) =>
+        directoryHandle is null || directoryHandle.IsInvalid
+            ? entryPath
+            : Path.Join($"/proc/self/fd/{directoryHandle.DangerousGetHandle().ToInt32()}", Path.GetFileName(entryPath));
+
+    /// <summary>
+    /// Deletes <paramref name="entryPath"/> relative to the directory opened by
+    /// <see cref="OpenRenameDirectory"/>, after checking that directory is still inside the
+    /// allowed directories. Like <see cref="File.Delete"/>, a missing entry is not an error.
+    /// </summary>
+    private void DeleteFileInDirectory(SafeFileHandle? directoryHandle, string entryPath)
     {
-        entryPath = string.Empty;
-        if (!TryResolveAllowedPath(filePath, out _))
-            return false;
+        if (!OperatingSystem.IsLinux())
+        {
+            File.Delete(entryPath);
+            return;
+        }
 
-        var fullPath = Path.GetFullPath(filePath);
-        if (!LibraryPathValidator.TryResolveWithin(
-                Path.GetDirectoryName(fullPath),
-                out var directory,
-                _settings.WatchedDirectory,
-                _settings.DuplicateDirectory))
-            return false;
+        if (directoryHandle is null || directoryHandle.IsInvalid)
+        {
+            throw new IOException("The directory handle is unavailable.");
+        }
 
-        entryPath = Path.Join(directory, Path.GetFileName(fullPath));
-        return true;
+        var directoryDescriptor = directoryHandle.DangerousGetHandle().ToInt32();
+        var currentDirectory = ReadLinuxDirectoryPath(directoryDescriptor);
+        if (!LibraryPathValidator.IsWithin(currentDirectory, _settings.WatchedDirectory) &&
+            !LibraryPathValidator.IsWithin(currentDirectory, _settings.DuplicateDirectory))
+        {
+            throw new IOException("The directory is outside the allowed directories.");
+        }
+
+        if (UnlinkLinux(directoryDescriptor, Path.GetFileName(entryPath), 0) != 0)
+        {
+            const int ENOENT = 2;
+            var error = Marshal.GetLastPInvokeError();
+            if (error != ENOENT)
+            {
+                throw new IOException($"Could not delete the file: {new Win32Exception(error).Message}");
+            }
+        }
     }
 
     private static SafeFileHandle? OpenRenameDirectory(string sourcePath)
@@ -381,6 +424,12 @@ public partial class ComicProcessorService
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         [Out] byte[] buffer,
         nuint bufferSize);
+
+    [DllImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
+    private static extern int UnlinkLinux(
+        int directory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        int flags);
 
     protected virtual int RenameLinuxNoReplace(
         int sourceDirectory,

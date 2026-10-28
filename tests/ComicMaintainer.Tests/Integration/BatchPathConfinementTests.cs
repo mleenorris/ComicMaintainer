@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Hosting;
@@ -26,8 +27,6 @@ namespace ComicMaintainer.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfinementTests.LibraryHost>
 {
-    private const string OutsideError = "One or more file paths are outside the allowed directory";
-
     private readonly LibraryHost _host;
 
     public BatchPathConfinementTests(LibraryHost host) => _host = host;
@@ -59,7 +58,7 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
 
         if (response.StatusCode == HttpStatusCode.BadRequest)
         {
-            Assert.Contains(OutsideError, await response.Content.ReadAsStringAsync());
+            Assert.Contains(JobsController.OutsideAllowedDirectoryError, await response.Content.ReadAsStringAsync());
         }
         else
         {
@@ -84,7 +83,7 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal(OutsideError, json.RootElement.GetProperty("error").GetString());
+        Assert.Equal(JobsController.OutsideAllowedDirectoryError, json.RootElement.GetProperty("error").GetString());
         Assert.Equal("keep me", await File.ReadAllTextAsync(outside));
     }
 
@@ -200,15 +199,15 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
             _client.Dispose();
             _factory.Dispose();
             SqliteConnection.ClearAllPools();
+            // A leftover directory must not fail the tests it served; it lives under the
+            // test output directory, which is discarded with the build, and is reported here.
             try
             {
                 Directory.Delete(_root, recursive: true);
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-            }
-            catch (UnauthorizedAccessException)
-            {
+                Console.Error.WriteLine($"{nameof(BatchPathConfinementTests)}: could not delete {_root}: {ex.Message}");
             }
         }
     }

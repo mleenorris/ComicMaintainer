@@ -538,14 +538,50 @@ public class JobsControllerCoverageTests
     [InlineData("/c/../Config/victim.txt")]
     [InlineData("/c-private/a.cbz")]
     [InlineData("../../etc/passwd")]
+    [InlineData("/c/a.cbz/")]
+    [InlineData("/c/a.cbz/.")]
+    [InlineData("/c/series/..")]
     public async Task DeleteSelected_PathOutsideTheLibrary_RejectsTheWholeBatch(string path)
     {
         var request = new JobsController.ProcessSelectedRequest { Files = new() { "/c/a.cbz", path } };
 
         var result = await _controller.DeleteSelected(request);
 
-        Assert.Equal("One or more file paths are outside the allowed directory", ErrorOf(result, 400));
+        Assert.Equal(JobsController.OutsideAllowedDirectoryError, ErrorOf(result, 400));
         _processor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteSelected_LinkOutsideTheLibraryToAComicInIt_RejectsTheWholeBatch()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var root = Path.Combine(Path.GetTempPath(), "jobs-delete-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var library = Directory.CreateDirectory(Path.Combine(root, "library")).FullName;
+            var outside = Directory.CreateDirectory(Path.Combine(root, "outside")).FullName;
+            var comic = Path.Combine(library, "a.cbz");
+            File.WriteAllText(comic, "keep me");
+            var link = Path.Combine(outside, "a.cbz");
+            File.CreateSymbolicLink(link, comic);
+            var controller = new JobsController(
+                _processor.Object, _fileStore.Object, NullLogger<JobsController>.Instance,
+                new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = library }));
+
+            var result = await controller.DeleteSelected(
+                new JobsController.ProcessSelectedRequest { Files = new() { comic, link } });
+
+            Assert.Equal(JobsController.OutsideAllowedDirectoryError, ErrorOf(result, 400));
+            _processor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]

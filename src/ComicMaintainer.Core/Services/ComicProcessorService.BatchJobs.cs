@@ -126,14 +126,24 @@ public partial class ComicProcessorService
                         return false;
                     }
 
-                    if (File.Exists(entryPath))
+                    // The library path of the entry that is deleted, which differs from the
+                    // requested path when that goes through a link or contains "..".
+                    var entryDirectory = Path.GetDirectoryName(entryPath)!;
+                    var canonicalPath = Path.Join(GetAllowedLogicalPath(entryDirectory), Path.GetFileName(entryPath));
+                    var storePaths = new[] { filePath, canonicalPath }.Distinct(StringComparer.Ordinal).ToArray();
+
+                    // Open the checked directory now, so the entry is deleted from it even if
+                    // the directory is replaced (e.g. by a link out of the library) meanwhile.
+                    using var directoryHandle = Directory.Exists(entryDirectory) ? OpenRenameDirectory(entryPath) : null;
+                    if (FileEntryExists(GetEntryPathInDirectory(directoryHandle, entryPath)))
                     {
                         // Remove from file store first (unlikely to fail), then
                         // delete the physical file. This order prevents orphaned
                         // file-store entries if the disk delete fails.
-                        await _fileStore.RemoveFileAsync(filePath, token);
-                        File.Delete(entryPath);
-                        await LogHistoryAsync(filePath, "Delete", true, null, token);
+                        foreach (var storePath in storePaths)
+                            await _fileStore.RemoveFileAsync(storePath, token);
+                        DeleteFileInDirectory(directoryHandle, entryPath);
+                        await LogHistoryAsync(canonicalPath, "Delete", true, null, token);
                         return true;
                     }
 
@@ -141,7 +151,8 @@ public partial class ComicProcessorService
                     // so the library list reflects reality.
                     try
                     {
-                        await _fileStore.RemoveFileAsync(filePath, token);
+                        foreach (var storePath in storePaths)
+                            await _fileStore.RemoveFileAsync(storePath, token);
                     }
                     catch (Exception removeEx)
                     {
@@ -149,7 +160,7 @@ public partial class ComicProcessorService
                             "DeleteFilesAsync: file-store cleanup failed for missing file {FilePath}",
                             LoggingHelper.SanitizePathForLog(filePath));
                     }
-                    await LogHistoryAsync(filePath, "Delete", false, "File not found on disk", token);
+                    await LogHistoryAsync(canonicalPath, "Delete", false, "File not found on disk", token);
                     return false;
                 }
                 catch (Exception ex)

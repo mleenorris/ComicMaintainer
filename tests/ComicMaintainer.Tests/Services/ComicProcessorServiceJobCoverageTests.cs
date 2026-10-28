@@ -264,6 +264,67 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         Assert.False(File.Exists(physical));
         Assert.NotNull(new DirectoryInfo(alias).LinkTarget);
         _fileStore.Verify(f => f.RemoveFileAsync(throughAlias, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.RemoveFileAsync(physical, It.IsAny<CancellationToken>()), Times.Once);
+        _history.Verify(h => h.AddHistoryEntryAsync(
+            It.Is<ProcessingHistoryEntry>(e => e.FilePath == physical && e.Success), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_PathEndingInASeparator_IsRejectedAndNothingIsDeleted()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var service = CreateService();
+        var comic = WriteCbz("Series/book.cbz", Xml("Series", "1", "Chapter 1"));
+        var link = Path.Combine(_library, "link.cbz");
+        File.CreateSymbolicLink(link, comic);
+        var other = WriteCbz("Series/other.cbz", Xml("Series", "2", "Chapter 2"));
+        var requests = new[] { link + "/", other + "/", link + "/.", Path.Combine(_library, "Series", "..") };
+
+        var jobId = await service.DeleteFilesAsync(requests);
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(0, job.ProcessedFiles);
+        Assert.Equal(requests.Length, job.FailedFiles);
+        Assert.True(File.Exists(comic));
+        Assert.True(File.Exists(other));
+        Assert.NotNull(new FileInfo(link).LinkTarget);
+        _fileStore.Verify(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_DirectoryReplacedByALinkOutOfTheLibrary_DeletesFromTheCheckedDirectory()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var service = CreateService();
+        var series = Path.Combine(_library, "Series");
+        var doomed = WriteCbz("Series/victim.cbz", Xml("Series", "1", "Chapter 1"));
+        var outside = WriteFile(Path.Combine(_root, "config", "victim.cbz"));
+        var moved = Path.Combine(_library, "Moved");
+        _fileStore
+            .Setup(f => f.RemoveFileAsync(doomed, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                // Swap the checked directory for a link out of the library mid-delete.
+                Directory.Move(series, moved);
+                Directory.CreateSymbolicLink(series, Path.GetDirectoryName(outside)!);
+                return Task.CompletedTask;
+            });
+
+        var jobId = await service.DeleteFilesAsync(new[] { doomed });
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.Equal("keep me", await File.ReadAllTextAsync(outside));
+        Assert.False(File.Exists(Path.Combine(moved, "victim.cbz")));
     }
 
     [Fact]

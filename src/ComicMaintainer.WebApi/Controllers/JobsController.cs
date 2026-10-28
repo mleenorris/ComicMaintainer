@@ -13,6 +13,11 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public class JobsController : ControllerBase
 {
+    /// <summary>
+    /// The error returned when a batch request names a file outside the watched and duplicate directories.
+    /// </summary>
+    public const string OutsideAllowedDirectoryError = "One or more file paths are outside the allowed directory";
+
     private readonly IComicProcessorService _processor;
     private readonly IFileStoreService _fileStore;
     private readonly ILogger<JobsController> _logger;
@@ -474,17 +479,18 @@ public class JobsController : ControllerBase
             }
 
             // Validate every path the delete job would act on (it skips blank entries itself),
-            // so a path outside the library rejects the whole request before anything is deleted.
+            // with the job's own checks, so a path it would refuse rejects the whole request
+            // before anything is deleted.
             var settings = _settings.CurrentValue;
             foreach (var filePath in request.Files)
             {
                 if (!string.IsNullOrWhiteSpace(filePath) &&
-                    !LibraryPathValidator.TryResolveWithin(filePath, out _, settings.WatchedDirectory, settings.DuplicateDirectory))
+                    !LibraryPathValidator.TryResolveEntryWithin(filePath, out _, settings.WatchedDirectory, settings.DuplicateDirectory))
                 {
                     _logger.LogWarning(
                         LoggingHelper.WithWebsitePrefix("DeleteSelected: attempt to delete a file outside the allowed directories: {FilePath}"),
                         LoggingHelper.SanitizePathForLog(filePath));
-                    return BadRequest(new { error = "One or more file paths are outside the allowed directory" });
+                    return BadRequest(new { error = OutsideAllowedDirectoryError });
                 }
             }
 

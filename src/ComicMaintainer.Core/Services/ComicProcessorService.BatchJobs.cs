@@ -110,6 +110,12 @@ public partial class ComicProcessorService
 
     public Task<Guid> DeleteFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
+        // Paths ignore case on Windows while the file store matches them exactly, so there
+        // the tracked spellings of a deleted file are looked up, from one listing per job.
+        var trackedPaths = new Lazy<Task<ILookup<string, string>>>(async () =>
+            (await _fileStore.GetAllFilesAsync(CancellationToken.None))
+                .ToLookup(f => f.FilePath, f => f.FilePath, StringComparer.OrdinalIgnoreCase));
+
         return QueueBatchJobAsync(
             filePaths,
             "DeleteFilesAsync",
@@ -130,7 +136,16 @@ public partial class ComicProcessorService
                     // requested path when that goes through a linked directory.
                     var entryDirectory = Path.GetDirectoryName(entryPath)!;
                     var canonicalPath = Path.Join(GetAllowedLogicalPath(entryDirectory), Path.GetFileName(entryPath));
-                    var storePaths = new[] { filePath, canonicalPath }.Distinct(StringComparer.Ordinal).ToArray();
+                    var requestedPaths = new[] { filePath, canonicalPath };
+                    var storePaths = requestedPaths.Distinct(StringComparer.Ordinal).ToArray();
+                    if (LibraryPathValidator.PathComparison == StringComparison.OrdinalIgnoreCase)
+                    {
+                        var tracked = await trackedPaths.Value;
+                        storePaths = storePaths
+                            .Concat(requestedPaths.SelectMany(path => tracked[path]))
+                            .Distinct(StringComparer.Ordinal)
+                            .ToArray();
+                    }
 
                     // Open the checked directory now, so the entry is deleted from it even if
                     // the directory is replaced (e.g. by a link out of the library) meanwhile.

@@ -111,6 +111,7 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
     public sealed class LibraryHost : IDisposable
     {
         private readonly string _root = Path.Join(AppContext.BaseDirectory, "batch-path-confinement-tests", Guid.NewGuid().ToString("N"));
+        private readonly WebApplicationFactory<Program> _baseFactory = new();
         private readonly WebApplicationFactory<Program> _factory;
         private readonly HttpClient _client;
 
@@ -128,7 +129,7 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
                 Directory.CreateDirectory(directory!);
             }
 
-            _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            _factory = _baseFactory.WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Development");
                 foreach (var (key, value) in overrides)
@@ -149,8 +150,11 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
 
         public string ConfigDirectory => Path.Join(_root, "config");
 
-        public Task<HttpResponseMessage> PostAsync(string url, string json) =>
-            _client.PostAsync(url, new StringContent(json, Encoding.UTF8, "application/json"));
+        public async Task<HttpResponseMessage> PostAsync(string url, string json)
+        {
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            return await _client.PostAsync(url, content);
+        }
 
         /// <summary>
         /// Waits for the job named in an accepted request's response to finish.
@@ -198,6 +202,7 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
         {
             _client.Dispose();
             _factory.Dispose();
+            _baseFactory.Dispose();
             SqliteConnection.ClearAllPools();
             // A leftover directory must not fail the tests it served; it lives under the
             // test output directory, which is discarded with the build, and is reported here.

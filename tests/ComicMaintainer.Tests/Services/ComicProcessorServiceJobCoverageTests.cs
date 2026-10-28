@@ -2,10 +2,13 @@ using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -146,9 +149,9 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     {
         var service = CreateService();
         var inLibrary = WriteCbz("Series/doomed.cbz", Xml("Series", "1", "Chapter 1"));
-        var duplicate = WriteFile(Path.Combine(_settings.DuplicateDirectory, "Series", "doomed.cbz"));
-        var outside = WriteFile(Path.Combine(_root, "config", "victim.txt"));
-        var traversal = Path.Combine(_library, "..", "config", "victim.txt");
+        var duplicate = WriteFile(Path.Join(_settings.DuplicateDirectory, "Series", "doomed.cbz"));
+        var outside = WriteFile(Path.Join(_root, "config", "victim.txt"));
+        var traversal = Path.Join(_library, "..", "config", "victim.txt");
 
         var jobId = await service.DeleteFilesAsync(new[] { inLibrary, duplicate, outside, traversal });
         var job = await WaitForJobAsync(service, jobId);
@@ -170,17 +173,17 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteFilesAsync_LinksLeadingOutOfTheLibrary_AreRejectedAndLeftUntouched()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
         var service = CreateService();
-        var outsideDir = Path.Combine(_root, "outside");
-        var outside = WriteFile(Path.Combine(outsideDir, "book.cbz"));
-        Directory.CreateSymbolicLink(Path.Combine(_library, "linked"), outsideDir);
-        var throughLink = Path.Combine(_library, "linked", "book.cbz");
-        var fileLink = Path.Combine(_library, "book.cbz");
+        var outsideDir = Path.Join(_root, "outside");
+        var outside = WriteFile(Path.Join(outsideDir, "book.cbz"));
+        Directory.CreateSymbolicLink(Path.Join(_library, "linked"), outsideDir);
+        var throughLink = Path.Join(_library, "linked", "book.cbz");
+        var fileLink = Path.Join(_library, "book.cbz");
         File.CreateSymbolicLink(fileLink, outside);
 
         var jobId = await service.DeleteFilesAsync(new[] { throughLink, fileLink });
@@ -200,14 +203,14 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteFilesAsync_FileLinkToAnotherComic_DeletesTheLinkAndKeepsTheComic()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
         var service = CreateService();
         var original = WriteCbz("Series/Series - Chapter 0001.cbz", Xml("Series", "1", "Chapter 1"));
-        var link = Path.Combine(_library, "Series", "Series 001.cbz");
+        var link = Path.Join(_library, "Series", "Series 001.cbz");
         File.CreateSymbolicLink(link, original);
 
         var jobId = await service.DeleteFilesAsync(new[] { link });
@@ -224,15 +227,15 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteFilesAsync_DanglingFileLink_IsDeleted()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
         var service = CreateService();
-        var link = Path.Combine(_library, "Series", "Series 001.cbz");
+        var link = Path.Join(_library, "Series", "Series 001.cbz");
         Directory.CreateDirectory(Path.GetDirectoryName(link)!);
-        File.CreateSymbolicLink(link, Path.Combine(_library, "Series", "missing.cbz"));
+        File.CreateSymbolicLink(link, Path.Join(_library, "Series", "missing.cbz"));
 
         var jobId = await service.DeleteFilesAsync(new[] { link });
         var job = await WaitForJobAsync(service, jobId);
@@ -245,16 +248,16 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteFilesAsync_PathThroughLinkedDirectoryInsideLibrary_DeletesThePhysicalFile()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
         var service = CreateService();
         var physical = WriteCbz("Series/book.cbz", Xml("Series", "1", "Chapter 1"));
-        var alias = Path.Combine(_library, "alias");
-        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Series"));
-        var throughAlias = Path.Combine(alias, "book.cbz");
+        var alias = Path.Join(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Join(_library, "Series"));
+        var throughAlias = Path.Join(alias, "book.cbz");
 
         var jobId = await service.DeleteFilesAsync(new[] { throughAlias });
         var job = await WaitForJobAsync(service, jobId);
@@ -272,17 +275,17 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteFilesAsync_PathEndingInASeparator_IsRejectedAndNothingIsDeleted()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
         var service = CreateService();
         var comic = WriteCbz("Series/book.cbz", Xml("Series", "1", "Chapter 1"));
-        var link = Path.Combine(_library, "link.cbz");
+        var link = Path.Join(_library, "link.cbz");
         File.CreateSymbolicLink(link, comic);
         var other = WriteCbz("Series/other.cbz", Xml("Series", "2", "Chapter 2"));
-        var requests = new[] { link + "/", other + "/", link + "/.", Path.Combine(_library, "Series", "..") };
+        var requests = new[] { link + "/", other + "/", link + "/.", Path.Join(_library, "Series", "..") };
 
         var jobId = await service.DeleteFilesAsync(requests);
         var job = await WaitForJobAsync(service, jobId);
@@ -298,16 +301,16 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteFilesAsync_PathWithParentSegments_IsRejectedAndNothingIsDeleted()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
         var service = CreateService();
-        Directory.CreateDirectory(Path.Combine(_library, "Series", "subdir"));
+        Directory.CreateDirectory(Path.Join(_library, "Series", "subdir"));
         var throughLinkTarget = WriteCbz("Series/target.cbz", Xml("Series", "1", "Chapter 1"));
         var lexicalTarget = WriteCbz("target.cbz", Xml("Series", "2", "Chapter 2"));
-        Directory.CreateSymbolicLink(Path.Combine(_library, "link"), Path.Combine(_library, "Series", "subdir"));
+        Directory.CreateSymbolicLink(Path.Join(_library, "link"), Path.Join(_library, "Series", "subdir"));
         // The OS resolves "link/.." to Series, while normalizing first would give the library root.
         var throughLink = _library + "/link/../target.cbz";
         // A missing directory fails to open, while normalizing first would drop it.
@@ -326,7 +329,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteFilesAsync_DirectoryOrLinkToADirectory_IsRejectedAndNothingIsDeleted()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
@@ -334,7 +337,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         var service = CreateService();
         var comic = WriteCbz("Series/book.cbz", Xml("Series", "1", "Chapter 1"));
         var series = Path.GetDirectoryName(comic)!;
-        var alias = Path.Combine(_library, "alias");
+        var alias = Path.Join(_library, "alias");
         Directory.CreateSymbolicLink(alias, series);
 
         var jobId = await service.DeleteFilesAsync(new[] { alias, series });
@@ -371,16 +374,16 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteFilesAsync_DirectoryReplacedByALinkOutOfTheLibrary_DeletesFromTheCheckedDirectory()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
         var service = CreateService();
-        var series = Path.Combine(_library, "Series");
+        var series = Path.Join(_library, "Series");
         var doomed = WriteCbz("Series/victim.cbz", Xml("Series", "1", "Chapter 1"));
-        var outside = WriteFile(Path.Combine(_root, "config", "victim.cbz"));
-        var moved = Path.Combine(_library, "Moved");
+        var outside = WriteFile(Path.Join(_root, "config", "victim.cbz"));
+        var moved = Path.Join(_library, "Moved");
         _fileStore
             .Setup(f => f.RemoveFileAsync(doomed, It.IsAny<CancellationToken>()))
             .Returns(() =>
@@ -397,7 +400,121 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         Assert.Equal(1, job.ProcessedFiles);
         Assert.Equal(0, job.FailedFiles);
         Assert.Equal("keep me", await File.ReadAllTextAsync(outside));
-        Assert.False(File.Exists(Path.Combine(moved, "victim.cbz")));
+        Assert.False(File.Exists(Path.Join(moved, "victim.cbz")));
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_DirectoryOrAncestorMovedWhileDeletingOnWindows_IsRefusedAndTheFileIsDeleted()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var service = CreateService();
+        var series = Path.Join(_library, "Series");
+        var doomed = WriteCbz("Series/victim.cbz", Xml("Series", "1", "Chapter 1"));
+        var outside = WriteFile(Path.Join(_root, "config", "victim.cbz"));
+        var moveErrors = new List<Exception?>();
+        _fileStore
+            .Setup(f => f.RemoveFileAsync(doomed, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                // Try to swap the checked directory, or the library holding it, for a link
+                // out of the library mid-delete; the open directory handle must prevent both.
+                moveErrors.Add(Record.Exception(() => Directory.Move(series, Path.Join(_library, "Moved"))));
+                moveErrors.Add(Record.Exception(() => Directory.Move(_library, Path.Join(_root, "moved-library"))));
+                return Task.CompletedTask;
+            });
+
+        var jobId = await service.DeleteFilesAsync(new[] { doomed });
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(2, moveErrors.Count);
+        Assert.All(moveErrors, error => Assert.True(error is IOException or UnauthorizedAccessException, $"Unexpected: {error}"));
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.True(Directory.Exists(series));
+        Assert.False(File.Exists(doomed));
+        Assert.Equal("keep me", await File.ReadAllTextAsync(outside));
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_FileDirectlyUnderADriveRootOnWindows_IsDeleted()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var driveRoot = Path.GetPathRoot(_root)!;
+        var comic = Path.Join(driveRoot, $"cps-job-cov-{Guid.NewGuid():N}.cbz");
+        try
+        {
+            File.WriteAllText(comic, "delete me");
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // The drive root is not writable for this account, so there is nothing to delete.
+            return;
+        }
+
+        try
+        {
+            _settings.WatchedDirectory = driveRoot;
+            var service = CreateService();
+
+            var jobId = await service.DeleteFilesAsync(new[] { comic });
+            var job = await WaitForJobAsync(service, jobId);
+
+            Assert.Equal(1, job.ProcessedFiles);
+            Assert.Equal(0, job.FailedFiles);
+            Assert.False(File.Exists(comic));
+        }
+        finally
+        {
+            File.Delete(comic);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_PathCasedDifferentlyFromTheStoreOnWindows_RemovesTheTrackedRecord()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var services = new ServiceCollection();
+        var databaseName = Guid.NewGuid().ToString("N");
+        services.AddDbContextFactory<ComicMaintainerDbContext>(options => options.UseInMemoryDatabase(databaseName));
+        await using var provider = services.BuildServiceProvider();
+        var store = new FileStoreService(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            Mock.Of<ILogger<FileStoreService>>(),
+            provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
+        var service = CreateService(fileStore: store);
+        var viaRequest = WriteCbz("Series/request.cbz", Xml("Series", "1", "Chapter 1"));
+        var viaLink = WriteCbz("Series/link.cbz", Xml("Series", "2", "Chapter 2"));
+        await store.AddFileAsync(viaRequest);
+        await store.AddFileAsync(viaLink);
+        // Requested through differently cased directory components, and through a link
+        // whose target spells the directory differently from the tracked path.
+        var recased = Path.Join(_library, "SERIES", "request.cbz");
+        var alias = Path.Join(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Join(_library, "series"));
+        var throughAlias = Path.Join(alias, "link.cbz");
+
+        var jobId = await service.DeleteFilesAsync(new[] { recased, throughAlias });
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(2, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.False(File.Exists(viaRequest));
+        Assert.False(File.Exists(viaLink));
+        Assert.Empty(await store.GetAllFilesAsync());
+        Assert.Null(await store.GetFileAsync(viaRequest));
+        Assert.Null(await store.GetFileAsync(viaLink));
     }
 
     [Fact]
@@ -646,12 +763,12 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         return (jobId, itemToken);
     }
 
-    private ComicProcessorService CreateService(IJobStateStore? jobStateStore = null)
+    private ComicProcessorService CreateService(IJobStateStore? jobStateStore = null, IFileStoreService? fileStore = null)
     {
         var service = new ComicProcessorService(
             new TestOptionsMonitor<AppSettings>(_settings),
             _logger,
-            _fileStore.Object,
+            fileStore ?? _fileStore.Object,
             _history.Object,
             eventBroadcaster: _broadcaster.Object,
             jobStateStore: jobStateStore);

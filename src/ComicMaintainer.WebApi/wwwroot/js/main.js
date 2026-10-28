@@ -120,13 +120,19 @@
                 const pageSizeChanged = perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE;
                 const shouldReloadLibrary = viewChanged || filterChanged || sortChanged || pageSizeChanged;
                 if (shouldReloadLibrary) {
-                    loadActiveLibraryView(1);
-                }
+                    const libraryReload = loadActiveLibraryView(1);
 
-                // A series page opened before the preferences arrived listed
-                // its issues without the saved filter; fetch them with it.
-                if (filterChanged && currentSeriesDetailId) {
-                    loadSeriesIssues(currentSeriesDetailId, true);
+                    // A series page opened before the preferences arrived listed
+                    // its issues without the saved filter; fetch them with it once
+                    // the library has reloaded, as that may move the series to a
+                    // new id.
+                    if (filterChanged && currentSeriesDetailId) {
+                        libraryReload.finally(() => {
+                            if (currentSeriesDetailId) {
+                                loadSeriesIssues(currentSeriesDetailId, true);
+                            }
+                        });
+                    }
                 }
             });
             

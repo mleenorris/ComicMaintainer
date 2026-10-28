@@ -122,8 +122,8 @@ test('a series page opened before the preferences arrive lists its issues with t
 });
 
 test('a series page whose id changes under the saved filter still lists its issues', async () => {
-    // The filter groups the series under another id, and the filtered library
-    // answers before the filtered issues requested under the old id.
+    // The filter groups the series under another id, and filtered issues
+    // requested under the old id would never answer.
     const filtered = seriesCard({ id: 'series-2' });
     const read = seriesIssue({ read: true });
     const unread = seriesIssue({ file_path: 'Saga/Saga 002.cbz', file_name: 'Saga 002.cbz', title: 'Chapter Two', issue: '2' });
@@ -144,6 +144,24 @@ test('a series page whose id changes under the saved filter still lists its issu
     assert.equal(page.evaluate('currentSeriesDetailId'), 'series-2');
     assert.equal(page.$('#seriesDetailPanel .loading'), null, 'the page is not left loading');
     assert.deepEqual(page.$$('#seriesDetailPanel .series-issue-card[data-file-path]').map(card => card.dataset.filePath), ['Saga/Saga 002.cbz']);
+});
+
+test('a series page refetches its issues with the saved filter only once the library has reloaded', async () => {
+    const issuesPath = `/api/files/series/${SAGA.id}/issues`;
+    const gate = deferred();
+    const page = await boot({
+        hash: `#/series/${SAGA.id}`,
+        routes: libraryRoutes({
+            'GET /api/preferences': preferences({ filterMode: 'unread' }),
+            'GET /api/files/series': call => (call.query.filter === 'unread' ? gate.promise : seriesPage([SAGA]))
+        })
+    });
+    assert.deepEqual(requests(page, 'GET', issuesPath).map(call => call.query.filter), [undefined], 'nothing is refetched while the library reloads');
+
+    gate.resolve(seriesPage([SAGA]));
+    await page.settle();
+
+    assert.deepEqual(requests(page, 'GET', issuesPath).map(call => call.query.filter), [undefined, 'unread']);
 });
 
 test('a saved filter the app no longer knows is labelled "All"', async () => {

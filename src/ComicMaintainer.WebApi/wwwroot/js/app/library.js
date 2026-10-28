@@ -157,6 +157,7 @@
                     if (seriesLoadController) {
                         seriesLoadController.abort();
                     }
+                    return new Promise(resolve => seriesReloadWaiters.push(resolve));
                 }
                 return;
             }
@@ -247,7 +248,10 @@
                     // flight. Re-run with the latest selection so the displayed
                     // series match the current filter without a page refresh.
                     seriesReloadPending = false;
-                    loadSeriesLibrary({ refresh: false });
+                    const waiters = seriesReloadWaiters;
+                    seriesReloadWaiters = [];
+                    const reload = loadSeriesLibrary({ refresh: false });
+                    waiters.forEach(resolve => resolve(reload));
                 }
             }
         }

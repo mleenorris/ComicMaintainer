@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
 using SystemZipArchive = System.IO.Compression.ZipArchive;
+using ZlibException = SharpCompress.Compressors.Deflate.ZlibException;
 using ImageMagick;
 
 namespace ComicMaintainer.Core.Services;
@@ -387,7 +388,7 @@ public class EpubConversionService : IEpubConversionService
             using var stream = entry.OpenEntryStream();
             return SHA256.HashData(stream).AsSpan().SequenceEqual(hash);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or ZlibException or (InvalidOperationException and not ObjectDisposedException))
         {
             _logger.LogDebug(
                 ex,
@@ -519,7 +520,7 @@ public class EpubConversionService : IEpubConversionService
                         entryStream.CopyTo(buffer);
                         imageBytes = buffer.ToArray();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or ZlibException or (InvalidOperationException and not ObjectDisposedException))
                     {
                         throw new InvalidOperationException(
                             $"Page '{pageKey}' in {Path.GetFileName(issue.FilePath)} could not be read: {ex.Message}",

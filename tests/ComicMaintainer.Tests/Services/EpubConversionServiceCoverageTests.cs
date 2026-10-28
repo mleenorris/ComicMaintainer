@@ -79,7 +79,7 @@ public class EpubConversionServiceCoverageTests : IDisposable
         var seriesImage = Path.Combine(_workDir, "series.jpg");
         File.WriteAllBytes(seriesImage, CreateImage(MagickFormat.Jpeg, 12, 18));
         var cbz = CreateCbz("Unreadable Cover.cbz", Page("001.jpg"), Page("002.jpg"), Page("cover.jpg"));
-        SetCompressionMethod(cbz, "cover.jpg", (ushort)method);
+        SetCompressionMethod(cbz, "cover.jpg", method: (ushort)method);
         var outputDir = Path.Combine(_workDir, $"unreadable-cover-{method}");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _service.ConvertToEpubAsync(

@@ -235,6 +235,194 @@ public partial class ComicProcessorService
             _settings.WatchedDirectory,
             _settings.DuplicateDirectory);
 
+    /// <summary>
+    /// Like <see cref="TryResolveAllowedPath"/>, but returns the physical path of the
+    /// directory entry itself: only the directories leading to it are resolved, so
+    /// deleting the result removes a link rather than the file it points to.
+    /// </summary>
+    private bool TryResolveAllowedEntry(string filePath, out string entryPath) =>
+        LibraryPathValidator.TryResolveEntryWithin(
+            filePath,
+            out entryPath,
+            _settings.WatchedDirectory,
+            _settings.DuplicateDirectory);
+
+    /// <summary>
+    /// The path of <paramref name="entryPath"/> as seen through the opened directory, so it
+    /// keeps naming the entry in the checked directory even if that directory is moved or
+    /// replaced by a link afterwards. On macOS that is the opened directory's current path.
+    /// On Windows the opened directory cannot be moved, so the path itself is used.
+    /// </summary>
+    private static string GetEntryPathInDirectory(SafeFileHandle? directoryHandle, string entryPath)
+    {
+        if (directoryHandle is null || directoryHandle.IsInvalid)
+        {
+            return entryPath;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            return Path.Join($"/proc/self/fd/{directoryHandle.DangerousGetHandle().ToInt32()}", Path.GetFileName(entryPath));
+        }
+
+        return OperatingSystem.IsMacOS()
+            ? Path.Join(NativeFileSystem.ReadMacDirectoryPath(directoryHandle.DangerousGetHandle().ToInt32()), Path.GetFileName(entryPath))
+            : entryPath;
+    }
+
+    /// <summary>
+    /// Opens the directory holding <paramref name="entryPath"/> so <see cref="DeleteFileInDirectory"/>
+    /// deletes from the directory that was checked. On Linux and macOS the entry is deleted
+    /// relative to the opened directory; on Windows the handle denies delete sharing, which keeps
+    /// the directory and its ancestors from being renamed or replaced while it is open. Other
+    /// platforms cannot pin the directory, so deleting fails there.
+    /// </summary>
+    private static SafeFileHandle OpenDeleteDirectory(string entryPath)
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            return OpenRenameDirectory(entryPath)!;
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return OpenMacDirectory(entryPath);
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Deleting files is only supported on Linux, macOS and Windows.");
+        }
+
+        var directoryPath = Path.GetDirectoryName(entryPath)
+            ?? throw new IOException("Cannot determine the directory of the file.");
+        // Share access is only checked for opens that request more than attributes, so
+        // listing access is needed for the missing FILE_SHARE_DELETE to block renames.
+        var handle = NativeFileSystem.CreateWindowsFile(
+            directoryPath,
+            NativeFileSystem.FILE_LIST_DIRECTORY | NativeFileSystem.FILE_READ_ATTRIBUTES,
+            NativeFileSystem.FILE_SHARE_READ_WRITE,
+            IntPtr.Zero,
+            NativeFileSystem.OPEN_EXISTING,
+            NativeFileSystem.FILE_FLAG_BACKUP_SEMANTICS,
+            IntPtr.Zero);
+        try
+        {
+            if (handle.IsInvalid)
+            {
+                throw new IOException($"Could not open the directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
+            }
+
+            // The handle follows links, so a directory that was replaced by a link (or a
+            // junction) before it was opened resolves somewhere else and is refused. Both
+            // paths are spelled as the file system stores them, so they are compared exactly.
+            // Trimming keeps the separator of a root such as "D:\", which the handle reports too.
+            if (!string.Equals(
+                    Path.TrimEndingDirectorySeparator(NativeFileSystem.ReadWindowsFinalPath(handle)),
+                    Path.TrimEndingDirectorySeparator(directoryPath),
+                    StringComparison.Ordinal))
+            {
+                throw new IOException("The directory changed while it was being opened.");
+            }
+
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Deletes <paramref name="entryPath"/> from the directory opened by
+    /// <see cref="OpenDeleteDirectory"/>, after checking that directory is still inside the
+    /// allowed directories. Like <see cref="File.Delete"/>, a missing entry is not an error.
+    /// </summary>
+    private void DeleteFileInDirectory(SafeFileHandle? directoryHandle, string entryPath)
+    {
+        if (directoryHandle is null || directoryHandle.IsInvalid)
+        {
+            throw new IOException("The directory handle is unavailable.");
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            var openedDirectory = NativeFileSystem.ReadWindowsFinalPath(directoryHandle);
+            if (!LibraryPathValidator.IsWithin(openedDirectory, _settings.WatchedDirectory) &&
+                !LibraryPathValidator.IsWithin(openedDirectory, _settings.DuplicateDirectory))
+            {
+                throw new IOException("The directory is outside the allowed directories.");
+            }
+
+            File.Delete(entryPath);
+            return;
+        }
+
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            throw new PlatformNotSupportedException("Deleting files is only supported on Linux, macOS and Windows.");
+        }
+
+        var directoryDescriptor = directoryHandle.DangerousGetHandle().ToInt32();
+        var currentDirectory = OperatingSystem.IsLinux()
+            ? ReadLinuxDirectoryPath(directoryDescriptor)
+            : NativeFileSystem.ReadMacDirectoryPath(directoryDescriptor);
+        if (!LibraryPathValidator.IsWithin(currentDirectory, _settings.WatchedDirectory) &&
+            !LibraryPathValidator.IsWithin(currentDirectory, _settings.DuplicateDirectory))
+        {
+            throw new IOException("The directory is outside the allowed directories.");
+        }
+
+        if (UnlinkAt(directoryDescriptor, Path.GetFileName(entryPath), 0) != 0)
+        {
+            const int ENOENT = 2;
+            var error = Marshal.GetLastPInvokeError();
+            if (error != ENOENT)
+            {
+                throw new IOException($"Could not delete the file: {new Win32Exception(error).Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Opens the directory holding <paramref name="entryPath"/> on macOS, checking that it is
+    /// the directory that was resolved rather than something it was replaced by meanwhile.
+    /// </summary>
+    private static SafeFileHandle OpenMacDirectory(string entryPath)
+    {
+        var directoryPath = Path.GetDirectoryName(entryPath)
+            ?? throw new IOException("Cannot determine the directory of the file.");
+        var descriptor = NativeFileSystem.OpenUnixDirectory(
+            directoryPath, NativeFileSystem.MAC_O_DIRECTORY | NativeFileSystem.MAC_O_CLOEXEC);
+        if (descriptor < 0)
+        {
+            throw new IOException($"Could not open the directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
+        }
+
+        var handle = new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
+        try
+        {
+            // The open follows links, so a directory that was replaced by a link before it
+            // was opened resolves somewhere else and is refused. Both paths are spelled as
+            // the file system stores them, so a differently cased request still matches.
+            if (!string.Equals(
+                    Path.TrimEndingDirectorySeparator(NativeFileSystem.ReadMacDirectoryPath(descriptor)),
+                    Path.TrimEndingDirectorySeparator(directoryPath),
+                    StringComparison.Ordinal))
+            {
+                throw new IOException("The directory changed while it was being opened.");
+            }
+
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
     private static SafeFileHandle? OpenRenameDirectory(string sourcePath)
     {
         if (!OperatingSystem.IsLinux())
@@ -245,7 +433,7 @@ public partial class ComicProcessorService
         var directoryPath = Path.GetDirectoryName(sourcePath)
             ?? throw new IOException("Cannot determine the source directory.");
         var directoryFlag = UsesArmOpenFlags ? 0x4000 : 0x10000;
-        var descriptor = OpenLinuxDirectory(directoryPath, directoryFlag | 0x80000 | 0x200000);
+        var descriptor = NativeFileSystem.OpenUnixDirectory(directoryPath, directoryFlag | 0x80000 | 0x200000);
         if (descriptor < 0)
         {
             throw new IOException($"Could not open the source directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
@@ -521,7 +709,7 @@ public partial class ComicProcessorService
             var relativePath = Path.GetRelativePath(resolvedRoot, resolvedPath);
             var logicalPath = Path.GetFullPath(Path.Combine(logicalRoot, relativePath));
             if (TryResolveAllowedPath(logicalPath, out var verifiedPath) &&
-                string.Equals(verifiedPath, resolvedPath, StringComparison.Ordinal))
+                string.Equals(verifiedPath, resolvedPath, LibraryPathValidator.PathComparison))
             {
                 return logicalPath;
             }
@@ -530,14 +718,17 @@ public partial class ComicProcessorService
         throw new IOException("The renamed file does not resolve within a configured library directory.");
     }
 
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int OpenLinuxDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-
     [DllImport("libc", EntryPoint = "readlink", SetLastError = true)]
     private static extern nint ReadLinuxLink(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         [Out] byte[] buffer,
         nuint bufferSize);
+
+    [DllImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
+    private static extern int UnlinkAt(
+        int directory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        int flags);
 
     protected virtual int RenameLinuxNoReplace(
         int sourceDirectory,

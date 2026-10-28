@@ -29,6 +29,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when `comicVineApiKey` is null or omitted (an empty string still clears it), and the settings
   page gains a "Clear stored API key on save" box. API clients that read `comicvine_api_key`,
   or that cleared the key by sending the settings back without it, must be updated.
+- **⚠️ Upgrade note: JWTs are no longer signed with a published secret, and `JWT_SECRET_FILE` is
+  read.** Unless `JWT_SECRET` was set, tokens were signed and validated with the secret shipped
+  in `appsettings.json`, and `docker-compose.dotnet.yml` and `.env.example` defaulted
+  `JWT_SECRET` to another published value, so anyone could sign a token for any user,
+  administrators included. `JWT_SECRET_FILE` and `ADMIN_PASSWORD_FILE`, which the Docker secrets
+  instructions recommend, were ignored. They now name files, such as Docker secrets, that hold
+  `JWT_SECRET` and `ADMIN_PASSWORD` (the line break at the end of the file is ignored). When no
+  secret is set, or it is one of the published values (now ignored, with a warning on the
+  startup log), a random key is generated on first start and kept in `jwt-secret.key` in the
+  config directory (`/Config`); the startup log says which secret is in use. **After upgrading,
+  users of such deployments must sign in again**, as their tokens were signed with the
+  published secret. The container now refuses to start when a variable and its `_FILE` variant
+  are both set, or when the file cannot be read or is empty: if you added a `_FILE` variable to
+  a compose file that still sets `JWT_SECRET` or `ADMIN_PASSWORD`, remove that line. A blank
+  `JWT_SECRET` now counts as not set. See
+  [Use Docker Secrets](docs/DOCKER_DEPLOYMENT_DOTNET.md#2-use-docker-secrets-recommended-for-production).
 
 ### Added
 - **Pending email deliveries can be cancelled.** Email Delivery History gives every pending
@@ -215,6 +231,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A malformed folder link in `GET /api/files/folders/{path}/files` is rejected** with `400`
   instead of listing the files at the root of the library.
 - **Removing metadata is confined to the library**, like writing it already was.
+- **Deleting selected files is confined to the library.** `POST /api/jobs/delete-selected`,
+  behind the multi-select **Delete** and **Delete All Duplicates**, deleted any file the
+  service could write, such as the database in the config directory, for any signed-in user
+  who is not ReadOnly. It now answers 400 when any path is outside the watched and duplicate
+  directories, and the delete job skips such paths, including links that lead out of them,
+  paths ending in a separator and paths with a `..` segment, and reports them as failed. It
+  also refuses directories and links to them. The file is deleted from the directory that was
+  checked, even if that directory is replaced while the job runs, on Linux, macOS and Windows
+  (including files directly under a Windows drive root). On Windows and macOS paths are
+  compared as the file system spells them, so a differently cased path to a library file is
+  deleted, while a differently cased sibling of the library in a case-sensitive Windows
+  directory is refused. The file's library record is removed even when Windows spells its path
+  in a different case, but not the record of a distinct file whose name differs only in case.
 - **Reading series metadata is confined to the library**, like reading a comic's other metadata
   already was.
 - **Processing a file renames the file that was checked.** The rename used the path as given,
@@ -3275,6 +3304,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.381] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.382] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.383] - 2026-10-28
 
 ### Changed
 - Automatic version bump on merge to master

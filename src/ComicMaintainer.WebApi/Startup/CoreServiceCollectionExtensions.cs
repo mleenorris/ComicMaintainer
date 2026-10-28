@@ -27,7 +27,8 @@ internal static class CoreServiceCollectionExtensions
         services.Configure<AppSettings>(configuration.GetSection("AppSettings"));
         services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<AppSettings>, AppSettingsEnvironmentPostConfigure>();
 
-        // Configure JWT settings (configuration section + JWT_SECRET environment variable)
+        // Configure JWT settings from the section and JWT_SECRET. AddComicMaintainerAuth also resolves JWT_SECRET_FILE
+        // and generated keys, then applies the resolved signing secret to these options.
         services.Configure<JwtSettings>(options => JwtSettingsBinder.Bind(configuration, options));
 
         // Configure Authelia settings (configuration section + AUTHELIA_* environment variables)
@@ -39,7 +40,7 @@ internal static class CoreServiceCollectionExtensions
     public static IServiceCollection AddComicMaintainerData(this IServiceCollection services, IConfiguration configuration)
     {
         // Configure database
-        var configDirectory = configuration["AppSettings:ConfigDirectory"] ?? "/Config";
+        var configDirectory = ResolveConfigDirectory(configuration);
         var rawConnectionString = configuration.GetConnectionString("DefaultConnection")
             ?? $"Data Source={Path.Combine(configDirectory, "comicmaintainer.db")}";
         // Normalize the connection string (pooling, shared cache, default timeout) once so
@@ -100,6 +101,13 @@ internal static class CoreServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// The directory that holds the database, the Data Protection keys and the generated JWT signing key
+    /// (<c>AppSettings:ConfigDirectory</c>, by default /Config).
+    /// </summary>
+    internal static string ResolveConfigDirectory(IConfiguration configuration) =>
+        configuration["AppSettings:ConfigDirectory"] ?? "/Config";
 
     /// <summary>
     /// Absolute path of the SQLite database file named by <paramref name="connectionString"/>

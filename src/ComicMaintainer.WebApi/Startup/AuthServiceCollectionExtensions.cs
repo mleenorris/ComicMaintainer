@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.WebApi.Authentication;
@@ -35,34 +36,12 @@ internal static class AuthServiceCollectionExtensions
         .AddEntityFrameworkStores<ComicMaintainerDbContext>()
         .AddDefaultTokenProviders();
 
-        // Configure JWT Authentication. Read through the same binder as IOptions<JwtSettings> (which AuthService signs
-        // tokens with), so tokens are validated with the secret they were signed with.
+        // Read settings through the same binder as IOptions<JwtSettings>, then resolve the signing secret once so
+        // token validation and AuthService use the same value. Program logs where it came from once logging is set up.
         var jwtSettings = JwtSettingsBinder.Load(configuration);
-        var jwtSecret = jwtSettings.Secret;
-        var defaultSecret = "YourSecretKeyHere-ChangeInProduction-MustBeAtLeast32CharactersLong!";
-
-        // A blank JWT_SECRET counts as unset, but it was meant to hold the secret (such as `$(cat jwt_secret.txt)` with
-        // the file missing), so it must not fall back to the public placeholder shipped in appsettings.json.
-        if (JwtSettingsBinder.IsSecretVariableBlank() && (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret == defaultSecret))
-        {
-            throw new InvalidOperationException(
-                "JWT_SECRET is set but blank, and JwtSettings:Secret is missing or blank too (the placeholder shipped in " +
-                "appsettings.json does not count). Set JWT_SECRET to a random secret of at least 32 characters, e.g. the " +
-                "output of `openssl rand -base64 48`.");
-        }
-
-        if (string.IsNullOrWhiteSpace(jwtSecret))
-        {
-            throw new InvalidOperationException("JWT_SECRET must be configured in appsettings.json or environment variable");
-        }
-
-        // Warn if using default JWT secret
-        if (jwtSecret == defaultSecret)
-        {
-            Log.Warning("⚠️ WARNING: Using default JWT secret! Please set JWT_SECRET environment variable for production.");
-            Log.Warning("⚠️ Current secret is stored in appsettings.json which is not persisted in /Config directory.");
-            Log.Warning("⚠️ Set JWT_SECRET environment variable to use a secure, persistent secret.");
-        }
+        var jwtSecret = JwtSecretResolver.Resolve(configuration);
+        services.AddSingleton(jwtSecret);
+        services.PostConfigure<JwtSettings>(options => options.Secret = jwtSecret.Value);
 
         // Check if Authelia is enabled. Read through the same binder as IOptions<AutheliaSettings> (used by the
         // handler), so the validation, schemes and CanAdminister fallback below match what the handler sees.
@@ -118,7 +97,7 @@ internal static class AuthServiceCollectionExtensions
                 ValidateIssuerSigningKey = true,
                 ValidIssuer = jwtSettings.Issuer,
                 ValidAudience = jwtSettings.Audience,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret.Value))
             };
             
             // Configure events to return JSON for authentication failures and support token in query string

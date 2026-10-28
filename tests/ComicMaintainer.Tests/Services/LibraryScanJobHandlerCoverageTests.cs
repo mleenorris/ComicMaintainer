@@ -340,7 +340,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         var summary = await CreateHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
 
         Assert.Equal(
-            "Library scan: +0 added, -0 removed, 0 stale retagged, 2 modified reprocessed. [modified: 1/2 ok, 0 failed]",
+            $"Library scan: +0 added, -0 removed, 0 stale retagged, 2 modified reprocessed. [modified: job {finalStatus.ToString().ToLowerInvariant()}, 1/2 ok, 0 failed]",
             summary);
         _fileStore.Verify(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -370,7 +370,9 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
 
         var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
 
-        Assert.Equal("Library scan: +1 added, -0 removed, 0 stale retagged. [added: 0/1 ok, 1 failed]", summary);
+        Assert.Equal(
+            $"Library scan: +1 added, -0 removed, 0 stale retagged. [added: job {finalStatus.ToString().ToLowerInvariant()}, 0/1 ok, 1 failed]",
+            summary);
     }
 
     [Fact]
@@ -425,7 +427,6 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
     [InlineData("add")]
     [InlineData("remove")]
     [InlineData("stale")]
-    [InlineData("stats")]
     public async Task ExecuteAsync_CancelledDuringAPass_ThrowsWithoutLoggingAFailureOrQueueingJobs(string pass)
     {
         const string allPasses =
@@ -445,12 +446,8 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
                 _fileStore.Setup(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                     .Callback(() => cts.Cancel()).ThrowsAsync(cancelled);
                 break;
-            case "stale":
-                _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                    .Callback(() => cts.Cancel()).ThrowsAsync(cancelled);
-                break;
             default:
-                _fileStore.Setup(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+                _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                     .Callback(() => cts.Cancel()).ThrowsAsync(cancelled);
                 break;
         }
@@ -467,6 +464,28 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
             It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
         _processor.Verify(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
         _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CancelledWhileRefreshingModifiedFileStats_ThrowsWithoutLoggingAFailure()
+    {
+        var path = WriteComic("Series", "c001.cbz");
+        SetupTracked(Tracked(path, size: 999));
+        SetupNormalizeJob(Finished(JobStatus.Completed, 1, 0));
+        using var cts = new CancellationTokenSource();
+        _fileStore.Setup(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback(() => cts.Cancel()).ThrowsAsync(new OperationCanceledException(cts.Token));
+        var logger = new Mock<ILogger<LibraryScanJobHandler>>();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CreateHandler(logger.Object).ExecuteAsync(ModifiedOnlyOptions, cts.Token));
+
+        logger.Verify(l => l.Log(
+            LogLevel.Warning,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
     }
 
     [Fact]

@@ -263,8 +263,8 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         // use NormalizeFilesAsync with forceReprocess=true so the
         // IsProcessed gate doesn't short-circuit them.
         var newProcessedSummary = await ProcessNewFilesAndWaitAsync(newPaths, cancellationToken);
-        var (staleProcessedSummary, _) = await NormalizeFilesAndWaitAsync(staleToFix, "stale", cancellationToken);
-        var (modifiedProcessedSummary, modifiedSucceeded) = await NormalizeFilesAndWaitAsync(modifiedToFix, "modified", cancellationToken);
+        var staleProcessedSummary = await NormalizeFilesAndWaitAsync(staleToFix, "stale", cancellationToken);
+        var (modifiedProcessedSummary, modifiedSucceeded) = await NormalizeModifiedFilesAndWaitAsync(modifiedToFix, cancellationToken);
 
         // Our own metadata writes change size/mtime; re-sync the stored
         // stats so the next scan doesn't see them as modified again. Only
@@ -350,11 +350,28 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         return (await WaitForJobAsync(jobId, files.Count, "added", cancellationToken)).Summary;
     }
 
-    private async Task<(string Summary, IReadOnlyList<string> Succeeded)> NormalizeFilesAndWaitAsync(
+    private async Task<string> NormalizeFilesAndWaitAsync(
+        IReadOnlyList<string> files, string label, CancellationToken cancellationToken)
+    {
+        return (await NormalizeFilesAndWaitForJobAsync(files, label, cancellationToken)).Summary;
+    }
+
+    /// <summary>
+    /// Re-normalizes the modified files and also returns the ones the job
+    /// normalized successfully, whose stored stats can then be refreshed.
+    /// </summary>
+    private async Task<(string Summary, IReadOnlyList<string> Succeeded)> NormalizeModifiedFilesAndWaitAsync(
+        IReadOnlyList<string> files, CancellationToken cancellationToken)
+    {
+        var (summary, job) = await NormalizeFilesAndWaitForJobAsync(files, "modified", cancellationToken);
+        return (summary, SucceededFiles(files, job));
+    }
+
+    private async Task<(string Summary, ProcessingJob? Job)> NormalizeFilesAndWaitForJobAsync(
         IReadOnlyList<string> files, string label, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (files.Count == 0) return (string.Empty, Array.Empty<string>());
+        if (files.Count == 0) return (string.Empty, null);
         Guid jobId;
         try
         {
@@ -363,10 +380,9 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Library scan: failed to queue {Count} {Label} file(s)", files.Count, label);
-            return ($" [{label}: queue failed]", Array.Empty<string>());
+            return ($" [{label}: queue failed]", null);
         }
-        var (summary, job) = await WaitForJobAsync(jobId, files.Count, label, cancellationToken);
-        return (summary, SucceededFiles(files, job));
+        return await WaitForJobAsync(jobId, files.Count, label, cancellationToken);
     }
 
     private async Task<(string Summary, ProcessingJob? Job)> WaitForJobAsync(Guid jobId, int requested, string label, CancellationToken cancellationToken)
@@ -381,9 +397,15 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         }
         // A cancelled scan throws rather than reporting a job it never polled as "evicted".
         cancellationToken.ThrowIfCancellationRequested();
-        var summary = job is null
-            ? $" [{label}: queued (job record evicted)]"
-            : $" [{label}: {job.ProcessedFiles}/{requested} ok, {job.FailedFiles} failed]";
+        var summary = job switch
+        {
+            null => $" [{label}: queued (job record evicted)]",
+            // Name an unsuccessful outcome: its files' stats aren't refreshed,
+            // so the next scan retries them.
+            { Status: JobStatus.Failed or JobStatus.Cancelled } =>
+                $" [{label}: job {job.Status.ToString().ToLowerInvariant()}, {job.ProcessedFiles}/{requested} ok, {job.FailedFiles} failed]",
+            _ => $" [{label}: {job.ProcessedFiles}/{requested} ok, {job.FailedFiles} failed]",
+        };
         return (summary, job);
     }
 
@@ -397,7 +419,12 @@ public class LibraryScanJobHandler : IScheduledJobHandler
     private static IReadOnlyList<string> SucceededFiles(IReadOnlyList<string> files, ProcessingJob? job)
     {
         if (job is not { Status: JobStatus.Completed }) return Array.Empty<string>();
-        var failed = new HashSet<string>(job.Errors.Keys, StringComparer.OrdinalIgnoreCase);
+        // Paths that differ only by case are distinct files on case-sensitive
+        // file systems, so compare them as the platform does.
+        var failed = new HashSet<string>(job.Errors.Keys,
+            LibraryPathValidator.PathComparison == StringComparison.Ordinal
+                ? StringComparer.Ordinal
+                : StringComparer.OrdinalIgnoreCase);
         return files.Where(f => !failed.Contains(f)).ToList();
     }
 

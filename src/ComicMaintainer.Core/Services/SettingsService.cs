@@ -87,9 +87,10 @@ public class SettingsService : ISettingsService
 
     public async Task UpdateIssueNumberPaddingAsync(int padding, CancellationToken cancellationToken = default)
     {
-        if (padding < 0)
+        if (padding is < 0 or > AppSettings.MaxIssueNumberPadding)
         {
-            throw new ArgumentException("Padding must be non-negative", nameof(padding));
+            throw new ArgumentException(
+                $"Padding must be between 0 and {AppSettings.MaxIssueNumberPadding}", nameof(padding));
         }
 
         await UpdateSettingAsync("IssueNumberPadding", padding, cancellationToken);

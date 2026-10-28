@@ -288,6 +288,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the path checks looked for the text `..` rather than a real parent-folder segment.
 - **A rename whose new name cannot be generated is reported as failed**, instead of as an
   already correctly named file.
+- **Issue-number padding is limited to 0–10 digits.** The settings API accepted any
+  non-negative value (and answered a negative one with 500), and values from
+  `user-settings.json` or the environment were not checked at all: 1,000,000,000 or more made
+  renames fail or was silently ignored, and a negative value named files "S - Chapter D-1".
+  The API now rejects values outside 0–10 with 400, filenames clamp configured values to that
+  range, and startup logs a warning naming the value used instead.
 - **Renaming keeps decimal chapter numbers whatever the server's language.** The issue number
   was read using the server's number format, so with a language that writes decimals with a
   comma (German, Spanish, Italian, Dutch, Brazilian Portuguese, Turkish, … set through `LANG` or

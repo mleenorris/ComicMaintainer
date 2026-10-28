@@ -428,6 +428,8 @@ Set issue number padding.
 }
 ```
 
+`padding` must be between 0 and 10; other values are rejected with `400` and `{ "error": "..." }`.
+
 ### GET /api/watcher/enabled
 
 Get watcher enabled state.

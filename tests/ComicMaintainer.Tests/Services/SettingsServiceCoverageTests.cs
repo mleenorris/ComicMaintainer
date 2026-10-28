@@ -57,6 +57,27 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     }
 
     [Theory]
+    [InlineData(11)]
+    [InlineData(1_000_000_000)]
+    [InlineData(int.MaxValue)]
+    public async Task UpdateIssueNumberPaddingAsync_RejectsPaddingAbove10(int padding)
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateIssueNumberPaddingAsync(padding));
+
+        Assert.Equal("padding", ex.ParamName);
+        Assert.StartsWith("Padding must be between 0 and 10", ex.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(_settingsPath));
+    }
+
+    [Fact]
+    public async Task UpdateIssueNumberPaddingAsync_Accepts10()
+    {
+        await _service.UpdateIssueNumberPaddingAsync(10);
+
+        Assert.Equal(10, ReadSection()["IssueNumberPadding"].GetInt32());
+    }
+
+    [Theory]
     [InlineData("WatcherEnableNormalize")]
     [InlineData("WriteCoverToFirstArchive")]
     [InlineData("WriteCoverToSeriesFolder")]

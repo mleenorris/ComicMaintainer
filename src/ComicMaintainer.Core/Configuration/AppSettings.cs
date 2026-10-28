@@ -8,11 +8,21 @@ public class AppSettings
     /// <summary>The filename format used until one is configured.</summary>
     public const string DefaultFilenameFormat = "{series} - Chapter {issue}";
 
+    /// <summary>
+    /// The largest supported <see cref="IssueNumberPadding"/>: the number of digits in <see cref="int.MaxValue"/>.
+    /// </summary>
+    public const int MaxIssueNumberPadding = 10;
+
     public string WatchedDirectory { get; set; } = "/watched_dir";
     public string DuplicateDirectory { get; set; } = "/duplicates";
     public string ConfigDirectory { get; set; } = "/Config";
     public string TempFileDirectory { get; set; } = "/Config/temp";
     public string FilenameFormat { get; set; } = DefaultFilenameFormat;
+
+    /// <summary>
+    /// Number of digits the <c>{issue}</c> placeholder is zero-padded to, from 0 to
+    /// <see cref="MaxIssueNumberPadding"/>. Filenames clamp configured values outside that range.
+    /// </summary>
     public int IssueNumberPadding { get; set; } = 4;
     public int MaxWorkers { get; set; } = 4;
     public int LogMaxBytes { get; set; } = 10485760; // 10MB

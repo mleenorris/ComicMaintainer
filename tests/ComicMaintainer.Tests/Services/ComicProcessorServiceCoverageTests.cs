@@ -29,6 +29,8 @@ namespace ComicMaintainer.Tests.Services;
 public class ComicProcessorServiceCoverageTests : IDisposable
 {
     private const string RenamingTemplate = "Renaming file from {OldPath} to {NewPath}";
+    private const string ChapterAppendedTemplate =
+        "Chapter number '{Chapter}' would be lost from filename during rename of {OriginalPath}; appending it to preserve the chapter.";
     private const int LargeEntrySize = 11 * 1024 * 1024;
     private static readonly DateTimeOffset FixtureTimestamp = new(2021, 3, 4, 5, 6, 8, TimeSpan.Zero);
 
@@ -1615,9 +1617,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     public async Task RenameFilesAsync_FilenameGenerationFails_CountsAsFailedAndIsNotMarkedRenamed()
     {
         _settings.FilenameFormat = "{series}";
-        _settings.IssueNumberPadding = int.MaxValue;
         var service = CreateService();
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        _logger.On(ChapterAppendedTemplate, _ => throw new InvalidOperationException("filename generation failed"));
 
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
 
@@ -1637,9 +1639,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     {
         _settings.WatcherEnableNormalize = false;
         _settings.FilenameFormat = "{series}";
-        _settings.IssueNumberPadding = int.MaxValue;
         var service = CreateService();
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        _logger.On(ChapterAppendedTemplate, _ => throw new InvalidOperationException("filename generation failed"));
 
         await service.ProcessFileAsync(path);
 
@@ -1675,8 +1677,33 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         Assert.Equal(1, job.ProcessedFiles);
         Assert.True(File.Exists(Path.Combine(_library, series, expectedName)), $"expected {expectedName}");
-        Assert.True(_logger.Has(LogLevel.Warning,
-            "Chapter number '{Chapter}' would be lost from filename during rename of {OriginalPath}; appending it to preserve the chapter."));
+        Assert.True(_logger.Has(LogLevel.Warning, ChapterAppendedTemplate));
+    }
+
+    // Issue-number padding from user-settings.json or the environment is not range-checked. Padding of
+    // 1,000,000,000 and above used to make the safety net's "D{padding}" throw, so the rename failed, and
+    // the template's "{issue}" silently ignored it; -1 named the file "S - Chapter D-1 - Chapter 5.cbz".
+    [Theory]
+    [InlineData("{series} - {title}", int.MaxValue, "S - T - Chapter 0000000005.cbz")]
+    [InlineData("{series} - {title}", 1_000_000_000, "S - T - Chapter 0000000005.cbz")]
+    [InlineData("{series} - {title}", -1, "S - T - Chapter 5.cbz")]
+    [InlineData("{series} - Chapter {issue}", 1_000_000_000, "S - Chapter 0000000005.cbz")]
+    [InlineData("{series} - Chapter {issue}", -1, "S - Chapter 5.cbz")]
+    public async Task RenameFilesAsync_OutOfRangeIssueNumberPadding_IsClampedTo0Through10(
+        string template, int padding, string expectedName)
+    {
+        _settings.FilenameFormat = template;
+        _settings.IssueNumberPadding = padding;
+        var service = CreateService();
+        var path = WriteCbz("S/S - Chapter 5.cbz", Xml("S", "5", "T"));
+
+        var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
+
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.False(_logger.Has(LogLevel.Error, "Error generating filename"));
+        var renamed = Assert.Single(Directory.GetFiles(Path.Combine(_library, "S")));
+        Assert.Equal(expectedName, Path.GetFileName(renamed));
     }
 
     // Regression test for issue #843: under de-DE (decimal ",", thousands "."), "5.5" used to be

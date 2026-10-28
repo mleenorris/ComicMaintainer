@@ -247,38 +247,96 @@ public partial class ComicProcessorService
             _settings.DuplicateDirectory);
 
     /// <summary>
-    /// True when a directory entry exists at <paramref name="path"/> that deleting a file
-    /// removes: a file, or a link to anything, including a link whose target is missing.
-    /// </summary>
-    private static bool FileEntryExists(string path) =>
-        Path.Exists(path) && (!Directory.Exists(path) || new FileInfo(path).LinkTarget is not null);
-
-    /// <summary>
     /// The path of <paramref name="entryPath"/> as seen through the opened directory, so it
     /// keeps naming the entry in the checked directory even if that directory is moved or
-    /// replaced by a link afterwards.
+    /// replaced by a link afterwards. On Windows the opened directory cannot be moved, so the
+    /// path itself is used.
     /// </summary>
     private static string GetEntryPathInDirectory(SafeFileHandle? directoryHandle, string entryPath) =>
-        directoryHandle is null || directoryHandle.IsInvalid
+        !OperatingSystem.IsLinux() || directoryHandle is null || directoryHandle.IsInvalid
             ? entryPath
             : Path.Join($"/proc/self/fd/{directoryHandle.DangerousGetHandle().ToInt32()}", Path.GetFileName(entryPath));
 
     /// <summary>
-    /// Deletes <paramref name="entryPath"/> relative to the directory opened by
-    /// <see cref="OpenRenameDirectory"/>, after checking that directory is still inside the
+    /// Opens the directory holding <paramref name="entryPath"/> so <see cref="DeleteFileInDirectory"/>
+    /// deletes from the directory that was checked. On Linux the entry is deleted relative to the
+    /// opened directory; on Windows the handle denies delete sharing, which keeps the directory
+    /// and its ancestors from being renamed or replaced while it is open. Other platforms cannot
+    /// pin the directory, so deleting fails there.
+    /// </summary>
+    private static SafeFileHandle OpenDeleteDirectory(string entryPath)
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            return OpenRenameDirectory(entryPath)!;
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Deleting files is only supported on Linux and Windows.");
+        }
+
+        var directoryPath = Path.GetDirectoryName(entryPath)
+            ?? throw new IOException("Cannot determine the directory of the file.");
+        const uint FILE_READ_ATTRIBUTES = 0x80;
+        const uint FILE_SHARE_READ_WRITE = 0x1 | 0x2;
+        const uint OPEN_EXISTING = 3;
+        const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+        var handle = CreateWindowsFile(
+            directoryPath, FILE_READ_ATTRIBUTES, FILE_SHARE_READ_WRITE, IntPtr.Zero, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            handle.Dispose();
+            throw new IOException($"Could not open the directory: {new Win32Exception(error).Message}");
+        }
+
+        try
+        {
+            // The handle follows links, so a directory that was replaced by a link (or a
+            // junction) before it was opened resolves somewhere else and is refused.
+            if (!string.Equals(ReadWindowsDirectoryPath(handle), directoryPath.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("The directory changed while it was being opened.");
+            }
+
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Deletes <paramref name="entryPath"/> from the directory opened by
+    /// <see cref="OpenDeleteDirectory"/>, after checking that directory is still inside the
     /// allowed directories. Like <see cref="File.Delete"/>, a missing entry is not an error.
     /// </summary>
     private void DeleteFileInDirectory(SafeFileHandle? directoryHandle, string entryPath)
     {
-        if (!OperatingSystem.IsLinux())
+        if (directoryHandle is null || directoryHandle.IsInvalid)
         {
+            throw new IOException("The directory handle is unavailable.");
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            var openedDirectory = ReadWindowsDirectoryPath(directoryHandle);
+            if (!LibraryPathValidator.IsWithin(openedDirectory, _settings.WatchedDirectory) &&
+                !LibraryPathValidator.IsWithin(openedDirectory, _settings.DuplicateDirectory))
+            {
+                throw new IOException("The directory is outside the allowed directories.");
+            }
+
             File.Delete(entryPath);
             return;
         }
 
-        if (directoryHandle is null || directoryHandle.IsInvalid)
+        if (!OperatingSystem.IsLinux())
         {
-            throw new IOException("The directory handle is unavailable.");
+            throw new PlatformNotSupportedException("Deleting files is only supported on Linux and Windows.");
         }
 
         var directoryDescriptor = directoryHandle.DangerousGetHandle().ToInt32();
@@ -298,6 +356,28 @@ public partial class ComicProcessorService
                 throw new IOException($"Could not delete the file: {new Win32Exception(error).Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// The physical path of the directory opened as <paramref name="handle"/> on Windows,
+    /// without the "\\?\" prefix.
+    /// </summary>
+    private static string ReadWindowsDirectoryPath(SafeFileHandle handle)
+    {
+        var buffer = new char[32768];
+        var length = GetWindowsFinalPathName(handle, buffer, (uint)buffer.Length, 0);
+        if (length == 0 || length >= buffer.Length)
+        {
+            throw new IOException($"Could not resolve the opened directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
+        }
+
+        var path = new string(buffer, 0, (int)length);
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.Ordinal))
+        {
+            return @"\\" + path[8..];
+        }
+
+        return path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path[4..] : path;
     }
 
     private static SafeFileHandle? OpenRenameDirectory(string sourcePath)
@@ -407,7 +487,7 @@ public partial class ComicProcessorService
             var relativePath = Path.GetRelativePath(resolvedRoot, resolvedPath);
             var logicalPath = Path.GetFullPath(Path.Combine(logicalRoot, relativePath));
             if (TryResolveAllowedPath(logicalPath, out var verifiedPath) &&
-                string.Equals(verifiedPath, resolvedPath, StringComparison.Ordinal))
+                string.Equals(verifiedPath, resolvedPath, LibraryPathValidator.PathComparison))
             {
                 return logicalPath;
             }
@@ -415,6 +495,23 @@ public partial class ComicProcessorService
 
         throw new IOException("The renamed file does not resolve within a configured library directory.");
     }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateWindowsFile(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        IntPtr securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile);
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetWindowsFinalPathName(
+        SafeFileHandle file,
+        [Out] char[] filePath,
+        uint filePathLength,
+        uint flags);
 
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]
     private static extern int OpenLinuxDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);

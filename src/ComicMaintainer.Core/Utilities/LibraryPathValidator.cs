@@ -53,7 +53,9 @@ public static class LibraryPathValidator
     /// the directory holding it must be inside one of <paramref name="allowedDirectories"/>.
     /// <paramref name="entryPath"/> is the entry in that resolved directory, so acting on it
     /// affects a link rather than the file the link points to. A path ending in a directory
-    /// separator, "." or ".." is rejected, since the OS would follow a link it ends in.
+    /// separator or "." is rejected, since the OS would follow a link it ends in, and so is
+    /// any ".." segment: the OS applies it after following links, so normalizing it away
+    /// first could name a different entry.
     /// </summary>
     public static bool TryResolveEntryWithin(string? path, out string entryPath, params string?[] allowedDirectories)
     {
@@ -61,7 +63,8 @@ public static class LibraryPathValidator
 
         if (string.IsNullOrWhiteSpace(path) ||
             Path.EndsInDirectorySeparator(path) ||
-            Path.GetFileName(path) is "." or "..")
+            Path.GetFileName(path) == "." ||
+            path.Split(Separators).Contains(".."))
             return false;
 
         if (!TryResolveWithin(path, out _, allowedDirectories))
@@ -97,13 +100,15 @@ public static class LibraryPathValidator
         if (root.Length == 0)
             return false;
 
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-
-        return string.Equals(fullPath.TrimEnd(Path.DirectorySeparatorChar), root, comparison)
-            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, comparison);
+        return string.Equals(fullPath.TrimEnd(Path.DirectorySeparatorChar), root, PathComparison)
+            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison);
     }
+
+    /// <summary>
+    /// How library paths are compared: ignoring case on Windows, ordinally elsewhere.
+    /// </summary>
+    public static StringComparison PathComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     /// <summary>
     /// Returns the physical path a (possibly linked) path ultimately refers to,

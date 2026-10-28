@@ -541,6 +541,7 @@ public class JobsControllerCoverageTests
     [InlineData("/c/a.cbz/")]
     [InlineData("/c/a.cbz/.")]
     [InlineData("/c/series/..")]
+    [InlineData("/c/missing/../a.cbz")]
     public async Task DeleteSelected_PathOutsideTheLibrary_RejectsTheWholeBatch(string path)
     {
         var request = new JobsController.ProcessSelectedRequest { Files = new() { "/c/a.cbz", path } };

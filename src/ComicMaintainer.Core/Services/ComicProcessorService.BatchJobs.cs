@@ -127,15 +127,29 @@ public partial class ComicProcessorService
                     }
 
                     // The library path of the entry that is deleted, which differs from the
-                    // requested path when that goes through a link or contains "..".
+                    // requested path when that goes through a linked directory.
                     var entryDirectory = Path.GetDirectoryName(entryPath)!;
                     var canonicalPath = Path.Join(GetAllowedLogicalPath(entryDirectory), Path.GetFileName(entryPath));
                     var storePaths = new[] { filePath, canonicalPath }.Distinct(StringComparer.Ordinal).ToArray();
 
                     // Open the checked directory now, so the entry is deleted from it even if
                     // the directory is replaced (e.g. by a link out of the library) meanwhile.
-                    using var directoryHandle = Directory.Exists(entryDirectory) ? OpenRenameDirectory(entryPath) : null;
-                    if (FileEntryExists(GetEntryPathInDirectory(directoryHandle, entryPath)))
+                    using var directoryHandle = Directory.Exists(entryDirectory) ? OpenDeleteDirectory(entryPath) : null;
+                    var entryInDirectory = GetEntryPathInDirectory(directoryHandle, entryPath);
+
+                    // Only files are deleted: a directory, or a link to one, would take every
+                    // comic beneath it with it. Directory.Exists follows links, while Path.Exists
+                    // is also true for a link whose target is missing.
+                    if (Directory.Exists(entryInDirectory))
+                    {
+                        _logger.LogWarning(
+                            "DeleteFilesAsync: not deleting a directory: {FilePath}",
+                            LoggingHelper.SanitizePathForLog(filePath));
+                        await LogHistoryAsync(canonicalPath, "Delete", false, "Not a file", token);
+                        return false;
+                    }
+
+                    if (Path.Exists(entryInDirectory))
                     {
                         // Remove from file store first (unlikely to fail), then
                         // delete the physical file. This order prevents orphaned

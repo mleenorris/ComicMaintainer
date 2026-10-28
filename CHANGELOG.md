@@ -205,9 +205,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behind the multi-select **Delete** and **Delete All Duplicates**, deleted any file the
   service could write, such as the database in the config directory, for any signed-in user
   who is not ReadOnly. It now answers 400 when any path is outside the watched and duplicate
-  directories, and the delete job skips such paths, including links that lead out of them and
-  paths ending in a separator, and reports them as failed. The file is deleted from the
-  directory that was checked, even if that directory is replaced while the job runs.
+  directories, and the delete job skips such paths, including links that lead out of them,
+  paths ending in a separator and paths with a `..` segment, and reports them as failed. It
+  also refuses directories and links to them. The file is deleted from the directory that was
+  checked, even if that directory is replaced while the job runs; platforms other than Linux
+  and Windows, where that directory cannot be pinned, no longer delete files.
 - **Reading series metadata is confined to the library**, like reading a comic's other metadata
   already was.
 - **Processing a file renames the file that was checked.** The rename used the path as given,

@@ -771,6 +771,47 @@ test("a Combine Folders start waiting for the server isn't released by the auto-
     assert.deepEqual(page.errors, []);
 });
 
+test("closing an ended job's dialog doesn't release a pending Combine Folders start", async (t) => {
+    const job = h.trackedJob();
+    const combine = deferred();
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            ...job.routes,
+            ...nextJobRoutes(),
+            'POST /api/files/combine-folders': () => combine.promise,
+            'GET /api/files/combinable-folders': { groups: [] }
+        }
+    });
+    await h.startTrackedJob(page);
+    h.jobUpdate(page, 'cancelled', h.progress(1, 4));
+    await h.tick(t, page, 500);
+
+    page.run(`
+        combineFolderGroups = [{ groupKey: 'batman', folders: [{ directory: 'Batman' }, { directory: 'Batman (2016)' }] }];
+        combineFolderIndex = 0;
+        combineFolderSelectedDestination = 'Batman (2016)';
+    `);
+    page.run('confirmCombineFolders()');
+    await page.settle();
+    assert.equal(page.run('currentJobId'), null);
+    assert.equal(h.takeConfirms(page).length, 1);
+
+    page.click('#progressCloseBtn');
+    h.assertProgress(page, { open: false, indicatorVisible: false });
+
+    h.chooseMenuItem(page, 'renameDropdown', 'Rename Unmarked');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), []);
+    assert.deepEqual(h.takeMessages(page), [REFUSED]);
+    assert.equal(h.requests(page, 'POST', '/api/jobs/rename-unmarked').length, 0);
+
+    combine.resolve({ jobId: h.OTHER_JOB_ID, totalItems: 3, skipped: 0 });
+    await page.settle();
+    h.assertProgress(page, { open: true, title: 'Combining 3 file(s)...', cancelVisible: true, closeVisible: false });
+    assert.equal(page.run('currentJobId'), h.OTHER_JOB_ID);
+    assert.deepEqual(page.errors, []);
+});
+
 // Every action that starts a job followed in the progress modal, as the page calls it.
 const JOB_STARTERS = [
     'processAllFiles()',

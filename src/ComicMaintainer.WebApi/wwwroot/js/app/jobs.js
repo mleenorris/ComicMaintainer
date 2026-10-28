@@ -39,6 +39,9 @@
         let jobStarting = false;
         // Bumped by every start, so a stale endJobStart() cannot release a newer one.
         let jobStartGeneration = 0;
+        // A modal can only release the pending start that opened it. An older
+        // finished-job dialog may remain visible while another start is pending.
+        let progressModalStartGeneration = null;
         window.addEventListener('beforeunload', function(event) {
             // Clean up SSE connection
             cleanupEventSource();
@@ -74,11 +77,15 @@
             clearProgressModalTimers();
             currentJobId = null;
             jobStarting = true;
+            progressModalStartGeneration = null;
             return ++jobStartGeneration;
         }
 
         function endJobStart(token) {
-            if (token === jobStartGeneration) jobStarting = false;
+            if (token === jobStartGeneration) {
+                jobStarting = false;
+                if (progressModalStartGeneration === token) progressModalStartGeneration = null;
+            }
         }
         
         async function processAllFiles() {
@@ -468,6 +475,7 @@
             currentJobTitle = title;  // Track title for progress updates
             jobStarting = false;
             jobStartGeneration++;
+            progressModalStartGeneration = null;
             // The modal now follows this job: a previous job's pending finish
             // must neither retitle nor close it.
             clearProgressModalTimers();
@@ -1493,7 +1501,7 @@
             // is current until trackJobStatus() names it, so the pending finish
             // of a job that ended can neither retitle nor close it, and no other
             // job can be started meanwhile (canStartJob).
-            beginJobStart();
+            progressModalStartGeneration = beginJobStart();
             const modal = document.getElementById('progressModal');
             const indicator = document.getElementById('progressIndicator');
             document.getElementById('progressTitle').textContent = title;
@@ -1673,8 +1681,11 @@
         function closeProgressModal() {
             clearTimeout(progressModalCloseTimer);
             progressModalCloseTimer = null;
-            jobStarting = false;
-            jobStartGeneration++;
+            if (progressModalStartGeneration === jobStartGeneration) {
+                jobStarting = false;
+                jobStartGeneration++;
+                progressModalStartGeneration = null;
+            }
             document.getElementById('progressModal').classList.remove('active');
             setProgressIndicatorVisible(false);
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button

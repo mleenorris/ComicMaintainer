@@ -50,6 +50,51 @@ public class EventBroadcasterServiceCoverageTests
     }
 
     [Fact]
+    public async Task Broadcast_StalledSseClient_IsDisconnectedAfterTheSendTimeout()
+    {
+        var service = new EventBroadcasterService(
+            Mock.Of<ILogger<EventBroadcasterService>>(), _hubContext.Object, TimeSpan.FromMilliseconds(100));
+        var (healthyStream, healthyWriter) = CreateClient();
+        using var stalledStream = new StalledStream();
+        using var stalledWriter = new StreamWriter(stalledStream);
+        using (healthyWriter)
+        {
+            service.RegisterSseClient("stalled", stalledWriter);
+            service.RegisterSseClient("healthy", healthyWriter);
+
+            // Completes although one client never accepts the event.
+            await service.BroadcastWatcherStatusAsync(running: false, enabled: true).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(1, stalledStream.Writes);
+
+            // The stalled client was dropped, so later broadcasts no longer wait for it.
+            await service.BroadcastWatcherStatusAsync(running: true, enabled: true).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(1, stalledStream.Writes);
+        }
+
+        Assert.Equal(
+            "data: {\"type\":\"watcher_status\",\"data\":{\"running\":false,\"enabled\":true}}\n\n"
+            + "data: {\"type\":\"watcher_status\",\"data\":{\"running\":true,\"enabled\":true}}\n\n",
+            ReadAll(healthyStream));
+    }
+
+    /// <summary>A client stream whose writes never complete until they are cancelled.</summary>
+    private sealed class StalledStream : MemoryStream
+    {
+        private int _writes;
+
+        public int Writes => Volatile.Read(ref _writes);
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _writes);
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+        }
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+    }
+
+    [Fact]
     public async Task BroadcastFileListUpdateAsync_WithoutClients_DoesNotThrow()
     {
         await _service.BroadcastFileListUpdateAsync();

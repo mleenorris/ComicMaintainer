@@ -20,12 +20,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// <summary>Upper bound on the wait between attempts to recreate a failed watcher.</summary>
     private static readonly TimeSpan RestartMaxDelay = TimeSpan.FromMinutes(1);
 
-    /// <summary>
-    /// How long a watcher status broadcast may hold up the ones queued after it. Clients that
-    /// stall a delivery for longer receive the later statuses without it having finished.
-    /// </summary>
-    private static readonly TimeSpan StatusDeliveryTimeout = TimeSpan.FromSeconds(30);
-
     private readonly IOptionsMonitor<AppSettings> _settingsMonitor;
     private readonly ILogger<FileWatcherService> _logger;
     private readonly IFileStoreService _fileStore;
@@ -480,15 +474,11 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             return;
         }
 
+        // The next status is only sent once this one has finished, so a client can never receive
+        // them out of order; the broadcaster bounds how long a stalled client can hold it up.
         try
         {
-            await _eventBroadcaster.BroadcastWatcherStatusAsync(running, _enabled).WaitAsync(StatusDeliveryTimeout);
-        }
-        catch (TimeoutException)
-        {
-            _logger.LogWarning(
-                "Watcher status broadcast did not complete within {Timeout}; sending later status changes without waiting for it",
-                StatusDeliveryTimeout);
+            await _eventBroadcaster.BroadcastWatcherStatusAsync(running, _enabled);
         }
         catch (Exception ex)
         {

@@ -41,21 +41,29 @@ namespace ComicMaintainer.WebApi.Services;
 ///
 /// <para>
 /// All broadcasts are best-effort and never throw to the caller. A failing
-/// SSE writer is silently disconnected and removed from the registry.
+/// SSE writer, or one that does not accept an event within
+/// <see cref="DefaultSseSendTimeout"/>, is silently disconnected and removed from the
+/// registry, so a stalled client cannot hold up a broadcast indefinitely.
 /// </para>
 /// </summary>
 public class EventBroadcasterService : IEventBroadcaster
 {
+    /// <summary>Longest an SSE client may take to accept an event before it is disconnected.</summary>
+    public static readonly TimeSpan DefaultSseSendTimeout = TimeSpan.FromSeconds(10);
+
     private readonly ILogger<EventBroadcasterService> _logger;
     private readonly IHubContext<ProgressHub> _hubContext;
     private readonly ConcurrentDictionary<string, StreamWriter> _sseClients = new();
+    private readonly TimeSpan _sseSendTimeout;
 
     public EventBroadcasterService(
         ILogger<EventBroadcasterService> logger,
-        IHubContext<ProgressHub> hubContext)
+        IHubContext<ProgressHub> hubContext,
+        TimeSpan? sseSendTimeout = null)
     {
         _logger = logger;
         _hubContext = hubContext;
+        _sseSendTimeout = sseSendTimeout ?? DefaultSseSendTimeout;
     }
 
     public void RegisterSseClient(string clientId, StreamWriter writer)
@@ -157,10 +165,11 @@ public class EventBroadcasterService : IEventBroadcaster
         
         foreach (var (clientId, writer) in _sseClients)
         {
+            using var timeout = new CancellationTokenSource(_sseSendTimeout);
             try
             {
-                await writer.WriteAsync(sseMessage);
-                await writer.FlushAsync();
+                await writer.WriteAsync(sseMessage.AsMemory(), timeout.Token);
+                await writer.FlushAsync(timeout.Token);
             }
             catch (Exception ex)
             {

@@ -304,6 +304,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separator: a Number of "1,000" or "1,5" is kept as written, like other non-numeric values
   such as "Extra", instead of becoming chapter 1000 or 15.
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
+- **A saved job whose status is not exactly a status name, such as a number, is restored as
+  Interrupted**, like any other unrecognised status. `1` used to come back after a restart as a
+  running job that was reported as the active job but could be neither cancelled nor deleted, and
+  `42` as an undefined status that could not be deleted either.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.
 - **Cancelling a job just as it finishes answers "already completed" instead of 500.** The

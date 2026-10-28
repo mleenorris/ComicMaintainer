@@ -159,6 +159,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **The Library Scan retries files changed on disk whose re-normalize failed.** With
+  `reprocessModified` on, the scan recorded a changed file's new size and modified time before
+  re-normalizing it, and again afterwards whatever the outcome. So a re-normalize that could not
+  be queued, failed, or was cut short by a cancelled job still counted as done, and the file
+  silently kept stale metadata. The stored values are now updated only for files the job
+  re-normalized successfully, and every other changed file is picked up again by the next scan.
+  When a job the scan started fails or is cancelled, the scan's last-run summary now says so, for
+  example `[modified: job failed, 1/2 ok, 0 failed]`.
 - **Processing renames files on filesystems without an atomic no-overwrite rename.** On NFS,
   ZFS before 2.2 and FUSE filesystems such as Unraid user shares, every rename failed with
   `Atomic no-overwrite rename is not supported by this filesystem.`, leaving files under their

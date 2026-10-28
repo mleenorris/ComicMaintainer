@@ -1087,7 +1087,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ProcessFileAsync_Renameat2Unsupported_FailsWithoutMovingSource()
+    public async Task ProcessFileAsync_Renameat2Unsupported_MovesFileThroughHardLink()
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -1096,16 +1096,58 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         _settings.WatcherEnableNormalize = false;
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
-        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
+        var original = await File.ReadAllBytesAsync(path);
         var service = CreateUnsupportedRenameAt2Service();
 
         await service.ProcessFileAsync(path);
 
-        Assert.True(File.Exists(path));
-        Assert.False(File.Exists(renamed));
-        _fileStore.Verify(f => f.MarkFileRenamedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success &&
-            e.ErrorMessage == "Atomic no-overwrite rename is not supported by this filesystem.");
+        Assert.Equal(new[] { renamed }, Directory.GetFiles(Path.GetDirectoryName(path)!));
+        Assert.Equal(original, await File.ReadAllBytesAsync(renamed));
+        Assert.False(_logger.Has(LogLevel.Debug, "Hard links are not available for {FileName} ({Reason}); copying it instead"));
+        Assert.False(_logger.Has(LogLevel.Error, "Failed to rename file: {FilePath}"));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Once);
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(renamed, true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(13)]
+    [InlineData(18)]
+    [InlineData(31)]
+    [InlineData(38)]
+    [InlineData(95)]
+    public async Task ProcessFileAsync_Renameat2AndHardLinksUnsupported_MovesFileThroughCopy(int linkError)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
+        const UnixFileMode mode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+            UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead | UnixFileMode.OtherWrite;
+        File.SetUnixFileMode(path, mode);
+        File.SetLastWriteTimeUtc(path, FixtureTimestamp.UtcDateTime);
+        var original = await File.ReadAllBytesAsync(path);
+        var service = CreateUnsupportedRenameAt2Service(linkError: linkError);
+
+        await service.ProcessFileAsync(path);
+
+        Assert.Equal(new[] { renamed }, Directory.GetFiles(Path.GetDirectoryName(path)!));
+        Assert.Equal(original, await File.ReadAllBytesAsync(renamed));
+        Assert.Equal(mode, File.GetUnixFileMode(renamed));
+        Assert.Equal(FixtureTimestamp.UtcDateTime, File.GetLastWriteTimeUtc(renamed));
+        Assert.True(_logger.Has(LogLevel.Debug, "Hard links are not available for {FileName} ({Reason}); copying it instead"));
+        Assert.False(_logger.Has(LogLevel.Error, "Failed to rename file: {FilePath}"));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Once);
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(renamed, true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -1118,22 +1160,146 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         _settings.WatcherEnableNormalize = false;
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
-        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
-        var service = CreateUnsupportedRenameAt2Service(() =>
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
+        var original = await File.ReadAllBytesAsync(path);
+        var service = CreateUnsupportedRenameAt2Service();
+        service.BeforeRename = name =>
+        {
+            if (name == "orig.cbz")
+            {
+                File.Delete(path);
+                File.WriteAllText(path, "replacement archive");
+            }
+        };
+
+        await service.ProcessFileAsync(path);
+
+        Assert.Equal("replacement archive", await File.ReadAllTextAsync(path));
+        Assert.Equal(original, await File.ReadAllBytesAsync(renamed));
+        Assert.Equal(2, Directory.GetFiles(Path.GetDirectoryName(path)!).Length);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_HardLinksUnsupportedAndSourceReplacedBeforeCopy_LeavesReplacementInPlace()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
+        var original = await File.ReadAllBytesAsync(path);
+        var service = CreateUnsupportedRenameAt2Service(linkError: 95);
+        service.BeforeLink = () =>
         {
             File.Delete(path);
             File.WriteAllText(path, "replacement archive");
+        };
+
+        await service.ProcessFileAsync(path);
+
+        Assert.Equal("replacement archive", await File.ReadAllTextAsync(path));
+        Assert.Equal(original, await File.ReadAllBytesAsync(renamed));
+        Assert.Equal(2, Directory.GetFiles(Path.GetDirectoryName(path)!).Length);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_HardLinksUnsupportedAndSourceReplacedAfterCopy_KeepsReplacement()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
+        var original = await File.ReadAllBytesAsync(path);
+        var service = CreateUnsupportedRenameAt2Service(linkError: 95);
+        service.BeforeRename = name =>
+        {
+            if (name == "orig.cbz")
+            {
+                File.Delete(path);
+                File.WriteAllText(path, "replacement archive");
+            }
+        };
+
+        await service.ProcessFileAsync(path);
+
+        Assert.Equal(original, await File.ReadAllBytesAsync(renamed));
+        var kept = Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!, ".tmp_*"));
+        Assert.Equal("replacement archive", await File.ReadAllTextAsync(kept));
+        Assert.True(_logger.Has(
+            LogLevel.Warning,
+            "A file replaced {FileName} while it was being renamed and could not be put back without risking another file ({Reason}); it was kept as {TemporaryPath}"));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(95)]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndSourceDeleted_DoesNotKeepMovedFile(int linkError)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var service = CreateUnsupportedRenameAt2Service(linkError: linkError);
+        service.BeforeRename = name =>
+        {
+            if (name == "orig.cbz")
+            {
+                File.Delete(path);
+            }
+        };
+
+        await service.ProcessFileAsync(path);
+
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(path)!));
+        Assert.True(_logger.Has(LogLevel.Error, "Failed to rename file: {FilePath}"));
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success &&
+            e.ErrorMessage == "The file was moved or deleted while it was being renamed.");
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndSourceSwappedForSymlink_DoesNotFollowIt()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var outside = Path.Join(_root, "outside.cbz");
+        await File.WriteAllTextAsync(outside, "outside archive");
+        var service = CreateUnsupportedRenameAt2Service(() =>
+        {
+            File.Delete(path);
+            File.CreateSymbolicLink(path, outside);
         });
 
         await service.ProcessFileAsync(path);
 
-        Assert.True(File.Exists(path));
-        Assert.Equal("replacement archive", await File.ReadAllTextAsync(path));
-        Assert.False(File.Exists(renamed));
+        Assert.Equal(new[] { path }, Directory.GetFiles(Path.GetDirectoryName(path)!));
+        Assert.Equal(outside, new FileInfo(path).LinkTarget);
+        Assert.Equal("outside archive", await File.ReadAllTextAsync(outside));
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success &&
+            e.ErrorMessage == "Only regular files can be renamed.");
     }
 
-    [Fact]
-    public async Task ProcessFileAsync_Renameat2UnsupportedAndTargetReplaced_DoesNotOverwriteTarget()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(95)]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndTargetReplaced_DoesNotOverwriteTarget(int linkError)
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -1144,7 +1310,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
         var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
         var service = CreateUnsupportedRenameAt2Service(() =>
-            File.WriteAllText(renamed, "replacement destination"));
+            File.WriteAllText(renamed, "replacement destination"), linkError);
 
         await service.ProcessFileAsync(path);
 
@@ -1155,8 +1321,10 @@ public class ComicProcessorServiceCoverageTests : IDisposable
             Times.Never);
     }
 
-    [Fact]
-    public async Task ProcessFileAsync_Renameat2UnsupportedAndTargetAppears_DoesNotOverwriteTarget()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(95)]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndTargetAppears_DoesNotOverwriteTarget(int linkError)
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -1166,7 +1334,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         _settings.WatcherEnableNormalize = false;
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
         var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
-        var service = CreateUnsupportedRenameAt2Service();
+        var service = CreateUnsupportedRenameAt2Service(linkError: linkError);
         _logger.On("ProcessFileAsync: Rename path validated: {FilePath}", _ =>
             File.WriteAllText(renamed, "pre-existing target"));
 
@@ -1892,7 +2060,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         return service;
     }
 
-    private ComicProcessorService CreateUnsupportedRenameAt2Service(Action? beforeFallbackRename = null)
+    private UnsupportedRenameAt2ComicProcessorService CreateUnsupportedRenameAt2Service(
+        Action? beforeFallbackRename = null,
+        int linkError = 0)
     {
         var service = new UnsupportedRenameAt2ComicProcessorService(
             _settings,
@@ -1901,7 +2071,8 @@ public class ComicProcessorServiceCoverageTests : IDisposable
             _history.Object,
             _broadcaster.Object)
         {
-            BeforeFallbackRename = beforeFallbackRename
+            BeforeFallbackRename = beforeFallbackRename,
+            LinkError = linkError
         };
         _services.Add(service);
         return service;
@@ -2150,6 +2321,13 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         public Action? BeforeFallbackRename { get; set; }
 
+        /// <summary>When not 0, hard links fail with this error, as on a filesystem without them.</summary>
+        public int LinkError { get; set; }
+
+        public Action? BeforeLink { get; set; }
+
+        public Action<string>? BeforeRename { get; set; }
+
         protected override int RenameLinuxNoReplace(
             int sourceDirectory,
             string sourceName,
@@ -2164,6 +2342,33 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         protected override void OnLinuxRenameFallback()
         {
             BeforeFallbackRename?.Invoke();
+        }
+
+        protected override int LinkLinux(
+            int sourceDirectory,
+            string sourceName,
+            int targetDirectory,
+            string targetName,
+            int flags)
+        {
+            BeforeLink?.Invoke();
+            if (LinkError != 0)
+            {
+                System.Runtime.InteropServices.Marshal.SetLastPInvokeError(LinkError);
+                return -1;
+            }
+
+            return base.LinkLinux(sourceDirectory, sourceName, targetDirectory, targetName, flags);
+        }
+
+        protected override int RenameLinux(
+            int sourceDirectory,
+            string sourceName,
+            int targetDirectory,
+            string targetName)
+        {
+            BeforeRename?.Invoke(sourceName);
+            return base.RenameLinux(sourceDirectory, sourceName, targetDirectory, targetName);
         }
     }
 

@@ -143,6 +143,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **Processing renames files on filesystems without an atomic no-overwrite rename.** On NFS,
+  ZFS before 2.2 and FUSE filesystems such as Unraid user shares, every rename failed with
+  `Atomic no-overwrite rename is not supported by this filesystem.`, leaving files under their
+  old names and filing an error report each time. The file is now moved there through a hard
+  link or, where hard links are unavailable, an exclusively created copy that keeps its
+  permissions and modification time. As before, it never replaces an existing file: a name that
+  is taken is still a duplicate, and a file that replaces the original during the move is kept.
 - **A conversion error for an unreadable page says which page and comic failed.** A page stored
   with an unsupported compression method, or whose data was corrupt, failed email delivery
   or a condensed-book build with the archive reader's bare message, such as

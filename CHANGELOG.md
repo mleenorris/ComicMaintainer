@@ -143,6 +143,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **A conversion error for an unreadable page says which page and comic failed.** A page stored
+  with an unsupported compression method, or whose data was corrupt, failed email delivery
+  or a condensed-book build with the archive reader's bare message, such as
+  `Unsupported compression method: 255`, leaving no way to tell which file to fix, especially
+  in a book condensed from many issues. The error now names both:
+  `Page '002.jpg' in Batman 012.cbz could not be read: Unsupported compression method: 255`.
+  Pages that cannot be decoded include the same context.
 - **Automated error reporting works when GitHub's response is labelled with a charset .NET
   cannot decode.** When something in between, such as a proxy, labelled the response
   `charset=utf8` or another name .NET does not recognise, filing an issue failed with a raw

@@ -1086,7 +1086,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ProcessFileAsync_Renameat2Unsupported_FallsBackWithoutHardLinks()
+    public async Task ProcessFileAsync_Renameat2Unsupported_FailsWithoutMovingSource()
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -1100,15 +1100,15 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         await service.ProcessFileAsync(path);
 
-        Assert.False(File.Exists(path));
-        Assert.True(File.Exists(renamed));
-        _fileStore.Verify(
-            f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
-            Times.Once);
+        Assert.True(File.Exists(path));
+        Assert.False(File.Exists(renamed));
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success &&
+            e.ErrorMessage == "Atomic no-overwrite rename is not supported by this filesystem.");
     }
 
     [Fact]
-    public async Task ProcessFileAsync_Renameat2UnsupportedAndSourceReplaced_MovesReplacementWithoutUnlinkingIt()
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndSourceReplaced_LeavesReplacementInPlace()
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -1126,8 +1126,32 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         await service.ProcessFileAsync(path);
 
-        Assert.False(File.Exists(path));
-        Assert.Equal("replacement archive", await File.ReadAllTextAsync(renamed));
+        Assert.True(File.Exists(path));
+        Assert.Equal("replacement archive", await File.ReadAllTextAsync(path));
+        Assert.False(File.Exists(renamed));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndTargetReplaced_DoesNotOverwriteTarget()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service(() =>
+            File.WriteAllText(renamed, "replacement destination"));
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(File.Exists(path));
+        Assert.Equal("replacement destination", await File.ReadAllTextAsync(renamed));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Never);
     }
 
     [Fact]
@@ -2044,10 +2068,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
             return -1;
         }
 
-        protected override int RenameLinux(int sourceDirectory, string sourceName, int targetDirectory, string targetName)
+        protected override void OnLinuxRenameFallback()
         {
             BeforeFallbackRename?.Invoke();
-            return base.RenameLinux(sourceDirectory, sourceName, targetDirectory, targetName);
         }
     }
 

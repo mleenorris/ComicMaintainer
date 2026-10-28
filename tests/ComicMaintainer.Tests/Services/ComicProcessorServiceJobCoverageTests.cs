@@ -494,8 +494,8 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
             Mock.Of<ILogger<FileStoreService>>(),
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
         var service = CreateService(fileStore: store);
-        var viaRequest = WriteCbz("Series/request.cbz", Xml("Series", "1", "Chapter 1"));
-        var viaLink = WriteCbz("Series/link.cbz", Xml("Series", "2", "Chapter 2"));
+        var viaRequest = Path.GetFullPath(WriteCbz("Series/request.cbz", Xml("Series", "1", "Chapter 1")));
+        var viaLink = Path.GetFullPath(WriteCbz("Series/link.cbz", Xml("Series", "2", "Chapter 2")));
         await store.AddFileAsync(viaRequest);
         await store.AddFileAsync(viaLink);
         // Requested through differently cased directory components, and through a link

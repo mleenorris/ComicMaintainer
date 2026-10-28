@@ -295,12 +295,15 @@ public partial class ComicProcessorService
 
         var directoryPath = Path.GetDirectoryName(entryPath)
             ?? throw new IOException("Cannot determine the directory of the file.");
+        // Share access is only checked for opens that request more than attributes, so
+        // listing access is needed for the missing FILE_SHARE_DELETE to block renames.
+        const uint FILE_LIST_DIRECTORY = 0x1;
         const uint FILE_READ_ATTRIBUTES = 0x80;
         const uint FILE_SHARE_READ_WRITE = 0x1 | 0x2;
         const uint OPEN_EXISTING = 3;
         const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
         var handle = CreateWindowsFile(
-            directoryPath, FILE_READ_ATTRIBUTES, FILE_SHARE_READ_WRITE, IntPtr.Zero, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero);
+            directoryPath, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_SHARE_READ_WRITE, IntPtr.Zero, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero);
         if (handle.IsInvalid)
         {
             var error = Marshal.GetLastPInvokeError();

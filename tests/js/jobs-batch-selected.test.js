@@ -476,3 +476,45 @@ test('Clear Processed Status keeps a series ticked beyond the first page of the 
     assert.equal(page.$('#processSelectedItem').disabled, false, 'the series can be processed again right away');
     assert.deepEqual(page.errors, []);
 });
+
+test('overlapping Clear Processed Status refreshes keep a series ticked beyond the first page selected', async (t) => {
+    const all = makeSeriesList(70);
+    const listSeries = seriesPages(all);
+    let gate = null;
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            'GET /api/files/series': call => (gate && call.query.refresh === 'true'
+                ? gate.promise.then(() => listSeries(call))
+                : listSeries(call)),
+            'GET /api/files/series/series-65/issues':
+                h.seriesIssues([h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)], { id: 'series-65' }),
+            'POST /api/status/clear-selected': { cleared: 2, requested: 2 }
+        }
+    });
+    page.run('loadSeriesLibrary({ append: true })');
+    await page.settle();
+    assert.equal(page.$$('#fileList .series-card').length, 70);
+    const selectBox = () => page.$('#fileList .series-select-box[data-series-id="series-65"]');
+    page.click(selectBox());
+    await page.settle();
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+
+    // The first clear's refresh is still loading (and has emptied the list)
+    // when the second clear completes.
+    gate = deferred();
+    h.chooseMenuItem(page, 'processDropdown', 'Clear Processed Status');
+    await page.settle();
+    page.run('clearSelectedProcessedStatus()');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(2), clearStatusConfirm(2)]);
+    gate.resolve();
+    await page.settle();
+
+    const reloads = h.requests(page, 'GET', /^\/api\/files\/series\?offset=0&limit=70(&refresh=true)?$/);
+    assert.equal(reloads.length, 2, 'the queued reload fetches every series loaded before the first clear');
+    assert.equal(page.$$('#fileList .series-card').length, 70);
+    assert.equal(selectBox().getAttribute('aria-checked'), 'true', 'the series beyond the first page stays ticked');
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+    assert.equal(page.$('#processSelectedItem').disabled, false, 'the series can be processed again right away');
+    assert.deepEqual(page.errors, []);
+});

@@ -140,10 +140,12 @@
             // loaded (not just the first page), so series selected further
             // down the list stay selected and the list keeps its length.
             let keepLoaded = false;
+            let keepCount = 0;
             if (typeof opts === 'object' && opts !== null) {
                 append = !!opts.append;
                 refresh = !!opts.refresh;
                 keepLoaded = !!opts.keepLoaded;
+                keepCount = Number(opts.keepCount) || 0;
             } else if (typeof opts === 'boolean') {
                 refresh = opts;
             } else if (typeof opts === 'number') {
@@ -159,7 +161,12 @@
                 // (label updated, content stale) until a manual page refresh.
                 if (!append) {
                     seriesReloadPending = true;
-                    seriesReloadKeepLoaded = keepLoaded;
+                    // The load in flight may have emptied the list already,
+                    // so keep the count it was fetching too; overlapping
+                    // keepLoaded refreshes keep the largest count.
+                    seriesReloadKeepCount = keepLoaded
+                        ? Math.max(seriesReloadKeepCount, keepCount, seriesLibrary.length, seriesLoadingCount)
+                        : 0;
                     if (seriesLoadController) {
                         seriesLoadController.abort();
                     }
@@ -168,7 +175,7 @@
             }
 
             const limit = (keepLoaded && !append)
-                ? Math.max(SERIES_PAGE_SIZE, seriesLibrary.length)
+                ? Math.max(SERIES_PAGE_SIZE, seriesLibrary.length, keepCount)
                 : SERIES_PAGE_SIZE;
 
             if (refresh || !append) {
@@ -194,6 +201,7 @@
             }
 
             seriesLoading = true;
+            seriesLoadingCount = append ? 0 : limit;
             const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
             seriesLoadController = controller;
             try {
@@ -255,14 +263,15 @@
                     seriesLoadController = null;
                 }
                 seriesLoading = false;
+                seriesLoadingCount = 0;
                 if (seriesReloadPending) {
                     // A filter/search/sort change arrived while this load was in
                     // flight. Re-run with the latest selection so the displayed
                     // series match the current filter without a page refresh.
                     seriesReloadPending = false;
-                    const reloadKeepLoaded = seriesReloadKeepLoaded;
-                    seriesReloadKeepLoaded = false;
-                    loadSeriesLibrary({ refresh: false, keepLoaded: reloadKeepLoaded });
+                    const reloadKeepCount = seriesReloadKeepCount;
+                    seriesReloadKeepCount = 0;
+                    loadSeriesLibrary({ refresh: false, keepLoaded: reloadKeepCount > 0, keepCount: reloadKeepCount });
                 }
             }
         }

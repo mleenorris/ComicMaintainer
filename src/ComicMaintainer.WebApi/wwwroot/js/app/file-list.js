@@ -899,30 +899,35 @@
             return loadFoldersConcurrently(stale);
         }
 
+        // Folder loads queued by loadFoldersConcurrently. The limit is shared
+        // by every caller, so overlapping reloads (e.g. quick successive
+        // filter changes, or several folder pages arriving) can't add up to
+        // a burst of fetches either.
+        const FOLDER_LOAD_CONCURRENCY = 4;
+        const folderLoadQueue = [];
+        let folderLoadsActive = 0;
+
+        function drainFolderLoadQueue() {
+            while (folderLoadsActive < FOLDER_LOAD_CONCURRENCY && folderLoadQueue.length > 0) {
+                const { dir, resolve } = folderLoadQueue.shift();
+                folderLoadsActive++;
+                ensureFolderLoaded(dir)
+                    .catch(() => {})
+                    .finally(() => {
+                        folderLoadsActive--;
+                        resolve();
+                        drainFolderLoadQueue();
+                    });
+            }
+        }
+
         // Loads the given folders' files with a bounded number of requests in
         // flight, so many folders don't fire a burst of fetches at once.
-        async function loadFoldersConcurrently(queue) {
-            const concurrency = 4;
-            let active = 0;
-            let index = 0;
-            await new Promise(resolve => {
-                const launch = () => {
-                    while (active < concurrency && index < queue.length) {
-                        const dir = queue[index++];
-                        active++;
-                        ensureFolderLoaded(dir).catch(() => {}).finally(() => {
-                            active--;
-                            if (index >= queue.length && active === 0) {
-                                resolve();
-                            } else {
-                                launch();
-                            }
-                        });
-                    }
-                    if (queue.length === 0) resolve();
-                };
-                launch();
-            });
+        async function loadFoldersConcurrently(dirs) {
+            await Promise.all(dirs.map(dir => new Promise(resolve => {
+                folderLoadQueue.push({ dir, resolve });
+                drainFolderLoadQueue();
+            })));
         }
 
         function collapseAllFolders() {

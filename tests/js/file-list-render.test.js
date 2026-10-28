@@ -646,6 +646,41 @@ test('a new filter lists many open folders\' files again a few at a time', async
         names.map(name => [name, { filter: 'unmarked' }]));
 });
 
+test('quick successive filter changes still list open folders\' files a few at a time', async () => {
+    const names = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const page = await bootFilesView({ folders: names.map(name => makeFolder(name)) });
+    let gate = null;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    page.route(folderFilesMatcher, async call => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+            if (gate) await gate.promise;
+            return { path: call.folder, files: [makeFile(`${call.folder}/${call.folder}.cbz`)] };
+        } finally {
+            inFlight--;
+        }
+    });
+    for (const name of names) await expandFolder(page, name);
+    const before = folderFileCalls(page).length;
+
+    gate = deferred();
+    maxInFlight = 0;
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    page.click('#headerFilterMenu [data-filter="marked"]');
+    await page.settle();
+    assert.equal(folderFileCalls(page).length, before + 4, 'the second reload waits for the first one\'s fetches');
+
+    gate.resolve();
+    await page.settle();
+    assert.equal(maxInFlight, 4, 'no more than 4 folders are fetched at once across both reloads');
+    const latest = new Map(folderFileCalls(page).map(call => [call.folder, call.query]));
+    assert.deepEqual(names.map(name => latest.get(name)), names.map(() => ({ filter: 'marked' })));
+    assert.deepEqual(page.errors, []);
+});
+
 test('a folder\'s checkbox and expand all fetch files listed for an earlier filter again', async () => {
     const page = await bootFilesView({ folders: [makeFolder('Batman'), makeFolder('Saga')] });
     page.route(folderFilesMatcher, call => ({

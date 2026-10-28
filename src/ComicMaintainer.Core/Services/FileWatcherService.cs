@@ -20,6 +20,12 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// <summary>Upper bound on the wait between attempts to recreate a failed watcher.</summary>
     private static readonly TimeSpan RestartMaxDelay = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// How long a watcher status broadcast may hold up the ones queued after it. Clients that
+    /// stall a delivery for longer receive the later statuses without it having finished.
+    /// </summary>
+    private static readonly TimeSpan StatusDeliveryTimeout = TimeSpan.FromSeconds(30);
+
     private readonly IOptionsMonitor<AppSettings> _settingsMonitor;
     private readonly ILogger<FileWatcherService> _logger;
     private readonly IFileStoreService _fileStore;
@@ -42,14 +48,17 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
     /// <summary>
     /// The watcher whose start (enabling its events) is in progress, written under
-    /// <see cref="_lock"/>. <see cref="OnWatcherError"/> reads it without the lock to tell errors
-    /// raised while a watcher starts apart from errors of a running watcher.
+    /// <see cref="_lock"/>. <see cref="OnWatcherError"/> reads it without waiting for the lock to
+    /// tell errors raised synchronously while a watcher starts apart from errors of a running
+    /// watcher.
     /// </summary>
     private volatile FileSystemWatcher? _startingWatcher;
 
     /// <summary>
     /// The latest queued watcher status broadcast (guarded by <see cref="_statusLock"/>). Each
-    /// broadcast runs after the previous one so clients see statuses in order.
+    /// broadcast runs after the previous one so clients see statuses in order. Statuses are queued
+    /// under <see cref="_lock"/> together with the change they report, and nothing waits for their
+    /// delivery, so slow clients cannot hold up starting, stopping or recreating the watcher.
     /// </summary>
     private Task _statusDelivery = Task.CompletedTask;
     private readonly object _statusLock = new();
@@ -208,7 +217,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         bool shouldInitialize = false;
-        bool watcherStarted = false;
         bool watchedDirectoryExists = Directory.Exists(_settings.WatchedDirectory);
 
         lock (_lock)
@@ -236,7 +244,10 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 }
 
                 StartWatcherLocked(_settings.WatchedDirectory);
-                watcherStarted = true;
+
+                // Broadcast watcher status change (only when the watcher actually started this
+                // call to avoid spurious status events on repeated StartAsync calls).
+                QueueStatusBroadcast(IsRunning);
             }
 
             // The file store inventory is used by features that don't depend on live watcher
@@ -247,13 +258,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 shouldInitialize = true;
                 _initialized = true;
             }
-        }
-
-        // Broadcast watcher status change (only when the watcher actually started this call to
-        // avoid spurious status events on repeated StartAsync calls).
-        if (watcherStarted)
-        {
-            await QueueStatusBroadcast(IsRunning);
         }
 
         // Initialize file store from database before scanning files (only once).
@@ -421,7 +425,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         }
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    public Task StopAsync(CancellationToken cancellationToken = default)
     {
         CancelAllPending();
 
@@ -439,24 +443,25 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 _activeWatchedDirectory = null;
                 _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher stopped"));
             }
+
+            // Broadcast watcher status change
+            QueueStatusBroadcast(false);
         }
 
         CancelRestart(restart);
-
-        // Broadcast watcher status change
-        await QueueStatusBroadcast(false);
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Queues a watcher status broadcast behind the earlier ones, preserving their order. The
-    /// returned task completes once it is delivered; callers that must not be held up by slow
-    /// clients (such as recreating a failed watcher) need not wait for it.
+    /// Queues a watcher status broadcast behind the earlier ones, preserving their order, without
+    /// waiting for its delivery. Callers hold <see cref="_lock"/> so that the order of the queued
+    /// statuses matches the order of the changes they report.
     /// </summary>
-    private Task QueueStatusBroadcast(bool running)
+    private void QueueStatusBroadcast(bool running)
     {
         if (_eventBroadcaster == null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         lock (_statusLock)
@@ -465,7 +470,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 .ContinueWith(_ => BroadcastStatusAsync(running), CancellationToken.None,
                     TaskContinuationOptions.DenyChildAttach, TaskScheduler.Default)
                 .Unwrap();
-            return _statusDelivery;
         }
     }
 
@@ -478,7 +482,13 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
         try
         {
-            await _eventBroadcaster.BroadcastWatcherStatusAsync(running, _enabled);
+            await _eventBroadcaster.BroadcastWatcherStatusAsync(running, _enabled).WaitAsync(StatusDeliveryTimeout);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Watcher status broadcast did not complete within {Timeout}; sending later status changes without waiting for it",
+                StatusDeliveryTimeout);
         }
         catch (Exception ex)
         {
@@ -650,9 +660,8 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     {
         var ex = e.GetException();
 
-        // Only a startup callback runs on the starting thread, which holds _lock while
-        // _startingWatcher is set; an error the started watcher raises on its own thread in the
-        // meantime may be terminal and is handled below.
+        // Only an error raised synchronously by enabling the watcher (on the thread that holds
+        // _lock) is a start error; one from the notification thread is a running watcher's.
         var starting = sender != null && ReferenceEquals(sender, _startingWatcher) && Monitor.IsEntered(_lock);
         if (starting || ex is InternalBufferOverflowException)
         {
@@ -710,10 +719,10 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 _restartCts = restart;
                 retrying = true;
             }
-        }
 
-        // Status delivery waits on clients, so it must not hold up recreating the watcher.
-        _ = QueueStatusBroadcast(false);
+            // Queued under the lock so a replacement's "running" status cannot overtake it.
+            QueueStatusBroadcast(false);
+        }
 
         if (retrying)
         {
@@ -729,7 +738,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     private async Task RestartWatcherAsync(CancellationTokenSource restart)
     {
         var token = restart.Token;
-        var startedHere = false;
         try
         {
             var delay = RestartInitialDelay;
@@ -761,7 +769,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                         try
                         {
                             StartWatcherLocked(directory);
-                            startedHere = true;
+                            QueueStatusBroadcast(IsRunning);
                         }
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or Win32Exception)
                         {
@@ -816,11 +824,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     _restartCts = null;
                 }
             }
-        }
-
-        if (startedHere)
-        {
-            _ = QueueStatusBroadcast(IsRunning);
         }
 
         await RecoverFromMissedEventsAsync();

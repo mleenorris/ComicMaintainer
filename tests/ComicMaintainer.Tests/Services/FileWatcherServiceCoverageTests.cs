@@ -192,6 +192,8 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         await service.StopAsync();
 
         Assert.False(service.IsRunning);
+        await _logger.Entries.WaitUntilAsync(
+            e => e.Count(x => x.Level == LogLevel.Warning) >= 2, "the start and stop broadcast failure warnings");
         var warnings = _logger.Entries.Snapshot().Where(e => e.Level == LogLevel.Warning).ToList();
         Assert.Equal(2, warnings.Count);
         Assert.All(warnings, w =>
@@ -668,9 +670,50 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task SettingsChange_WhileAnEarlierStatusDeliveryIsStalled_RebindsWatcher()
+    {
+        var otherLibrary = Path.Join(_root, "other-library");
+        Directory.CreateDirectory(otherLibrary);
+        var broadcasts = new Recorder<(bool Running, bool Enabled)>();
+        var stalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stalls = 1;
+        var broadcaster = new Mock<IEventBroadcaster>();
+        broadcaster.Setup(b => b.BroadcastWatcherStatusAsync(It.IsAny<bool>(), It.IsAny<bool>()))
+            .Returns<bool, bool>((running, enabled) =>
+            {
+                broadcasts.Add((running, enabled));
+                return !running && Interlocked.Exchange(ref stalls, 0) == 1 ? stalled.Task : Task.CompletedTask;
+            });
+        var monitor = new TestOptionsMonitor<AppSettings>(Settings());
+        var service = CreateService(monitor, broadcaster.Object);
+        await service.StartAsync();
+        await _logger.WaitForAsync(LogLevel.Information, "Incremental scan completed");
+        ArmWatcherFailure("trigger.cbz");
+
+        MoveIn("trigger.cbz");
+        await _logger.WaitForAsync(LogLevel.Information, $"Recovery rescan completed: {_library}");
+        await broadcasts.WaitUntilAsync(b => b.Count >= 2, "the stalled stop status broadcast");
+
+        // Rebinding stops the recreated watcher and starts the new one while the stop status
+        // sent by the recovery is still being delivered.
+        monitor.Set(Settings(directory: otherLibrary));
+
+        await _logger.WaitForAsync(LogLevel.Information, $"File watcher started for directory: {otherLibrary}");
+        Assert.True(service.IsRunning);
+        var arrival = MoveIn("arrival.cbz", otherLibrary);
+        await _added.WaitForAsync(p => p == arrival, "the comic that arrived in the new directory");
+        Assert.Equal(new[] { (true, true), (false, true) }, broadcasts.Snapshot());
+
+        stalled.SetResult();
+
+        await broadcasts.WaitUntilAsync(b => b.Count >= 5, "the statuses queued behind the stalled one");
+        Assert.Equal(new[] { (true, true), (false, true), (true, true), (false, true), (true, true) }, broadcasts.Snapshot());
+    }
+
+    [Fact]
     public async Task WatcherError_DirectoryChangedBeforeRestartAttempt_StartsTheNewDirectory()
     {
-        var otherLibrary = Path.Combine(_root, "other-library");
+        var otherLibrary = Path.Join(_root, "other-library");
         Directory.CreateDirectory(otherLibrary);
         var current = Settings();
         AppSettings? afterNextRead = null;
@@ -759,7 +802,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
             {
                 service.StopAsync().GetAwaiter().GetResult();
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
             {
                 hookFailures.Enqueue(ex);
             }

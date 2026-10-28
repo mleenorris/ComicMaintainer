@@ -46,15 +46,15 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         .GetType("ComicMaintainer.WebApi.Startup.CoreServiceCollectionExtensions", throwOnError: true)!
         .GetMethod("AddComicMaintainerSettings", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "cm-auth-extensions-" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(Path.GetTempPath(), "cm-auth-extensions-" + Guid.NewGuid().ToString("N"));
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
         new("JWT_SECRET", "JWT_SECRET_FILE", "CONFIG_DIR", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES", "AUTHELIA_ADMIN_GROUPS");
 
     // Created by the app when it generates a key.
-    private string ConfigDirectory => Path.Combine(_root, "config");
+    private string ConfigDirectory => Path.Join(_root, "config");
 
-    private string KeyFile => Path.Combine(ConfigDirectory, "jwt-secret.key");
+    private string KeyFile => Path.Join(ConfigDirectory, "jwt-secret.key");
 
     public void Dispose()
     {
@@ -65,6 +65,7 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         }
         catch (DirectoryNotFoundException)
         {
+            // The test created no files.
         }
     }
 
@@ -181,19 +182,37 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         Assert.Equal([KeyFile], Directory.GetFiles(ConfigDirectory));
     }
 
+    // An instance that finds the key file empty waits for the instance that created it to write its key.
+    [Fact]
+    public async Task WithoutASecret_WaitsForAKeyFileBeingWritten()
+    {
+        Directory.CreateDirectory(ConfigDirectory);
+        File.WriteAllText(KeyFile, "");
+        var writer = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(300));
+            File.WriteAllText(KeyFile, FileSecret);
+        });
+
+        using var provider = BuildProvider();
+        await writer;
+
+        AssertSignsAndValidatesWith(provider, FileSecret);
+    }
+
     [Fact]
     public void WithoutASecret_RefusesToStartWhenTheKeyCannotBeSaved()
     {
         // The config directory cannot be created: a file is in the way.
         Directory.CreateDirectory(_root);
-        var blocker = Path.Combine(_root, "blocker");
+        var blocker = Path.Join(_root, "blocker");
         File.WriteAllText(blocker, "");
-        var configDirectory = Path.Combine(blocker, "config");
+        var configDirectory = Path.Join(blocker, "config");
 
         var exception = Assert.Throws<InvalidOperationException>(() => BuildProvider(("AppSettings:ConfigDirectory", configDirectory)));
 
         Assert.StartsWith(
-            $"No JWT secret is configured, and the signing key generated in its place cannot be saved to or read from '{Path.Combine(configDirectory, "jwt-secret.key")}'",
+            $"No JWT secret is configured, and the signing key generated in its place cannot be saved to or read from '{Path.Join(configDirectory, "jwt-secret.key")}'",
             exception.Message);
         Assert.Contains("set JWT_SECRET (or JWT_SECRET_FILE) to a random secret", exception.Message);
     }
@@ -297,7 +316,7 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
     [InlineData(true)]
     public void JwtSecretFile_ThatCannotBeRead_StopsTheStartup(bool isADirectory)
     {
-        var path = Path.Combine(_root, "secrets", "jwt_secret");
+        var path = Path.Join(_root, "secrets", "jwt_secret");
         if (isADirectory)
         {
             Directory.CreateDirectory(path);
@@ -603,7 +622,7 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
 
     private string WriteSecretFile(string contents)
     {
-        var path = Path.Combine(_root, "secrets", "jwt_secret");
+        var path = Path.Join(_root, "secrets", "jwt_secret");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, contents);
         return path;

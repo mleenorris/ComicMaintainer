@@ -86,9 +86,11 @@ public sealed class JwtSigningSecretIntegrationTests : IAsyncLifetime
         }
         catch (IOException)
         {
+            // Best-effort cleanup of the temporary directory; a leftover file must not fail the test.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup of the temporary directory; a leftover file must not fail the test.
         }
     }
 

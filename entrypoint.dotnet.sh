@@ -64,8 +64,15 @@ chown -R "$PUID:$PGID" /app /Config /watched_dir /duplicates 2>/dev/null || true
 # versions of this script are made private again first.
 find /watched_dir /duplicates /Config -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \
     -exec chmod 600 {} + 2>/dev/null || true
+# Secret files named by JWT_SECRET_FILE or ADMIN_PASSWORD_FILE keep the permissions they were given.
+SECRET_FILE_EXCLUSIONS=()
+for secret_file in "${JWT_SECRET_FILE:-}" "${ADMIN_PASSWORD_FILE:-}"; do
+    if [ -n "$secret_file" ]; then
+        SECRET_FILE_EXCLUSIONS+=(! -path "$(realpath -ms -- "$secret_file")")
+    fi
+done
 find /watched_dir /duplicates /Config ! -type l ! \( -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \) \
-    -exec chmod 755 {} + 2>/dev/null || true
+    "${SECRET_FILE_EXCLUSIONS[@]}" -exec chmod 755 {} + 2>/dev/null || true
 
 # Switch to the specified user and run the application
 echo "Switching to user $USER_NAME (UID=$PUID, GID=$PGID)"

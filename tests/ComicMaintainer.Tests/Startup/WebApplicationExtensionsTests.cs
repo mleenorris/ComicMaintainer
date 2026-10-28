@@ -183,7 +183,7 @@ public sealed class WebApplicationExtensionsTests : IDisposable
     [InlineData("\n")]
     public async Task SeedsTheAdminUserWithThePasswordInAdminPasswordFile(string lineBreak)
     {
-        var passwordFile = Path.Combine(_configDirectory, "admin_password");
+        var passwordFile = Path.Join(_configDirectory, "admin_password");
         await File.WriteAllTextAsync(passwordFile, AdminPassword + lineBreak);
         _environment.Set("ADMIN_USERNAME", "root-admin");
         _environment.Set("ADMIN_PASSWORD_FILE", passwordFile);
@@ -202,7 +202,7 @@ public sealed class WebApplicationExtensionsTests : IDisposable
     [Fact]
     public async Task RefusesToSeedFromBothAdminPasswordAndAdminPasswordFile()
     {
-        var passwordFile = Path.Combine(_configDirectory, "admin_password");
+        var passwordFile = Path.Join(_configDirectory, "admin_password");
         await File.WriteAllTextAsync(passwordFile, AdminPassword);
         _environment.Set("ADMIN_USERNAME", "root-admin");
         _environment.Set("ADMIN_PASSWORD", "Oth3rPassword");
@@ -219,7 +219,7 @@ public sealed class WebApplicationExtensionsTests : IDisposable
     [Fact]
     public async Task RefusesToSeedFromAnAdminPasswordFileThatCannotBeRead()
     {
-        var passwordFile = Path.Combine(_configDirectory, "missing", "admin_password");
+        var passwordFile = Path.Join(_configDirectory, "missing", "admin_password");
         _environment.Set("ADMIN_USERNAME", "root-admin");
         _environment.Set("ADMIN_PASSWORD_FILE", passwordFile);
         await using var app = BuildApp();

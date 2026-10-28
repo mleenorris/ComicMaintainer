@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace ComicMaintainer.WebApi.Startup;
 
@@ -29,6 +31,10 @@ internal static class JwtSecretResolver
     // 48 random bytes, like the documented `openssl rand -base64 48`.
     private const int GeneratedKeyBytes = 48;
 
+    // How long to wait for another instance that created the key file to write its key into it.
+    private static readonly TimeSpan KeyFileWriteWait = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan KeyFilePollInterval = TimeSpan.FromMilliseconds(50);
+
     // The "Secret" shipped in appsettings.json, and the fallback of docker-compose.dotnet.yml (also the value in
     // .env.example). Deployments set up with them may still pass them in.
     private static readonly string[] PublishedPlaceholders =
@@ -37,6 +43,7 @@ internal static class JwtSecretResolver
         "ChangeThisToASecureRandomString-MustBeAtLeast32CharactersLong!!",
     ];
 
+    /// <summary>Resolves the secret that signs and validates the app's JWTs, generating and saving a key when none is set.</summary>
     /// <exception cref="InvalidOperationException">
     /// Both <c>JWT_SECRET</c> and <c>JWT_SECRET_FILE</c> are set, the file cannot be read, or the generated key cannot
     /// be saved or read back.
@@ -89,32 +96,36 @@ internal static class JwtSecretResolver
         generated = false;
         try
         {
-            if (ReadKeyFile(path) is { } existing)
+            var waited = Stopwatch.StartNew();
+            while (true)
             {
-                return existing;
-            }
+                var key = ReadKeyFile(path);
+                if (key is null)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+                    var newKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(GeneratedKeyBytes));
+                    if (TryCreateKeyFile(path, newKey))
+                    {
+                        generated = true;
+                        return newKey;
+                    }
+                }
+                else if (key.Length > 0)
+                {
+                    return key;
+                }
 
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-            var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
-            try
-            {
-                WriteOwnerOnlyFile(temporaryPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(GeneratedKeyBytes)));
+                // Another instance sharing the config directory created the file first and may not have written its
+                // key yet. Every instance must use that key, so wait for it.
+                if (waited.Elapsed >= KeyFileWriteWait)
+                {
+                    throw new IOException(key is null
+                        ? "Another instance keeps creating and removing the file."
+                        : "The file is empty; delete it so that a new key is generated.");
+                }
 
-                // The key appears complete, so no reader sees part of it. The move never replaces a file, so when
-                // another instance sharing the config directory saved its key first, every instance uses that key.
-                File.Move(temporaryPath, path, overwrite: false);
-                generated = true;
+                Thread.Sleep(KeyFilePollInterval);
             }
-            catch (IOException) when (File.Exists(path))
-            {
-                // Another instance saved its key first; it is read back below.
-            }
-            finally
-            {
-                File.Delete(temporaryPath);
-            }
-
-            return ReadKeyFile(path) ?? throw new IOException("The file was removed while it was being read.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
@@ -127,9 +138,49 @@ internal static class JwtSecretResolver
         }
     }
 
-    // The saved key, or null when the file does not exist. The app never saves an empty key or a published
-    // placeholder, so such a file is rejected rather than replaced: replacing it could leave instances that share the
-    // config directory with different keys.
+    // Saves the key, unless the file already exists. The file is created with O_EXCL (FileMode.CreateNew), which
+    // atomically fails when another instance created it first, so only one key is ever saved.
+    private static bool TryCreateKeyFile(string path, string key)
+    {
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows())
+        {
+            // The key is a credential: on Unix only the app's user may read it.
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        FileStream stream;
+        try
+        {
+            stream = new FileStream(path, options);
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            using (stream)
+            {
+                // One write, so that a reader sees the whole key or none of it.
+                stream.Write(Encoding.ASCII.GetBytes(key));
+                stream.Flush(flushToDisk: true);
+            }
+
+            return true;
+        }
+        catch
+        {
+            // Without its key the file would stop every start; remove it so that a key can be saved again.
+            File.Delete(path);
+            throw;
+        }
+    }
+
+    // The saved key; an empty string when the file is empty, or null when it does not exist. The app never saves a
+    // published placeholder, so such a file is rejected rather than replaced: replacing it could leave instances that
+    // share the config directory with different keys.
     private static string? ReadKeyFile(string path)
     {
         string contents;
@@ -145,7 +196,7 @@ internal static class JwtSecretResolver
         var key = contents.TrimEnd('\r', '\n');
         if (string.IsNullOrWhiteSpace(key))
         {
-            throw new IOException("The file is empty; delete it so that a new key is generated.");
+            return string.Empty;
         }
 
         if (IsPublishedPlaceholder(key))
@@ -157,21 +208,7 @@ internal static class JwtSecretResolver
 
         return key;
     }
-
-    // The key is a credential: on Unix only the app's user may read it.
-    private static void WriteOwnerOnlyFile(string path, string contents)
-    {
-        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
-        if (!OperatingSystem.IsWindows())
-        {
-            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        }
-
-        using var writer = new StreamWriter(path, options);
-        writer.Write(contents);
-    }
 }
-
 /// <summary>
 /// The secret that signs and validates the app's JWTs, resolved once at startup by <see cref="JwtSecretResolver"/>,
 /// and where it came from. Not a record, so that nothing prints the value by accident.

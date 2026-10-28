@@ -111,7 +111,7 @@ restarts. Keep that file private, like the database: anyone who has the key can 
 user. Delete it and restart the container to sign everyone out. The example secrets that earlier
 versions shipped in `appsettings.json`, `docker-compose.dotnet.yml` and `.env.example` are public,
 so the app ignores them, with a warning on the startup log. The startup log says which secret is
-in use.
+in use. Instances that share `/Config` and start together all use the one key that was saved first.
 
 ### 2. Use Docker Secrets (Recommended for Production)
 
@@ -135,7 +135,8 @@ docker service create \
 `ADMIN_PASSWORD`; the line break at the end of the file is ignored. Set either a variable or its
 `_FILE` variant, not both: the app refuses to start when both are set, or when the file cannot be
 read or is empty. With Docker Compose, replace the `JWT_SECRET` and `ADMIN_PASSWORD` entries of
-`docker-compose.dotnet.yml` with their `_FILE` variants.
+`docker-compose.dotnet.yml` with their `_FILE` variants. When those files are kept in a mounted
+directory such as `/Config`, the container leaves their permissions as they are.
 
 ### 3. Set Proper Permissions
 

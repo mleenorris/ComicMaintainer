@@ -254,6 +254,8 @@ Configuration can be set via:
 | EnableExternalSeriesMetadata | ENABLE_EXTERNAL_SERIES_METADATA | false | Enable ComicVine alias lookups for series grouping |
 | ComicVineApiKey | COMICVINE_API_KEY | _(empty)_ | ComicVine API key used for external series alias enrichment |
 | ComicVineBaseUrl | COMICVINE_BASE_URL | https://comicvine.gamespot.com/api | Override the ComicVine API base URL if needed |
+| ReverseProxySettings:TrustedProxies | TRUSTED_PROXIES | _(empty)_ | Comma-separated IP addresses and CIDR ranges of your reverse proxies; requests from them are rate-limited using `X-Forwarded-For` (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)) |
+| ReverseProxySettings:ForwardedHopLimit | TRUSTED_PROXY_HOPS | 1 | Number of right-most trusted `X-Forwarded-For` entries to follow; keep at 1 unless every additional proxy reliably appends its actual peer address (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)) |
 
 ## API Endpoints
 
@@ -474,6 +476,7 @@ landmark.
 - **Secrets Management**: Environment-based configuration for sensitive data
 - **JWT Security**: HMAC SHA256 signing with configurable expiration
 - **Authelia Header Trust**: With Authelia enabled, the forward-auth headers are only accepted from the reverse proxies listed in the required `AUTHELIA_TRUSTED_PROXIES` (see [AUTHELIA.md](docs/AUTHELIA.md#choosing-authelia_trusted_proxies))
+- **Per-Client Rate Limiting**: Signed-out requests are limited per client address; behind a reverse proxy, set `TRUSTED_PROXIES` so that each client is counted by the address the proxy forwards rather than all of them sharing the proxy's (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting))
 
 See [SECURITY_FIXES_DOTNET.md](docs/archive/SECURITY_FIXES_DOTNET.md) for complete security documentation.
 

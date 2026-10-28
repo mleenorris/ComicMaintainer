@@ -152,6 +152,10 @@ ComicMaintainer supports the following Authelia-related environment variables:
    - The check uses the address of the TCP connection, i.e. the proxy itself, never `X-Forwarded-For`, which clients
      can forge. Do not set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` on the container: it makes ASP.NET Core take
      the connection address from `X-Forwarded-For` sent by any client, which defeats the allowlist.
+   - Rate limiting trusts these addresses too: on requests from them it counts signed-out clients by the address the
+     proxy appends to `X-Forwarded-For`, so that one client cannot use up the limit for everyone (no `TRUSTED_PROXIES`
+     needed; see [Trusted Proxies and Rate Limiting](REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)). The header
+     is used for that only, never for the check above.
    - The setting is required: with `AUTHELIA_ENABLED=true`, the app refuses to start when `AUTHELIA_TRUSTED_PROXIES`
      is missing, empty or contains an entry that is not an IP address or CIDR range (see
      [Troubleshooting](#troubleshooting)). This is a breaking change for existing Authelia deployments; see the

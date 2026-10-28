@@ -150,6 +150,42 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("SeriesImageMaxDimension", maxDimension, cancellationToken);
     }
 
+    public async Task UpdateSeriesImageLimitsAsync(
+        int maxBytes,
+        int maxDownloadBytes,
+        int maxDimension,
+        CancellationToken cancellationToken = default)
+    {
+        if (maxBytes <= 0)
+        {
+            throw new ArgumentException("Series image max bytes must be greater than 0", nameof(maxBytes));
+        }
+
+        if (maxDownloadBytes <= 0)
+        {
+            throw new ArgumentException("Series image max download bytes must be greater than 0", nameof(maxDownloadBytes));
+        }
+
+        if (maxDimension <= 0)
+        {
+            throw new ArgumentException("Series image max dimension must be greater than 0", nameof(maxDimension));
+        }
+
+        if (maxDownloadBytes < maxBytes)
+        {
+            throw new ArgumentException("Series image max download bytes must be greater than or equal to series image max bytes", nameof(maxDownloadBytes));
+        }
+
+        await UpdateSettingsAsync(
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["SeriesImageMaxBytes"] = maxBytes,
+                ["SeriesImageMaxDownloadBytes"] = maxDownloadBytes,
+                ["SeriesImageMaxDimension"] = maxDimension
+            },
+            cancellationToken);
+    }
+
     public async Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default)
     {
         await UpdateSecretSettingAsync("GitHubToken", token, cancellationToken);
@@ -231,6 +267,48 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("AniListBaseUrl", baseUrl, cancellationToken);
     }
 
+    public async Task UpdateExternalSeriesMetadataSettingsAsync(
+        bool enabled,
+        string? comicVineApiKey,
+        string? comicVineBaseUrl,
+        bool enableMangaDex,
+        string? mangaDexBaseUrl,
+        bool enableAniList,
+        string? aniListBaseUrl,
+        CancellationToken cancellationToken = default)
+    {
+        // The group is written in a single atomic file replacement. Saving the
+        // fields one at a time let an aborted request or a failed write leave
+        // lookups switched on beside the previous key and URLs.
+        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["EnableExternalSeriesMetadata"] = enabled
+        };
+
+        // A null key means "keep the stored secret"; a blank one clears it.
+        if (comicVineApiKey is not null)
+        {
+            values["ComicVineApiKey"] = Normalize(comicVineApiKey);
+        }
+
+        // A blank base URL keeps the stored one.
+        SetUnlessBlank("ComicVineBaseUrl", comicVineBaseUrl);
+        values["EnableMangaDexMetadata"] = enableMangaDex;
+        SetUnlessBlank("MangaDexBaseUrl", mangaDexBaseUrl);
+        values["EnableAniListMetadata"] = enableAniList;
+        SetUnlessBlank("AniListBaseUrl", aniListBaseUrl);
+
+        await UpdateSettingsAsync(values, cancellationToken);
+
+        void SetUnlessBlank(string settingName, string? value)
+        {
+            if (Normalize(value) is { } normalized)
+            {
+                values[settingName] = normalized;
+            }
+        }
+    }
+
     public async Task UpdateSuwayomiSettingsAsync(
         bool enabled,
         string? baseUrl,
@@ -294,22 +372,7 @@ public class SettingsService : ISettingsService
             values["SuwayomiImportDirectory"] = normalizedImportDirectory;
         }
 
-        await PersistSettingsAsync(values, cancellationToken);
-
-        foreach (var (settingName, value) in values)
-        {
-            if (SecretSettingNames.Contains(settingName))
-            {
-                _logger.LogInformation(
-                    "Updated setting {SettingName} ({State})",
-                    settingName,
-                    value is null ? "cleared" : "value hidden");
-                continue;
-            }
-
-            var sanitizedValue = LoggingHelper.SanitizeForLog(value?.ToString() ?? "null");
-            _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
-        }
+        await UpdateSettingsAsync(values, cancellationToken);
     }
 
     public async Task UpdateDefaultPreferredLanguageAsync(string? language, CancellationToken cancellationToken = default)
@@ -470,23 +533,7 @@ public class SettingsService : ISettingsService
             values["ErrorReportingGitHubToken"] = gitHubToken.Length == 0 ? null : gitHubToken.Trim();
         }
 
-        await PersistSettingsAsync(values, cancellationToken);
-
-        foreach (var name in values.Keys)
-        {
-            if (SecretSettingNames.Contains(name))
-            {
-                _logger.LogInformation(
-                    "Updated setting {SettingName} ({State})",
-                    name,
-                    values[name] is null ? "cleared" : "value hidden");
-                continue;
-            }
-
-            var value = values[name];
-            var sanitizedValue = LoggingHelper.SanitizeForLog(value?.ToString() ?? "null");
-            _logger.LogInformation("Updated setting {SettingName} to {Value}", name, sanitizedValue);
-        }
+        await UpdateSettingsAsync(values, cancellationToken);
     }
 
     private static string? Normalize(string? value)
@@ -568,6 +615,31 @@ public class SettingsService : ISettingsService
             cleared ? "cleared" : "value hidden");
     }
 
+    /// <summary>
+    /// Persists a group of related settings in one atomic write, so the group is
+    /// saved entirely or not at all, then logs each one. Secret values are never
+    /// passed to the logger, only whether they were set or cleared.
+    /// </summary>
+    private async Task UpdateSettingsAsync(IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
+    {
+        await PersistSettingsAsync(values, cancellationToken);
+
+        foreach (var (settingName, value) in values)
+        {
+            if (SecretSettingNames.Contains(settingName))
+            {
+                _logger.LogInformation(
+                    "Updated setting {SettingName} ({State})",
+                    settingName,
+                    value is null ? "cleared" : "value hidden");
+                continue;
+            }
+
+            var sanitizedValue = LoggingHelper.SanitizeForLog(value?.ToString() ?? "null");
+            _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
+        }
+    }
+
     private Task PersistSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
         => PersistSettingsAsync(
             new Dictionary<string, object?>(StringComparer.Ordinal) { [settingName] = value },
@@ -600,6 +672,7 @@ public class SettingsService : ISettingsService
             // Update the settings
             foreach (var (settingName, value) in values)
             {
+                OnStagingSetting(settingName);
                 appSettingsSection[settingName] = value;
             }
 
@@ -624,6 +697,14 @@ public class SettingsService : ISettingsService
         {
             _lock.Release();
         }
+    }
+
+    /// <summary>
+    /// Called inside <see cref="PersistSettingsAsync"/> just before each setting is
+    /// staged for the write, so tests can interrupt a save between two fields.
+    /// </summary>
+    protected virtual void OnStagingSetting(string settingName)
+    {
     }
 
     /// <summary>

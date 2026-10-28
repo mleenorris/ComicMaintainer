@@ -385,14 +385,13 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task SetSeriesImageLimits_LegacyPost_PersistsAllThreeLimits()
+    public async Task SetSeriesImageLimits_LegacyPost_PersistsAllThreeLimitsInOneSave()
     {
         var result = await CreateController().SetSeriesImageLimits(new() { MaxMB = 0.5, MaxDownloadMB = 2, MaxDimension = 900 });
 
         Assert.Equal("Series image limits updated successfully", OkJson(result).GetProperty("message").GetString());
-        _settingsService.Verify(s => s.UpdateSeriesImageMaxBytesAsync(BytesPerMb / 2, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateSeriesImageMaxDownloadBytesAsync(2 * BytesPerMb, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateSeriesImageMaxDimensionAsync(900, It.IsAny<CancellationToken>()), Times.Once());
+        _settingsService.Verify(s => s.UpdateSeriesImageLimitsAsync(BytesPerMb / 2, 2 * BytesPerMb, 900, It.IsAny<CancellationToken>()), Times.Once());
+        _settingsService.VerifyNoOtherCalls();
     }
 
     [Theory]
@@ -409,17 +408,30 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task UpdateSeriesImageLimits_ServiceFailure_Returns500AndStopsUpdating()
+    public async Task UpdateSeriesImageLimits_ServiceFailure_Returns500()
     {
         var failure = new InvalidOperationException("boom");
-        _settingsService.Setup(s => s.UpdateSeriesImageMaxDownloadBytesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        _settingsService.Setup(s => s.UpdateSeriesImageLimitsAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
         var result = await CreateController().UpdateSeriesImageLimits(new() { MaxMB = 1, MaxDownloadMB = 1, MaxDimension = 800 });
 
         Assert.Equal("Failed to update series image limits", ServerErrorJson(result).GetProperty("error").GetString());
-        _settingsService.Verify(s => s.UpdateSeriesImageMaxDimensionAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never());
         VerifyLogged(LogLevel.Error, "Failed to update series image limits", Times.Once(), failure);
+    }
+
+    [Fact]
+    public async Task UpdateSeriesImageLimits_ServiceValidationFailure_ReturnsBadRequestWithServiceMessage()
+    {
+        // A positive size too small to be a whole byte rounds to 0, which the
+        // service rejects; that is the caller's mistake, not a server error.
+        _settingsService.Setup(s => s.UpdateSeriesImageLimitsAsync(0, BytesPerMb, 800, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("Series image max bytes must be greater than 0", "maxBytes"));
+
+        var result = await CreateController().UpdateSeriesImageLimits(new() { MaxMB = 0.0000001, MaxDownloadMB = 1, MaxDimension = 800 });
+
+        Assert.Equal("Series image max bytes must be greater than 0 (Parameter 'maxBytes')", BadRequestError(result));
+        VerifyLogged(LogLevel.Error, "Failed to update series image limits", Times.Never());
     }
 
     [Fact]
@@ -614,7 +626,7 @@ public class SettingsControllerCoverageTests
     // ---------------------------------------------------------------- external series metadata
 
     [Fact]
-    public async Task UpdateExternalSeriesMetadata_TrimsValuesAndDoesNotEchoApiKey()
+    public async Task UpdateExternalSeriesMetadata_SavesTheWholeGroupInOneCallAndDoesNotEchoApiKey()
     {
         var request = new SettingsController.ExternalSeriesMetadataSettingsRequest
         {
@@ -632,21 +644,24 @@ public class SettingsControllerCoverageTests
         var json = OkJson(result);
         Assert.Equal("External series metadata settings updated successfully", json.GetProperty("message").GetString());
         Assert.DoesNotContain("cv-key-do-not-echo", json.GetRawText());
-        _settingsService.Verify(s => s.UpdateExternalSeriesMetadataEnabledAsync(true, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateComicVineApiKeyAsync("cv-key-do-not-echo", It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateComicVineBaseUrlAsync("https://comicvine.example/api", It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateMangaDexEnabledAsync(true, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateMangaDexBaseUrlAsync("https://mangadex.example", It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateAniListEnabledAsync(false, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateAniListBaseUrlAsync("https://anilist.example/graphql", It.IsAny<CancellationToken>()), Times.Once());
+        _settingsService.Verify(s => s.UpdateExternalSeriesMetadataSettingsAsync(
+            true,
+            "  cv-key-do-not-echo  ",
+            " https://comicvine.example/api ",
+            true,
+            " https://mangadex.example ",
+            false,
+            " https://anilist.example/graphql ",
+            It.IsAny<CancellationToken>()), Times.Once());
         _settingsService.VerifyNoOtherCalls();
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task SetExternalSeriesMetadata_BlankValues_ClearApiKeyAndKeepBaseUrls(string blank)
+    public async Task SetExternalSeriesMetadata_LegacyPost_PassesBlankValuesToTheGroupSave(string blank)
     {
+        // The service decides what blanks mean (clear the key, keep the URLs).
         var request = new SettingsController.ExternalSeriesMetadataSettingsRequest
         {
             Enabled = false,
@@ -659,15 +674,13 @@ public class SettingsControllerCoverageTests
         var result = await CreateController().SetExternalSeriesMetadata(request);
 
         Assert.IsType<OkObjectResult>(result);
-        _settingsService.Verify(s => s.UpdateExternalSeriesMetadataEnabledAsync(false, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateComicVineApiKeyAsync(null, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateMangaDexEnabledAsync(false, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateAniListEnabledAsync(false, It.IsAny<CancellationToken>()), Times.Once());
+        _settingsService.Verify(s => s.UpdateExternalSeriesMetadataSettingsAsync(
+            false, blank, blank, false, blank, false, blank, It.IsAny<CancellationToken>()), Times.Once());
         _settingsService.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task UpdateExternalSeriesMetadata_OmittedApiKey_KeepsTheStoredKey()
+    public async Task UpdateExternalSeriesMetadata_OmittedApiKey_PassesNullSoTheStoredKeyIsKept()
     {
         // GET /api/settings never returns the key, so the settings form leaves
         // it out unless the user types a new one; that must not wipe it.
@@ -682,10 +695,8 @@ public class SettingsControllerCoverageTests
         var result = await CreateController().UpdateExternalSeriesMetadata(request);
 
         Assert.IsType<OkObjectResult>(result);
-        _settingsService.Verify(s => s.UpdateComicVineApiKeyAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never());
-        _settingsService.Verify(s => s.UpdateExternalSeriesMetadataEnabledAsync(true, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateMangaDexEnabledAsync(true, It.IsAny<CancellationToken>()), Times.Once());
-        _settingsService.Verify(s => s.UpdateAniListEnabledAsync(true, It.IsAny<CancellationToken>()), Times.Once());
+        _settingsService.Verify(s => s.UpdateExternalSeriesMetadataSettingsAsync(
+            true, null, null, true, null, true, null, It.IsAny<CancellationToken>()), Times.Once());
         _settingsService.VerifyNoOtherCalls();
     }
 
@@ -693,7 +704,9 @@ public class SettingsControllerCoverageTests
     public async Task UpdateExternalSeriesMetadata_ServiceFailure_Returns500WithoutLeakingDetails()
     {
         var failure = new InvalidOperationException("cv-key-do-not-echo rejected");
-        _settingsService.Setup(s => s.UpdateComicVineApiKeyAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _settingsService.Setup(s => s.UpdateExternalSeriesMetadataSettingsAsync(
+                It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<bool>(),
+                It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
         var result = await CreateController().UpdateExternalSeriesMetadata(new() { ComicVineApiKey = "cv-key-do-not-echo" });

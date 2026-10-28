@@ -72,6 +72,17 @@ public interface ISettingsService
     Task UpdateSeriesImageMaxDimensionAsync(int maxDimension, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Persist all three series cover image limits in one write, so they are
+    /// saved together or not at all. Every limit must be greater than 0, and
+    /// <paramref name="maxDownloadBytes"/> must be at least <paramref name="maxBytes"/>.
+    /// </summary>
+    Task UpdateSeriesImageLimitsAsync(
+        int maxBytes,
+        int maxDownloadBytes,
+        int maxDimension,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update the GitHub token setting
     /// </summary>
     Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default);
@@ -107,6 +118,23 @@ public interface ISettingsService
     Task UpdateMangaDexBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
     Task UpdateAniListEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persist the external series metadata settings in one write, so they are
+    /// saved together or not at all. A null <paramref name="comicVineApiKey"/>
+    /// leaves the stored key untouched so the UI never has to round-trip the
+    /// secret; pass an empty or blank string to clear it. A blank base URL
+    /// leaves the stored URL untouched. Values are trimmed.
+    /// </summary>
+    Task UpdateExternalSeriesMetadataSettingsAsync(
+        bool enabled,
+        string? comicVineApiKey,
+        string? comicVineBaseUrl,
+        bool enableMangaDex,
+        string? mangaDexBaseUrl,
+        bool enableAniList,
+        string? aniListBaseUrl,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Persist the Suwayomi download-server settings. A null

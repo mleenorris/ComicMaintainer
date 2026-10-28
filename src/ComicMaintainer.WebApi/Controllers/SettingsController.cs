@@ -398,10 +398,12 @@ public class SettingsController : ControllerBase
 
         try
         {
-            await _settingsService.UpdateSeriesImageMaxBytesAsync(maxBytes, cancellationToken);
-            await _settingsService.UpdateSeriesImageMaxDownloadBytesAsync(maxDownloadBytes, cancellationToken);
-            await _settingsService.UpdateSeriesImageMaxDimensionAsync(request.MaxDimension, cancellationToken);
+            await _settingsService.UpdateSeriesImageLimitsAsync(maxBytes, maxDownloadBytes, request.MaxDimension, cancellationToken);
             return Ok(new { message = "Series image limits updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
@@ -572,41 +574,23 @@ public class SettingsController : ControllerBase
 
     /// <summary>
     /// Updates the external series metadata settings. Omit <c>comicVineApiKey</c>
-    /// to keep the stored key; send an empty string to clear it.
+    /// to keep the stored key; send an empty string to clear it. The settings are
+    /// saved together: if the request fails, none of them change.
     /// </summary>
     [HttpPut("external-series-metadata")]
     public async Task<ActionResult> UpdateExternalSeriesMetadata([FromBody] ExternalSeriesMetadataSettingsRequest request, CancellationToken cancellationToken = default)
     {
         try
         {
-            await _settingsService.UpdateExternalSeriesMetadataEnabledAsync(request.Enabled, cancellationToken);
-
-            // A null key means "keep the stored secret"; a blank one clears it.
-            if (request.ComicVineApiKey is not null)
-            {
-                var trimmedApiKey = string.IsNullOrWhiteSpace(request.ComicVineApiKey)
-                    ? null
-                    : request.ComicVineApiKey.Trim();
-
-                await _settingsService.UpdateComicVineApiKeyAsync(trimmedApiKey, cancellationToken);
-            }
-
-            if (!string.IsNullOrWhiteSpace(request.ComicVineBaseUrl))
-            {
-                await _settingsService.UpdateComicVineBaseUrlAsync(request.ComicVineBaseUrl.Trim(), cancellationToken);
-            }
-
-            await _settingsService.UpdateMangaDexEnabledAsync(request.EnableMangaDex, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(request.MangaDexBaseUrl))
-            {
-                await _settingsService.UpdateMangaDexBaseUrlAsync(request.MangaDexBaseUrl.Trim(), cancellationToken);
-            }
-
-            await _settingsService.UpdateAniListEnabledAsync(request.EnableAniList, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(request.AniListBaseUrl))
-            {
-                await _settingsService.UpdateAniListBaseUrlAsync(request.AniListBaseUrl.Trim(), cancellationToken);
-            }
+            await _settingsService.UpdateExternalSeriesMetadataSettingsAsync(
+                request.Enabled,
+                request.ComicVineApiKey,
+                request.ComicVineBaseUrl,
+                request.EnableMangaDex,
+                request.MangaDexBaseUrl,
+                request.EnableAniList,
+                request.AniListBaseUrl,
+                cancellationToken);
 
             return Ok(new { message = "External series metadata settings updated successfully" });
         }

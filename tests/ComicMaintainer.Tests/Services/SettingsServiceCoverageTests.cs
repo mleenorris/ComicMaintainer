@@ -115,6 +115,40 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         Assert.Equal(4096, ReadSection()[settingName].GetInt32());
     }
 
+    [Fact]
+    public async Task UpdateSeriesImageLimitsAsync_PersistsAllThreeLimits()
+    {
+        await _service.UpdateSeriesImageLimitsAsync(4096, 8192, 1600);
+
+        var section = ReadSection();
+        Assert.Equal(3, section.Count);
+        Assert.Equal(4096, section["SeriesImageMaxBytes"].GetInt32());
+        Assert.Equal(8192, section["SeriesImageMaxDownloadBytes"].GetInt32());
+        Assert.Equal(1600, section["SeriesImageMaxDimension"].GetInt32());
+        Assert.Contains("Updated setting SeriesImageMaxDownloadBytes to 8192", _logger.Messages);
+
+        // The download limit may equal the stored limit.
+        await _service.UpdateSeriesImageLimitsAsync(4096, 4096, 1600);
+        Assert.Equal(4096, ReadSection()["SeriesImageMaxDownloadBytes"].GetInt32());
+    }
+
+    [Theory]
+    [InlineData(0, 8192, 1600, "maxBytes")]
+    [InlineData(-1, 8192, 1600, "maxBytes")]
+    [InlineData(4096, 0, 1600, "maxDownloadBytes")]
+    [InlineData(4096, 2048, 1600, "maxDownloadBytes")]
+    [InlineData(4096, 8192, 0, "maxDimension")]
+    [InlineData(4096, 8192, -5, "maxDimension")]
+    public async Task UpdateSeriesImageLimitsAsync_AnInvalidLimitSavesNoneOfThem(
+        int maxBytes, int maxDownloadBytes, int maxDimension, string parameterName)
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateSeriesImageLimitsAsync(maxBytes, maxDownloadBytes, maxDimension));
+
+        Assert.Equal(parameterName, ex.ParamName);
+        Assert.False(File.Exists(_settingsPath));
+    }
+
     [Theory]
     [InlineData("GitHubIssueAssignee")]
     [InlineData("ComicVineBaseUrl")]
@@ -170,6 +204,67 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         var stored = ReadSection()["ComicVineApiKey"];
         Assert.Equal(cleared, stored.ValueKind == JsonValueKind.Null ? null : stored.GetString());
         Assert.Contains("Updated setting ComicVineApiKey (cleared)", _logger.Messages);
+    }
+
+    [Fact]
+    public async Task UpdateExternalSeriesMetadataSettingsAsync_PersistsTrimmedValuesWithoutLoggingTheKey()
+    {
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(
+            enabled: true,
+            comicVineApiKey: "  cv-secret-key-123  ",
+            comicVineBaseUrl: " https://comicvine.example/api ",
+            enableMangaDex: true,
+            mangaDexBaseUrl: " https://mangadex.example ",
+            enableAniList: false,
+            aniListBaseUrl: " https://anilist.example/graphql ");
+
+        var section = ReadSection();
+        Assert.Equal(7, section.Count);
+        Assert.True(section["EnableExternalSeriesMetadata"].GetBoolean());
+        Assert.Equal("cv-secret-key-123", section["ComicVineApiKey"].GetString());
+        Assert.Equal("https://comicvine.example/api", section["ComicVineBaseUrl"].GetString());
+        Assert.True(section["EnableMangaDexMetadata"].GetBoolean());
+        Assert.Equal("https://mangadex.example", section["MangaDexBaseUrl"].GetString());
+        Assert.False(section["EnableAniListMetadata"].GetBoolean());
+        Assert.Equal("https://anilist.example/graphql", section["AniListBaseUrl"].GetString());
+        Assert.Contains("Updated setting ComicVineApiKey (value hidden)", _logger.Messages);
+        Assert.Contains("Updated setting AniListBaseUrl to https://anilist.example/graphql", _logger.Messages);
+        Assert.DoesNotContain(_logger.Messages, m => m.Contains("cv-secret-key-123", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task UpdateExternalSeriesMetadataSettingsAsync_NullKeyKeepsTheStoredKeyAndBlankClearsIt(string blank)
+    {
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(true, "cv-secret-key-123", null, false, null, false, null);
+
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(true, null, null, false, null, false, null);
+        Assert.Equal("cv-secret-key-123", ReadSection()["ComicVineApiKey"].GetString());
+
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(true, blank, null, false, null, false, null);
+        Assert.Equal(JsonValueKind.Null, ReadSection()["ComicVineApiKey"].ValueKind);
+        Assert.Contains("Updated setting ComicVineApiKey (cleared)", _logger.Messages);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task UpdateExternalSeriesMetadataSettingsAsync_BlankBaseUrlsKeepTheStoredOnes(string? blank)
+    {
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(
+            true, null, "https://comicvine.example/api", true, "https://mangadex.example", true, "https://anilist.example/graphql");
+
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(false, null, blank, false, blank, false, blank);
+
+        var section = ReadSection();
+        Assert.False(section["EnableExternalSeriesMetadata"].GetBoolean());
+        Assert.False(section["EnableMangaDexMetadata"].GetBoolean());
+        Assert.False(section["EnableAniListMetadata"].GetBoolean());
+        Assert.Equal("https://comicvine.example/api", section["ComicVineBaseUrl"].GetString());
+        Assert.Equal("https://mangadex.example", section["MangaDexBaseUrl"].GetString());
+        Assert.Equal("https://anilist.example/graphql", section["AniListBaseUrl"].GetString());
     }
 
     [Fact]

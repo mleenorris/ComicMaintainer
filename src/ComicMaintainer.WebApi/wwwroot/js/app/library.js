@@ -433,6 +433,8 @@
         }
         
         let sortMode = 'name'; // 'name', 'date', 'size'
+        // Mirrors the API's accepted sort directions (ValidSortDirections).
+        const VALID_SORT_DIRECTIONS = ['asc', 'desc'];
         let sortDirection = 'asc'; // 'asc', 'desc'
 
         // Syncs the sort dropdown label and active item with the current

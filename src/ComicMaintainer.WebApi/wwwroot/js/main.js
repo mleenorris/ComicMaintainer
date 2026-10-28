@@ -98,7 +98,7 @@
                 if (prefs.sortMode) {
                     sortMode = prefs.sortMode;
                 }
-                if (prefs.sortDirection === 'asc' || prefs.sortDirection === 'desc') {
+                if (VALID_SORT_DIRECTIONS.includes(prefs.sortDirection)) {
                     sortDirection = prefs.sortDirection;
                 }
                 if (prefs.sortMode || prefs.sortDirection) {
@@ -114,15 +114,18 @@
                 
                 // The library started loading with the defaults; reload it if
                 // the saved preferences change what it lists.
-                if (libraryViewMode !== oldLibraryViewMode || filterMode !== oldFilterMode
-                    || sortMode !== oldSortMode || sortDirection !== oldSortDirection
-                    || (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE)) {
+                const viewChanged = libraryViewMode !== oldLibraryViewMode;
+                const filterChanged = filterMode !== oldFilterMode;
+                const sortChanged = sortMode !== oldSortMode || sortDirection !== oldSortDirection;
+                const pageSizeChanged = perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE;
+                const shouldReloadLibrary = viewChanged || filterChanged || sortChanged || pageSizeChanged;
+                if (shouldReloadLibrary) {
                     loadActiveLibraryView(1);
                 }
 
                 // A series page opened before the preferences arrived listed
                 // its issues without the saved filter; fetch them with it.
-                if (filterMode !== oldFilterMode && currentSeriesDetailId) {
+                if (filterChanged && currentSeriesDetailId) {
                     loadSeriesIssues(currentSeriesDetailId, true);
                 }
             });

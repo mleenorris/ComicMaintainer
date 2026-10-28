@@ -90,7 +90,7 @@ test('a saved descending sort is restored, and the library reloads in that order
     assert.deepEqual(seriesListLoads(page).at(-1).query, { offset: '0', limit: '60', sort: 'date', direction: 'desc' });
 });
 
-test('a saved direction alone reverses the default sort; one the app does not know is ignored', async () => {
+test('a saved direction alone reverses the default sort; one that the app does not know is ignored', async () => {
     const reversed = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ sortDirection: 'desc' }) }) });
     assert.equal(reversed.$('#headerSortLabel').textContent, 'Name ↓');
     assert.equal(seriesListLoads(reversed).length, 2);

@@ -105,7 +105,9 @@
 
         async function loadSeriesIssues(seriesId, force = false, page = 1) {
             if (!seriesId) return;
-            if (force) {
+            // An entry listed (or being listed) under another filter is stale.
+            const cachedEntry = seriesIssuesCache.get(seriesId);
+            if (force || (cachedEntry && cachedEntry.filter !== filterMode)) {
                 seriesIssuesCache.delete(seriesId);
             }
             const existing = seriesIssuesCache.get(seriesId);
@@ -134,7 +136,8 @@
                     loadedPages: new Set(),
                     loadingPages: new Set(),
                     allLoaded: false,
-                    error: false
+                    error: false,
+                    filter: filterMode
                 };
                 seriesIssuesCache.set(seriesId, entry);
             }

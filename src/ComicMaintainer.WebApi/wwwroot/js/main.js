@@ -125,11 +125,12 @@
                     // A series page opened before the preferences arrived listed
                     // its issues without the saved filter; fetch them with it once
                     // the library has reloaded, as that may move the series to a
-                    // new id.
+                    // new id. Issues already listed or loading under the saved
+                    // filter are reused; only entries for another filter refetch.
                     if (filterChanged && currentSeriesDetailId) {
                         libraryReload.finally(() => {
                             if (currentSeriesDetailId) {
-                                loadSeriesIssues(currentSeriesDetailId, true);
+                                loadSeriesIssues(currentSeriesDetailId);
                             }
                         });
                     }

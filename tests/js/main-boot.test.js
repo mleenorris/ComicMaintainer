@@ -164,6 +164,35 @@ test('a series page refetches its issues with the saved filter only once the lib
     assert.deepEqual(requests(page, 'GET', issuesPath).map(call => call.query.filter), [undefined, 'unread']);
 });
 
+test('a series page whose id changes while its issues load requests the filtered issues only once', async () => {
+    // The library reload moves the open series to a new id before its first
+    // issues answer, so the page starts the filtered request for the new id
+    // itself; the post-reload refetch must reuse it.
+    const filtered = seriesCard({ id: 'series-2' });
+    const unread = seriesIssue({ file_path: 'Saga/Saga 002.cbz', file_name: 'Saga 002.cbz', title: 'Chapter Two', issue: '2' });
+    const unfilteredGate = deferred();
+    const filteredGate = deferred();
+    const filteredPath = `/api/files/series/${filtered.id}/issues`;
+    const page = await boot({
+        hash: `#/series/${SAGA.id}`,
+        routes: libraryRoutes({
+            'GET /api/preferences': preferences({ filterMode: 'unread' }),
+            'GET /api/files/series': call => seriesPage(call.query.filter === 'unread' ? [filtered] : [SAGA]),
+            [`GET /api/files/series/${SAGA.id}/issues`]: () => unfilteredGate.promise,
+            [`GET ${filteredPath}`]: () => filteredGate.promise
+        })
+    });
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'series-2');
+    assert.deepEqual(requests(page, 'GET', filteredPath).map(call => call.query.filter), ['unread']);
+
+    filteredGate.resolve(seriesIssues(filtered, [unread]));
+    unfilteredGate.resolve(seriesIssues(SAGA, [unread]));
+    await page.settle();
+
+    assert.equal(requests(page, 'GET', filteredPath).length, 1, 'the in-flight filtered request is reused');
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issue-card[data-file-path]').map(card => card.dataset.filePath), ['Saga/Saga 002.cbz']);
+});
+
 test('a saved filter the app no longer knows is labelled "All"', async () => {
     const page = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ filterMode: 'retired' }) }) });
 

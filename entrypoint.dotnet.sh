@@ -59,9 +59,13 @@ fi
 # Ensure directories exist and have correct permissions
 mkdir -p /watched_dir /duplicates /Config
 chown -R "$PUID:$PGID" /app /Config /watched_dir /duplicates 2>/dev/null || true
-chmod -R 755 /watched_dir /duplicates /Config 2>/dev/null || true
-# The JWT signing key the app generates when JWT_SECRET is not set must stay private to its user.
-chmod 600 /Config/jwt-secret.key 2>/dev/null || true
+# The JWT signing key the app generates when JWT_SECRET is not set (and its temporary files) must stay private to
+# its user, wherever it is kept, so it is left out of the permission change below. Keys made readable by earlier
+# versions of this script are made private again first.
+find /watched_dir /duplicates /Config -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \
+    -exec chmod 600 {} + 2>/dev/null || true
+find /watched_dir /duplicates /Config ! -type l ! \( -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \) \
+    -exec chmod 755 {} + 2>/dev/null || true
 
 # Switch to the specified user and run the application
 echo "Switching to user $USER_NAME (UID=$PUID, GID=$PGID)"

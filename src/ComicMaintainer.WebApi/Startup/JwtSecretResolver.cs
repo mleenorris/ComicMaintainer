@@ -67,19 +67,29 @@ internal static class JwtSecretResolver
             ignoredPlaceholders.Add(ConfigurationKey);
         }
 
-        var keyFile = Path.Combine(CoreServiceCollectionExtensions.ResolveConfigDirectory(configuration), KeyFileName);
+        var keyFile = Path.Join(ResolveKeyDirectory(configuration), KeyFileName);
         secret = ReadOrCreateKeyFile(keyFile, out var generated);
         return new JwtSigningSecret(secret, keyFile, keyFile, generated, ignoredPlaceholders);
     }
 
     private static bool IsPublishedPlaceholder(string secret) => Array.IndexOf(PublishedPlaceholders, secret.Trim()) >= 0;
 
+    // CONFIG_DIR wins over AppSettings:ConfigDirectory, as in AppSettingsEnvironmentPostConfigure, so the key is kept
+    // in the config directory the deployment chose.
+    private static string ResolveKeyDirectory(IConfiguration configuration)
+    {
+        var configDirectory = Environment.GetEnvironmentVariable("CONFIG_DIR");
+        return string.IsNullOrEmpty(configDirectory)
+            ? CoreServiceCollectionExtensions.ResolveConfigDirectory(configuration)
+            : configDirectory;
+    }
+
     private static string ReadOrCreateKeyFile(string path, out bool generated)
     {
         generated = false;
         try
         {
-            if (ReadKeyFile(path, out var replaceEmptyFile) is { } existing)
+            if (ReadKeyFile(path) is { } existing)
             {
                 return existing;
             }
@@ -90,20 +100,21 @@ internal static class JwtSecretResolver
             {
                 WriteOwnerOnlyFile(temporaryPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(GeneratedKeyBytes)));
 
-                // The key appears complete, so no reader sees part of it. Unless an empty file is being replaced, the
-                // move fails if another instance sharing the config directory saved its key first; that key wins.
-                File.Move(temporaryPath, path, overwrite: replaceEmptyFile);
+                // The key appears complete, so no reader sees part of it. The move never replaces a file, so when
+                // another instance sharing the config directory saved its key first, every instance uses that key.
+                File.Move(temporaryPath, path, overwrite: false);
                 generated = true;
             }
-            catch (IOException) when (!replaceEmptyFile && File.Exists(path))
+            catch (IOException) when (File.Exists(path))
             {
+                // Another instance saved its key first; it is read back below.
             }
             finally
             {
                 File.Delete(temporaryPath);
             }
 
-            return ReadKeyFile(path, out _) ?? throw new IOException("The file is empty.");
+            return ReadKeyFile(path) ?? throw new IOException("The file was removed while it was being read.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
@@ -116,10 +127,11 @@ internal static class JwtSecretResolver
         }
     }
 
-    // The saved key, or null when the file does not exist or (isEmpty) holds no key.
-    private static string? ReadKeyFile(string path, out bool isEmpty)
+    // The saved key, or null when the file does not exist. The app never saves an empty key or a published
+    // placeholder, so such a file is rejected rather than replaced: replacing it could leave instances that share the
+    // config directory with different keys.
+    private static string? ReadKeyFile(string path)
     {
-        isEmpty = false;
         string contents;
         try
         {
@@ -131,8 +143,19 @@ internal static class JwtSecretResolver
         }
 
         var key = contents.TrimEnd('\r', '\n');
-        isEmpty = string.IsNullOrWhiteSpace(key);
-        return isEmpty ? null : key;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new IOException("The file is empty; delete it so that a new key is generated.");
+        }
+
+        if (IsPublishedPlaceholder(key))
+        {
+            throw new IOException(
+                "The file holds a placeholder published with ComicMaintainer, which anyone could use to sign in as any " +
+                "user; delete it so that a new key is generated.");
+        }
+
+        return key;
     }
 
     // The key is a credential: on Unix only the app's user may read it.

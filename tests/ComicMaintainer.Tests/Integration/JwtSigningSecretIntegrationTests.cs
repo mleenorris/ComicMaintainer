@@ -46,7 +46,7 @@ public sealed class JwtSigningSecretIntegrationTests : IAsyncLifetime
     private readonly List<WebApplicationFactory<Program>> _factories = [];
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
-        new("JWT_SECRET", "JWT_SECRET_FILE", "ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "ADMIN_EMAIL");
+        new("JWT_SECRET", "JWT_SECRET_FILE", "CONFIG_DIR", "ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "ADMIN_EMAIL");
 
     // The "Secret" that appsettings.json shipped with, and the fallback of docker-compose.dotnet.yml and .env.example.
     public static TheoryData<string, bool> PublishedSecrets => new()
@@ -66,6 +66,8 @@ public sealed class JwtSigningSecretIntegrationTests : IAsyncLifetime
         Directory.CreateDirectory(Path.Join(_root, "watched"));
         Directory.CreateDirectory(Path.Join(_root, "duplicates"));
         Directory.CreateDirectory(Path.Join(_root, "secrets"));
+        // CONFIG_DIR, where the generated key is kept, otherwise points at the directory shared by the whole test run.
+        _environment.Set("CONFIG_DIR", ConfigDirectory);
         return Task.CompletedTask;
     }
 

@@ -49,7 +49,7 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "cm-auth-extensions-" + Guid.NewGuid().ToString("N"));
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
-        new("JWT_SECRET", "JWT_SECRET_FILE", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES", "AUTHELIA_ADMIN_GROUPS");
+        new("JWT_SECRET", "JWT_SECRET_FILE", "CONFIG_DIR", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES", "AUTHELIA_ADMIN_GROUPS");
 
     // Created by the app when it generates a key.
     private string ConfigDirectory => Path.Combine(_root, "config");
@@ -98,25 +98,62 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         Assert.Equal(firstKey, File.ReadAllText(KeyFile));
     }
 
+    [Fact]
+    public void WithoutASecret_UsesTheKeyFile()
+    {
+        Directory.CreateDirectory(ConfigDirectory);
+        File.WriteAllText(KeyFile, FileSecret + "\n");
+
+        using var provider = BuildProvider();
+
+        AssertSignsAndValidatesWith(provider, FileSecret);
+    }
+
+    // The app never saves such a key. Replacing it could leave instances that share the config directory with
+    // different keys, and a published placeholder would let anyone sign tokens, so the startup stops instead.
     [Theory]
-    [InlineData(FileSecret + "\n", FileSecret)]
-    [InlineData("\n", null)]
-    [InlineData("", null)]
-    public void WithoutASecret_UsesTheKeyFileUnlessItIsEmpty(string contents, string? expectedKey)
+    [InlineData("", "The file is empty")]
+    [InlineData("\n", "The file is empty")]
+    [InlineData(PublishedAppSettingsSecret + "\n", "The file holds a placeholder published with ComicMaintainer")]
+    [InlineData(PublishedComposeSecret, "The file holds a placeholder published with ComicMaintainer")]
+    public void WithoutASecret_RejectsAKeyFileWithoutAUsableKey(string contents, string reason)
     {
         Directory.CreateDirectory(ConfigDirectory);
         File.WriteAllText(KeyFile, contents);
 
+        var exception = Assert.Throws<InvalidOperationException>(() => BuildProvider());
+
+        Assert.StartsWith($"No JWT secret is configured, and the signing key generated in its place cannot be saved to or read from '{KeyFile}': {reason}", exception.Message);
+        Assert.Equal(contents, File.ReadAllText(KeyFile));
+    }
+
+    // JWT_SECRET_FILE pointing at the key file with a published placeholder in it must not reach the key file fallback.
+    [Theory]
+    [InlineData(PublishedAppSettingsSecret)]
+    [InlineData(PublishedComposeSecret)]
+    public void JwtSecretFile_NamingAKeyFileThatHoldsAPublishedSecret_StopsTheStartup(string publishedSecret)
+    {
+        Directory.CreateDirectory(ConfigDirectory);
+        File.WriteAllText(KeyFile, publishedSecret + "\n");
+        _environment.Set("JWT_SECRET_FILE", KeyFile);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => BuildProvider());
+
+        Assert.Contains("The file holds a placeholder published with ComicMaintainer", exception.Message);
+    }
+
+    // As for the other settings, CONFIG_DIR wins over AppSettings:ConfigDirectory.
+    [Fact]
+    public void WithoutASecret_SavesTheKeyInConfigDir()
+    {
+        var configDir = Path.Join(_root, "config-dir");
+        _environment.Set("CONFIG_DIR", configDir);
+
         using var provider = BuildProvider();
 
-        var key = File.ReadAllText(KeyFile);
-        if (expectedKey is null)
-        {
-            Assert.Equal(48, Convert.FromBase64String(key).Length);
-            expectedKey = key;
-        }
-
-        AssertSignsAndValidatesWith(provider, expectedKey);
+        var key = File.ReadAllText(Path.Join(configDir, "jwt-secret.key"));
+        AssertSignsAndValidatesWith(provider, key);
+        Assert.False(File.Exists(KeyFile));
     }
 
     [Fact]

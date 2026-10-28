@@ -107,7 +107,7 @@
                 
                 // Reload files if perPage changed from default
                 if (libraryViewMode !== oldLibraryViewMode || sortMode !== oldSortMode || (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE)) {
-                    loadActiveLibraryView(1);
+                    loadActiveLibraryView();
                 }
             });
             
@@ -164,7 +164,7 @@
                     // Trigger a fresh load with the search applied. Tests for
                     // emptiness avoid an unnecessary reload when nothing
                     // changed.
-                    loadActiveLibraryView(1, false);
+                    loadActiveLibraryView();
                 }
                 // Reopen the series detail panel if one was open.
                 if (snap.currentSeriesDetailId

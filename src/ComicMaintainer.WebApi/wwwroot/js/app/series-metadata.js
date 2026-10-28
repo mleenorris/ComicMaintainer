@@ -164,7 +164,7 @@
                 return;
             }
             if (!jobProgress.canStartJob()) return;
-            if (!confirm(`Re-apply the current cached series image to ${series.length} selected series${series.length === 1 ? '' : 'es'}? This may rewrite archive files.`)) {
+            if (!confirm(`Re-apply the current cached series image to ${series.length} selected series? This may rewrite archive files.`)) {
                 return;
             }
             showProgressModal('Starting cover update...');

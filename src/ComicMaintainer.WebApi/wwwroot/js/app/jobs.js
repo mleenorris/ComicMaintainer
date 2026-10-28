@@ -273,9 +273,18 @@
                     `Cleared processed status on ${data.cleared} of ${data.requested} file(s). ` +
                     'Run Process / Rename / Normalize to reapply.',
                     'success');
-                // Refresh the file list so badges update.
-                if (typeof loadFiles === 'function') {
-                    loadFiles(true);
+                // Reload what is shown so the status badges update: an open
+                // series's issues in place, then the library view (kept
+                // behind an open series), which also updates the
+                // "… Unmarked" actions and the library health. Every loaded
+                // series page is reloaded so series selected beyond the
+                // first page stay selected for reprocessing.
+                if (libraryViewMode === 'series' && currentSeriesDetailId &&
+                    typeof loadSeriesIssues === 'function') {
+                    await loadSeriesIssues(currentSeriesDetailId, true);
+                }
+                if (typeof loadActiveLibraryView === 'function') {
+                    await loadActiveLibraryView({ refresh: true, keepLoaded: true });
                 }
             } catch (err) {
                 console.error('clearSelectedProcessedStatus failed', err);
@@ -586,7 +595,7 @@
                     showMessage(`Batch processing completed: ${successCount} of ${total} files processed successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`, successCount > 0 ? 'success' : 'warning');
                     
                     // Refresh file list to show updated status
-                    await loadActiveLibraryView(1, true);
+                    await loadActiveLibraryView({ refresh: true });
                 } else if (status.status === 'failed') {
                     // Job failed while we were away
                     console.error(`[JOB RESUME] Job ${activeJobId} already failed`);
@@ -604,7 +613,7 @@
                     showMessage(
                         `Batch processing was interrupted by a server restart after ${processed} of ${total} files. Re-run it to process the rest.`,
                         'warning');
-                    await loadActiveLibraryView(1, true);
+                    await loadActiveLibraryView({ refresh: true });
                 }
             } catch (error) {
                 // Network error or other exception
@@ -1211,7 +1220,7 @@
                 }
                 
                 showMessage('File deleted successfully!', 'success');
-                await loadActiveLibraryView(1, true);
+                await loadActiveLibraryView({ refresh: true });
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');
             }
@@ -1237,7 +1246,7 @@
                 }
 
                 showMessage('Metadata removed and file marked unprocessed.', 'success');
-                await loadActiveLibraryView(1, true);
+                await loadActiveLibraryView({ refresh: true });
             } catch (error) {
                 showMessage('Failed to remove metadata: ' + error.message, 'error');
             }
@@ -1251,7 +1260,7 @@
             if (libraryViewMode === 'series' && currentSeriesDetailId) {
                 await loadSeriesIssues(currentSeriesDetailId, true);
             } else {
-                await loadActiveLibraryView(1, true);
+                await loadActiveLibraryView({ refresh: true });
             }
         }
 
@@ -1452,7 +1461,7 @@
         
         function refreshFiles() {
             showMessage('Refreshing file list...', 'info');
-            loadActiveLibraryView(1, true);
+            loadActiveLibraryView({ refresh: true });
         }
         
         // Helper: toggle the progress indicator pill, adding the
@@ -1800,11 +1809,12 @@
                 console.log(`[BULK DELETE] Created job ${jobId} for ${totalItems} file(s)`);
                 showMessage(`Deleting ${totalItems} file(s) in background`, 'info');
 
-                // Clear selected files now; the server is authoritative from this
-                // point on and SSE events (job_updated / file_processed /
-                // file_list_updated) will refresh the library in place.
-                selectedFiles.clear();
-                resetSeriesSelectionState();
+                // Clear the selection now, on the page too: the server is
+                // authoritative from this point on, and the SSE events
+                // (job_updated / file_processed / file_list_updated) that
+                // refresh the library in place never come if the job is
+                // cancelled before it deletes a file or the event stream is down.
+                clearSelection();
 
                 // Track via the standard SSE-driven progress modal.
                 await trackJobStatus(jobId, `Deleting ${totalItems} file(s)...`);

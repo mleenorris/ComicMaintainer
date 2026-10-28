@@ -9,12 +9,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { deferred } = require('./support/app');
 const { respond } = require('./support/dom');
+const { makeSeries, makeSeriesList, seriesPages } = require('./support/library-helpers');
 const h = require('./support/jobs-helpers');
 
 const { ISSUE_A, ISSUE_B } = h;
 const plural = n => (n > 1 ? 's' : '');
 const forcePrompt = (description, status) =>
     `${description}\n\nClick OK to include files already marked as ${status}, or Cancel to skip them.`;
+const clearStatusConfirm = n => `Clear the renamed/normalized flags on ${n} selected file${plural(n)}?\n\n`
+    + 'The files will then be re-processed on the next Process / Rename / Normalize run.';
 
 const SELECTED_ACTIONS = [
     {
@@ -280,15 +283,73 @@ test('Delete deletes the selected issues in a background job', async (t) => {
     assert.deepEqual(page.errors, []);
 });
 
+test('Delete clears the selection on the page at once, even if the job is cancelled before it deletes a file', async (t) => {
+    const page = await h.bootSeriesDetail(t, {
+        routes: {
+            'POST /api/jobs/delete-selected': { job_id: h.JOB_ID, total_items: 2 },
+            [`GET /api/jobs/${h.JOB_ID}`]: h.jobStatus({ total_items: 2 }),
+            [`POST /api/jobs/${h.JOB_ID}/cancel`]: { success: true }
+        }
+    });
+    // The selection as the page shows it: the selection bar and its batch
+    // actions, the select-all box and the issue cards.
+    const shownSelection = () => ({
+        info: page.$('#selectInfo').textContent,
+        deleteEnabled: !page.$('#deleteSelectedBtn').disabled,
+        updateEnabled: !page.$('#batchUpdateBtn').disabled,
+        selectAll: page.$('#selectAll').checked,
+        ticked: page.$$('#seriesDetailPanel .series-issue-select input[type="checkbox"]').filter(box => box.checked).length,
+        highlighted: page.$$('#seriesDetailPanel .series-issue-card--selected').length
+    });
+    const NOTHING_SELECTED = { info: 'No files selected', deleteEnabled: false, updateEnabled: false, selectAll: false, ticked: 0, highlighted: 0 };
+    const grid = page.$('#seriesDetailPanel .series-issues-grid');
+    assert.ok(grid);
+
+    h.selectIssue(page, ISSUE_A);
+    h.selectIssue(page, ISSUE_B);
+    assert.deepEqual(shownSelection(), { info: '2 files selected', deleteEnabled: true, updateEnabled: true, selectAll: true, ticked: 2, highlighted: 2 });
+
+    page.click('#deleteSelectedBtn');
+    await page.settle();
+    h.takeConfirms(page);
+    assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: 'Deleting 2 file(s) in background' }]);
+    // Before the server reports anything, and in place: the page is not
+    // redrawn, so it keeps its scroll position.
+    assert.deepEqual(shownSelection(), NOTHING_SELECTED);
+    assert.equal(page.$('#seriesDetailPanel .series-issues-grid'), grid);
+
+    // Cancelled before it deletes a file, the job sends no file_processed
+    // event to redraw the page; nothing shows as selected afterwards either.
+    page.click('#progressCancelBtn');
+    await page.settle();
+    h.takeConfirms(page);
+    assert.deepEqual(h.takeMessages(page), [{ type: 'warning', text: 'Batch processing cancelled' }]);
+    h.jobUpdate(page, 'cancelled', h.progress(0, 2));
+    await h.tick(t, page, 500);
+    await h.tick(t, page, 2000);
+    assert.equal(h.progressView(page).open, false);
+    assert.deepEqual(shownSelection(), NOTHING_SELECTED);
+    assert.equal(page.run('selectedFiles.size'), 0);
+
+    // The issues can be selected afresh.
+    h.selectIssue(page, ISSUE_A);
+    assert.deepEqual(shownSelection(), { info: '1 file selected', deleteEnabled: true, updateEnabled: true, selectAll: false, ticked: 1, highlighted: 1 });
+    assert.deepEqual(page.errors, []);
+});
+
 test('Clear Processed Status clears the flags of the selected issues', async (t) => {
     let answer = _call => ({ cleared: 1, requested: 2 });
+    let issues = [h.seriesIssue(ISSUE_A, { duplicate: true }), h.seriesIssue(ISSUE_B)];
+    let unmarked = 0;
     const page = await h.bootSeriesDetail(t, {
-        routes: { 'POST /api/status/clear-selected': call => answer(call) }
+        routes: {
+            'GET /api/files/series': () => ({ series: [], total_series: 0, unmarked_count: unmarked }),
+            'GET /api/files/series/s1/issues': () => h.seriesIssues(issues),
+            'POST /api/status/clear-selected': call => answer(call)
+        }
     });
     const clears = () => h.requests(page, 'POST', '/api/status/clear-selected');
     const clearSelected = () => h.chooseMenuItem(page, 'processDropdown', 'Clear Processed Status');
-    const confirmText = n => `Clear the renamed/normalized flags on ${n} selected file${plural(n)}?\n\n`
-        + 'The files will then be re-processed on the next Process / Rename / Normalize run.';
 
     assert.equal(page.$('#clearSelectedStatusItem').disabled, true);
     page.run('clearSelectedProcessedStatus()');
@@ -299,14 +360,14 @@ test('Clear Processed Status clears the flags of the selected issues', async (t)
     h.answerConfirms(page, false);
     clearSelected();
     await page.settle();
-    assert.deepEqual(h.takeConfirms(page), [confirmText(1)]);
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(1)]);
     assert.equal(clears().length, 0);
 
     h.selectIssue(page, ISSUE_B);
     answer = () => respond(500, { error: 'Error clearing status' });
     clearSelected();
     await page.settle();
-    assert.deepEqual(h.takeConfirms(page), [confirmText(2)]);
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(2)]);
     assert.deepEqual(clears()[0].body, { Files: [ISSUE_A, ISSUE_B] });
     assert.equal(clears()[0].init.credentials, 'same-origin');
     assert.match(clears()[0].headers.authorization, /^Bearer /);
@@ -318,21 +379,146 @@ test('Clear Processed Status clears the flags of the selected issues', async (t)
     assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to clear processed status: Failed to fetch' }]);
 
     // The server reports how many of the requested files had flags to clear.
-    // The list refresh that follows is not asserted: it loads the folder view
-    // (loadFiles() → GET /api/files/folders) even on a series page, which
-    // looks like a bug.
+    // The open series then reloads its issues in place, so their badges show
+    // the cleared flags; the selection stays for processing them again. The
+    // library behind the series reloads too, so the "… Unmarked" actions and
+    // the library health counts take in the cleared files.
+    issues = [h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)];
+    unmarked = 2;
+    const unmarkedItems = () => ['processUnmarkedItem', 'renameUnmarkedItem', 'normalizeUnmarkedItem']
+        .map(id => page.$(`#${id}`).style.display);
+    const issueLoads = () => h.requests(page, 'GET', '/api/files/series/s1/issues').length;
+    const healthLoads = () => h.requests(page, 'GET', '/api/files/counts').length;
+    const loadsBefore = issueLoads();
+    const healthBefore = healthLoads();
+    assert.equal(page.$$('.series-issue-duplicate-badge').length, 1);
+    assert.deepEqual(unmarkedItems(), ['none', 'none', 'none']);
     answer = () => ({ cleared: 1, requested: 2 });
     clearSelected();
     await page.settle();
-    assert.deepEqual(h.takeMessages(page)[0], {
+    assert.deepEqual(h.takeMessages(page), [{
         type: 'success',
         text: 'Cleared processed status on 1 of 2 file(s). Run Process / Rename / Normalize to reapply.'
-    });
+    }]);
+    assert.equal(issueLoads(), loadsBefore + 1, 'the open series reloads its issues in place');
+    assert.equal(page.$$('.series-issue-duplicate-badge').length, 0, 'the badges show the cleared flags');
+    assert.equal(page.window.location.hash, '#/series/s1');
+    assert.ok(page.$('#seriesDetailPanel'), 'the series stays open');
+    assert.equal(page.$('#fileList .folder-section'), null);
+    assert.equal(h.requests(page, 'GET', '/api/files/folders').length, 0, 'the retired folder view is not loaded');
+    assert.equal(h.requests(page, 'GET', h.LIBRARY_RELOAD).length, 1, 'the library behind the series reloads');
+    assert.deepEqual(unmarkedItems(), ['', '', ''], 'the "… Unmarked" actions are offered for the cleared files');
+    assert.equal(healthLoads(), healthBefore + 1, 'the library health counts reload');
+    assert.equal(page.$$('.series-issue-select input:checked').length, 2);
+    assert.equal(page.$('#selectInfo').textContent, '2 files selected');
 
     answer = () => 401;
     page.run('clearSelectedProcessedStatus()');
     await page.settle();
     assert.equal(h.loginRedirects(page), 1);
     assert.deepEqual(h.messages(page), []);
+    assert.deepEqual(page.errors, []);
+});
+
+test('Clear Processed Status on series ticked in the library reloads the series list', async (t) => {
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            'GET /api/files/series': { series: [makeSeries(1)], total_series: 1, unmarked_count: 0 },
+            'GET /api/files/series/series-1/issues':
+                h.seriesIssues([h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)], { id: 'series-1' }),
+            'POST /api/status/clear-selected': { cleared: 2, requested: 2 }
+        }
+    });
+    const selectBox = () => page.$('#fileList .series-select-box[data-series-id="series-1"]');
+    page.click(selectBox());
+    await page.settle();
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+
+    h.chooseMenuItem(page, 'processDropdown', 'Clear Processed Status');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(2)]);
+    assert.deepEqual(h.requests(page, 'POST', '/api/status/clear-selected')[0].body, { Files: [ISSUE_A, ISSUE_B] });
+    assert.deepEqual(h.takeMessages(page), [{
+        type: 'success',
+        text: 'Cleared processed status on 2 of 2 file(s). Run Process / Rename / Normalize to reapply.'
+    }]);
+    assert.equal(h.requests(page, 'GET', h.LIBRARY_RELOAD).length, 1, 'the series list reloads');
+    assert.equal(h.requests(page, 'GET', '/api/files/folders').length, 0, 'the retired folder view is not loaded');
+    assert.equal(page.$('#fileList .file-list-header'), null);
+    assert.equal(page.window.location.hash, '#/library');
+    assert.equal(selectBox().getAttribute('aria-checked'), 'true', 'the reloaded series stays ticked');
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+    assert.deepEqual(page.errors, []);
+});
+
+test('Clear Processed Status keeps a series ticked beyond the first page of the library selected', async (t) => {
+    const all = makeSeriesList(70);
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            'GET /api/files/series': seriesPages(all),
+            'GET /api/files/series/series-65/issues':
+                h.seriesIssues([h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)], { id: 'series-65' }),
+            'POST /api/status/clear-selected': { cleared: 2, requested: 2 }
+        }
+    });
+    page.run('loadSeriesLibrary({ append: true })');
+    await page.settle();
+    assert.equal(page.$$('#fileList .series-card').length, 70);
+    const selectBox = () => page.$('#fileList .series-select-box[data-series-id="series-65"]');
+    page.click(selectBox());
+    await page.settle();
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+
+    h.chooseMenuItem(page, 'processDropdown', 'Clear Processed Status');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(2)]);
+    const reloads = h.requests(page, 'GET', /^\/api\/files\/series\?offset=0&limit=70&refresh=true$/);
+    assert.equal(reloads.length, 1, 'every loaded page of the series list reloads');
+    assert.equal(page.$$('#fileList .series-card').length, 70);
+    assert.equal(selectBox().getAttribute('aria-checked'), 'true', 'the series beyond the first page stays ticked');
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+    assert.equal(page.$('#processSelectedItem').disabled, false, 'the series can be processed again right away');
+    assert.deepEqual(page.errors, []);
+});
+
+test('overlapping Clear Processed Status refreshes keep a series ticked beyond the first page selected', async (t) => {
+    const all = makeSeriesList(70);
+    const listSeries = seriesPages(all);
+    let gate = null;
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            'GET /api/files/series': call => (gate && call.query.refresh === 'true'
+                ? gate.promise.then(() => listSeries(call))
+                : listSeries(call)),
+            'GET /api/files/series/series-65/issues':
+                h.seriesIssues([h.seriesIssue(ISSUE_A), h.seriesIssue(ISSUE_B)], { id: 'series-65' }),
+            'POST /api/status/clear-selected': { cleared: 2, requested: 2 }
+        }
+    });
+    page.run('loadSeriesLibrary({ append: true })');
+    await page.settle();
+    assert.equal(page.$$('#fileList .series-card').length, 70);
+    const selectBox = () => page.$('#fileList .series-select-box[data-series-id="series-65"]');
+    page.click(selectBox());
+    await page.settle();
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+
+    // The first clear's refresh is still loading (and has emptied the list)
+    // when the second clear completes.
+    gate = deferred();
+    h.chooseMenuItem(page, 'processDropdown', 'Clear Processed Status');
+    await page.settle();
+    page.run('clearSelectedProcessedStatus()');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(2), clearStatusConfirm(2)]);
+    gate.resolve();
+    await page.settle();
+
+    const reloads = h.requests(page, 'GET', /^\/api\/files\/series\?offset=0&limit=70(&refresh=true)?$/);
+    assert.equal(reloads.length, 2, 'the queued reload fetches every series loaded before the first clear');
+    assert.equal(page.$$('#fileList .series-card').length, 70);
+    assert.equal(selectBox().getAttribute('aria-checked'), 'true', 'the series beyond the first page stays ticked');
+    assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
+    assert.equal(page.$('#processSelectedItem').disabled, false, 'the series can be processed again right away');
     assert.deepEqual(page.errors, []);
 });

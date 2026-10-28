@@ -1,3 +1,4 @@
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Hosting;
@@ -9,7 +10,7 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Controllers;
 
-public class ServiceWorkerControllerTests
+public class ServiceWorkerControllerTests : IDisposable
 {
     private readonly Mock<IWebHostEnvironment> _mockEnvironment;
     private readonly Mock<ILogger<ServiceWorkerController>> _mockLogger;
@@ -42,6 +43,24 @@ public class ServiceWorkerControllerTests
         {
             HttpContext = httpContext
         };
+    }
+
+    public void Dispose()
+    {
+        TestIO.TryDeleteDirectory(_tempDirectory);
+    }
+
+    [Fact]
+    public void Dispose_DeletesTheTempDirectory()
+    {
+        // Regression test for #876: every test used to leave its directory behind.
+        File.WriteAllText(Path.Combine(_tempDirectory, "sw.js"), "// Service Worker");
+
+        // xUnit only disposes test classes that implement IDisposable.
+        Assert.IsAssignableFrom<IDisposable>(this);
+        Dispose();
+
+        Assert.False(Directory.Exists(_tempDirectory));
     }
 
     [Fact]

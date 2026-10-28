@@ -300,6 +300,11 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             lookup = await _externalMetadata.LookupSeriesAsync(lookupQuery, cancellationToken);
             status = lookup is null ? "not_found" : "success";
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller gave up; the provider didn't fail.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(lookupQuery));

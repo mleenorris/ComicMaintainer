@@ -289,6 +289,15 @@ public partial class ComicProcessorService
             return filenameStem;
         }
 
+        // FormatFilename keeps an issue it cannot read as a number (e.g. "1,000", "1,5",
+        // "Extra") verbatim, so such a value already rendered into the name is preserved.
+        if (!float.TryParse(chapterToPreserve, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out _) &&
+            ContainsStandaloneToken(filenameStem, chapterToPreserve))
+        {
+            return filenameStem;
+        }
+
         // Format the chapter number with the configured padding so the
         // appended value is consistent with how the rest of the codebase
         // renders chapter numbers.
@@ -301,6 +310,42 @@ public partial class ComicProcessorService
 
         var separator = string.IsNullOrEmpty(filenameStem) ? string.Empty : " - ";
         return $"{filenameStem}{separator}Chapter {formattedChapter}";
+    }
+
+    private static bool ContainsStandaloneToken(string text, string token)
+    {
+        var index = text.IndexOf(token, StringComparison.Ordinal);
+        while (index >= 0)
+        {
+            var end = index + token.Length;
+            if (IsTokenBoundary(text, index - 1, -1) && IsTokenBoundary(text, end, 1))
+            {
+                return true;
+            }
+
+            index = text.IndexOf(token, index + 1, StringComparison.Ordinal);
+        }
+
+        return false;
+    }
+
+    // A position is a boundary unless it holds a letter/digit, or a "," / "." joining
+    // another numeric component (e.g. the ",000" in "1,000,000").
+    private static bool IsTokenBoundary(string text, int position, int direction)
+    {
+        if (position < 0 || position >= text.Length)
+        {
+            return true;
+        }
+
+        var c = text[position];
+        if (char.IsLetterOrDigit(c))
+        {
+            return false;
+        }
+
+        var next = position + direction;
+        return !((c == ',' || c == '.') && next >= 0 && next < text.Length && char.IsDigit(text[next]));
     }
 
     private static string FormatChapterForFilename(string chapter, int padding)

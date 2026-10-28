@@ -27,6 +27,11 @@
             localStorage.setItem('theme', newTheme);
         }
         
+        // Hide timers of the messages below. Showing a message again cancels
+        // its earlier timer, which would otherwise hide the new one early.
+        let errorHideTimer = null;
+        let successHideTimer = null;
+        
         // Show error message
         function showError(message) {
             const errorElement = document.getElementById('errorMessage');
@@ -37,7 +42,8 @@
             errorElement.classList.add('show');
             errorElement.textContent = message;
             
-            setTimeout(() => {
+            clearTimeout(errorHideTimer);
+            errorHideTimer = setTimeout(() => {
                 errorElement.classList.remove('show');
                 errorElement.textContent = '';
             }, 5000);
@@ -49,7 +55,8 @@
             successElement.classList.add('show');
             successElement.textContent = message;
             
-            setTimeout(() => {
+            clearTimeout(successHideTimer);
+            successHideTimer = setTimeout(() => {
                 successElement.classList.remove('show');
                 successElement.textContent = '';
             }, 3000);
@@ -94,7 +101,8 @@
             return currentTime >= expirationTime;
         }
         
-        // Check if setup is required
+        // Check if setup is required. Resolves to true when it is, and the
+        // page is on its way to the setup page.
         async function checkSetupRequired() {
             try {
                 const response = await fetch(apiUrl('/api/auth/setup-required'));
@@ -103,10 +111,12 @@
                 if (data.setupRequired) {
                     // Setup is required, redirect to setup page
                     window.location.href = '/setup.html';
+                    return true;
                 }
             } catch (error) {
                 console.error('Error checking setup status:', error);
             }
+            return false;
         }
         
         // Check if already logged in (including Authelia)
@@ -171,6 +181,10 @@
             loginBtnText.classList.add('hidden');
             loginBtnSpinner.classList.remove('hidden');
             
+            // Set once signed in: the button then stays disabled until the page
+            // navigates, so a second click cannot sign in again.
+            let redirecting = false;
+            
             try {
                 const response = await fetch(apiUrl('/api/auth/login'), {
                     method: 'POST',
@@ -189,6 +203,7 @@
                     
                     // Show success and redirect
                     showSuccess('Login successful! Redirecting...');
+                    redirecting = true;
                     
                     setTimeout(() => {
                         window.location.href = '/';
@@ -200,18 +215,23 @@
                 console.error('Login error:', error);
                 showError('An error occurred. Please try again.');
             } finally {
-                // Reset button state
-                loginBtn.disabled = false;
-                loginBtnText.classList.remove('hidden');
-                loginBtnSpinner.classList.add('hidden');
+                // Reset button state, unless the page is about to navigate
+                if (!redirecting) {
+                    loginBtn.disabled = false;
+                    loginBtnText.classList.remove('hidden');
+                    loginBtnSpinner.classList.add('hidden');
+                }
             }
         });
         
         // Initialize theme on page load
         initTheme();
         
-        // Check if setup is required first
-        checkSetupRequired();
-        
-        // Check if already authenticated
-        checkAuth();
+        // Check if setup is required first, and only when it is not whether the
+        // user is already authenticated: either check can redirect, and the
+        // page must redirect only once.
+        checkSetupRequired().then(setupRequired => {
+            if (!setupRequired) {
+                checkAuth();
+            }
+        });

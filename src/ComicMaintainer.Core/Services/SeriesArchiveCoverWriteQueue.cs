@@ -147,7 +147,7 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
                 await ProcessAsync(request, cancellationToken);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Expected on shutdown.
         }
@@ -175,7 +175,9 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
                     cancellationToken);
             }
         }
-        catch (OperationCanceledException)
+        // Only the queue's own stop ends the consumer; any other cancellation
+        // (e.g. a timeout inside the writer) is a failure of this one item.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }

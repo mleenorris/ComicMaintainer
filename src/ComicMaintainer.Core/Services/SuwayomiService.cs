@@ -774,7 +774,11 @@ public class SuwayomiService : ISuwayomiService
         return 0;
     }
 
-    private static string Normalize(string value)
+    /// <summary>
+    /// Lower-cases <paramref name="value"/> and keeps only letters and digits,
+    /// so titles that differ only in punctuation or spacing compare equal.
+    /// </summary>
+    internal static string Normalize(string value)
     {
         var filtered = value
             .ToLowerInvariant()

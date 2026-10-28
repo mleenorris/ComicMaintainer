@@ -26,10 +26,14 @@ services:
       # - TELEMETRY__METRICSTOKEN=change-me          # require "Authorization: Bearer <token>" on /metrics
       # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317  # push metrics + traces via OTLP
       # - API__ENABLESWAGGER=true                    # serve Swagger UI at /swagger outside Development
+      # Import Suwayomi downloads (see .env.example); pair with the volume below:
+      # - SUWAYOMI_DOWNLOADS_DIR=/suwayomi/downloads/mangas
     volumes:
       - ./test_comics:/watched_dir
       - ./duplicates:/duplicates
       - ./config:/Config
+      # Suwayomi's data folder, outside the watched directory and writable by PUID/PGID:
+      # - ./suwayomi:/suwayomi
     restart: unless-stopped
     # --- Container hardening --------------------------------------------------
     # The entrypoint starts as root to create the PUID/PGID user (groupadd/groupmod/

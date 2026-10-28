@@ -57,57 +57,80 @@ test('showMessage keeps persistent messages until the caller removes them', t =>
     assert.deepEqual(messages(page), []);
 });
 
+/** Fetch `path`, throw apiResponseError() for a failure and report what was caught, as the app's callers do. */
+function reportFailure(page, label, path, method = 'GET') {
+    return page.run(`fetch(apiUrl('${path}'), { method: '${method}' })
+        .then(response => { if (!response.ok) throw apiResponseError(response); })
+        .catch(error => showMessage('${label}: ' + error.message, 'error', { reference: error }))`);
+}
+
 test('a failed API call\'s correlation id is appended to the error reported for it', async () => {
     const page = apiPage({
         routes: {
             'GET /api/files/series': respond(500, { error: 'database is locked' }, { 'X-Correlation-Id': 'corr-500' })
         }
     });
-    const response = await page.run("fetch(apiUrl('/api/files/series'))");
-    assert.equal(response.status, 500, 'the wrapped fetch still returns the response');
-    page.run("showMessage('Failed to load series', 'error', { reference: true })");
-    page.run("showMessage('Failed to load series (ref: corr-500)', 'error', { reference: true })");
+    await reportFailure(page, 'Failed to load series', '/api/files/series');
+    page.run("showMessage('Failed to load series (ref: corr-500)', 'error', { reference: 'corr-500' })");
     page.run("showMessage('Clipboard access denied', 'error')");
     assert.deepEqual(messages(page).map(message => message.text), [
-        'Failed to load series (ref: corr-500)',
+        'Failed to load series: HTTP error! status: 500 (ref: corr-500)',
         'Failed to load series (ref: corr-500)',
         'Clipboard access denied'
     ]);
 });
 
-test('only non-auth failures that carry a correlation id are remembered', async () => {
+test('apiResponseError keeps the status and the correlation id of a non-auth failure', async () => {
     const page = apiPage({
         routes: {
             'GET /api/first': respond(500, { error: 'boom' }, { 'X-Correlation-Id': 'corr-first' }),
             'GET /api/unauthorized': respond(401, { error: 'expired' }, { 'X-Correlation-Id': 'corr-401' }),
             'GET /api/forbidden': respond(403, { error: 'read-only' }, { 'X-Correlation-Id': 'corr-403' }),
-            'GET /api/no-id': respond(502, 'Bad gateway'),
-            'GET /api/ok': respond(200, { ok: true }, { 'X-Correlation-Id': 'corr-ok' })
+            'GET /api/no-id': respond(502, 'Bad gateway')
         }
     });
-    assert.equal(page.run('withApiFailureReference("Nothing failed", true)'), 'Nothing failed');
-    await page.run("fetch('/api/first')");
-    for (const path of ['/api/unauthorized', '/api/forbidden', '/api/no-id', '/api/ok']) {
-        await page.run(`fetch('${path}')`);
-    }
-    assert.equal(page.run('withApiFailureReference("Failed", true)'), 'Failed (ref: corr-first)');
-    assert.equal(page.run('withApiFailureReference("Failed", "explicit-7")'), 'Failed (ref: explicit-7)');
-    assert.equal(page.run('withApiFailureReference("Failed", "")'), 'Failed');
+    const errorFor = async (path, message) => plain(await page.run(`fetch('${path}').then(response => {
+        const error = apiResponseError(response${message ? `, '${message}'` : ''});
+        return { isError: error instanceof Error, message: error.message, status: error.status, correlationId: error.correlationId };
+    })`));
+
+    assert.deepEqual(await errorFor('/api/first'), { isError: true, message: 'HTTP error! status: 500', status: 500, correlationId: 'corr-first' });
+    assert.deepEqual(await errorFor('/api/first', 'boom'), { isError: true, message: 'boom', status: 500, correlationId: 'corr-first' });
+    // 401/403 are explained by their own handling; a reference would be noise.
+    assert.deepEqual(await errorFor('/api/unauthorized'), { isError: true, message: 'HTTP error! status: 401', status: 401, correlationId: null });
+    assert.deepEqual(await errorFor('/api/forbidden'), { isError: true, message: 'HTTP error! status: 403', status: 403, correlationId: null });
+    assert.deepEqual(await errorFor('/api/no-id'), { isError: true, message: 'HTTP error! status: 502', status: 502, correlationId: null });
 });
 
-test('a correlation id older than fifteen seconds is no longer attached', async () => {
+test('a failure is reported with its own correlation id or none, never an earlier request\'s', async () => {
     const page = apiPage({
-        routes: { 'POST /api/jobs': respond(500, { error: 'boom' }, { 'X-Correlation-Id': 'corr-old' }) }
+        routes: {
+            'POST /api/backups': respond(500, { error: 'No space left on device' }, { 'X-Correlation-Id': 'corr-create' }),
+            'DELETE /api/backups/old.db': () => { throw new TypeError('Failed to fetch'); },
+            'GET /api/files/series': respond(502, 'Bad gateway'),
+            'GET /api/files/folders': respond(403, { error: 'read-only' }, { 'X-Correlation-Id': 'corr-403' }),
+            'GET /api/files/counts': respond(500, { error: 'boom' }, { 'X-Correlation-Id': 'corr-counts' })
+        }
     });
-    page.run('Date.now = () => 1700000000000');
-    await page.run("fetch('/api/jobs', { method: 'POST' })");
-    page.run('Date.now = () => 1700000015000');
-    assert.equal(page.run('withApiFailureReference("Job failed", true)'), 'Job failed (ref: corr-old)');
-    page.run('Date.now = () => 1700000015001');
-    assert.equal(page.run('withApiFailureReference("Job failed", true)'), 'Job failed');
+    await reportFailure(page, 'Failed to create backup', '/api/backups', 'POST');
+    await reportFailure(page, 'Failed to delete backup', '/api/backups/old.db', 'DELETE');
+    await reportFailure(page, 'Failed to load series', '/api/files/series');
+    await reportFailure(page, 'Failed to load files', '/api/files/folders');
+    await reportFailure(page, 'Failed to load counts', '/api/files/counts');
+    page.run("showMessage('Clipboard access denied', 'error', { reference: new Error('denied') })");
+    assert.deepEqual(messages(page).map(message => message.text), [
+        'Failed to create backup: HTTP error! status: 500 (ref: corr-create)',
+        'Failed to delete backup: Failed to fetch',
+        'Failed to load series: HTTP error! status: 502',
+        'Failed to load files: HTTP error! status: 403',
+        'Failed to load counts: HTTP error! status: 500 (ref: corr-counts)',
+        'Clipboard access denied'
+    ]);
+    // There is no "whatever failed last" to fall back on.
+    assert.equal(page.run('withApiFailureReference("Failed", true)'), 'Failed');
 });
 
-test('opaque failed responses whose headers cannot be read are ignored', async () => {
+test('a failed response whose headers cannot be read has no reference', async () => {
     const page = apiPage({
         routes: {
             'GET /api/opaque'() {
@@ -119,15 +142,25 @@ test('opaque failed responses whose headers cannot be read are ignored', async (
             }
         }
     });
-    const response = await page.run("fetch('/api/opaque')");
-    assert.equal(response.status, 500);
-    assert.equal(page.run('withApiFailureReference("Failed", true)'), 'Failed');
+    await reportFailure(page, 'Failed', '/api/opaque');
+    assert.deepEqual(messages(page).map(message => message.text), ['Failed: HTTP error! status: 500']);
 });
 
-test('api.js leaves fetch alone when the browser has none to wrap', () => {
+test('withApiFailureReference appends an explicit id, or the reported error\'s own', () => {
+    const page = apiPage();
+    assert.equal(page.run('withApiFailureReference("Failed", "explicit-7")'), 'Failed (ref: explicit-7)');
+    assert.equal(page.run('withApiFailureReference("Failed (ref: explicit-7)", "explicit-7")'), 'Failed (ref: explicit-7)');
+    assert.equal(page.run('withApiFailureReference("Failed", Object.assign(new Error("boom"), { correlationId: "corr-9" }))'), 'Failed (ref: corr-9)');
+    for (const reference of ['""', 'new TypeError("Failed to fetch")', '{ correlationId: null }', '{ correlationId: 42 }', 'true', 'null', 'undefined']) {
+        assert.equal(page.run(`withApiFailureReference("Failed", ${reference})`), 'Failed', reference);
+    }
+});
+
+test('api.js leaves fetch alone', () => {
+    const page = apiPage();
+    assert.equal(page.run('window.fetch'), page.fetchStub.fetch);
     const sandbox = loadScripts(['js/app/api.js'], { fetch: undefined });
     assert.equal(sandbox.run('typeof window.fetch'), 'undefined');
-    assert.equal(sandbox.run('withApiFailureReference("Failed", true)'), 'Failed');
 });
 
 test('getPreferences returns the saved preferences, or {} when they cannot be loaded', async () => {

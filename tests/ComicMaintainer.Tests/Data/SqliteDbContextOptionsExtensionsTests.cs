@@ -82,7 +82,7 @@ public sealed class SqliteDbContextOptionsExtensionsTests : IDisposable
         Assert.Contains(typeof(SqlitePragmaInterceptor).FullName!, loggerFactory.Categories);
         var warning = Assert.Single(loggerFactory.Entries, e => e.Level == LogLevel.Warning);
         Assert.Equal(typeof(SqlitePragmaInterceptor).FullName, warning.Category);
-        Assert.Contains("Failed to apply SQLite PRAGMAs", warning.Message);
+        Assert.Contains("Failed to switch SQLite journal mode to WAL", warning.Message);
         Assert.IsType<SqliteException>(warning.Exception);
     }
 

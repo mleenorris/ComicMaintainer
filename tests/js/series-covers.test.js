@@ -171,8 +171,9 @@ test('Update Covers Selected Series on the library sends each selected title onc
     page.click(selectedItem(page));
     await page.settle();
 
-    assert.equal(page.dialogs.length, 1);
-    assert.match(page.dialogs[0].message, /^Re-apply the current cached series image to 2 selected series/);
+    assert.deepEqual(page.dialogs.map(dialog => dialog.message), [
+        'Re-apply the current cached series image to 2 selected series? This may rewrite archive files.'
+    ]);
     const [post] = callsTo(page, SELECTED, 'POST');
     assert.deepEqual(post.body, { series: ['Saga', 'Paper Girls'] }, 'case-insensitive duplicates and blank titles are dropped');
     assert.deepEqual(lastMessage(page), { text: 'No covers embedded: no series have a cached image to apply.', type: 'info' });

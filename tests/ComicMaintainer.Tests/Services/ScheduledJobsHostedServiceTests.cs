@@ -342,9 +342,13 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
     {
         SeedJob(enabled: false);
         var started = NewGate();
+        var followUpStarted = NewGate();
         var handler = new TestJobHandler(JobKey, async (_, token) =>
         {
-            started.TrySetResult();
+            if (!started.TrySetResult())
+            {
+                followUpStarted.TrySetResult();
+            }
             await Task.Delay(Timeout.Infinite, token);
             return "unreachable";
         });
@@ -358,8 +362,10 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         await _logger.WaitForAsync(e => e.Message.Contains("was cancelled", StringComparison.Ordinal));
 
         // A follow-up run would start once the cancelled run releases its slot,
-        // just after the log line above, and be cancelled and logged in turn.
-        await Task.Delay(200);
+        // just after the log line above, and signal the gate as soon as it reaches
+        // the handler; give it a bounded window to do so.
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => followUpStarted.Task.WaitAsync(TimeSpan.FromSeconds(1)));
         Assert.Equal(1, handler.Invocations);
         Assert.Single(_logger.Entries, e => e.Message.Contains("was cancelled", StringComparison.Ordinal));
         Assert.Equal(nameof(ScheduledJobStatus.Cancelled), LoadJob().LastStatus);

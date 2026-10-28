@@ -131,7 +131,9 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             return Task.FromCanceled<bool>(cancellationToken);
         }
 
-        var slot = _slots.GetOrAdd(jobKey, _ => new JobSlot());
+        // Key the slot by the handler's canonical key so every spelling that
+        // resolves to this handler shares one single-flight slot.
+        var slot = _slots.GetOrAdd(handler.JobKey, _ => new JobSlot());
         if (runAgainIfInProgress)
         {
             // Raised before trying the slot: either this request starts a run
@@ -233,7 +235,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         {
             return;
         }
-        var slot = _slots.GetOrAdd(jobKey, _ => new JobSlot());
+        var slot = _slots.GetOrAdd(handler.JobKey, _ => new JobSlot());
 
         // Single-flight: skip overlapping runs rather than queue them up.
         if (!await slot.SingleFlight.WaitAsync(0))

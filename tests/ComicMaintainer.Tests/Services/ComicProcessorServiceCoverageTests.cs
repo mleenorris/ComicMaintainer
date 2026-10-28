@@ -5,12 +5,15 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
 using ComicMaintainer.Tests.Helpers;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -282,6 +285,55 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         Assert.Null(await service.GetSeriesMetadataAsync(path));
         Assert.True(_logger.Has(LogLevel.Error, "Error parsing series metadata from ComicInfo.xml"));
+    }
+
+    [Fact]
+    public async Task GetSeriesMetadataAsync_FileOutsideAllowedDirectories_ReturnsNullLikeGetMetadataAsync()
+    {
+        var service = CreateService();
+        var outside = WriteCbzAt(Path.Combine(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+
+        Assert.Null(await service.GetMetadataAsync(outside));
+        Assert.Null(await service.GetSeriesMetadataAsync(outside));
+    }
+
+    [Fact]
+    public async Task GetSeriesMetadataAsync_PathThroughLinkedDirectoryOutsideLibrary_ReturnsNull()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var service = CreateService();
+        var outsideDir = Path.Combine(_root, "outside");
+        WriteCbzAt(Path.Combine(outsideDir, "real.cbz"), Xml("Outside", "1", "Chapter 1"));
+        Directory.CreateSymbolicLink(Path.Combine(_library, "linked"), outsideDir);
+
+        var result = await service.GetSeriesMetadataAsync(Path.Combine(_library, "linked", "real.cbz"));
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetSeriesMetadataAsync_PathThroughLinkedDirectoryInsideLibrary_ReadsTheArchive()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var service = CreateService();
+        WriteCbz("Series/book.cbz", Xml("Main", "4", "Chapter 4", ("SeriesGroup", "Group")));
+        var alias = Path.Combine(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Series"));
+
+        var result = await service.GetSeriesMetadataAsync(Path.Combine(alias, "book.cbz"));
+
+        Assert.NotNull(result);
+        Assert.Equal("Main", result!.Series);
+        Assert.Equal("Group", result.SeriesGroup);
+        Assert.Equal("4", result.Issue);
     }
 
     [Fact]
@@ -794,6 +846,337 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         Assert.True(_logger.Has(LogLevel.Error, "Failed to rename file: {FilePath}"));
         _fileStore.Verify(f => f.MarkFileDuplicateAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_LinkedDirectoryRepointedBeforeMove_RenamesTheValidatedFileAndKeepsTheRequestedPathForRecords()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var service = CreateService();
+        var physical = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var outsideDir = Path.Combine(_root, "outside");
+        var outside = WriteCbzAt(Path.Combine(outsideDir, "orig.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var alias = Path.Combine(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Series"));
+        var path = Path.Combine(alias, "orig.cbz");
+        _logger.On(RenamingTemplate, _ =>
+        {
+            Directory.Delete(alias);
+            Directory.CreateSymbolicLink(alias, outsideDir);
+        });
+
+        await service.ProcessFileAsync(path);
+
+        Assert.False(File.Exists(physical));
+        Assert.True(File.Exists(Path.Combine(_library, "Series", "Series - Chapter 0005.cbz")));
+        Assert.True(File.Exists(outside));
+        Assert.False(File.Exists(Path.Combine(outsideDir, "Series - Chapter 0005.cbz")));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(path, Path.Combine(_library, "Series", "Series - Chapter 0005.cbz"), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_LinkedDirectoryRepointedBeforeMetadataRead_UsesTheCapturedArchive()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var service = CreateService();
+        WriteCbz("SeriesA/orig.cbz", Xml("Series A", "5", "Chapter 5"));
+        WriteCbz("SeriesB/orig.cbz", Xml("Series B", "9", "Chapter 9"));
+        var alias = Path.Combine(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "SeriesA"));
+        var path = Path.Combine(alias, "orig.cbz");
+        _logger.On("ProcessFileAsync: Extracting metadata from archive: {FilePath}", _ =>
+        {
+            Directory.Delete(alias);
+            Directory.CreateSymbolicLink(alias, Path.Combine(_library, "SeriesB"));
+        });
+
+        await service.ProcessFileAsync(path);
+
+        var renamed = Path.Combine(_library, "SeriesA", "Series A - Chapter 0005.cbz");
+        Assert.True(File.Exists(renamed));
+        Assert.True(File.Exists(Path.Combine(_library, "SeriesB", "orig.cbz")));
+        Assert.False(File.Exists(Path.Combine(_library, "SeriesB", "Series B - Chapter 0009.cbz")));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_LinkedDirectoryFallbackNamingUsesCallerPath()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var service = CreateService();
+        WriteCbz("Physical Series/Chapter 0005.cbz", comicInfoXml: null);
+        var alias = Path.Combine(_library, "Caller Series");
+        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Physical Series"));
+        var path = Path.Combine(alias, "Chapter 0005.cbz");
+
+        await service.ProcessFileAsync(path);
+
+        var renamed = Path.Combine(_library, "Physical Series", "Caller Series - Chapter 0005.cbz");
+        Assert.True(File.Exists(renamed));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_FileSymlink_IsNotProcessedOrRenamed()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var service = CreateService();
+        var target = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var link = Path.Combine(_library, "alias.cbz");
+        File.CreateSymbolicLink(link, target);
+
+        var result = await service.ProcessFileAsync(link);
+
+        Assert.False(result);
+        Assert.True(File.Exists(target));
+        Assert.Equal(target, new FileInfo(link).ResolveLinkTarget(returnFinalTarget: true)!.FullName);
+        Assert.True(_logger.Has(LogLevel.Warning, "ProcessFileAsync: File symlinks are not processed: {FilePath}"));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_FolderReplacedByLinkAfterValidation_RenamesOnlyThroughTheCapturedDirectoryHandle()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var service = CreateService();
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var folder = Path.GetDirectoryName(path)!;
+        var movedFolder = Path.Combine(_library, "Series-moved");
+        var outsideDir = Path.Combine(_root, "outside");
+        var outside = WriteCbzAt(Path.Combine(outsideDir, "orig.cbz"), Xml("Outside", "1", "Chapter 1"));
+        _logger.On("ProcessFileAsync: Rename path validated: {FilePath}", _ =>
+        {
+            Directory.Move(folder, movedFolder);
+            Directory.CreateSymbolicLink(folder, outsideDir);
+        });
+
+        await service.ProcessFileAsync(path);
+
+        var renamed = Path.Combine(movedFolder, "Series - Chapter 0005.cbz");
+        Assert.True(File.Exists(renamed));
+        Assert.True(File.Exists(outside));
+        Assert.False(File.Exists(Path.Combine(outsideDir, "Series - Chapter 0005.cbz")));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_FolderReplacedByLinkOutsideLibraryBeforeRename_AbortsTheRename()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var service = CreateService();
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var folder = Path.GetDirectoryName(path)!;
+        var movedFolder = Path.Combine(_library, "Series-moved");
+        var outsideDir = Path.Combine(_root, "outside");
+        var outside = WriteCbzAt(Path.Combine(outsideDir, "orig.cbz"), Xml("Outside", "1", "Chapter 1"));
+        _logger.On("ProcessFileAsync: Attempting to rename file: {FilePath}", _ =>
+        {
+            Directory.Move(folder, movedFolder);
+            Directory.CreateSymbolicLink(folder, outsideDir);
+        });
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(File.Exists(outside));
+        Assert.False(File.Exists(Path.Combine(outsideDir, "Series - Chapter 0005.cbz")));
+        Assert.True(File.Exists(Path.Combine(movedFolder, "orig.cbz")));
+        Assert.True(_logger.Has(LogLevel.Warning, "ProcessFileAsync: File path changed during processing, not renaming: {FilePath}"));
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Never);
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success && e.ErrorMessage == "File path changed during processing");
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_SymlinkedWatchedRoot_RenamesAndUpdatesRealFileStoreToConfiguredPath()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var watchedRoot = Path.Combine(_root, "watched-root");
+        Directory.CreateSymbolicLink(watchedRoot, _library);
+        _settings.WatchedDirectory = watchedRoot;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        path = Path.Combine(watchedRoot, Path.GetRelativePath(_library, path));
+
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
+            options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
+        using var provider = services.BuildServiceProvider();
+        var fileStore = new FileStoreService(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            NullLogger<FileStoreService>.Instance,
+            provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
+        await fileStore.AddFileAsync(path);
+        var service = CreateService(fileStore: fileStore);
+
+        await service.ProcessFileAsync(path);
+
+        var expected = Path.Combine(watchedRoot, "Series", "Series - Chapter 0005.cbz");
+        Assert.True(File.Exists(expected));
+        var storedFile = Assert.Single(await fileStore.GetAllFilesAsync());
+        Assert.Equal(expected, storedFile.FilePath);
+        Assert.True(File.Exists(storedFile.FilePath));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_LiveDirectoryEndingInDeleted_RenamesSuccessfully()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var service = CreateService();
+        var path = WriteCbz("Series (deleted)/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var expected = Path.Combine(_library, "Series (deleted)", "Series - Chapter 0005.cbz");
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(File.Exists(expected));
+        Assert.False(File.Exists(path));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(path, expected, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_Renameat2Unsupported_FailsWithoutMovingSource()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service();
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(File.Exists(path));
+        Assert.False(File.Exists(renamed));
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success &&
+            e.ErrorMessage == "Atomic no-overwrite rename is not supported by this filesystem.");
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndSourceReplaced_LeavesReplacementInPlace()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service(() =>
+        {
+            File.Delete(path);
+            File.WriteAllText(path, "replacement archive");
+        });
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(File.Exists(path));
+        Assert.Equal("replacement archive", await File.ReadAllTextAsync(path));
+        Assert.False(File.Exists(renamed));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndTargetReplaced_DoesNotOverwriteTarget()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service(() =>
+            File.WriteAllText(renamed, "replacement destination"));
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(File.Exists(path));
+        Assert.Equal("replacement destination", await File.ReadAllTextAsync(renamed));
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_Renameat2UnsupportedAndTargetAppears_DoesNotOverwriteTarget()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service();
+        _logger.On("ProcessFileAsync: Rename path validated: {FilePath}", _ =>
+            File.WriteAllText(renamed, "pre-existing target"));
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(File.Exists(path));
+        Assert.Equal("pre-existing target", await File.ReadAllTextAsync(renamed));
+        _fileStore.Verify(f => f.MarkFileDuplicateAsync(path, true, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(
+            f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Never);
     }
 
     [Fact]
@@ -1438,12 +1821,13 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         ISeriesNameResolver? resolver = null,
         IExternalSeriesMetadataService? external = null,
         IComicEmailService? email = null,
-        ComicMaintainerMetrics? metrics = null)
+        ComicMaintainerMetrics? metrics = null,
+        IFileStoreService? fileStore = null)
     {
         var service = new ComicProcessorService(
             new TestOptionsMonitor<AppSettings>(_settings),
             _logger,
-            _fileStore.Object,
+            fileStore ?? _fileStore.Object,
             _history.Object,
             eventBroadcaster: _broadcaster.Object,
             externalSeriesMetadata: external,
@@ -1451,6 +1835,21 @@ public class ComicProcessorServiceCoverageTests : IDisposable
             seriesNameResolver: resolver,
             comicEmail: email,
             metrics: metrics);
+        _services.Add(service);
+        return service;
+    }
+
+    private ComicProcessorService CreateUnsupportedRenameAt2Service(Action? beforeFallbackRename = null)
+    {
+        var service = new UnsupportedRenameAt2ComicProcessorService(
+            _settings,
+            _logger,
+            _fileStore.Object,
+            _history.Object,
+            _broadcaster.Object)
+        {
+            BeforeFallbackRename = beforeFallbackRename
+        };
         _services.Add(service);
         return service;
     }
@@ -1683,6 +2082,37 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     private sealed record EntrySnapshot(string Name, DateTime LastWriteTime, long Length, string Sha256);
 
     private sealed record LogEntry(LogLevel Level, string Template, IReadOnlyDictionary<string, object?> Properties, Exception? Exception);
+
+    private sealed class UnsupportedRenameAt2ComicProcessorService : ComicProcessorService
+    {
+        public UnsupportedRenameAt2ComicProcessorService(
+            AppSettings settings,
+            ILogger<ComicProcessorService> logger,
+            IFileStoreService fileStore,
+            IProcessingHistoryService history,
+            IEventBroadcaster eventBroadcaster)
+            : base(new TestOptionsMonitor<AppSettings>(settings), logger, fileStore, history, eventBroadcaster)
+        {
+        }
+
+        public Action? BeforeFallbackRename { get; set; }
+
+        protected override int RenameLinuxNoReplace(
+            int sourceDirectory,
+            string sourceName,
+            int targetDirectory,
+            string targetName,
+            uint flags)
+        {
+            System.Runtime.InteropServices.Marshal.SetLastPInvokeError(38);
+            return -1;
+        }
+
+        protected override void OnLinuxRenameFallback()
+        {
+            BeforeFallbackRename?.Invoke();
+        }
+    }
 
     private sealed class HookLogger : ILogger<ComicProcessorService>
     {

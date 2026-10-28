@@ -48,6 +48,13 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     private volatile FileSystemWatcher? _startingWatcher;
 
     /// <summary>
+    /// The latest queued watcher status broadcast (guarded by <see cref="_statusLock"/>). Each
+    /// broadcast runs after the previous one so clients see statuses in order.
+    /// </summary>
+    private Task _statusDelivery = Task.CompletedTask;
+    private readonly object _statusLock = new();
+
+    /// <summary>
     /// Pending per-file processing requests, keyed by full path. A burst of file-system events for
     /// the same path coalesces into a single delayed run: each new event cancels the previously
     /// scheduled debounce and re-arms it, so we only act once the file has stopped changing and we
@@ -246,7 +253,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         // avoid spurious status events on repeated StartAsync calls).
         if (watcherStarted)
         {
-            await BroadcastStatusAsync(IsRunning);
+            await QueueStatusBroadcast(IsRunning);
         }
 
         // Initialize file store from database before scanning files (only once).
@@ -437,7 +444,29 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         CancelRestart(restart);
 
         // Broadcast watcher status change
-        await BroadcastStatusAsync(false);
+        await QueueStatusBroadcast(false);
+    }
+
+    /// <summary>
+    /// Queues a watcher status broadcast behind the earlier ones, preserving their order. The
+    /// returned task completes once it is delivered; callers that must not be held up by slow
+    /// clients (such as recreating a failed watcher) need not wait for it.
+    /// </summary>
+    private Task QueueStatusBroadcast(bool running)
+    {
+        if (_eventBroadcaster == null)
+        {
+            return Task.CompletedTask;
+        }
+
+        lock (_statusLock)
+        {
+            _statusDelivery = _statusDelivery
+                .ContinueWith(_ => BroadcastStatusAsync(running), CancellationToken.None,
+                    TaskContinuationOptions.DenyChildAttach, TaskScheduler.Default)
+                .Unwrap();
+            return _statusDelivery;
+        }
     }
 
     private async Task BroadcastStatusAsync(bool running)
@@ -680,7 +709,8 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             }
         }
 
-        await BroadcastStatusAsync(false);
+        // Status delivery waits on clients, so it must not hold up recreating the watcher.
+        _ = QueueStatusBroadcast(false);
 
         if (retrying)
         {
@@ -700,7 +730,8 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         try
         {
             var delay = RestartInitialDelay;
-            for (var attempt = 1; ; attempt++)
+            var attempt = 0;
+            while (true)
             {
                 var directory = _settings.WatchedDirectory;
                 var available = Directory.Exists(directory);
@@ -712,6 +743,14 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     {
                         _logger.LogDebug(LoggingHelper.WithWatcherPrefix("Stopped trying to recreate the file watcher"));
                         return;
+                    }
+
+                    // A settings change since the directory was read may have found no watcher
+                    // and queued a start for the new directory only; read it again so the old
+                    // one is not started and left running.
+                    if (!string.Equals(directory, _settings.WatchedDirectory, StringComparison.Ordinal))
+                    {
+                        continue;
                     }
 
                     if (_watcher == null && available)
@@ -735,6 +774,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     }
                 }
 
+                attempt++;
                 var level = attempt == 1 ? LogLevel.Warning : LogLevel.Debug;
                 if (failure == null)
                 {
@@ -777,7 +817,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
         if (startedHere)
         {
-            await BroadcastStatusAsync(IsRunning);
+            _ = QueueStatusBroadcast(IsRunning);
         }
 
         await RecoverFromMissedEventsAsync();

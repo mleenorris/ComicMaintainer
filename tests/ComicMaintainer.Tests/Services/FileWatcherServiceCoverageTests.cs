@@ -586,6 +586,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         await _logger.WaitForAsync(LogLevel.Information, $"Recovery rescan completed: {_library}");
         Assert.True(service.IsRunning);
         Assert.Equal(2, CountLogged($"File watcher started for directory: {_library}"));
+        await broadcasts.WaitUntilAsync(b => b.Count >= 3, "the start, stop and restart status broadcasts");
         Assert.Equal(new[] { (true, true), (false, true), (true, true) }, broadcasts.Snapshot());
         Assert.Contains(trigger, _added.Snapshot());
         Assert.Empty(_time.Delays.Snapshot());
@@ -633,6 +634,78 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         Assert.True(service.IsRunning);
         Assert.Equal(2, CountLogged($"File watcher started for directory: {_library}"));
         Assert.Equal(expected.Length, _time.Delays.Snapshot().Count);
+    }
+
+    [Fact]
+    public async Task WatcherError_StalledStatusDelivery_DoesNotBlockRecreationOrRescan()
+    {
+        var broadcasts = new Recorder<(bool Running, bool Enabled)>();
+        var stalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var broadcaster = new Mock<IEventBroadcaster>();
+        broadcaster.Setup(b => b.BroadcastWatcherStatusAsync(It.IsAny<bool>(), It.IsAny<bool>()))
+            .Returns<bool, bool>((running, enabled) =>
+            {
+                broadcasts.Add((running, enabled));
+                return running ? Task.CompletedTask : stalled.Task;
+            });
+        var service = await StartWatchingAsync(broadcaster: broadcaster.Object);
+        ArmWatcherFailure("trigger.cbz");
+
+        MoveIn("trigger.cbz");
+
+        await _logger.WaitForAsync(LogLevel.Information, $"Recovery rescan completed: {_library}");
+        Assert.True(service.IsRunning);
+        Assert.Equal(2, CountLogged($"File watcher started for directory: {_library}"));
+
+        // The "running" status waits behind the stalled "stopped" one so their order is kept.
+        await broadcasts.WaitUntilAsync(b => b.Count >= 2, "the stalled stop status broadcast");
+        Assert.Equal(new[] { (true, true), (false, true) }, broadcasts.Snapshot());
+
+        stalled.SetResult();
+
+        await broadcasts.WaitUntilAsync(b => b.Count >= 3, "the restart status broadcast");
+        Assert.Equal(new[] { (true, true), (false, true), (true, true) }, broadcasts.Snapshot());
+    }
+
+    [Fact]
+    public async Task WatcherError_DirectoryChangedBeforeRestartAttempt_StartsTheNewDirectory()
+    {
+        var otherLibrary = Path.Combine(_root, "other-library");
+        Directory.CreateDirectory(otherLibrary);
+        var current = Settings();
+        AppSettings? afterNextRead = null;
+        var monitor = new Mock<IOptionsMonitor<AppSettings>>();
+        monitor.Setup(m => m.CurrentValue).Returns(() =>
+        {
+            // Changes the settings right after the restart attempt reads the watched directory,
+            // before it takes the service's lock.
+            var value = Volatile.Read(ref current);
+            var next = Interlocked.Exchange(ref afterNextRead, null);
+            if (next != null)
+            {
+                Volatile.Write(ref current, next);
+            }
+
+            return value;
+        });
+        var service = CreateService(monitor.Object);
+        await service.StartAsync();
+        await _logger.WaitForAsync(LogLevel.Information, "Incremental scan completed");
+        var hookFailures = new ConcurrentQueue<Exception>();
+        ArmWatcherFailure("trigger.cbz", alsoOnLog: entry => DeleteLibraryOnRestart(entry, hookFailures));
+
+        MoveIn("trigger.cbz");
+        await _time.Delays.WaitUntilAsync(d => d.Count == 1, "the first backoff wait");
+        Assert.Empty(hookFailures);
+
+        Directory.CreateDirectory(_library);
+        Volatile.Write(ref afterNextRead, Settings(directory: otherLibrary));
+        _time.Advance(_time.Delays.Snapshot()[0]);
+
+        await _logger.WaitForAsync(LogLevel.Information, $"Recovery rescan completed: {otherLibrary}");
+        Assert.True(service.IsRunning);
+        Assert.Equal(1, CountLogged($"File watcher started for directory: {otherLibrary}"));
+        Assert.Equal(1, CountLogged($"File watcher started for directory: {_library}"));
     }
 
     [Theory]

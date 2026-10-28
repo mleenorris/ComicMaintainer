@@ -165,7 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still reported itself as running. The watcher is now recreated, retrying after 1 s and then
   twice as long each time, up to 1 min, while the folder is unavailable, and the folder is
   rescanned for files that arrived in the meantime. A buffer overflow still only triggers a
-  rescan.
+  rescan. A slow or stalled browser connection no longer holds up the recovery, and changing
+  the watched folder while the watcher is being recreated watches the new folder.
 - **Processing renames files on filesystems without an atomic no-overwrite rename.** On NFS,
   ZFS before 2.2 and FUSE filesystems such as Unraid user shares, every rename failed with
   `Atomic no-overwrite rename is not supported by this filesystem.`, leaving files under their

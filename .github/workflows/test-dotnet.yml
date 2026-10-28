@@ -137,6 +137,34 @@ jobs:
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  # Deleting files pins the checked directory with platform-specific handles, so the
+  # delete-job tests also run on Windows and macOS, where their own cases apply.
+  file-operation-tests:
+    name: File Operation Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Build tests (excluding MAUI)
+      run: dotnet build tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj --configuration Release
+
+    - name: Run delete-job tests
+      run: >
+        dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
+        --no-build --configuration Release --verbosity normal
+        --filter "FullyQualifiedName~ComicProcessorServiceJobCoverageTests.DeleteFilesAsync"
+
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest

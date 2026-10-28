@@ -722,6 +722,55 @@ test("a job can't be started while another one's start is still waiting for the 
     assert.deepEqual(page.errors, []);
 });
 
+test("a Combine Folders start waiting for the server isn't released by the auto-close of a job that ended", async (t) => {
+    // The cancelled job's pending auto-close closed the progress modal while
+    // Combine Folders waited for the server, which let another job start
+    // whose progress Combine then took over.
+    const job = h.trackedJob();
+    const combine = deferred();
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            ...job.routes,
+            ...nextJobRoutes(),
+            'POST /api/files/combine-folders': () => combine.promise,
+            'GET /api/files/combinable-folders': { groups: [] }
+        }
+    });
+    await h.startTrackedJob(page);
+    h.jobUpdate(page, 'cancelled', h.progress(1, 4));
+    await h.tick(t, page, 500);
+    h.assertProgress(page, { open: true, title: 'Cancelled - Job was cancelled', closeVisible: true });
+
+    // Combine Folders is confirmed before the cancelled job's progress closes,
+    // and the server takes its time to plan the moves.
+    page.run(`
+        combineFolderGroups = [{ groupKey: 'batman', folders: [{ directory: 'Batman' }, { directory: 'Batman (2016)' }] }];
+        combineFolderIndex = 0;
+        combineFolderSelectedDestination = 'Batman (2016)';
+    `);
+    page.run('confirmCombineFolders()');
+    await page.settle();
+    assert.equal(h.takeConfirms(page).length, 1);
+    assert.equal(page.run('currentJobId'), null, 'the cancelled job is no longer followed');
+    await h.tick(t, page, 5000);
+    h.assertProgress(page, { open: true, title: 'Cancelled - Job was cancelled' });
+
+    // No other job can be started meanwhile.
+    h.chooseMenuItem(page, 'renameDropdown', 'Rename Unmarked');
+    await page.settle();
+    assert.deepEqual(h.takeConfirms(page), []);
+    assert.deepEqual(h.takeMessages(page), [REFUSED]);
+    assert.equal(h.requests(page, 'POST', '/api/jobs/rename-unmarked').length, 0);
+
+    combine.resolve({ jobId: h.OTHER_JOB_ID, totalItems: 3, skipped: 0 });
+    await page.settle();
+    h.assertProgress(page, { open: true, title: 'Combining 3 file(s)...', text: '0 / 3 files', cancelVisible: true, closeVisible: false });
+    assert.equal(page.run('currentJobId'), h.OTHER_JOB_ID);
+    h.jobUpdate(page, 'running', h.progress(1, 3), h.OTHER_JOB_ID);
+    h.assertProgress(page, { text: '1 / 3 files' });
+    assert.deepEqual(page.errors, []);
+});
+
 // Every action that starts a job followed in the progress modal, as the page calls it.
 const JOB_STARTERS = [
     'processAllFiles()',

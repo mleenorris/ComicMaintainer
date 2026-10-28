@@ -67,7 +67,12 @@
         // Blocks other job starts (canStartJob) while the server is asked to
         // start a job. Returns a token for endJobStart(), which releases the
         // block unless the job got tracked or another start took over since.
+        // No job is current until trackJobStatus() names the new one, so the
+        // pending finish or auto-close of a job that ended can neither retitle
+        // nor close the progress modal, nor release this start.
         function beginJobStart() {
+            clearProgressModalTimers();
+            currentJobId = null;
             jobStarting = true;
             return ++jobStartGeneration;
         }
@@ -1488,8 +1493,6 @@
             // is current until trackJobStatus() names it, so the pending finish
             // of a job that ended can neither retitle nor close it, and no other
             // job can be started meanwhile (canStartJob).
-            clearProgressModalTimers();
-            currentJobId = null;
             beginJobStart();
             const modal = document.getElementById('progressModal');
             const indicator = document.getElementById('progressIndicator');

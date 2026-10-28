@@ -238,7 +238,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
     /// grow with entry or archive size. The new archive is written to a sibling
     /// temp file and atomically moved into place.
     /// </summary>
-    private static void RewriteArchive(
+    internal static void RewriteArchive(
         string archivePath,
         string? coverEntryName,
         byte[]? coverBytes,

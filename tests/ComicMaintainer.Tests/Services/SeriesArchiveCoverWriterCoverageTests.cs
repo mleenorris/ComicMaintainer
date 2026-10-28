@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
@@ -260,21 +259,26 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     [Fact]
     public void RewriteArchive_LargeEntry_AllocatesFarLessThanTheEntrySize()
     {
-        var cbz = Path.Combine(_root, "issue1.cbz");
+        var cbz = Path.Join(_root, "issue1.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
-            // Zeros, so the archive itself stays tiny.
-            AddEntry(zip, "big.bin", new byte[LargeEntrySize], FixtureTimestamp);
+            // Zeros, so the archive itself stays tiny. Written in small chunks so the fixture
+            // doesn't need a LargeEntrySize buffer.
+            var entry = zip.CreateEntry("big.bin", CompressionLevel.Fastest);
+            entry.LastWriteTime = FixtureTimestamp;
+            using var stream = entry.Open();
+            var chunk = new byte[81920];
+            for (var remaining = LargeEntrySize; remaining > 0; remaining -= chunk.Length)
+            {
+                stream.Write(chunk, 0, Math.Min(chunk.Length, remaining));
+            }
         }
-        // RewriteArchive is private (no InternalsVisibleTo). Calling it directly keeps the whole
-        // rewrite on this thread, so GC.GetAllocatedBytesForCurrentThread sees all of it;
-        // WriteAsync can resume on a pool thread after reading the source cover.
-        var rewrite = typeof(SeriesArchiveCoverWriter)
-            .GetMethod("RewriteArchive", BindingFlags.Static | BindingFlags.NonPublic)!
-            .CreateDelegate<Action<string, string?, byte[]?, Action?, Action?>>();
 
+        // Calling RewriteArchive directly keeps the whole rewrite on this thread, so
+        // GC.GetAllocatedBytesForCurrentThread sees all of it; WriteAsync can resume on a
+        // pool thread after reading the source cover.
         var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        rewrite(cbz, "cover.jpg", NewCover, null, null);
+        SeriesArchiveCoverWriter.RewriteArchive(cbz, "cover.jpg", NewCover);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
         Assert.True(
@@ -287,7 +291,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     [Fact]
     public async Task WriteAsync_ArchiveWithLargeEntry_KeepsEveryOtherEntryByteForByte()
     {
-        var cbz = Path.Combine(_root, "issue1.cbz");
+        var cbz = Path.Join(_root, "issue1.cbz");
         var big = new byte[3 * 1024 * 1024];
         new Random(867).NextBytes(big);
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))

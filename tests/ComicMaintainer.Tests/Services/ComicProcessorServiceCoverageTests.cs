@@ -3,6 +3,7 @@ using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
@@ -1151,6 +1152,45 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_CopyFallback_SourceChangesInPlaceDuringCopy_RollsBackTargetAndKeepsSource()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Update))
+        {
+            AddEntry(zip, "large.bin", RandomNumberGenerator.GetBytes(256 * 1024), FixtureTimestamp);
+        }
+
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service(linkError: 95);
+        var changed = false;
+        service.BeforeCopyChunk = () =>
+        {
+            if (changed)
+            {
+                return;
+            }
+
+            changed = true;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            stream.WriteByte(0);
+            stream.Flush(flushToDisk: true);
+        };
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(changed);
+        Assert.True(File.Exists(path));
+        Assert.False(File.Exists(renamed));
+        Assert.True(_logger.Has(LogLevel.Error, "Failed to rename file: {FilePath}"));
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_Renameat2UnsupportedAndSourceReplaced_LeavesReplacementInPlace()
     {
         if (!OperatingSystem.IsLinux())
@@ -1230,11 +1270,43 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         await service.ProcessFileAsync(path);
 
         Assert.Equal(original, await File.ReadAllBytesAsync(renamed));
-        var kept = Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!, ".tmp_*"));
-        Assert.Equal("replacement archive", await File.ReadAllTextAsync(kept));
-        Assert.True(_logger.Has(
-            LogLevel.Warning,
-            "A file replaced {FileName} while it was being renamed and could not be put back without risking another file ({Reason}); it was kept as {TemporaryPath}"));
+        var keptDirectory = Assert.Single(Directory.GetDirectories(Path.GetDirectoryName(path)!, ".tmp_*"));
+        Assert.Equal("replacement archive", await File.ReadAllTextAsync(Path.Join(keptDirectory, "entry")));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_HardLinksUnsupportedAndTemporaryDirectoryNameReplacedAfterCheck_KeepsReplacement()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service(linkError: 95);
+        var replaced = false;
+        service.BeforeTemporaryEntryUnlink = privateDirectoryName =>
+        {
+            if (replaced)
+            {
+                return;
+            }
+
+            replaced = true;
+            var directory = Path.Join(_library, "Series", privateDirectoryName);
+            var movedDirectory = directory + ".moved";
+            Directory.Move(directory, movedDirectory);
+            File.WriteAllText(directory, "replacement");
+        };
+
+        await service.ProcessFileAsync(path);
+
+        Assert.True(replaced);
+        Assert.True(File.Exists(renamed));
+        Assert.Equal("replacement", await File.ReadAllTextAsync(
+            Directory.GetFiles(Path.Join(_library, "Series"), ".tmp_*").Single()));
     }
 
     [Theory]
@@ -2272,6 +2344,68 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         return root.ToString();
     }
 
+    [Fact]
+    public async Task ProcessFileAsync_CopyFallback_PreservesSourceGroupWhenItDiffersFromTargetDefault()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+        var effectiveGroup = GetLinuxEffectiveGroupId();
+        var sourceGroup = effectiveGroup == 0 ? 1u : 0u;
+        if (SetLinuxFileGroup(path, uint.MaxValue, sourceGroup) != 0)
+        {
+            return;
+        }
+
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
+        var service = CreateUnsupportedRenameAt2Service(linkError: 95);
+
+        await service.ProcessFileAsync(path);
+
+        Assert.Equal(sourceGroup, GetLinuxFileGroup(renamed));
+    }
+
+    private static uint GetLinuxFileGroup(string path)
+    {
+        if (StatLinuxFile(path, out var status) != 0)
+        {
+            throw new IOException("Could not read the file's group.");
+        }
+
+        return status.GroupId;
+    }
+
+    [DllImport("libc", EntryPoint = "getegid")]
+    private static extern uint GetLinuxEffectiveGroupId();
+
+    [DllImport("libc", EntryPoint = "chown", SetLastError = true)]
+    private static extern int SetLinuxFileGroup(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        uint owner,
+        uint group);
+
+    [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
+    private static extern int StatLinuxFile(
+        int directory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags,
+        uint mask,
+        out TestLinuxFileStatus status);
+
+    private static int StatLinuxFile(string path, out TestLinuxFileStatus status) =>
+        StatLinuxFile(-100, path, 0, 0x10, out status);
+
+    [StructLayout(LayoutKind.Explicit, Size = 256)]
+    private struct TestLinuxFileStatus
+    {
+        [FieldOffset(24)]
+        public uint GroupId;
+    }
+
     private static XElement? ReadComicInfo(string path)
     {
         using var zip = ZipFile.OpenRead(path);
@@ -2328,6 +2462,10 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         public Action<string>? BeforeRename { get; set; }
 
+        public Action? BeforeCopyChunk { get; set; }
+
+        public Action<string>? BeforeTemporaryEntryUnlink { get; set; }
+
         protected override int RenameLinuxNoReplace(
             int sourceDirectory,
             string sourceName,
@@ -2370,6 +2508,12 @@ public class ComicProcessorServiceCoverageTests : IDisposable
             BeforeRename?.Invoke(sourceName);
             return base.RenameLinux(sourceDirectory, sourceName, targetDirectory, targetName);
         }
+
+        protected override void OnLinuxCopyChunk(long offset, int bytesRead) =>
+            BeforeCopyChunk?.Invoke();
+
+        protected override void OnLinuxTemporaryEntryChecked(string privateDirectoryName) =>
+            BeforeTemporaryEntryUnlink?.Invoke(privateDirectoryName);
     }
 
     private sealed class HookLogger : ILogger<ComicProcessorService>

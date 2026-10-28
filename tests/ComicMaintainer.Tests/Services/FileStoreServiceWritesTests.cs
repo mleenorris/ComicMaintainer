@@ -543,6 +543,32 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_StubRowAtTarget_RefreshesPartialFileMetadata()
+    {
+        var oldPath = Path.Combine(_library, "Chapter 7.cbz");
+        var newPath = WriteComic(_library, "Saga - Chapter 007.cbz");
+        var expectedModified = new DateTime(2024, 3, 4, 5, 6, 8, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(newPath, expectedModified);
+        var expectedFile = new FileInfo(newPath);
+        var partialModified = new DateTime(2020, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        await SeedAsync(
+            Row(oldPath, renamed: true),
+            Row(newPath, configure: e =>
+            {
+                e.FileSize = 1;
+                e.LastModified = partialModified;
+            }));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+
+        await service.UpdateFilePathAsync(oldPath, newPath);
+
+        var row = Assert.Single(await AllRowsAsync());
+        Assert.Equal(expectedFile.Length, row.FileSize);
+        Assert.Equal(expectedFile.LastWriteTime, row.LastModified);
+    }
+
+    [Fact]
     public async Task UpdateFilePathAsync_TargetRowAlreadyComplete_KeepsTheTargetsState()
     {
         var oldPath = Path.Combine(_library, "Chapter 8.cbz");

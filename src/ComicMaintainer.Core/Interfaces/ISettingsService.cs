@@ -72,6 +72,17 @@ public interface ISettingsService
     Task UpdateSeriesImageMaxDimensionAsync(int maxDimension, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Persist all three series cover image limits in one write, so they are
+    /// saved together or not at all. Every limit must be greater than 0, and
+    /// <paramref name="maxDownloadBytes"/> must be at least <paramref name="maxBytes"/>.
+    /// </summary>
+    Task UpdateSeriesImageLimitsAsync(
+        int maxBytes,
+        int maxDownloadBytes,
+        int maxDimension,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update the GitHub token setting
     /// </summary>
     Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default);
@@ -109,15 +120,38 @@ public interface ISettingsService
     Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Persist the external series metadata settings in one write, so they are
+    /// saved together or not at all. A null <paramref name="comicVineApiKey"/>
+    /// leaves the stored key untouched so the UI never has to round-trip the
+    /// secret; pass an empty or blank string to clear it. A blank base URL
+    /// leaves the stored URL untouched. Values are trimmed.
+    /// </summary>
+    Task UpdateExternalSeriesMetadataSettingsAsync(
+        bool enabled,
+        string? comicVineApiKey,
+        string? comicVineBaseUrl,
+        bool enableMangaDex,
+        string? mangaDexBaseUrl,
+        bool enableAniList,
+        string? aniListBaseUrl,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Persist the Suwayomi download-server settings. A null
     /// <paramref name="password"/> leaves the stored password untouched so the
     /// UI never has to round-trip the secret; pass an empty string to clear it.
+    /// <paramref name="downloadsDirectory"/> and <paramref name="importDirectory"/>
+    /// configure the Suwayomi download import and follow the same rule: null
+    /// keeps the stored value, an empty string clears it.
     /// </summary>
+    /// <exception cref="ArgumentException">A value is invalid; the message says why.</exception>
     Task UpdateSuwayomiSettingsAsync(
         bool enabled,
         string? baseUrl,
         string? username,
         string? password,
+        string? downloadsDirectory = null,
+        string? importDirectory = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -143,6 +177,21 @@ public interface ISettingsService
         string? fromAddress,
         string? fromName,
         int maxAttachmentMegabytes,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persist the email rate limit. Each value is a non-negative integer and
+    /// 0 disables that limit. Comic deliveries over a limit stay pending until
+    /// a slot frees up.
+    /// </summary>
+    /// <param name="maxSendsPerHour">Most comic emails in any rolling 60-minute window.</param>
+    /// <param name="maxSendsPerDay">Most comic emails in any rolling 24-hour window.</param>
+    /// <param name="minSecondsBetweenSends">Minimum gap between two comic emails.</param>
+    /// <exception cref="ArgumentException">A value is negative or above its upper bound.</exception>
+    Task UpdateEmailRateLimitSettingsAsync(
+        int maxSendsPerHour,
+        int maxSendsPerDay,
+        int minSecondsBetweenSends,
         CancellationToken cancellationToken = default);
 
     /// <summary>

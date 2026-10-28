@@ -286,7 +286,7 @@ public sealed class AutheliaTrustedProxyStartupTests : IDisposable
         StartupMethod("CoreServiceCollectionExtensions", "AddComicMaintainerSettings");
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
-        new("JWT_SECRET", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES");
+        new("JWT_SECRET", "JWT_SECRET_FILE", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES");
 
     public void Dispose() => _environment.Dispose();
 

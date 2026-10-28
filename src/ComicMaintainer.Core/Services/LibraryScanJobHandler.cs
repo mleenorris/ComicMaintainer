@@ -106,7 +106,10 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         {
             diskPaths = new HashSet<string>(
                 Directory.EnumerateFiles(watchedDir, "*.*", SearchOption.AllDirectories)
-                    .Where(ComicFileExtensions.IsComicArchive),
+                    .Where(ComicFileExtensions.IsComicArchive)
+                    // Skip files still being staged into the library (e.g. a
+                    // Suwayomi import), as the file watcher does.
+                    .Where(path => !Path.GetFileName(path).StartsWith(".tmp_", StringComparison.OrdinalIgnoreCase)),
                 StringComparer.OrdinalIgnoreCase);
 
             _logger.LogInformation("Library scan: found {Count} comic file(s) on disk under {Dir}",
@@ -122,12 +125,16 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         {
             foreach (var path in diskPaths)
             {
-                if (cancellationToken.IsCancellationRequested) break;
+                cancellationToken.ThrowIfCancellationRequested();
                 if (tracked.ContainsKey(path)) continue;
                 try
                 {
                     await _fileStore.AddFileAsync(path, cancellationToken);
                     newPaths.Add(path);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -145,13 +152,17 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         {
             foreach (var path in tracked.Keys.ToList())
             {
-                if (cancellationToken.IsCancellationRequested) break;
+                cancellationToken.ThrowIfCancellationRequested();
                 if (diskPaths.Contains(path)) continue;
                 try
                 {
                     await _fileStore.RemoveFileAsync(path, cancellationToken);
                     tracked.Remove(path);
                     removedCount++;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -190,7 +201,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
 
                 foreach (var (key, paths) in byKey)
                 {
-                    if (cancellationToken.IsCancellationRequested) break;
+                    cancellationToken.ThrowIfCancellationRequested();
                     var record = await _seriesCache.GetAsync(key, cancellationToken);
                     if (record is null) continue;
                     var stale = await _fileStore.GetFilesWithStaleSeriesMetadataAsync(
@@ -209,6 +220,10 @@ public class LibraryScanJobHandler : IScheduledJobHandler
                     .ToList();
                 staleCount = staleToFix.Count;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Library scan: stale-metadata pass failed");
@@ -225,7 +240,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             var staleSet = new HashSet<string>(staleToFix, StringComparer.OrdinalIgnoreCase);
             foreach (var file in tracked.Values)
             {
-                if (cancellationToken.IsCancellationRequested) break;
+                cancellationToken.ThrowIfCancellationRequested();
                 if (newSet.Contains(file.FilePath) || staleSet.Contains(file.FilePath)) continue;
                 if (!diskPaths.Contains(file.FilePath)) continue;
                 if (IsModifiedOnDisk(file)) modifiedToFix.Add(file.FilePath);
@@ -295,6 +310,10 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         {
             await _fileStore.RefreshFileStatsAsync(files, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Library scan: failed to refresh stored stats for {Count} file(s)", files.Count);
@@ -314,6 +333,9 @@ public class LibraryScanJobHandler : IScheduledJobHandler
 
     private async Task<string> ProcessNewFilesAndWaitAsync(IReadOnlyList<string> files, CancellationToken cancellationToken)
     {
+        // A job queued with a cancelled token is cancelled straight away, so
+        // once the scan is cancelled (e.g. at shutdown) nothing more is queued.
+        cancellationToken.ThrowIfCancellationRequested();
         if (files.Count == 0) return string.Empty;
         Guid jobId;
         try
@@ -331,6 +353,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
     private async Task<(string Summary, IReadOnlyList<string> Succeeded)> NormalizeFilesAndWaitAsync(
         IReadOnlyList<string> files, string label, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (files.Count == 0) return (string.Empty, Array.Empty<string>());
         Guid jobId;
         try
@@ -356,6 +379,8 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             if (job.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled) break;
             await Task.Delay(PollInterval, cancellationToken);
         }
+        // A cancelled scan throws rather than reporting a job it never polled as "evicted".
+        cancellationToken.ThrowIfCancellationRequested();
         var summary = job is null
             ? $" [{label}: queued (job record evicted)]"
             : $" [{label}: {job.ProcessedFiles}/{requested} ok, {job.FailedFiles} failed]";

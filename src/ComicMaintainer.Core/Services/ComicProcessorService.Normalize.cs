@@ -112,6 +112,11 @@ public partial class ComicProcessorService
             
             return success;
         }
+        // A cancelled job didn't fail this file: leave it and its stored state as they are.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "NormalizeFileAsync: Error normalizing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));

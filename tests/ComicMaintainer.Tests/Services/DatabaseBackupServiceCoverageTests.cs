@@ -163,6 +163,26 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task NameBasedOperations_AcceptGeneratedNamesWhenTheBackupDirectoryIsTheFileSystemRoot()
+    {
+        // The root keeps its separator ("/", "C:\"), which used to get every backup name
+        // rejected as invalid. Nothing is written to the root: the random suffix names a
+        // backup that is absent, which must be reported as missing rather than invalid.
+        var fileSystemRoot = Path.GetPathRoot(_root)!;
+        _settings.DatabaseBackupDirectory = fileSystemRoot;
+        var service = CreateService();
+        var name = $"comicmaintainer-20261020-040000-{Guid.NewGuid().ToString("N")[..16]}.db";
+        Assert.True(DatabaseBackupService.IsValidBackupName(name));
+        Assert.False(File.Exists(Path.Join(fileSystemRoot, name)));
+
+        Assert.Equal(fileSystemRoot, service.BackupDirectory);
+        Assert.Null(service.OpenBackup(name));
+        Assert.False(service.DeleteBackup(name));
+        var ex = await Assert.ThrowsAsync<FileNotFoundException>(() => service.StageRestoreAsync(name));
+        Assert.Equal(name, ex.FileName);
+    }
+
+    [Fact]
     public async Task StageRestoreFromStreamAsync_RejectsADatabaseThatFailsTheIntegrityCheck()
     {
         CreateDatabase(_dbPath);

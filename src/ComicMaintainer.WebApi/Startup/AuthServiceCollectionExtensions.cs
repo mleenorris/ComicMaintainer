@@ -36,10 +36,9 @@ internal static class AuthServiceCollectionExtensions
         .AddEntityFrameworkStores<ComicMaintainerDbContext>()
         .AddDefaultTokenProviders();
 
-        // Configure JWT Authentication. The signing secret is resolved once (see JwtSecretResolver) and used both to
-        // validate tokens here and to sign them in AuthService, which reads it from IOptions<JwtSettings>. Program
-        // logs where it came from once logging is set up.
-        var jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>() ?? new JwtSettings();
+        // Read settings through the same binder as IOptions<JwtSettings>, then resolve the signing secret once so
+        // token validation and AuthService use the same value. Program logs where it came from once logging is set up.
+        var jwtSettings = JwtSettingsBinder.Load(configuration);
         var jwtSecret = JwtSecretResolver.Resolve(configuration);
         services.AddSingleton(jwtSecret);
         services.PostConfigure<JwtSettings>(options => options.Secret = jwtSecret.Value);

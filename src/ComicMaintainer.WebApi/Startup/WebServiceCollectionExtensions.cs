@@ -1,8 +1,11 @@
+using System.Globalization;
 using System.IO.Compression;
+using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.HealthChecks;
 using ComicMaintainer.WebApi.Infrastructure;
 using ComicMaintainer.WebApi.Middleware;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.ResponseCompression;
 using Serilog;
 
@@ -11,7 +14,7 @@ namespace ComicMaintainer.WebApi.Startup;
 /// <summary>
 /// Registers MVC, Swagger, compression, request timeouts, rate limiting, output caching, SignalR, health checks, problem details and CORS.
 /// </summary>
-internal static class WebServiceCollectionExtensions
+public static class WebServiceCollectionExtensions
 {
     public static IServiceCollection AddComicMaintainerWeb(this IServiceCollection services, IConfiguration configuration)
     {
@@ -76,6 +79,20 @@ internal static class WebServiceCollectionExtensions
         });
 
         // Add rate limiting (ASP.NET Core 9 best practice)
+        // Behind a reverse proxy every request arrives from the proxy, so anonymous requests are counted per client
+        // address that a trusted proxy forwards in X-Forwarded-For, not per connection: otherwise one client could
+        // exhaust the anonymous limit for every visitor, and lock them all out of signing in.
+        var trustedProxies = LoadRateLimiterTrustedProxies(configuration);
+        var forwardedHopLimit = LoadRateLimiterForwardedHopLimit(configuration);
+        if (trustedProxies.Networks.Count > 0)
+        {
+            services.AddSingleton<IStartupFilter>(serviceProvider =>
+                new RateLimiterTrustedProxyLoggingStartupFilter(
+                    trustedProxies,
+                    forwardedHopLimit,
+                    serviceProvider.GetRequiredService<ILogger<RateLimiterTrustedProxyLoggingStartupFilter>>()));
+        }
+
         services.AddRateLimiter(options =>
         {
             options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
@@ -85,7 +102,7 @@ internal static class WebServiceCollectionExtensions
                 var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
                 var partitionKey = isAuthenticated
                     ? $"user:{context.User?.Identity?.Name ?? "authenticated"}"
-                    : $"ip:{context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+                    : $"ip:{ForwardedClientAddress.Resolve(context, trustedProxies, forwardedHopLimit)?.ToString() ?? "unknown"}";
 
                 return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: partitionKey,
@@ -171,5 +188,78 @@ internal static class WebServiceCollectionExtensions
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// The reverse proxies whose <c>X-Forwarded-For</c> the rate limiter uses (see <see cref="ForwardedClientAddress"/>):
+    /// <c>TRUSTED_PROXIES</c> (an unset or empty variable keeps <c>ReverseProxySettings:TrustedProxies</c>), plus
+    /// <c>AUTHELIA_TRUSTED_PROXIES</c> when Authelia is enabled, because the proxy that sends the Authelia headers
+    /// relays every request. Refuses to start on an entry that is not an IP address or CIDR range.
+    /// </summary>
+    private static TrustedProxyAllowlist LoadRateLimiterTrustedProxies(IConfiguration configuration)
+    {
+        const string variable = "TRUSTED_PROXIES";
+        var value = Environment.GetEnvironmentVariable(variable);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            value = configuration["ReverseProxySettings:TrustedProxies"];
+        }
+
+        if (!TrustedProxyAllowlist.TryParseOptional(value, variable, out var trustedProxies, out var error))
+        {
+            throw new InvalidOperationException(error + " See docs/REVERSE_PROXY.md.");
+        }
+
+        // AddComicMaintainerAuth has already refused to start if Authelia is enabled with an invalid list.
+        var autheliaSettings = AutheliaSettingsBinder.Load(configuration);
+        if (autheliaSettings.Enabled
+            && TrustedProxyAllowlist.TryParse(autheliaSettings.TrustedProxies, out var autheliaProxies, out _))
+        {
+            trustedProxies = trustedProxies.Union(autheliaProxies);
+        }
+
+        return trustedProxies;
+    }
+
+    /// <summary>
+    /// The maximum number of right-most <c>X-Forwarded-For</c> entries the rate limiter follows; defaults to one
+    /// so a trusted network gateway cannot expose client-controlled entries farther to the left.
+    /// </summary>
+    private static int LoadRateLimiterForwardedHopLimit(IConfiguration configuration)
+    {
+        const string variable = "TRUSTED_PROXY_HOPS";
+        var value = Environment.GetEnvironmentVariable(variable);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            value = configuration["ReverseProxySettings:ForwardedHopLimit"];
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return 1;
+        }
+
+        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var hopLimit) || hopLimit < 1)
+        {
+            throw new InvalidOperationException(
+                $"Invalid {variable} value '{value}'. Set it to a positive integer. See docs/REVERSE_PROXY.md.");
+        }
+
+        return hopLimit;
+    }
+
+    private sealed class RateLimiterTrustedProxyLoggingStartupFilter(
+        TrustedProxyAllowlist trustedProxies,
+        int forwardedHopLimit,
+        ILogger<RateLimiterTrustedProxyLoggingStartupFilter> logger) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            logger.LogInformation(
+                "Rate limiting counts anonymous requests from {TrustedProxies} per X-Forwarded-For client address, up to {ForwardedHopLimit} hop(s)",
+                string.Join(", ", trustedProxies.Networks),
+                forwardedHopLimit);
+            next(app);
+        };
     }
 }

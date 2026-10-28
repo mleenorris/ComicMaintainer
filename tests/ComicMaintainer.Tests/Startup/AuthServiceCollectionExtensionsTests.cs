@@ -46,7 +46,6 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         .GetType("ComicMaintainer.WebApi.Startup.CoreServiceCollectionExtensions", throwOnError: true)!
         .GetMethod("AddComicMaintainerSettings", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
-
     private readonly string _root = Path.Combine(Path.GetTempPath(), "cm-auth-extensions-" + Guid.NewGuid().ToString("N"));
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
@@ -331,6 +330,72 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         Assert.Equal("ComicMaintainer", parameters.ValidIssuer);
         Assert.Equal("ComicMaintainerAPI", parameters.ValidAudience);
         await AssertJwtOnlyAsync(provider);
+    }
+
+    // AuthService signs tokens with IOptions<JwtSettings> and the bearer scheme validates them with the key read at
+    // startup, so both must resolve JWT_SECRET the same way. Regression test for #875: a blank JWT_SECRET (as passed by
+    // `docker run -e JWT_SECRET=` or an empty env-file entry) counts as unset in both, so the configured secret is used.
+    [Theory]
+    [InlineData(null, ConfiguredSecret)]
+    [InlineData("", ConfiguredSecret)]
+    [InlineData(" \t ", ConfiguredSecret)]
+    [InlineData(EnvironmentSecret, EnvironmentSecret)]
+    public void JwtSecretEnvironmentVariable_ResolvesTheSameSecretForSigningAndValidation(string? variable, string expectedSecret)
+    {
+        _environment.Set("JWT_SECRET", variable);
+        var configuration = BuildConfiguration(("JwtSettings:Secret", ConfiguredSecret));
+        var services = new ServiceCollection();
+        services.AddLogging();
+        AddComicMaintainerSettings(services, configuration);
+        AddComicMaintainerAuth(services, configuration);
+        using var provider = services.BuildServiceProvider();
+
+        Assert.Equal(expectedSecret, provider.GetRequiredService<IOptions<JwtSettings>>().Value.Secret);
+        var key = Assert.IsType<SymmetricSecurityKey>(GetBearerOptions(provider).TokenValidationParameters.IssuerSigningKey);
+        Assert.Equal(Encoding.UTF8.GetBytes(expectedSecret), key.Key);
+    }
+
+    // A blank variable counts as unset. With no configured secret, startup generates a persistent key instead.
+    [Theory]
+    [InlineData("", null)]
+    [InlineData("", "")]
+    [InlineData("", "   ")]
+    [InlineData(" \t ", null)]
+    public void BlankJwtSecretEnvironmentVariable_WithoutAConfiguredSecret_GeneratesAKey(string variable, string? configuredSecret)
+    {
+        _environment.Set("JWT_SECRET", variable);
+
+        using var provider = BuildProvider(("JwtSettings:Secret", configuredSecret));
+
+        var key = File.ReadAllText(KeyFile);
+        Assert.Equal(48, Convert.FromBase64String(key).Length);
+        AssertSignsAndValidatesWith(provider, key);
+    }
+
+    // A blank JWT_SECRET was meant to hold the secret (such as `-e JWT_SECRET="$(cat jwt_secret.txt)"` with the file
+    // missing), so it must not fall back to the placeholder secret shipped in appsettings.json: that one is public, and
+    // anyone could sign tokens with it. The shipped file (which the build copies next to the tests, as it is published
+    // next to the app) is read, so that a change to it is covered too.
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \t ")]
+    public void BlankJwtSecretEnvironmentVariable_WithOnlyTheShippedSecret_GeneratesAKey(string variable)
+    {
+        _environment.Set("JWT_SECRET", variable);
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(Path.Join(AppContext.BaseDirectory, "appsettings.json"), optional: false)
+            .AddInMemoryCollection([new KeyValuePair<string, string?>("AppSettings:ConfigDirectory", ConfigDirectory)])
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        AddComicMaintainerSettings(services, configuration);
+        AddComicMaintainerAuth(services, configuration);
+        using var provider = services.BuildServiceProvider();
+
+        var key = File.ReadAllText(KeyFile);
+        Assert.Equal(48, Convert.FromBase64String(key).Length);
+        AssertSignsAndValidatesWith(provider, key);
     }
 
     [Fact]

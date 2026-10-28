@@ -162,6 +162,42 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SaveReadingProgressAsync_MarkedReadConcurrently_KeepsTheFileRead()
+    {
+        // The web reader posts progress and mark-read together when the page it shows is the
+        // last one, so for a comic opened for the first time both insert the first status row.
+        var path = Path.Join(_library, "Saga 008.cbz");
+        var service = CreateService("alice");
+        _interceptor.BeforeNextSave = () => InsertStatusRowAsync("alice", path, isRead: true, page: 1);
+
+        await service.SaveReadingProgressAsync(path, 9);
+
+        // Regression: the losing request copied its whole row onto the winner, so its default
+        // IsRead = false undid the mark-read.
+        var row = Assert.Single(await StatusRowsAsync("alice", path));
+        Assert.True(row.IsRead);
+        Assert.Equal(9, row.CurrentPage);
+        Assert.False(_logger.Has(LogLevel.Error));
+    }
+
+    [Fact]
+    public async Task MarkFileReadAsync_ProgressSavedConcurrently_KeepsTheSavedPage()
+    {
+        var path = Path.Join(_library, "Saga 009.cbz");
+        var service = CreateService("alice");
+        _interceptor.BeforeNextSave = () => InsertStatusRowAsync("alice", path, isRead: false, page: 9);
+
+        await service.MarkFileReadAsync(path, read: true);
+
+        // Regression: as above, the losing request's default CurrentPage = 1 replaced the saved page.
+        var row = Assert.Single(await StatusRowsAsync("alice", path));
+        Assert.True(row.IsRead);
+        Assert.Equal(9, row.CurrentPage);
+        Assert.Equal(9, await service.GetReadingProgressAsync(path));
+        Assert.False(_logger.Has(LogLevel.Error));
+    }
+
+    [Fact]
     public async Task MarkFileReadAsync_ConflictingStatusRowVanishesBeforeRecovery_LogsTheFailure()
     {
         var path = Path.Combine(_library, "Saga 006.cbz");

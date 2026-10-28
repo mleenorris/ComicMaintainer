@@ -27,9 +27,9 @@ internal static class CoreServiceCollectionExtensions
         services.Configure<AppSettings>(configuration.GetSection("AppSettings"));
         services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<AppSettings>, AppSettingsEnvironmentPostConfigure>();
 
-        // Configure JWT settings. The signing secret is applied on top by AddComicMaintainerAuth, which resolves it
-        // (JWT_SECRET, JWT_SECRET_FILE, this section or a generated key; see JwtSecretResolver) for validation too.
-        services.Configure<JwtSettings>(options => configuration.GetSection("JwtSettings").Bind(options));
+        // Configure JWT settings from the section and JWT_SECRET. AddComicMaintainerAuth also resolves JWT_SECRET_FILE
+        // and generated keys, then applies the resolved signing secret to these options.
+        services.Configure<JwtSettings>(options => JwtSettingsBinder.Bind(configuration, options));
 
         // Configure Authelia settings (configuration section + AUTHELIA_* environment variables)
         services.Configure<AutheliaSettings>(options => AutheliaSettingsBinder.Bind(configuration, options));
@@ -290,6 +290,7 @@ internal static class CoreServiceCollectionExtensions
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
             });
         services.AddSingleton<ISuwayomiService, SuwayomiService>();
+        services.AddSingleton<ISuwayomiDownloadImportService, SuwayomiDownloadImportService>();
         services.AddSingleton<ComicVineSeriesMetadataService>();
         services.AddSingleton<MangaDexSeriesMetadataService>();
         services.AddSingleton<AniListManhwaSeriesMetadataService>();
@@ -392,6 +393,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IScheduledJobHandler, LibraryScanJobHandler>();
         services.AddSingleton<IScheduledJobHandler, MetadataBackfillJobHandler>();
         services.AddSingleton<IScheduledJobHandler, MissingIssuesCheckJobHandler>();
+        services.AddSingleton<IScheduledJobHandler, SuwayomiDownloadImportJobHandler>();
         // Only registered when the database is a file (see AddComicMaintainerData).
         if (services.Any(d => d.ServiceType == typeof(IDatabaseBackupService)))
         {

@@ -730,3 +730,98 @@ test('a recorded cache name that cannot be read is logged, and the default cache
     assert.equal(sw.logged('Failed to read the recorded cache name').length, 1);
     assert.equal(await sw.caches.text(DEFAULT_CACHE, '/css/styles.css'), 'body{}');
 });
+
+// --- background cache updates ------------------------------------------------
+//
+// Once a fetch event has its response the browser may stop the worker, unless a
+// promise passed to event.waitUntil() is still pending, cutting off any cache
+// update under way. Here cache writes take an event-loop turn, as with real
+// cache storage (the fake one writes at once), so an update the worker left out
+// of waitUntil() would still be unfinished when sw.respondEarly() reports that
+// the event ended.
+
+function deferred() {
+    let resolve;
+    const promise = new Promise(res => {
+        resolve = res;
+    });
+    return { promise, resolve };
+}
+
+/** Make every write to `cache` wait for the event loop first. */
+function slowStorage(cache) {
+    for (const method of ['put', 'delete']) {
+        const write = cache[method].bind(cache);
+        cache[method] = async (...args) => {
+            await new Promise(resolve => setImmediate(resolve));
+            return write(...args);
+        };
+    }
+    return cache;
+}
+
+test('refreshing a cached script keeps the worker running until the new copy is stored', async () => {
+    const sw = await installedWorker();
+    const MAIN = `/js/main.js?v=${APP_VERSION}`;
+    slowStorage(await sw.caches.open(VERSIONED_CACHE));
+    const network = deferred();
+    sw.network.route('GET /js/main.js', () => network.promise);
+
+    const { response, extended, ended } = await sw.respondEarly(MAIN);
+    assert.equal(await response.text(), `// ${MAIN}`);
+    await sw.idle();
+    assert.equal(extended(), true, 'the refresh is not tied to the fetch event');
+
+    network.resolve(script('// main.js, hotfixed'));
+    await ended;
+    assert.equal(await sw.caches.text(VERSIONED_CACHE, MAIN), '// main.js, hotfixed');
+});
+
+test('a stylesheet, icon or cover fetched for the first time is stored, and its cache trimmed, before the worker may stop', async () => {
+    const sw = await installedWorker();
+    const runtime = {};
+    for (let i = 0; i < 120; i++) runtime[`/icons/runtime-${i}.png`] = image(`icon ${i}`);
+    slowStorage(await sw.caches.seed(VERSIONED_CACHE, runtime));
+    const covers = {};
+    for (let i = 0; i < 400; i++) covers[`/api/ComicReader/cover?filePath=c${i}.cbz`] = image(`cover ${i}`);
+    slowStorage(await sw.caches.seed(IMAGE_CACHE, covers));
+    sw.network.route('GET /css/theme.css', stylesheet);
+    sw.network.route('GET /api/ComicReader/cover', image('cover'));
+
+    for (const [url, cacheName, evicted] of [
+        ['/css/theme.css', VERSIONED_CACHE, '/icons/runtime-0.png'],
+        ['/icons/badge.png', VERSIONED_CACHE, '/icons/runtime-1.png'],
+        [COVER, IMAGE_CACHE, '/api/ComicReader/cover?filePath=c0.cbz']
+    ]) {
+        const { ended } = await sw.respondEarly(url);
+        await ended;
+        const urls = sw.caches.urls(cacheName);
+        assert.equal(urls.at(-1), absolute(url), url);
+        assert.equal(urls.includes(absolute(evicted)), false, url);
+    }
+});
+
+for (const [status, answer, cachedAfter] of [
+    [200, image('cover v2'), 'cover v2'],
+    [401, reply(401, { error: 'Unauthorized' }), undefined],
+    [403, reply(403, { error: 'Forbidden' }), undefined]
+]) {
+    test(`revalidating a cached image keeps the worker running until the ${status} answer has ${cachedAfter ? 'replaced' : 'evicted'} it`, async () => {
+        // A comic's cover, and one requested in a way no download can match.
+        for (const url of [COVER, '/api/ComicReader/cover?id=7']) {
+            const sw = await installedWorker();
+            slowStorage(await sw.caches.seed(IMAGE_CACHE, { [url]: image('cover v1') }));
+            const network = deferred();
+            sw.network.route('GET /api/ComicReader/cover', () => network.promise);
+
+            const { response, extended, ended } = await sw.respondEarly(url);
+            assert.equal(await response.text(), 'cover v1', url);
+            await sw.idle();
+            assert.equal(extended(), true, `${url}: the revalidation is not tied to the fetch event`);
+
+            network.resolve(answer);
+            await ended;
+            assert.equal(await sw.caches.text(IMAGE_CACHE, url), cachedAfter, url);
+        }
+    });
+}

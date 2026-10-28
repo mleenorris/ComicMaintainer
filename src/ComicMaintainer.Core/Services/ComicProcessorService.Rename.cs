@@ -310,8 +310,7 @@ public partial class ComicProcessorService
         while (index >= 0)
         {
             var end = index + token.Length;
-            if ((index == 0 || !char.IsLetterOrDigit(text[index - 1])) &&
-                (end == text.Length || !char.IsLetterOrDigit(text[end])))
+            if (IsTokenBoundary(text, index - 1, -1) && IsTokenBoundary(text, end, 1))
             {
                 return true;
             }
@@ -320,6 +319,25 @@ public partial class ComicProcessorService
         }
 
         return false;
+    }
+
+    // A position is a boundary unless it holds a letter/digit, or a "," / "." joining
+    // another numeric component (e.g. the ",000" in "1,000,000").
+    private static bool IsTokenBoundary(string text, int position, int direction)
+    {
+        if (position < 0 || position >= text.Length)
+        {
+            return true;
+        }
+
+        var c = text[position];
+        if (char.IsLetterOrDigit(c))
+        {
+            return false;
+        }
+
+        var next = position + direction;
+        return !((c == ',' || c == '.') && next >= 0 && next < text.Length && char.IsDigit(text[next]));
     }
 
     private static string FormatChapterForFilename(string chapter, int padding)

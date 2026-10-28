@@ -1019,6 +1019,8 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     [InlineData("{series}", "Series", "Extra", "Series - Chapter Extra.cbz")]
     [InlineData("{title}", "Series", "5", "Chapter 0005.cbz")]
     [InlineData("{series}", "Series 2", "5", "Series 2 - Chapter 0005.cbz")]
+    [InlineData("{series}", "Series 1,000,000", "1,000", "Series 1,000,000 - Chapter 1,000.cbz")]
+    [InlineData("{series}", "Series 2,1,000", "1,000", "Series 2,1,000 - Chapter 1,000.cbz")]
     public async Task RenameFilesAsync_TemplateWithoutIssue_AppendsChapterToPreserveIt(
         string template, string series, string issue, string expectedName)
     {

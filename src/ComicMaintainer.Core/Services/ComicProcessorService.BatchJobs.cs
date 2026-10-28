@@ -110,8 +110,8 @@ public partial class ComicProcessorService
 
     public Task<Guid> DeleteFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
-        // Paths ignore case on Windows while the file store matches them exactly, so there
-        // the tracked spellings of a deleted file are looked up, from one listing per job.
+        // Paths usually ignore case on Windows while the file store matches them exactly, so
+        // there the tracked spellings of a deleted file are looked up, from one listing per job.
         var trackedPaths = new Lazy<Task<ILookup<string, string>>>(async () =>
             (await _fileStore.GetAllFilesAsync(CancellationToken.None))
                 .ToLookup(f => f.FilePath, f => f.FilePath, StringComparer.OrdinalIgnoreCase));
@@ -138,11 +138,19 @@ public partial class ComicProcessorService
                     var canonicalPath = Path.Join(GetAllowedLogicalPath(entryDirectory), Path.GetFileName(entryPath));
                     var requestedPaths = new[] { filePath, canonicalPath };
                     var storePaths = requestedPaths.Distinct(StringComparer.Ordinal).ToArray();
-                    if (LibraryPathValidator.PathComparison == StringComparison.OrdinalIgnoreCase)
+                    if (OperatingSystem.IsWindows())
                     {
+                        // A differently cased tracked path names this entry only where its
+                        // directories ignore case, which a Windows directory can be set not to,
+                        // so it must open as the same entry. Checked before the entry is deleted;
+                        // when it is already missing, so must the tracked path be.
                         var tracked = await trackedPaths.Value;
+                        var entryIdentity = NativeFileSystem.TryReadWindowsEntryPath(entryPath);
                         storePaths = storePaths
-                            .Concat(requestedPaths.SelectMany(path => tracked[path]))
+                            .Concat(requestedPaths
+                                .SelectMany(path => tracked[path])
+                                .Where(path => string.Equals(
+                                    NativeFileSystem.TryReadWindowsEntryPath(path), entryIdentity, StringComparison.Ordinal)))
                             .Distinct(StringComparer.Ordinal)
                             .ToArray();
                     }

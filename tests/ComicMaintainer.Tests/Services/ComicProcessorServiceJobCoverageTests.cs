@@ -499,22 +499,121 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         await store.AddFileAsync(viaRequest);
         await store.AddFileAsync(viaLink);
         // Requested through differently cased directory components, and through a link
-        // whose target spells the directory differently from the tracked path.
-        var recased = Path.Join(_library, "SERIES", "request.cbz");
+        // whose target spells the directory differently from the tracked path when this
+        // account may create symbolic links.
+        var requests = new List<string> { Path.Join(_library, "SERIES", "request.cbz") };
         var alias = Path.Join(_library, "alias");
-        Directory.CreateSymbolicLink(alias, Path.Join(_library, "series"));
-        var throughAlias = Path.Join(alias, "link.cbz");
+        if (TryCreateDirectoryLink(alias, Path.Join(_library, "series")))
+        {
+            requests.Add(Path.Join(alias, "link.cbz"));
+        }
 
-        var jobId = await service.DeleteFilesAsync(new[] { recased, throughAlias });
+        var jobId = await service.DeleteFilesAsync(requests);
         var job = await WaitForJobAsync(service, jobId);
 
-        Assert.Equal(2, job.ProcessedFiles);
+        Assert.Equal(requests.Count, job.ProcessedFiles);
         Assert.Equal(0, job.FailedFiles);
         Assert.False(File.Exists(viaRequest));
-        Assert.False(File.Exists(viaLink));
-        Assert.Empty(await store.GetAllFilesAsync());
         Assert.Null(await store.GetFileAsync(viaRequest));
-        Assert.Null(await store.GetFileAsync(viaLink));
+        if (requests.Count == 2)
+        {
+            Assert.False(File.Exists(viaLink));
+            Assert.Empty(await store.GetAllFilesAsync());
+        }
+        else
+        {
+            Assert.True(File.Exists(viaLink));
+            Assert.NotNull(await store.GetFileAsync(viaLink));
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_DirectoryCasedDifferentlyOnACaseInsensitiveVolume_DeletesTheFile()
+    {
+        var service = CreateService();
+        var comic = WriteCbz("Series/book.cbz", Xml("Series", "1", "Chapter 1"));
+        var recased = Path.Join(_library, "series", "book.cbz");
+        if (!File.Exists(recased))
+        {
+            // The volume is case-sensitive, so the recased path names nothing.
+            return;
+        }
+
+        var jobId = await service.DeleteFilesAsync(new[] { recased });
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.False(File.Exists(comic));
+        // The tracked path is the library path spelled as on disk.
+        _fileStore.Verify(f => f.RemoveFileAsync(comic, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_DifferentlyCasedSiblingOfTheLibraryInACaseSensitiveWindowsDirectory_IsRejected()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var parent = Path.Join(_root, "case-sensitive");
+        if (!TryCreateCaseSensitiveDirectory(parent))
+        {
+            return;
+        }
+
+        _settings.WatchedDirectory = Directory.CreateDirectory(Path.Join(parent, "library")).FullName;
+        var sibling = WriteFile(Path.Join(parent, "LIBRARY", "Series", "victim.cbz"));
+        var service = CreateService();
+
+        var jobId = await service.DeleteFilesAsync(new[] { sibling });
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(0, job.ProcessedFiles);
+        Assert.Equal(1, job.FailedFiles);
+        Assert.Equal("keep me", await File.ReadAllTextAsync(sibling));
+        Assert.True(_logger.Has(LogLevel.Warning, "DeleteFilesAsync: file is outside the allowed directories: {FilePath}"));
+        _fileStore.Verify(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_TrackedFilesDifferingOnlyInCaseInACaseSensitiveWindowsDirectory_KeepsTheOthersRecord()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var series = Path.Join(_library, "Series");
+        if (!TryCreateCaseSensitiveDirectory(series))
+        {
+            return;
+        }
+
+        var services = new ServiceCollection();
+        var databaseName = Guid.NewGuid().ToString("N");
+        services.AddDbContextFactory<ComicMaintainerDbContext>(options => options.UseInMemoryDatabase(databaseName));
+        await using var provider = services.BuildServiceProvider();
+        var store = new FileStoreService(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            Mock.Of<ILogger<FileStoreService>>(),
+            provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
+        var service = CreateService(fileStore: store);
+        var lower = Path.GetFullPath(WriteFile(Path.Join(series, "book.cbz")));
+        var upper = Path.GetFullPath(WriteFile(Path.Join(series, "BOOK.cbz")));
+        await store.AddFileAsync(lower);
+        await store.AddFileAsync(upper);
+
+        var jobId = await service.DeleteFilesAsync(new[] { lower });
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.False(File.Exists(lower));
+        Assert.True(File.Exists(upper));
+        Assert.Null(await store.GetFileAsync(lower));
+        Assert.NotNull(await store.GetFileAsync(upper));
     }
 
     [Fact]
@@ -804,6 +903,53 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         }
 
         return path;
+    }
+
+    private static bool TryCreateDirectoryLink(string path, string target)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(path, target);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Windows accounts need the symbolic link privilege or Developer Mode.
+            return false;
+        }
+    }
+
+    // Creates an empty directory and makes it case-sensitive, which new subdirectories
+    // inherit. False when the Windows file system or configuration does not support it.
+    private static bool TryCreateCaseSensitiveDirectory(string path)
+    {
+        Directory.CreateDirectory(path);
+        try
+        {
+            using var fsutil = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                "fsutil.exe", new[] { "file", "setCaseSensitiveInfo", path, "enable" })
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            })!;
+            fsutil.StandardOutput.ReadToEnd();
+            fsutil.StandardError.ReadToEnd();
+            fsutil.WaitForExit();
+            if (fsutil.ExitCode != 0)
+            {
+                return false;
+            }
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+
+        File.WriteAllText(Path.Join(path, "probe"), string.Empty);
+        var caseSensitive = !File.Exists(Path.Join(path, "PROBE"));
+        File.Delete(Path.Join(path, "probe"));
+        return caseSensitive;
     }
 
     private static string WriteFile(string path)

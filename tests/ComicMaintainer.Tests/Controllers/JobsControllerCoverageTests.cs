@@ -560,14 +560,14 @@ public class JobsControllerCoverageTests
             return;
         }
 
-        var root = Path.Combine(Path.GetTempPath(), "jobs-delete-" + Guid.NewGuid().ToString("N"));
+        var root = Path.Join(Path.GetTempPath(), "jobs-delete-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var library = Directory.CreateDirectory(Path.Combine(root, "library")).FullName;
-            var outside = Directory.CreateDirectory(Path.Combine(root, "outside")).FullName;
-            var comic = Path.Combine(library, "a.cbz");
+            var library = Directory.CreateDirectory(Path.Join(root, "library")).FullName;
+            var outside = Directory.CreateDirectory(Path.Join(root, "outside")).FullName;
+            var comic = Path.Join(library, "a.cbz");
             File.WriteAllText(comic, "keep me");
-            var link = Path.Combine(outside, "a.cbz");
+            var link = Path.Join(outside, "a.cbz");
             File.CreateSymbolicLink(link, comic);
             var controller = new JobsController(
                 _processor.Object, _fileStore.Object, NullLogger<JobsController>.Instance,

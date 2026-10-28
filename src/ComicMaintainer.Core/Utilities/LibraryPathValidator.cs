@@ -91,6 +91,12 @@ public static class LibraryPathValidator
     /// Returns true when the already resolved <paramref name="fullPath"/> is the
     /// resolved <paramref name="directory"/> itself or lives beneath it.
     /// </summary>
+    /// <remarks>
+    /// The paths are compared exactly, on every platform. Resolved paths, and the paths the
+    /// OS reports for an opened directory, are spelled as the file system stores them, so a
+    /// differently cased request on a case-insensitive volume still matches, while a distinct
+    /// "LIBRARY" next to "library" in a case-sensitive directory does not.
+    /// </remarks>
     public static bool IsWithin(string fullPath, string? directory)
     {
         if (string.IsNullOrWhiteSpace(directory))
@@ -100,12 +106,13 @@ public static class LibraryPathValidator
         if (root.Length == 0)
             return false;
 
-        return string.Equals(fullPath.TrimEnd(Path.DirectorySeparatorChar), root, PathComparison)
-            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison);
+        return string.Equals(fullPath.TrimEnd(Path.DirectorySeparatorChar), root, StringComparison.Ordinal)
+            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// How library paths are compared: ignoring case on Windows, ordinally elsewhere.
+    /// How library paths that are not spelled as the file system stores them are compared:
+    /// ignoring case on Windows, ordinally elsewhere.
     /// </summary>
     public static StringComparison PathComparison =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
@@ -115,7 +122,8 @@ public static class LibraryPathValidator
     /// resolving each path segment from the root down. A link is replaced by its
     /// target, which is resolved the same way (links in its directories, chained
     /// links, and ".." applied to where the link really leads), as the OS does.
-    /// Segments that do not exist, or are not links, are kept verbatim.
+    /// Segments that do not exist, or are not links, are kept verbatim, except that on
+    /// Windows and macOS the existing directories are spelled as the file system stores them.
     /// </summary>
     /// <exception cref="IOException">
     /// More than 40 links have to be followed, e.g. because of a link loop.
@@ -163,7 +171,27 @@ public static class LibraryPathValidator
             PushSegments(pending, target);
         }
 
-        return resolved;
+        return ToStoredSpelling(resolved);
+    }
+
+    // On Windows and macOS a path may be spelled in any case the volume ignores, so the
+    // deepest existing directory is replaced by the path the OS reports for it once opened.
+    // That is the spelling on disk, which a containment check can compare exactly.
+    private static string ToStoredSpelling(string path)
+    {
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
+            return path;
+
+        var existing = path;
+        while (!Directory.Exists(existing))
+        {
+            existing = Path.GetDirectoryName(existing);
+            if (existing is null)
+                return path;
+        }
+
+        var stored = NativeFileSystem.TryReadDirectorySpelling(existing);
+        return stored is null ? path : Path.Join(stored, path.AsSpan(existing.Length));
     }
 
     private static void PushSegments(Stack<string> pending, string relativePath)

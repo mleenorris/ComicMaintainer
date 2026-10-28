@@ -265,7 +265,7 @@ public partial class ComicProcessorService
         }
 
         return OperatingSystem.IsMacOS()
-            ? Path.Join(ReadMacDirectoryPath(directoryHandle.DangerousGetHandle().ToInt32()), Path.GetFileName(entryPath))
+            ? Path.Join(NativeFileSystem.ReadMacDirectoryPath(directoryHandle.DangerousGetHandle().ToInt32()), Path.GetFileName(entryPath))
             : entryPath;
     }
 
@@ -297,29 +297,29 @@ public partial class ComicProcessorService
             ?? throw new IOException("Cannot determine the directory of the file.");
         // Share access is only checked for opens that request more than attributes, so
         // listing access is needed for the missing FILE_SHARE_DELETE to block renames.
-        const uint FILE_LIST_DIRECTORY = 0x1;
-        const uint FILE_READ_ATTRIBUTES = 0x80;
-        const uint FILE_SHARE_READ_WRITE = 0x1 | 0x2;
-        const uint OPEN_EXISTING = 3;
-        const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
-        var handle = CreateWindowsFile(
-            directoryPath, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_SHARE_READ_WRITE, IntPtr.Zero, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero);
-        if (handle.IsInvalid)
-        {
-            var error = Marshal.GetLastPInvokeError();
-            handle.Dispose();
-            throw new IOException($"Could not open the directory: {new Win32Exception(error).Message}");
-        }
-
+        var handle = NativeFileSystem.CreateWindowsFile(
+            directoryPath,
+            NativeFileSystem.FILE_LIST_DIRECTORY | NativeFileSystem.FILE_READ_ATTRIBUTES,
+            NativeFileSystem.FILE_SHARE_READ_WRITE,
+            IntPtr.Zero,
+            NativeFileSystem.OPEN_EXISTING,
+            NativeFileSystem.FILE_FLAG_BACKUP_SEMANTICS,
+            IntPtr.Zero);
         try
         {
+            if (handle.IsInvalid)
+            {
+                throw new IOException($"Could not open the directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
+            }
+
             // The handle follows links, so a directory that was replaced by a link (or a
-            // junction) before it was opened resolves somewhere else and is refused.
+            // junction) before it was opened resolves somewhere else and is refused. Both
+            // paths are spelled as the file system stores them, so they are compared exactly.
             // Trimming keeps the separator of a root such as "D:\", which the handle reports too.
             if (!string.Equals(
-                    Path.TrimEndingDirectorySeparator(ReadWindowsDirectoryPath(handle)),
+                    Path.TrimEndingDirectorySeparator(NativeFileSystem.ReadWindowsFinalPath(handle)),
                     Path.TrimEndingDirectorySeparator(directoryPath),
-                    StringComparison.OrdinalIgnoreCase))
+                    StringComparison.Ordinal))
             {
                 throw new IOException("The directory changed while it was being opened.");
             }
@@ -347,7 +347,7 @@ public partial class ComicProcessorService
 
         if (OperatingSystem.IsWindows())
         {
-            var openedDirectory = ReadWindowsDirectoryPath(directoryHandle);
+            var openedDirectory = NativeFileSystem.ReadWindowsFinalPath(directoryHandle);
             if (!LibraryPathValidator.IsWithin(openedDirectory, _settings.WatchedDirectory) &&
                 !LibraryPathValidator.IsWithin(openedDirectory, _settings.DuplicateDirectory))
             {
@@ -366,7 +366,7 @@ public partial class ComicProcessorService
         var directoryDescriptor = directoryHandle.DangerousGetHandle().ToInt32();
         var currentDirectory = OperatingSystem.IsLinux()
             ? ReadLinuxDirectoryPath(directoryDescriptor)
-            : ReadMacDirectoryPath(directoryDescriptor);
+            : NativeFileSystem.ReadMacDirectoryPath(directoryDescriptor);
         if (!LibraryPathValidator.IsWithin(currentDirectory, _settings.WatchedDirectory) &&
             !LibraryPathValidator.IsWithin(currentDirectory, _settings.DuplicateDirectory))
         {
@@ -385,28 +385,6 @@ public partial class ComicProcessorService
     }
 
     /// <summary>
-    /// The physical path of the directory opened as <paramref name="handle"/> on Windows,
-    /// without the "\\?\" prefix.
-    /// </summary>
-    private static string ReadWindowsDirectoryPath(SafeFileHandle handle)
-    {
-        var buffer = new char[32768];
-        var length = GetWindowsFinalPathName(handle, buffer, (uint)buffer.Length, 0);
-        if (length == 0 || length >= buffer.Length)
-        {
-            throw new IOException($"Could not resolve the opened directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
-        }
-
-        var path = new string(buffer, 0, (int)length);
-        if (path.StartsWith(@"\\?\UNC\", StringComparison.Ordinal))
-        {
-            return @"\\" + path[8..];
-        }
-
-        return path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path[4..] : path;
-    }
-
-    /// <summary>
     /// Opens the directory holding <paramref name="entryPath"/> on macOS, checking that it is
     /// the directory that was resolved rather than something it was replaced by meanwhile.
     /// </summary>
@@ -414,9 +392,8 @@ public partial class ComicProcessorService
     {
         var directoryPath = Path.GetDirectoryName(entryPath)
             ?? throw new IOException("Cannot determine the directory of the file.");
-        const int O_DIRECTORY = 0x100000;
-        const int O_CLOEXEC = 0x1000000;
-        var descriptor = OpenUnixDirectory(directoryPath, O_DIRECTORY | O_CLOEXEC);
+        var descriptor = NativeFileSystem.OpenUnixDirectory(
+            directoryPath, NativeFileSystem.MAC_O_DIRECTORY | NativeFileSystem.MAC_O_CLOEXEC);
         if (descriptor < 0)
         {
             throw new IOException($"Could not open the directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
@@ -426,9 +403,10 @@ public partial class ComicProcessorService
         try
         {
             // The open follows links, so a directory that was replaced by a link before it
-            // was opened resolves somewhere else and is refused.
+            // was opened resolves somewhere else and is refused. Both paths are spelled as
+            // the file system stores them, so a differently cased request still matches.
             if (!string.Equals(
-                    Path.TrimEndingDirectorySeparator(ReadMacDirectoryPath(descriptor)),
+                    Path.TrimEndingDirectorySeparator(NativeFileSystem.ReadMacDirectoryPath(descriptor)),
                     Path.TrimEndingDirectorySeparator(directoryPath),
                     StringComparison.Ordinal))
             {
@@ -444,47 +422,6 @@ public partial class ComicProcessorService
         }
     }
 
-    /// <summary>
-    /// The current physical path of the directory opened as <paramref name="descriptor"/>
-    /// on macOS.
-    /// </summary>
-    private static string ReadMacDirectoryPath(int descriptor)
-    {
-        // ATTR_CMN_FULLPATH: an attrreference to the path, after the buffer's length field.
-        const uint ATTR_CMN_FULLPATH = 0x08000000;
-        const int ATTR_BIT_MAP_COUNT = 5;
-        var attributes = new MacAttributeList { BitmapCount = ATTR_BIT_MAP_COUNT, CommonAttributes = ATTR_CMN_FULLPATH };
-        var buffer = new byte[4096 + 12];
-        if (GetMacAttributes(descriptor, ref attributes, buffer, (nuint)buffer.Length, 0) != 0)
-        {
-            throw new IOException($"Could not resolve the opened directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
-        }
-
-        const int referenceOffset = sizeof(uint);
-        var dataOffset = BitConverter.ToInt32(buffer, referenceOffset);
-        var dataLength = BitConverter.ToUInt32(buffer, referenceOffset + sizeof(int));
-        var start = referenceOffset + dataOffset;
-        if (dataLength == 0 || dataOffset < 0 || start + (long)dataLength > buffer.Length)
-        {
-            throw new IOException("Could not resolve the opened directory.");
-        }
-
-        // The length includes the terminating NUL.
-        return Encoding.UTF8.GetString(buffer, start, (int)dataLength - 1);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MacAttributeList
-    {
-        public ushort BitmapCount;
-        public ushort Reserved;
-        public uint CommonAttributes;
-        public uint VolumeAttributes;
-        public uint DirectoryAttributes;
-        public uint FileAttributes;
-        public uint ForkAttributes;
-    }
-
     private static SafeFileHandle? OpenRenameDirectory(string sourcePath)
     {
         if (!OperatingSystem.IsLinux())
@@ -495,7 +432,7 @@ public partial class ComicProcessorService
         var directoryPath = Path.GetDirectoryName(sourcePath)
             ?? throw new IOException("Cannot determine the source directory.");
         var directoryFlag = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 0x4000 : 0x10000;
-        var descriptor = OpenUnixDirectory(directoryPath, directoryFlag | 0x80000 | 0x200000);
+        var descriptor = NativeFileSystem.OpenUnixDirectory(directoryPath, directoryFlag | 0x80000 | 0x200000);
         if (descriptor < 0)
         {
             throw new IOException($"Could not open the source directory: {new Win32Exception(Marshal.GetLastPInvokeError()).Message}");
@@ -601,39 +538,11 @@ public partial class ComicProcessorService
         throw new IOException("The renamed file does not resolve within a configured library directory.");
     }
 
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateWindowsFile(
-        string fileName,
-        uint desiredAccess,
-        uint shareMode,
-        IntPtr securityAttributes,
-        uint creationDisposition,
-        uint flagsAndAttributes,
-        IntPtr templateFile);
-
-    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint GetWindowsFinalPathName(
-        SafeFileHandle file,
-        [Out] char[] filePath,
-        uint filePathLength,
-        uint flags);
-
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int OpenUnixDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-
     [DllImport("libc", EntryPoint = "readlink", SetLastError = true)]
     private static extern nint ReadLinuxLink(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         [Out] byte[] buffer,
         nuint bufferSize);
-
-    [DllImport("libc", EntryPoint = "fgetattrlist", SetLastError = true)]
-    private static extern int GetMacAttributes(
-        int descriptor,
-        ref MacAttributeList attributes,
-        [Out] byte[] buffer,
-        nuint bufferSize,
-        uint options);
 
     [DllImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
     private static extern int UnlinkAt(

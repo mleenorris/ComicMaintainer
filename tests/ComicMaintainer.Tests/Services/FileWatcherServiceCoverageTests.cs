@@ -6,6 +6,7 @@ using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 
 namespace ComicMaintainer.Tests.Services;
@@ -13,7 +14,8 @@ namespace ComicMaintainer.Tests.Services;
 /// <summary>
 /// Covers the <see cref="FileWatcherService"/> paths that <see cref="FileWatcherServiceTests"/>
 /// leaves out: rebinding on settings changes, status-broadcast failures, new-directory scans,
-/// deletions, the single-mode "should process" checks and recovery after a watcher error.
+/// deletions, the single-mode "should process" checks and recovery after a watcher error,
+/// including recreating a watcher that may have stopped.
 /// </summary>
 /// <remarks>
 /// The event handlers are private, so they are driven by real file-system events in a unique
@@ -21,7 +23,8 @@ namespace ComicMaintainer.Tests.Services;
 /// arrival raises a single "created" notification. Every wait completes from a recorded log
 /// entry or mock call (TaskCompletionSource, bounded by <see cref="WaitTimeout"/>); there are no
 /// fixed sleeps. A watcher error is simulated by making the service's own "File created" handler
-/// throw: FileSystemWatcher reports handler exceptions through its Error event.
+/// throw: FileSystemWatcher reports handler exceptions through its Error event. Waits between
+/// attempts to recreate a watcher run on a <see cref="RecordingTimeProvider"/>.
 /// </remarks>
 public sealed class FileWatcherServiceCoverageTests : IDisposable
 {
@@ -48,6 +51,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     private readonly Recorder<string> _added = new();
     private readonly Recorder<string> _removed = new();
     private readonly Recorder<string> _processed = new();
+    private readonly RecordingTimeProvider _time = new();
     private readonly List<FileWatcherService> _services = new();
     private volatile Func<string, Task>? _onAdd;
 
@@ -502,14 +506,31 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         Assert.Empty(_processed.Snapshot());
     }
 
+    [Fact]
+    public async Task BufferOverflow_RescansWithoutRecreatingTheWatcher()
+    {
+        await StartWatchingAsync();
+        var (trigger, overflow) = ArmWatcherFailure("trigger.cbz", failure: new InternalBufferOverflowException("simulated overflow"));
+
+        MoveIn("trigger.cbz");
+
+        var reported = await _logger.WaitForAsync(LogLevel.Error, "File watcher reported an error; some file-system events may have been lost");
+        Assert.Same(overflow, reported.Exception);
+        await _logger.WaitForAsync(LogLevel.Information, $"Recovery rescan completed: {_library}");
+        Assert.Contains(trigger, _added.Snapshot());
+        AssertNotLogged("may have stopped");
+        Assert.Equal(1, CountLogged("File watcher started for directory"));
+        Assert.Empty(_time.Delays.Snapshot());
+    }
+
     [Theory]
     [InlineData(Unavailability.DirectoryDeleted)]
     [InlineData(Unavailability.WatcherStopped)]
-    public async Task WatcherError_WhenWatchedDirectoryIsUnavailable_SkipsRecoveryRescan(Unavailability cause)
+    public async Task BufferOverflow_WhenWatchedDirectoryIsUnavailable_SkipsRecoveryRescan(Unavailability cause)
     {
         var service = await StartWatchingAsync();
         var hookFailures = new ConcurrentQueue<Exception>();
-        var (trigger, _) = ArmWatcherFailure("trigger.cbz", entry =>
+        var (trigger, _) = ArmWatcherFailure("trigger.cbz", failure: new InternalBufferOverflowException("simulated overflow"), alsoOnLog: entry =>
         {
             // Runs on the FileSystemWatcher's thread, before the recovery is queued; an exception
             // escaping here would take down the test host, so failures are recorded instead.
@@ -540,7 +561,146 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         await _logger.WaitForAsync(LogLevel.Warning, "Recovery rescan skipped: watched directory is unavailable");
         Assert.Empty(hookFailures);
         AssertNotLogged("Starting recovery rescan");
+        AssertNotLogged("may have stopped");
         Assert.DoesNotContain(trigger, _added.Snapshot());
+    }
+
+    [Fact]
+    public async Task WatcherError_RecreatesTheWatcherAndRescans()
+    {
+        var broadcasts = new Recorder<(bool Running, bool Enabled)>();
+        var broadcaster = new Mock<IEventBroadcaster>();
+        broadcaster.Setup(b => b.BroadcastWatcherStatusAsync(It.IsAny<bool>(), It.IsAny<bool>()))
+            .Returns<bool, bool>((running, enabled) =>
+            {
+                broadcasts.Add((running, enabled));
+                return Task.CompletedTask;
+            });
+        var service = await StartWatchingAsync(broadcaster: broadcaster.Object);
+        var (trigger, failure) = ArmWatcherFailure("trigger.cbz");
+
+        MoveIn("trigger.cbz");
+
+        var reported = await _logger.WaitForAsync(LogLevel.Error, "File watcher reported an error and may have stopped");
+        Assert.Same(failure, reported.Exception);
+        await _logger.WaitForAsync(LogLevel.Information, $"Recovery rescan completed: {_library}");
+        Assert.True(service.IsRunning);
+        Assert.Equal(2, CountLogged($"File watcher started for directory: {_library}"));
+        Assert.Equal(new[] { (true, true), (false, true), (true, true) }, broadcasts.Snapshot());
+        Assert.Contains(trigger, _added.Snapshot());
+        Assert.Empty(_time.Delays.Snapshot());
+
+        // The recreated watcher picks up new arrivals.
+        var arrival = MoveIn("arrival.cbz");
+        await _added.WaitForAsync(p => p == arrival, "the comic that arrived after the watcher was recreated");
+    }
+
+    [Fact]
+    public async Task WatcherError_WhileDirectoryIsUnavailable_RetriesWithExponentialBackoff()
+    {
+        var service = await StartWatchingAsync();
+        var hookFailures = new ConcurrentQueue<Exception>();
+        ArmWatcherFailure("trigger.cbz", alsoOnLog: entry => DeleteLibraryOnRestart(entry, hookFailures));
+
+        MoveIn("trigger.cbz");
+
+        var expected = new[] { 1, 2, 4, 8, 16, 32, 60, 60 }.Select(s => TimeSpan.FromSeconds(s)).ToArray();
+        for (var i = 0; i < expected.Length; i++)
+        {
+            await _time.Delays.WaitUntilAsync(d => d.Count > i, $"backoff wait #{i + 1}");
+            Assert.Equal(expected[i], _time.Delays.Snapshot()[i]);
+            Assert.False(service.IsRunning);
+            if (i < expected.Length - 1)
+            {
+                _time.Advance(expected[i]);
+            }
+        }
+
+        Assert.Empty(hookFailures);
+        var unavailable = _logger.Entries.Snapshot()
+            .Where(e => e.Message.Contains("Cannot recreate the file watcher while the watched directory is unavailable", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(expected.Length, unavailable.Count);
+        Assert.Equal(LogLevel.Warning, unavailable[0].Level);
+        Assert.All(unavailable.Skip(1), e => Assert.Equal(LogLevel.Debug, e.Level));
+        Assert.Equal(1, CountLogged("File watcher started for directory"));
+
+        // Once the directory is back the next attempt recreates the watcher and rescans it.
+        Directory.CreateDirectory(_library);
+        _time.Advance(expected[^1]);
+
+        await _logger.WaitForAsync(LogLevel.Information, $"Recovery rescan completed: {_library}");
+        Assert.True(service.IsRunning);
+        Assert.Equal(2, CountLogged($"File watcher started for directory: {_library}"));
+        Assert.Equal(expected.Length, _time.Delays.Snapshot().Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WatcherError_StopOrDisposeDuringBackoff_EndsTheRetries(bool dispose)
+    {
+        var service = await StartWatchingAsync();
+        var hookFailures = new ConcurrentQueue<Exception>();
+        ArmWatcherFailure("trigger.cbz", alsoOnLog: entry => DeleteLibraryOnRestart(entry, hookFailures));
+
+        MoveIn("trigger.cbz");
+        await _time.Delays.WaitUntilAsync(d => d.Count == 1, "the first backoff wait");
+
+        if (dispose)
+        {
+            service.Dispose();
+        }
+        else
+        {
+            await service.StopAsync();
+        }
+
+        await _logger.WaitForAsync(LogLevel.Debug, "Stopped trying to recreate the file watcher");
+        Assert.Empty(hookFailures);
+
+        Directory.CreateDirectory(_library);
+        _time.Advance(TimeSpan.FromMinutes(5));
+
+        Assert.False(service.IsRunning);
+        Assert.Single(_time.Delays.Snapshot());
+        Assert.Equal(1, CountLogged("File watcher started for directory"));
+        AssertNotLogged("Starting recovery rescan");
+        AssertNotLogged("Recovery rescan");
+    }
+
+    [Fact]
+    public async Task WatcherError_FromAStoppedWatcher_IsIgnored()
+    {
+        var service = await StartWatchingAsync();
+        var hookFailures = new ConcurrentQueue<Exception>();
+        ArmWatcherFailure("trigger.cbz", alsoOnLog: entry =>
+        {
+            // Runs on the FileSystemWatcher's thread, before the restart is queued.
+            if (!entry.Message.Contains("may have stopped", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            try
+            {
+                service.StopAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                hookFailures.Enqueue(ex);
+            }
+        });
+
+        MoveIn("trigger.cbz");
+
+        await _logger.WaitForAsync(LogLevel.Debug, "Ignoring the error of a file watcher that has already been stopped or replaced");
+        Assert.Empty(hookFailures);
+        Assert.False(service.IsRunning);
+        Assert.Equal(1, CountLogged("File watcher started for directory"));
+        AssertNotLogged("Starting recovery rescan");
+        AssertNotLogged("Recovery rescan");
+        Assert.Empty(_time.Delays.Snapshot());
     }
 
     [Fact]
@@ -583,7 +743,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
 
     private FileWatcherService CreateService(IOptionsMonitor<AppSettings> monitor, IEventBroadcaster? broadcaster = null)
     {
-        var service = new FileWatcherService(monitor, _logger, _store.Object, _processor.Object, broadcaster);
+        var service = new FileWatcherService(monitor, _logger, _store.Object, _processor.Object, broadcaster, _time);
         _services.Add(service);
         return service;
     }
@@ -625,14 +785,15 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     }
 
     /// <summary>
-    /// Makes the service's "File created" handler throw once for <paramref name="fileName"/>, by
-    /// failing the log call it starts with. FileSystemWatcher reports the exception through its
-    /// Error event, which is the path a buffer overflow takes too.
+    /// Makes the service's "File created" handler throw <paramref name="failure"/> (by default an
+    /// <see cref="IOException"/>) once for <paramref name="fileName"/>, by failing the log call it
+    /// starts with. FileSystemWatcher reports the exception through its Error event, which is the
+    /// path a buffer overflow or a failing watcher takes too.
     /// </summary>
-    private (string Trigger, Exception Failure) ArmWatcherFailure(string fileName, Action<LogEntry>? alsoOnLog = null)
+    private (string Trigger, Exception Failure) ArmWatcherFailure(string fileName, Action<LogEntry>? alsoOnLog = null, Exception? failure = null)
     {
         var trigger = Path.Combine(_library, fileName);
-        var failure = new IOException("simulated watcher failure");
+        failure ??= new IOException("simulated watcher failure");
         var armed = 1;
         _logger.OnLog = entry =>
         {
@@ -645,6 +806,30 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         };
         return (trigger, failure);
     }
+
+    /// <summary>
+    /// Deletes the library when the service reports that its watcher may have stopped, before the
+    /// restart is queued, so the restart finds the watched directory unavailable.
+    /// </summary>
+    private void DeleteLibraryOnRestart(LogEntry entry, ConcurrentQueue<Exception> hookFailures)
+    {
+        if (!entry.Message.Contains("may have stopped", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(_library, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            hookFailures.Enqueue(ex);
+        }
+    }
+
+    private int CountLogged(string fragment) =>
+        _logger.Entries.Snapshot().Count(e => e.Message.Contains(fragment, StringComparison.Ordinal));
 
     private void AssertLogged(LogLevel level, string fragment) =>
         Assert.True(_logger.Has(level, fragment), $"Expected a {level} log containing \"{fragment}\". Logged:{Environment.NewLine}{_logger.Dump()}");
@@ -740,6 +925,34 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
 
             public TaskCompletionSource Signal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
+    }
+
+    /// <summary>
+    /// <see cref="FakeTimeProvider"/> wrapper that records the due time of every timer created, so
+    /// a test can await the service's next wait before advancing past it.
+    /// </summary>
+    private sealed class RecordingTimeProvider : TimeProvider
+    {
+        private readonly FakeTimeProvider _time = new();
+
+        public Recorder<TimeSpan> Delays { get; } = new();
+
+        public override long TimestampFrequency => _time.TimestampFrequency;
+
+        public override TimeZoneInfo LocalTimeZone => _time.LocalTimeZone;
+
+        public override DateTimeOffset GetUtcNow() => _time.GetUtcNow();
+
+        public override long GetTimestamp() => _time.GetTimestamp();
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = _time.CreateTimer(callback, state, dueTime, period);
+            Delays.Add(dueTime);
+            return timer;
+        }
+
+        public void Advance(TimeSpan delta) => _time.Advance(delta);
     }
 
     private sealed class RecordingLogger : ILogger<FileWatcherService>

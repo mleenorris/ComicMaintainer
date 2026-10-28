@@ -159,6 +159,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **The file watcher recovers after it stops with an error.** When a network share disconnected,
+  the watched folder was removed, or (on Linux) an error ended the watcher's event loop, the
+  watcher stayed dead until the service restarted, so new comics went undetected; on Linux it
+  still reported itself as running. The watcher is now recreated, retrying after 1 s and then
+  twice as long each time, up to 1 min, while the folder is unavailable, and the folder is
+  rescanned for files that arrived in the meantime. A buffer overflow still only triggers a
+  rescan.
 - **Processing renames files on filesystems without an atomic no-overwrite rename.** On NFS,
   ZFS before 2.2 and FUSE filesystems such as Unraid user shares, every rename failed with
   `Atomic no-overwrite rename is not supported by this filesystem.`, leaving files under their

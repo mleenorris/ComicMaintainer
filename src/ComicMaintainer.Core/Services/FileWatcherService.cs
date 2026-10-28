@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
@@ -14,10 +15,10 @@ namespace ComicMaintainer.Core.Services;
 public class FileWatcherService : IFileWatcherService, IDisposable
 {
     /// <summary>Wait after the first failed attempt to recreate a failed watcher.</summary>
-    public static readonly TimeSpan RestartInitialDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan RestartInitialDelay = TimeSpan.FromSeconds(1);
 
     /// <summary>Upper bound on the wait between attempts to recreate a failed watcher.</summary>
-    public static readonly TimeSpan RestartMaxDelay = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan RestartMaxDelay = TimeSpan.FromMinutes(1);
 
     private readonly IOptionsMonitor<AppSettings> _settingsMonitor;
     private readonly ILogger<FileWatcherService> _logger;
@@ -38,6 +39,13 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// or disposing the service takes and cancels it, which ends the retries.
     /// </summary>
     private CancellationTokenSource? _restartCts;
+
+    /// <summary>
+    /// The watcher whose start (enabling its events) is in progress, written under
+    /// <see cref="_lock"/>. <see cref="OnWatcherError"/> reads it without the lock to tell errors
+    /// raised while a watcher starts apart from errors of a running watcher.
+    /// </summary>
+    private volatile FileSystemWatcher? _startingWatcher;
 
     /// <summary>
     /// Pending per-file processing requests, keyed by full path. A burst of file-system events for
@@ -255,11 +263,19 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
     /// <summary>
     /// Creates and starts the watcher for <paramref name="directory"/>, replacing any previous
-    /// one. Callers hold <see cref="_lock"/>, which is how <see cref="OnWatcherError"/> tells
-    /// errors raised while starting apart from errors of a running watcher.
+    /// one. Callers hold <see cref="_lock"/>.
     /// </summary>
     private void StartWatcherLocked(string directory)
     {
+        // A watcher that stopped itself (Windows does so after an error) is replaced, not leaked.
+        // It is retired before the new one is enabled so the two never raise events together.
+        if (_watcher != null)
+        {
+            DisposeWatcher(_watcher);
+            _watcher = null;
+            _activeWatchedDirectory = null;
+        }
+
         var watcher = new FileSystemWatcher(directory)
         {
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
@@ -276,6 +292,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         watcher.Deleted += OnFileDeleted;
         watcher.Error += OnWatcherError;
 
+        _startingWatcher = watcher;
         try
         {
             watcher.EnableRaisingEvents = true;
@@ -285,11 +302,9 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             watcher.Dispose();
             throw;
         }
-
-        // A watcher that stopped itself (Windows does so after an error) is replaced, not leaked.
-        if (_watcher != null)
+        finally
         {
-            DisposeWatcher(_watcher);
+            _startingWatcher = null;
         }
 
         _watcher = watcher;
@@ -606,9 +621,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     {
         var ex = e.GetException();
 
-        // Only an error raised while starting a watcher arrives on a thread holding _lock: the
-        // thread starting it.
-        var starting = Monitor.IsEntered(_lock);
+        var starting = sender != null && ReferenceEquals(sender, _startingWatcher);
         if (starting || ex is InternalBufferOverflowException)
         {
             _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
@@ -616,7 +629,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
             // A watcher started by a restart is rescanned once it runs, so subdirectories it
             // cannot watch don't each queue another full rescan.
-            if (!starting || _restartCts == null)
+            if (!starting || Volatile.Read(ref _restartCts) == null)
             {
                 // Recover off the event thread so we don't block the watcher's notification pipeline.
                 _ = Task.Run(async () => await RecoverFromMissedEventsAsync());
@@ -643,8 +656,9 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// </summary>
     private async Task RestartFaultedWatcherAsync(FileSystemWatcher faulted)
     {
-        CancellationTokenSource? restart = null;
-        var token = CancellationToken.None;
+        // Only this method disposes the restart: StopAsync and Dispose just cancel it.
+        using var restart = new CancellationTokenSource();
+        var retrying = false;
         lock (_lock)
         {
             if (!ReferenceEquals(_watcher, faulted))
@@ -661,16 +675,16 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             // A restart that is already retrying replaces this watcher too.
             if (_restartCts == null)
             {
-                restart = _restartCts = new CancellationTokenSource();
-                token = restart.Token;
+                _restartCts = restart;
+                retrying = true;
             }
         }
 
         await BroadcastStatusAsync(false);
 
-        if (restart != null)
+        if (retrying)
         {
-            await RestartWatcherAsync(restart, token);
+            await RestartWatcherAsync(restart);
         }
     }
 
@@ -679,9 +693,9 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// and twice as long after each further one, up to <see cref="RestartMaxDelay"/>, until a
     /// watcher runs or StopAsync or Dispose takes <paramref name="restart"/>.
     /// </summary>
-    private async Task RestartWatcherAsync(CancellationTokenSource restart, CancellationToken token)
+    private async Task RestartWatcherAsync(CancellationTokenSource restart)
     {
-        var restarted = false;
+        var token = restart.Token;
         var startedHere = false;
         try
         {
@@ -707,7 +721,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                             StartWatcherLocked(directory);
                             startedHere = true;
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or Win32Exception)
                         {
                             failure = ex;
                         }
@@ -717,7 +731,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     if (_watcher != null)
                     {
                         _restartCts = null;
-                        restarted = true;
                         break;
                     }
                 }
@@ -745,28 +758,20 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             _logger.LogDebug(LoggingHelper.WithWatcherPrefix("Stopped trying to recreate the file watcher"));
             return;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error recreating the file watcher"));
             return;
         }
         finally
         {
-            // Whoever takes the restart out of _restartCts disposes it: this loop once a watcher
-            // runs again or after an unexpected failure, otherwise StopAsync or Dispose.
-            var owned = restarted;
+            // Release the restart after an unexpected failure so a later error can retry again.
             lock (_lock)
             {
                 if (ReferenceEquals(_restartCts, restart))
                 {
                     _restartCts = null;
-                    owned = true;
                 }
-            }
-
-            if (owned)
-            {
-                restart.Dispose();
             }
         }
 
@@ -784,25 +789,27 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// </summary>
     private static void CancelRestart(CancellationTokenSource? restart)
     {
-        if (restart == null)
+        try
         {
-            return;
+            restart?.Cancel();
         }
-
-        restart.Cancel();
-        restart.Dispose();
+        catch (ObjectDisposedException)
+        {
+            // The restart loop already ended and disposed it.
+        }
     }
 
-    private static void DisposeWatcher(FileSystemWatcher watcher)
+    private void DisposeWatcher(FileSystemWatcher watcher)
     {
         try
         {
             watcher.EnableRaisingEvents = false;
             watcher.Dispose();
         }
-        catch
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or Win32Exception)
         {
             // Best-effort disposal of a watcher that may already have failed
+            _logger.LogDebug(ex, LoggingHelper.WithWatcherPrefix("Error disposing a file watcher"));
         }
     }
 

@@ -254,7 +254,8 @@ Configuration can be set via:
 | EnableExternalSeriesMetadata | ENABLE_EXTERNAL_SERIES_METADATA | false | Enable ComicVine alias lookups for series grouping |
 | ComicVineApiKey | COMICVINE_API_KEY | _(empty)_ | ComicVine API key used for external series alias enrichment |
 | ComicVineBaseUrl | COMICVINE_BASE_URL | https://comicvine.gamespot.com/api | Override the ComicVine API base URL if needed |
-| ReverseProxySettings:TrustedProxies | TRUSTED_PROXIES | _(empty)_ | Comma-separated IP addresses and CIDR ranges of your reverse proxies; requests from them are rate-limited per client address taken from `X-Forwarded-For` (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)) |
+| ReverseProxySettings:TrustedProxies | TRUSTED_PROXIES | _(empty)_ | Comma-separated IP addresses and CIDR ranges of your reverse proxies; requests from them are rate-limited using `X-Forwarded-For` (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)) |
+| ReverseProxySettings:ForwardedHopLimit | TRUSTED_PROXY_HOPS | 1 | Number of right-most trusted `X-Forwarded-For` entries to follow; keep at 1 unless every additional proxy reliably appends its actual peer address (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)) |
 
 ## API Endpoints
 

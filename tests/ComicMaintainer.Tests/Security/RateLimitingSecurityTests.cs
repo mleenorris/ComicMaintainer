@@ -30,7 +30,7 @@ public sealed class RateLimitingSecurityTests : IDisposable
     private static readonly IPAddress Proxy = IPAddress.Parse("172.18.0.2");
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
-        new("TRUSTED_PROXIES", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES");
+        new("TRUSTED_PROXIES", "TRUSTED_PROXY_HOPS", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES");
 
     public void Dispose() => _environment.Dispose();
 
@@ -58,6 +58,44 @@ public sealed class RateLimitingSecurityTests : IDisposable
         Assert.False(TryAcquire(limiter, Anonymous(Proxy, "192.0.2.2, " + ClientA)));
         Assert.False(TryAcquire(limiter, Anonymous(Proxy, ClientB + ", " + ClientA)));
         Assert.False(TryAcquire(limiter, Anonymous(Proxy, "172.18.0.3, " + ClientA)));
+    }
+
+    [Fact]
+    public void DefaultHopLimit_DoesNotFollowPastATrustedGateway()
+    {
+        _environment.Set("TRUSTED_PROXIES", "172.18.0.0/16");
+
+        Assert.False(GatewayClientsHaveIndependentLimits());
+    }
+
+    [Fact]
+    public void AdditionalTrustedHops_MustBeExplicitlyConfigured()
+    {
+        _environment.Set("TRUSTED_PROXIES", "172.18.0.0/16");
+        _environment.Set("TRUSTED_PROXY_HOPS", "2");
+
+        Assert.True(GatewayClientsHaveIndependentLimits());
+    }
+
+    [Fact]
+    public void ForwardedHopLimit_CanBeConfiguredInApplicationSettings()
+    {
+        _environment.Set("TRUSTED_PROXIES", "172.18.0.0/16");
+
+        Assert.True(GatewayClientsHaveIndependentLimits(("ReverseProxySettings:ForwardedHopLimit", "2")));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("two")]
+    public void InvalidForwardedHopLimit_RefusesToStart(string value)
+    {
+        _environment.Set("TRUSTED_PROXY_HOPS", value);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => CreateGlobalLimiter());
+
+        Assert.StartsWith($"Invalid TRUSTED_PROXY_HOPS value '{value}'", exception.Message);
     }
 
     [Theory]
@@ -176,6 +214,14 @@ public sealed class RateLimitingSecurityTests : IDisposable
         ExhaustAnonymousLimit(limiter, () => Anonymous(proxy, ClientA));
 
         return TryAcquire(limiter, Anonymous(proxy, ClientB));
+    }
+
+    private static bool GatewayClientsHaveIndependentLimits(params (string Key, string? Value)[] settings)
+    {
+        using var limiter = CreateGlobalLimiter(settings);
+        ExhaustAnonymousLimit(limiter, () => Anonymous(Proxy, ClientA + ", 172.18.0.1"));
+
+        return TryAcquire(limiter, Anonymous(Proxy, ClientB + ", 172.18.0.1"));
     }
 
     private static PartitionedRateLimiter<HttpContext> CreateGlobalLimiter(params (string Key, string? Value)[] settings)

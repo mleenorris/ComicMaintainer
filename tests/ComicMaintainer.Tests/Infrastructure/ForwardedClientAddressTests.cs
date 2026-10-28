@@ -6,9 +6,9 @@ using Microsoft.AspNetCore.Http;
 namespace ComicMaintainer.Tests.Infrastructure;
 
 /// <summary>
-/// <see cref="ForwardedClientAddress"/>: the client address the rate limiter counts anonymous requests by. Behind
-/// trusted proxies it is the right-most <c>X-Forwarded-For</c> entry that is not a trusted proxy; every other
-/// request is identified by its TCP peer, whatever <c>X-Forwarded-For</c> it sends.
+/// <see cref="ForwardedClientAddress"/>: by default, the rate limiter uses only the right-most
+/// <c>X-Forwarded-For</c> entry from a trusted proxy. Additional trusted hops are followed only when explicitly
+/// configured; every other request is identified by its TCP peer, whatever <c>X-Forwarded-For</c> it sends.
 /// </summary>
 public sealed class ForwardedClientAddressTests
 {
@@ -24,6 +24,25 @@ public sealed class ForwardedClientAddressTests
     public void TrustedProxy_TheClientItForwardedIsUsed(string forwardedFor, string expected)
     {
         Assert.Equal(IPAddress.Parse(expected), Resolve("172.18.0.2", forwardedFor));
+    }
+
+    [Theory]
+    [InlineData("198.51.100.1, 172.18.0.1")]
+    [InlineData("203.0.113.7, 172.18.0.1")]
+    public void TrustedGateway_IsTheClientAfterOneHop(string forwardedFor)
+    {
+        Assert.Equal(IPAddress.Parse("172.18.0.1"), Resolve("172.18.0.2", forwardedFor));
+    }
+
+    [Fact]
+    public void AdditionalTrustedHops_AreFollowedOnlyWhenExplicitlyConfigured()
+    {
+        Assert.Equal(
+            IPAddress.Parse("198.51.100.1"),
+            ForwardedClientAddress.Resolve(
+                Request("172.18.0.2", "198.51.100.1, 172.18.0.1"),
+                TrustedProxies,
+                forwardedHopLimit: 2));
     }
 
     [Theory]
@@ -51,7 +70,9 @@ public sealed class ForwardedClientAddressTests
     [InlineData("203.0.113.7, , 10.0.0.5,")]                    // empty entries are skipped
     public void ChainOfTrustedProxies_IsFollowedToTheFirstUntrustedAddress(string forwardedFor)
     {
-        Assert.Equal(IPAddress.Parse("203.0.113.7"), Resolve("172.18.0.2", forwardedFor));
+        Assert.Equal(
+            IPAddress.Parse("203.0.113.7"),
+            ForwardedClientAddress.Resolve(Request("172.18.0.2", forwardedFor), TrustedProxies, forwardedHopLimit: 3));
     }
 
     [Fact]
@@ -60,13 +81,18 @@ public sealed class ForwardedClientAddressTests
         var context = Request("172.18.0.2");
         context.Request.Headers["X-Forwarded-For"] = new[] { "198.51.100.1", "203.0.113.7, 10.0.0.5" };
 
-        Assert.Equal(IPAddress.Parse("203.0.113.7"), ForwardedClientAddress.Resolve(context, TrustedProxies));
+        Assert.Equal(IPAddress.Parse("203.0.113.7"), ForwardedClientAddress.Resolve(context, TrustedProxies, 2));
     }
 
     [Fact]
     public void EveryForwardedAddressTrusted_TheLeftMostIsUsed()
     {
-        Assert.Equal(IPAddress.Parse("172.18.0.40"), Resolve("172.18.0.2", "172.18.0.40, 10.0.0.5"));
+        Assert.Equal(
+            IPAddress.Parse("172.18.0.40"),
+            ForwardedClientAddress.Resolve(
+                Request("172.18.0.2", "172.18.0.40, 10.0.0.5"),
+                TrustedProxies,
+                forwardedHopLimit: 2));
     }
 
     [Theory]

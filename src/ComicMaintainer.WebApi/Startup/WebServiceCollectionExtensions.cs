@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
@@ -82,11 +83,13 @@ public static class WebServiceCollectionExtensions
         // address that a trusted proxy forwards in X-Forwarded-For, not per connection: otherwise one client could
         // exhaust the anonymous limit for every visitor, and lock them all out of signing in.
         var trustedProxies = LoadRateLimiterTrustedProxies(configuration);
+        var forwardedHopLimit = LoadRateLimiterForwardedHopLimit(configuration);
         if (trustedProxies.Networks.Count > 0)
         {
             services.AddSingleton<IStartupFilter>(serviceProvider =>
                 new RateLimiterTrustedProxyLoggingStartupFilter(
                     trustedProxies,
+                    forwardedHopLimit,
                     serviceProvider.GetRequiredService<ILogger<RateLimiterTrustedProxyLoggingStartupFilter>>()));
         }
 
@@ -99,7 +102,7 @@ public static class WebServiceCollectionExtensions
                 var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
                 var partitionKey = isAuthenticated
                     ? $"user:{context.User?.Identity?.Name ?? "authenticated"}"
-                    : $"ip:{ForwardedClientAddress.Resolve(context, trustedProxies)?.ToString() ?? "unknown"}";
+                    : $"ip:{ForwardedClientAddress.Resolve(context, trustedProxies, forwardedHopLimit)?.ToString() ?? "unknown"}";
 
                 return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: partitionKey,
@@ -218,15 +221,44 @@ public static class WebServiceCollectionExtensions
         return trustedProxies;
     }
 
+    /// <summary>
+    /// The maximum number of right-most <c>X-Forwarded-For</c> entries the rate limiter follows; defaults to one
+    /// so a trusted network gateway cannot expose client-controlled entries farther to the left.
+    /// </summary>
+    private static int LoadRateLimiterForwardedHopLimit(IConfiguration configuration)
+    {
+        const string variable = "TRUSTED_PROXY_HOPS";
+        var value = Environment.GetEnvironmentVariable(variable);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            value = configuration["ReverseProxySettings:ForwardedHopLimit"];
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return 1;
+        }
+
+        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var hopLimit) || hopLimit < 1)
+        {
+            throw new InvalidOperationException(
+                $"Invalid {variable} value '{value}'. Set it to a positive integer. See docs/REVERSE_PROXY.md.");
+        }
+
+        return hopLimit;
+    }
+
     private sealed class RateLimiterTrustedProxyLoggingStartupFilter(
         TrustedProxyAllowlist trustedProxies,
+        int forwardedHopLimit,
         ILogger<RateLimiterTrustedProxyLoggingStartupFilter> logger) : IStartupFilter
     {
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
         {
             logger.LogInformation(
-                "Rate limiting counts anonymous requests from {TrustedProxies} per X-Forwarded-For client address",
-                string.Join(", ", trustedProxies.Networks));
+                "Rate limiting counts anonymous requests from {TrustedProxies} per X-Forwarded-For client address, up to {ForwardedHopLimit} hop(s)",
+                string.Join(", ", trustedProxies.Networks),
+                forwardedHopLimit);
             next(app);
         };
     }

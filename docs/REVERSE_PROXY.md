@@ -44,8 +44,9 @@ proxy every request comes from the proxy's address, so unless the proxy is trust
 that one limit: a single client, such as a password-guessing script, can use it up and stop everyone from signing in
 until the minute is over.
 
-Set `TRUSTED_PROXIES` to the address your reverse proxy connects to ComicMaintainer from, and the requests it relays
-are counted per client instead, using the client address the proxy adds to the `X-Forwarded-For` header:
+Set `TRUSTED_PROXIES` to the address your reverse proxy connects to ComicMaintainer from. The default
+`TRUSTED_PROXY_HOPS=1` uses only the right-most `X-Forwarded-For` entry, which the proxy directly connected to the app
+appended:
 
 ```yaml
 environment:
@@ -54,22 +55,29 @@ environment:
 
 - Entries are comma-separated IPv4 or IPv6 addresses or CIDR ranges (e.g. `172.18.0.0/16, 10.0.0.5, fd00::/8`).
   Hostnames are not supported, and the app refuses to start on an invalid entry. Choose them as described in
-  [Choosing `AUTHELIA_TRUSTED_PROXIES`](AUTHELIA.md#choosing-authelia_trusted_proxies). If requests pass through
-  more than one proxy (for example a CDN in front of SWAG), list each of them. The value can also be set in
+  [Choosing `AUTHELIA_TRUSTED_PROXIES`](AUTHELIA.md#choosing-authelia_trusted_proxies). The value can also be set in
   `appsettings.json` as `ReverseProxySettings:TrustedProxies`; the environment variable takes precedence.
+- One forwarded hop is used by default. If requests pass through multiple proxies (for example a CDN in front of
+  SWAG), set `TRUSTED_PROXY_HOPS` to the number of right-most entries to follow (or use
+  `ReverseProxySettings:ForwardedHopLimit` in `appsettings.json`). It must be a positive integer; the environment
+  variable takes precedence. Entries beyond the first are followed only while the current address is trusted.
 - With Authelia enabled, the addresses in `AUTHELIA_TRUSTED_PROXIES` are trusted for this as well, so an Authelia
   deployment usually needs no extra setting.
 - The proxy must **append** the client address to `X-Forwarded-For`. nginx does this with
   `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, which SWAG's `proxy.conf` and the nginx examples
-  in this guide include; Traefik, Caddy and Apache add it by default. The header is read from the right, stopping at
-  the first address that is not a trusted proxy, so addresses that a client writes into the header itself are
-  ignored, and so is the whole header on requests that do not come from a trusted proxy.
+  in this guide include; Traefik, Caddy and Apache add it by default. The header is read from the right, and so is
+  ignored on requests that do not come from a trusted proxy.
+- Keep the hop limit at one unless every additional proxy is trusted and reliably appends its actual peer address.
+  For example, Docker's userland proxy can relay traffic through the bridge gateway (`172.18.0.1`), producing a
+  header like `<client-supplied>, 172.18.0.1`. With the default one-hop limit the gateway is used as the partition,
+  not the client-controlled entry to its left. Those gateway-relayed clients therefore share a rate limit; increasing
+  the hop limit in this setup would let them choose separate partitions using that entry.
 - Keep the list narrow: a host in it can choose which address its requests are counted against. The list only
   affects rate limiting and never makes a request trusted for authentication: the connection's address is not
   rewritten, and the Authelia headers are still checked against it.
 
 At startup, the log lists the trusted proxies:
-`Rate limiting counts anonymous requests from 172.18.0.0/16 per X-Forwarded-For client address`.
+`Rate limiting counts anonymous requests from 172.18.0.0/16 per X-Forwarded-For client address, up to 1 hop(s)`.
 
 ### Base Path Support
 You can deploy ComicMaintainer at a subdirectory path using the `BASE_PATH` environment variable:

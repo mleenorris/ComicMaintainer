@@ -11,10 +11,10 @@ namespace ComicMaintainer.WebApi.Infrastructure;
 /// <remarks>
 /// <para>Behind a reverse proxy every connection comes from the proxy, so keying on the TCP peer would put every
 /// visitor in one rate-limit partition, and a single client could lock everybody out of signing in. A proxy appends
-/// the address it received the request from to <c>X-Forwarded-For</c>, so the header is read from the right: while
-/// the current address is a trusted proxy, the entry that proxy appended replaces it. The first address that is not
-/// a trusted proxy is the client. The entries to its left were written by the client (or by a proxy nobody
-/// trusts) and are ignored, so a client cannot choose its own address by sending the header.</para>
+/// the address it received the request from to <c>X-Forwarded-For</c>, so the right-most entry is the address the
+/// connected proxy appended. By default only that one hop is used. Additional trusted hops can be followed when
+/// explicitly configured; the first address that is not a trusted proxy is the client. Entries beyond the
+/// configured hop limit are ignored.</para>
 /// <para>This deliberately leaves <see cref="ConnectionInfo.RemoteIpAddress"/> untouched (no forwarded-headers
 /// middleware): the Authelia allowlist must keep checking the TCP peer, see
 /// <see cref="AutheliaAuthenticationHandler"/>.</para>
@@ -24,15 +24,21 @@ public static class ForwardedClientAddress
     private const string ForwardedForHeader = "X-Forwarded-For";
 
     /// <summary>
-    /// The client address of <paramref name="context"/>: the right-most <c>X-Forwarded-For</c> entry that is not
-    /// in <paramref name="trustedProxies"/> when the TCP peer is, otherwise the TCP peer itself.
+    /// The client address of <paramref name="context"/>: up to <paramref name="forwardedHopLimit"/> right-most
+    /// <c>X-Forwarded-For</c> entries when the TCP peer is in <paramref name="trustedProxies"/>, otherwise the TCP
+    /// peer itself.
     /// </summary>
     /// <returns>
     /// The address, with IPv4-mapped IPv6 addresses converted to IPv4; <see langword="null"/> when the server does
     /// not know the peer.
     /// </returns>
-    public static IPAddress? Resolve(HttpContext context, TrustedProxyAllowlist trustedProxies)
+    public static IPAddress? Resolve(
+        HttpContext context,
+        TrustedProxyAllowlist trustedProxies,
+        int forwardedHopLimit = 1)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(forwardedHopLimit);
+
         var peer = context.Connection.RemoteIpAddress;
         if (peer is null)
         {
@@ -49,7 +55,9 @@ public static class ForwardedClientAddress
         var forwardedFor = context.Request.Headers[ForwardedForHeader];
         var valueIndex = forwardedFor.Count - 1;
         var end = -1;
-        while (trustedProxies.Contains(address)
+        var hops = 0;
+        while (hops < forwardedHopLimit
+            && trustedProxies.Contains(address)
             && TryTakeLastEntry(forwardedFor, ref valueIndex, ref end, out var entry))
         {
             // A proxy that forwards "unknown" (or anything else that is not an address) is the furthest hop known.
@@ -59,6 +67,7 @@ public static class ForwardedClientAddress
             }
 
             address = TrustedProxyAllowlist.Normalize(endPoint.Address);
+            hops++;
         }
 
         return address;

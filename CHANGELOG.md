@@ -150,6 +150,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in a book condensed from many issues. The error now names both:
   `Page '002.jpg' in Batman 012.cbz could not be read: Unsupported compression method: 255`.
   Pages that cannot be decoded include the same context.
+- **Automated error reporting works when GitHub's response is labelled with a charset .NET
+  cannot decode.** When something in between, such as a proxy, labelled the response
+  `charset=utf8` or another name .NET does not recognise, filing an issue failed with a raw
+  error: the report was dropped, **Send Test Report** answered 500, and an issue GitHub had
+  already created was never recorded and could be filed again. Responses are now always read
+  as UTF-8, which JSON requires and GitHub sends, so the issue is recorded and a rejected
+  assignee falls back to an unassigned issue.
 - **One client can no longer stop everyone from signing in behind a reverse proxy.** Signed-out
   requests are rate-limited per client address, but behind a proxy every request comes from the
   proxy's address, so one client sending more than about 110 requests a minute (a
@@ -393,6 +400,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files its own issue instead of being folded into the first one filed. Errors raised while a
   query runs, such as an unauthorized account, and an unreachable server are still only shown
   to the user.
+
+- **A malformed Suwayomi chapter list no longer fails the whole Missing Issues check.** When
+  Suwayomi answered the chapter query with a `chapters` value that was not an object, such as
+  `null`, reading it threw: the chapter list of that series failed with a 500, and the
+  scheduled Missing Issues check stopped for the whole library. The answer now identifies
+  `data.chapters.nodes` as requiring an array, so the chapter list answers 400 with that detail
+  and the check logs a warning for that series and carries on with the rest. A
+  chapter list without its `chapters` or `nodes` is reported the same way instead of being read
+  as an empty list, which said every missing issue had no matching chapter.
+
+- **One malformed entry in a MangaDex answer no longer empties the whole search.** A search
+  result that was not a JSON object, such as `null`, or whose `attributes` were not one, made
+  the lookup throw: every other match was dropped, and the provider health recorded a failure
+  with the cryptic "The requested operation requires an element of type 'Object'…". Such
+  entries, and cover-art relationships of the same kind, are now skipped and the remaining
+  matches are returned.
 
 - **Condensed downloads no longer die at 30 seconds, and a timeout now files an issue.** Every
   request in the application was capped by a 30 second default timeout policy, and because the
@@ -3194,6 +3217,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.375] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.376] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.377] - 2026-10-28
 
 ### Changed
 - Automatic version bump on merge to master

@@ -6,9 +6,9 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
-        async function loadActiveLibraryView(_page = 1, refresh = false) {
+        async function loadActiveLibraryView({ refresh = false, keepLoaded = false } = {}) {
             if (libraryViewMode === 'series') {
-                return loadSeriesLibrary({ refresh });
+                return loadSeriesLibrary({ refresh, keepLoaded });
             }
 
             return loadFolders({ refresh });
@@ -109,7 +109,7 @@
             updateLibraryViewButtons();
             updateLibraryViewLayout();
             await setPreferences({ libraryViewMode: mode });
-            await loadActiveLibraryView(1, true);
+            await loadActiveLibraryView({ refresh: true });
         }
 
         function promptForForceReprocess(actionDescription, statusDescription) {
@@ -136,9 +136,16 @@
             // ?refresh=true query, and re-trigger library-health stats.
             let append = false;
             let refresh = false;
+            // keepLoaded: a same-query refresh re-fetches every series already
+            // loaded (not just the first page), so series selected further
+            // down the list stay selected and the list keeps its length.
+            let keepLoaded = false;
+            let keepCount = 0;
             if (typeof opts === 'object' && opts !== null) {
                 append = !!opts.append;
                 refresh = !!opts.refresh;
+                keepLoaded = !!opts.keepLoaded;
+                keepCount = Number(opts.keepCount) || 0;
             } else if (typeof opts === 'boolean') {
                 refresh = opts;
             } else if (typeof opts === 'number') {
@@ -154,12 +161,22 @@
                 // (label updated, content stale) until a manual page refresh.
                 if (!append) {
                     seriesReloadPending = true;
+                    // The load in flight may have emptied the list already,
+                    // so keep the count it was fetching too; overlapping
+                    // keepLoaded refreshes keep the largest count.
+                    seriesReloadKeepCount = keepLoaded
+                        ? Math.max(seriesReloadKeepCount, keepCount, seriesLibrary.length, seriesLoadingCount)
+                        : 0;
                     if (seriesLoadController) {
                         seriesLoadController.abort();
                     }
                 }
                 return;
             }
+
+            const limit = (keepLoaded && !append)
+                ? Math.max(SERIES_PAGE_SIZE, seriesLibrary.length, keepCount)
+                : SERIES_PAGE_SIZE;
 
             if (refresh || !append) {
                 seriesLibrary = [];
@@ -184,10 +201,11 @@
             }
 
             seriesLoading = true;
+            seriesLoadingCount = append ? 0 : limit;
             const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
             seriesLoadController = controller;
             try {
-                let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${SERIES_PAGE_SIZE}`);
+                let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${limit}`);
                 if (refresh) {
                     url += '&refresh=true';
                 }
@@ -245,12 +263,15 @@
                     seriesLoadController = null;
                 }
                 seriesLoading = false;
+                seriesLoadingCount = 0;
                 if (seriesReloadPending) {
                     // A filter/search/sort change arrived while this load was in
                     // flight. Re-run with the latest selection so the displayed
                     // series match the current filter without a page refresh.
                     seriesReloadPending = false;
-                    loadSeriesLibrary({ refresh: false });
+                    const reloadKeepCount = seriesReloadKeepCount;
+                    seriesReloadKeepCount = 0;
+                    loadSeriesLibrary({ refresh: false, keepLoaded: reloadKeepCount > 0, keepCount: reloadKeepCount });
                 }
             }
         }
@@ -359,6 +380,7 @@
                 if (rootArrived) {
                     ensureFolderLoaded('', true).catch(() => {});
                 }
+                reloadStaleOpenFolders(newFolders).catch(() => {});
                 updateButtonVisibility();
                 ensureScrollObserver();
                 if (refresh) {
@@ -427,12 +449,12 @@
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId); // re-render to show loading state
                 loadSeriesIssues(detailId, true);
-                loadActiveLibraryView(1, true);
+                loadActiveLibraryView({ refresh: true });
                 return;
             }
             // Reload from page 1 with new search query
             currentSeriesDetailTitleKeys = null;
-            loadActiveLibraryView(1);
+            loadActiveLibraryView();
         }
         
         let sortMode = 'name'; // 'name', 'date', 'size'
@@ -506,13 +528,13 @@
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId);
                 loadSeriesIssues(detailId, true);
-                loadActiveLibraryView(1, true);
+                loadActiveLibraryView({ refresh: true });
                 return;
             }
 
             // Reload from page 1 with new filter
             currentSeriesDetailTitleKeys = null;
-            loadActiveLibraryView(1);
+            loadActiveLibraryView();
         }
         
         function setSort(mode) {
@@ -537,13 +559,13 @@
             // their number), so we just refresh the underlying series library
             // in the background and stay on the current series.
             if (currentSeriesDetailId) {
-                loadActiveLibraryView(1, true);
+                loadActiveLibraryView({ refresh: true });
                 return;
             }
 
             // Reload from page 1 with new sort order
             currentSeriesDetailTitleKeys = null;
-            loadActiveLibraryView(1);
+            loadActiveLibraryView();
         }
         
         function toggleHeaderFilterDropdown(event) {

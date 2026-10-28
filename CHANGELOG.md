@@ -169,6 +169,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the watched folder while the watcher is being recreated watches the new folder. A browser
   that does not accept a live update within 10 s is disconnected from the live updates, so it
   can no longer delay them for everyone else.
+- **The Library Scan retries files changed on disk whose re-normalize failed.** With
+  `reprocessModified` on, the scan recorded a changed file's new size and modified time before
+  re-normalizing it, and again afterwards whatever the outcome. So a re-normalize that could not
+  be queued, failed, or was cut short by a cancelled job still counted as done, and the file
+  silently kept stale metadata. The stored values are now updated only for files the job
+  re-normalized successfully, and every other changed file is picked up again by the next scan.
+  When a job the scan started fails or is cancelled, the scan's last-run summary now says so, for
+  example `[modified: job failed, 1/2 ok, 0 failed]`.
 - **Processing renames files on filesystems without an atomic no-overwrite rename.** On NFS,
   ZFS before 2.2 and FUSE filesystems such as Unraid user shares, every rename failed with
   `Atomic no-overwrite rename is not supported by this filesystem.`, leaving files under their
@@ -314,6 +322,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separator: a Number of "1,000" or "1,5" is kept as written, like other non-numeric values
   such as "Extra", instead of becoming chapter 1000 or 15.
 - **A batch job cancelled before it starts ends as Cancelled** instead of staying Queued.
+- **A saved job whose status is not exactly a status name, such as a number, is restored as
+  Interrupted**, like any other unrecognised status. `1` used to come back after a restart as a
+  running job that was reported as the active job but could be neither cancelled nor deleted, and
+  `42` as an undefined status that could not be deleted either.
 - **Cancel in the progress dialog works for password logins** (it sent no credentials), and
   library-wide actions with nothing to do say so instead of tracking an empty job.
 - **Cancelling a job just as it finishes answers "already completed" instead of 500.** The
@@ -399,6 +411,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **Process ▸ Clear Processed Status keeps the series page open and updates its badges.** It
+  replaced the series page or library grid with the retired folder list (not even refreshed),
+  leaving the address unchanged, and never reloaded the series' status badges. The open series
+  now reloads its issues in place, and the library reloads as well. In the folder list itself,
+  open folders no longer show files listed for an earlier filter, search or sort, and the
+  expand/collapse-all button matches the folders' state after one is closed or reopened or the
+  list changes.
 - **The Library's List/Grid/Compact toggle highlights the current layout when the Library is
   opened from another page.** The app starts on the Overview and the buttons were only updated
   while the Library was shown, so none (or a stale one) was highlighted until a layout was
@@ -3365,6 +3384,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.387] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.388] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.389] - 2026-10-28
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.390] - 2026-10-28
 
 ### Changed
 - Automatic version bump on merge to master

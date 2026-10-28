@@ -219,10 +219,11 @@ public class LibraryScanJobHandlerTests : IDisposable
         _processor.Verify(p => p.NormalizeFilesAsync(
             It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { path })),
             true, It.IsAny<CancellationToken>()), Times.Once);
-        // Before queuing (record the external change) and after the job (absorb our own write).
+        // Only after the job succeeds (absorbing the change and our own write); never before
+        // queuing, or a failed re-normalize would be recorded as handled (#864).
         _fileStore.Verify(f => f.RefreshFileStatsAsync(
             It.Is<IEnumerable<string>>(paths => paths.Contains(path)),
-            It.IsAny<CancellationToken>()), Times.Exactly(2));
+            It.IsAny<CancellationToken>()), Times.Once);
         Assert.Contains("1 modified reprocessed", summary);
         Assert.Contains("[modified: 1/1 ok", summary);
     }

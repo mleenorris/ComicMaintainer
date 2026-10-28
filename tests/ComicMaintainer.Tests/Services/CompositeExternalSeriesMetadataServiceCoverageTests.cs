@@ -270,6 +270,23 @@ public class CompositeExternalSeriesMetadataServiceCoverageTests
     }
 
     [Fact]
+    public async Task CheckAllHealthAsync_CallerCancellation_IsRethrownWithoutProbingTheRest()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var provider = new Mock<IExternalSeriesMetadataService>();
+        provider.Setup(p => p.CheckHealthAsync(cts.Token))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var next = new Mock<IExternalSeriesMetadataService>();
+        var service = CreateService(provider.Object, next.Object);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckAllHealthAsync(cts.Token));
+
+        next.Verify(p => p.CheckHealthAsync(It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Empty(_logger.Entries);
+    }
+
+    [Fact]
     public async Task CheckAllHealthAsync_NoProviders_ReturnsEmpty()
     {
         Assert.Empty(await CreateService().CheckAllHealthAsync());

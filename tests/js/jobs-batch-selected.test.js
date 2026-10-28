@@ -279,6 +279,60 @@ test('Delete deletes the selected issues in a background job', async (t) => {
     assert.deepEqual(page.errors, []);
 });
 
+test('Delete clears the selection on the page at once, even if the job is cancelled before it deletes a file', async (t) => {
+    const page = await h.bootSeriesDetail(t, {
+        routes: {
+            'POST /api/jobs/delete-selected': { job_id: h.JOB_ID, total_items: 2 },
+            [`GET /api/jobs/${h.JOB_ID}`]: h.jobStatus({ total_items: 2 }),
+            [`POST /api/jobs/${h.JOB_ID}/cancel`]: { success: true }
+        }
+    });
+    // The selection as the page shows it: the selection bar and its batch
+    // actions, the select-all box and the issue cards.
+    const shownSelection = () => ({
+        info: page.$('#selectInfo').textContent,
+        deleteEnabled: !page.$('#deleteSelectedBtn').disabled,
+        updateEnabled: !page.$('#batchUpdateBtn').disabled,
+        selectAll: page.$('#selectAll').checked,
+        ticked: page.$$('#seriesDetailPanel .series-issue-select input[type="checkbox"]').filter(box => box.checked).length,
+        highlighted: page.$$('#seriesDetailPanel .series-issue-card--selected').length
+    });
+    const NOTHING_SELECTED = { info: 'No files selected', deleteEnabled: false, updateEnabled: false, selectAll: false, ticked: 0, highlighted: 0 };
+    const grid = page.$('#seriesDetailPanel .series-issues-grid');
+    assert.ok(grid);
+
+    h.selectIssue(page, ISSUE_A);
+    h.selectIssue(page, ISSUE_B);
+    assert.deepEqual(shownSelection(), { info: '2 files selected', deleteEnabled: true, updateEnabled: true, selectAll: true, ticked: 2, highlighted: 2 });
+
+    page.click('#deleteSelectedBtn');
+    await page.settle();
+    h.takeConfirms(page);
+    assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: 'Deleting 2 file(s) in background' }]);
+    // Before the server reports anything, and in place: the page is not
+    // redrawn, so it keeps its scroll position.
+    assert.deepEqual(shownSelection(), NOTHING_SELECTED);
+    assert.equal(page.$('#seriesDetailPanel .series-issues-grid'), grid);
+
+    // Cancelled before it deletes a file, the job sends no file_processed
+    // event to redraw the page; nothing shows as selected afterwards either.
+    page.click('#progressCancelBtn');
+    await page.settle();
+    h.takeConfirms(page);
+    assert.deepEqual(h.takeMessages(page), [{ type: 'warning', text: 'Batch processing cancelled' }]);
+    h.jobUpdate(page, 'cancelled', h.progress(0, 2));
+    await h.tick(t, page, 500);
+    await h.tick(t, page, 2000);
+    assert.equal(h.progressView(page).open, false);
+    assert.deepEqual(shownSelection(), NOTHING_SELECTED);
+    assert.equal(page.run('selectedFiles.size'), 0);
+
+    // The issues can be selected afresh.
+    h.selectIssue(page, ISSUE_A);
+    assert.deepEqual(shownSelection(), { info: '1 file selected', deleteEnabled: true, updateEnabled: true, selectAll: false, ticked: 1, highlighted: 1 });
+    assert.deepEqual(page.errors, []);
+});
+
 test('Clear Processed Status clears the flags of the selected issues', async (t) => {
     let answer = _call => ({ cleared: 1, requested: 2 });
     let issues = [h.seriesIssue(ISSUE_A, { duplicate: true }), h.seriesIssue(ISSUE_B)];

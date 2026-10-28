@@ -16,7 +16,9 @@ services:
       - PGID=${PGID:-100}
       - MAX_WORKERS=4
       - DB_CACHE_SIZE_MB=64
-      - JWT_SECRET=${JWT_SECRET:-ChangeThisToASecureRandomString-MustBeAtLeast32CharactersLong!!}
+      # JWT signing secret. Leave JWT_SECRET unset to have a random key generated on first start and kept in
+      # /Config/jwt-secret.key; or set it to your own (e.g. `openssl rand -base64 48`).
+      - JWT_SECRET=${JWT_SECRET:-}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@comicmaintainer.local}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Admin123!}
@@ -26,10 +28,14 @@ services:
       # - TELEMETRY__METRICSTOKEN=change-me          # require "Authorization: Bearer <token>" on /metrics
       # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317  # push metrics + traces via OTLP
       # - API__ENABLESWAGGER=true                    # serve Swagger UI at /swagger outside Development
+      # Import Suwayomi downloads (see .env.example); pair with the volume below:
+      # - SUWAYOMI_DOWNLOADS_DIR=/suwayomi/downloads/mangas
     volumes:
       - ./test_comics:/watched_dir
       - ./duplicates:/duplicates
       - ./config:/Config
+      # Suwayomi's data folder, outside the watched directory and writable by PUID/PGID:
+      # - ./suwayomi:/suwayomi
     restart: unless-stopped
     # --- Container hardening --------------------------------------------------
     # The entrypoint starts as root to create the PUID/PGID user (groupadd/groupmod/

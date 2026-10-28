@@ -1698,11 +1698,12 @@
                 console.log(`[BULK DELETE] Created job ${jobId} for ${totalItems} file(s)`);
                 showMessage(`Deleting ${totalItems} file(s) in background`, 'info');
 
-                // Clear selected files now; the server is authoritative from this
-                // point on and SSE events (job_updated / file_processed /
-                // file_list_updated) will refresh the library in place.
-                selectedFiles.clear();
-                resetSeriesSelectionState();
+                // Clear the selection now, on the page too: the server is
+                // authoritative from this point on, and the SSE events
+                // (job_updated / file_processed / file_list_updated) that
+                // refresh the library in place never come if the job is
+                // cancelled before it deletes a file or the event stream is down.
+                clearSelection();
 
                 // Track via the standard SSE-driven progress modal.
                 await trackJobStatus(jobId, `Deleting ${totalItems} file(s)...`);

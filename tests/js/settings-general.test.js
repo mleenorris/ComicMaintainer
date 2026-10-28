@@ -51,6 +51,8 @@ function formValues(page) {
         suwayomiPassword: value('suwayomiPassword'),
         suwayomiPasswordHint: text('suwayomiPasswordHint'),
         suwayomiClearPassword: checked('suwayomiClearPasswordCheckbox'),
+        suwayomiDownloadsDirectory: value('suwayomiDownloadsDirectory'),
+        suwayomiImportDirectory: value('suwayomiImportDirectory'),
         defaultView: value('defaultLibraryViewSelect'),
         preferredLanguage: value('defaultPreferredLanguageSelect'),
         smtpHost: value('smtpHost'),
@@ -64,6 +66,9 @@ function formValues(page) {
         emailFromAddress: value('emailFromAddress'),
         emailFromName: value('emailFromName'),
         emailMaxAttachmentMb: value('emailMaxAttachmentMb'),
+        emailMaxSendsPerHour: value('emailMaxSendsPerHour'),
+        emailMaxSendsPerDay: value('emailMaxSendsPerDay'),
+        emailMinSecondsBetweenSends: value('emailMinSecondsBetweenSends'),
         errorReporting: checked('errorReportingEnabledCheckbox'),
         errorReportingDestination: text('errorReportingDestination'),
         errorReportingToken: value('errorReportingToken'),
@@ -123,6 +128,8 @@ test('the settings page fills every group from GET /api/settings', async () => {
         suwayomiPassword: '',
         suwayomiPasswordHint: 'Leave blank to keep the stored password.',
         suwayomiClearPassword: false,
+        suwayomiDownloadsDirectory: '/suwayomi/downloads/mangas',
+        suwayomiImportDirectory: 'Manga',
         defaultView: 'series',
         preferredLanguage: 'ja',
         smtpHost: 'smtp.example.com',
@@ -136,6 +143,9 @@ test('the settings page fills every group from GET /api/settings', async () => {
         emailFromAddress: 'comics@example.com',
         emailFromName: 'Comic Maintainer',
         emailMaxAttachmentMb: '30',
+        emailMaxSendsPerHour: '20',
+        emailMaxSendsPerDay: '200',
+        emailMinSecondsBetweenSends: '30',
         errorReporting: true,
         errorReportingDestination: 'mleenorris/ComicMaintainer',
         errorReportingToken: '',
@@ -205,6 +215,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
             suwayomi_base_url: null,
             suwayomi_username: null,
             suwayomi_password_set: false,
+            suwayomi_downloads_directory: null,
             default_library_view: 'files',
             allow_registration: false,
             default_preferred_language: null,
@@ -222,6 +233,9 @@ test('unset optional settings fall back to defaults and first-time hints', async
             email_from_address: null,
             email_from_name: null,
             email_max_attachment_mb: null,
+            email_max_sends_per_hour: null,
+            email_max_sends_per_day: undefined,
+            email_min_seconds_between_sends: null,
             error_reporting_enabled: false,
             error_reporting_github_owner: '',
             error_reporting_github_repo: 'ComicMaintainer',
@@ -245,6 +259,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
     assert.equal(values.suwayomiBaseUrl, '');
     assert.equal(values.suwayomiUsername, '');
     assert.equal(values.suwayomiPasswordHint, 'Enter a password only if your Suwayomi server requires one.');
+    assert.equal(values.suwayomiDownloadsDirectory, '');
     assert.equal(values.defaultView, 'files');
     assert.equal(values.preferredLanguage, '');
     // Image limits that are not numbers leave the inputs untouched (blank).
@@ -259,6 +274,10 @@ test('unset optional settings fall back to defaults and first-time hints', async
     assert.equal(values.emailFromAddress, '');
     assert.equal(values.emailFromName, '');
     assert.equal(values.emailMaxAttachmentMb, '');
+    // An unset email rate limit shows as 0 (no limit).
+    assert.equal(values.emailMaxSendsPerHour, '0');
+    assert.equal(values.emailMaxSendsPerDay, '0');
+    assert.equal(values.emailMinSecondsBetweenSends, '0');
     assert.equal(values.errorReporting, false);
     assert.equal(values.errorReportingDestination, 'the ComicMaintainer project repository',
         'an incomplete owner/repo pair is not shown');

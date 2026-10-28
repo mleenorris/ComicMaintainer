@@ -259,9 +259,13 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Timer_FiringWhileARunIsInProgress_RecordsASkippedRun()
+    public async Task Timer_FiringWhileARunIsInProgress_LeavesTheRunAloneAndOnlyMovesTheNextRunOn()
     {
-        SeedJob(enabled: true, intervalMinutes: 60, nextRunUtc: DateTime.UtcNow.AddMilliseconds(300));
+        // Regression test for #856: the skipped tick was recorded as the job's last run
+        // ("Skipped", 0 ms) while the run carried on, so the page reported that run as over.
+        var previousRun = DateTime.UtcNow.AddHours(-1);
+        SeedJob(enabled: true, intervalMinutes: 60, nextRunUtc: DateTime.UtcNow.AddMilliseconds(300),
+            lastRunUtc: previousRun, lastDurationMs: 4200);
         var started = NewGate();
         var release = NewGate();
         var handler = new TestJobHandler(JobKey, async (_, _) =>
@@ -273,22 +277,39 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         using var metrics = new ComicMaintainerMetrics();
         using var recorder = new MetricRecorder(metrics.Meter);
         var (hosted, _) = CreateHostedService(handler, metrics);
-        var skipped = _dbFactory.WaitForSavedStatusAsync(JobKey, ScheduledJobStatus.Skipped);
+        var oneIntervalOn = DateTime.UtcNow.AddMinutes(30);
+        var rescheduled = _dbFactory.WaitForSaveAsync(s => s.NextRunUtc > oneIntervalOn);
 
         // Occupy the job's single-flight slot, then let the host arm the timer.
         await hosted.RunNowAsync(JobKey);
         await started.Task.WaitAsync(SignalTimeout);
         await hosted.StartAsync(CancellationToken.None);
+        await rescheduled.WaitAsync(SignalTimeout);
 
-        var skippedRow = await skipped.WaitAsync(SignalTimeout);
-        Assert.Equal("Skipped: previous run still in progress.", skippedRow.LastMessage);
-        Assert.Equal(0, skippedRow.LastDurationMs);
+        // The tick is only logged and counted. The run in progress keeps its status and
+        // the previous run's time and duration; the next run is the tick after this one.
+        Assert.Contains(_logger.Entries, e => e.Message.Contains(
+            $"Skipping {JobKey} run because previous run still in progress", StringComparison.Ordinal));
         Assert.Contains(recorder.Snapshot(), m =>
-            m.Instrument == "comicmaintainer.scheduled_job.runs" && (string?)m.Tags["outcome"] == "skipped");
+            m.Instrument == "comicmaintainer.scheduled_job.runs"
+            && m.Tags.TryGetValue("outcome", out var outcome)
+            && (string?)outcome == "skipped");
+        var row = LoadJob();
+        Assert.Equal(nameof(ScheduledJobStatus.Running), row.LastStatus);
+        Assert.Null(row.LastMessage);
+        Assert.InRange(row.LastRunUtc!.Value, previousRun.AddSeconds(-1), previousRun.AddSeconds(1));
+        Assert.Equal(4200, row.LastDurationMs);
+        Assert.True(row.NextRunUtc > oneIntervalOn, "The next run is one interval after the skipped tick.");
 
+        // The run then records its own outcome.
         release.TrySetResult();
         await _logger.WaitForAsync(e => e.Message.Contains("completed in", StringComparison.Ordinal));
         Assert.Equal(1, handler.Invocations);
+        var finished = LoadJob();
+        Assert.Equal(nameof(ScheduledJobStatus.Success), finished.LastStatus);
+        Assert.Equal("long run", finished.LastMessage);
+        Assert.True(finished.LastRunUtc > previousRun);
+        Assert.DoesNotContain(_dbFactory.Saved, s => s.LastStatus == nameof(ScheduledJobStatus.Skipped));
     }
 
     [Fact]
@@ -438,7 +459,7 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Timer_FiringWhileARunIsInProgress_WithoutMetrics_StillRecordsTheSkip()
+    public async Task Timer_FiringWhileARunIsInProgress_WithoutMetrics_StillOnlyMovesTheNextRunOn()
     {
         SeedJob(enabled: true, intervalMinutes: 60, nextRunUtc: DateTime.UtcNow.AddMilliseconds(300));
         var started = NewGate();
@@ -450,14 +471,17 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
             return "long run";
         });
         var (hosted, _) = CreateHostedService(handler);
-        var skipped = _dbFactory.WaitForSavedStatusAsync(JobKey, ScheduledJobStatus.Skipped);
+        var oneIntervalOn = DateTime.UtcNow.AddMinutes(30);
+        var rescheduled = _dbFactory.WaitForSaveAsync(s => s.NextRunUtc > oneIntervalOn);
 
         await hosted.RunNowAsync(JobKey);
         await started.Task.WaitAsync(SignalTimeout);
         await hosted.StartAsync(CancellationToken.None);
 
-        var skippedRow = await skipped.WaitAsync(SignalTimeout);
-        Assert.Equal("Skipped: previous run still in progress.", skippedRow.LastMessage);
+        var savedRow = await rescheduled.WaitAsync(SignalTimeout);
+        Assert.Equal(nameof(ScheduledJobStatus.Running), savedRow.LastStatus);
+        Assert.Null(savedRow.LastMessage);
+        Assert.Null(savedRow.LastDurationMs);
 
         release.TrySetResult();
         await _logger.WaitForAsync(e => e.Message.Contains("completed in", StringComparison.Ordinal));
@@ -520,7 +544,13 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         return gate;
     }
 
-    private void SeedJob(bool enabled, int intervalMinutes = 60, DateTime? nextRunUtc = null, string? optionsJson = null)
+    private void SeedJob(
+        bool enabled,
+        int intervalMinutes = 60,
+        DateTime? nextRunUtc = null,
+        string? optionsJson = null,
+        DateTime? lastRunUtc = null,
+        long? lastDurationMs = null)
     {
         using var db = _dbFactory.CreateDbContext();
         db.ScheduledJobs.Add(new ScheduledJobEntity
@@ -530,7 +560,9 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
             IntervalMinutes = intervalMinutes,
             NextRunUtc = nextRunUtc,
             OptionsJson = optionsJson,
-            LastStatus = nameof(ScheduledJobStatus.NeverRun)
+            LastRunUtc = lastRunUtc,
+            LastDurationMs = lastDurationMs,
+            LastStatus = lastRunUtc is null ? nameof(ScheduledJobStatus.NeverRun) : nameof(ScheduledJobStatus.Success)
         });
         db.SaveChanges();
     }
@@ -656,7 +688,8 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         }
     }
 
-    private sealed record SavedJob(string JobKey, string LastStatus, string? LastMessage, long? LastDurationMs);
+    private sealed record SavedJob(
+        string JobKey, string LastStatus, string? LastMessage, long? LastDurationMs, DateTime? NextRunUtc);
 
     /// <summary>
     /// In-memory database whose contexts report every saved job row and their own
@@ -670,7 +703,7 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
                 .Options;
         private readonly object _gate = new();
         private readonly List<SavedJob> _saved = new();
-        private readonly List<(string JobKey, string Status, TaskCompletionSource<SavedJob> Signal)> _statusWaiters = new();
+        private readonly List<(Func<SavedJob, bool> Predicate, TaskCompletionSource<SavedJob> Signal)> _saveWaiters = new();
         private TaskCompletionSource? _nextDisposal;
 
         public volatile bool FailCreation;
@@ -701,17 +734,29 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
             return signal.Task;
         }
 
-        public Task<SavedJob> WaitForSavedStatusAsync(string jobKey, ScheduledJobStatus status)
+        /// <summary>Every job row saved so far, in the order the saves completed.</summary>
+        public IReadOnlyList<SavedJob> Saved
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _saved.ToList();
+                }
+            }
+        }
+
+        public Task<SavedJob> WaitForSaveAsync(Func<SavedJob, bool> predicate)
         {
             lock (_gate)
             {
-                var existing = _saved.FirstOrDefault(s => s.JobKey == jobKey && s.LastStatus == status.ToString());
+                var existing = _saved.FirstOrDefault(predicate);
                 if (existing is not null)
                 {
                     return Task.FromResult(existing);
                 }
                 var signal = new TaskCompletionSource<SavedJob>(TaskCreationOptions.RunContinuationsAsynchronously);
-                _statusWaiters.Add((jobKey, status.ToString(), signal));
+                _saveWaiters.Add((predicate, signal));
                 return signal.Task;
             }
         }
@@ -722,12 +767,12 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
             lock (_gate)
             {
                 _saved.Add(saved);
-                for (var i = _statusWaiters.Count - 1; i >= 0; i--)
+                for (var i = _saveWaiters.Count - 1; i >= 0; i--)
                 {
-                    if (_statusWaiters[i].JobKey == saved.JobKey && _statusWaiters[i].Status == saved.LastStatus)
+                    if (_saveWaiters[i].Predicate(saved))
                     {
-                        matched.Add(_statusWaiters[i].Signal);
-                        _statusWaiters.RemoveAt(i);
+                        matched.Add(_saveWaiters[i].Signal);
+                        _saveWaiters.RemoveAt(i);
                     }
                 }
             }
@@ -764,7 +809,8 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
             var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
             foreach (var job in changed)
             {
-                _factory.OnSaved(new SavedJob(job.JobKey, job.LastStatus, job.LastMessage, job.LastDurationMs));
+                _factory.OnSaved(new SavedJob(
+                    job.JobKey, job.LastStatus, job.LastMessage, job.LastDurationMs, job.NextRunUtc));
             }
             return result;
         }

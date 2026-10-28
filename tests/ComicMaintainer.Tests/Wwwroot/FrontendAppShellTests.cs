@@ -132,6 +132,15 @@ public class FrontendAppShellTests
     {
         var js = WwwrootFiles.ReadAppScripts();
 
+        // Every Save Settings group is sent by saveSettingsGroup.
+        var helperStart = js.IndexOf("async function saveSettingsGroup(", StringComparison.Ordinal);
+        Assert.True(helperStart >= 0, "Expected the shared settings save request");
+        var requestStart = js.IndexOf("fetch(apiUrl(path)", helperStart, StringComparison.Ordinal);
+        Assert.True(requestStart >= 0, "Expected saveSettingsGroup to send the request");
+        var requestEnd = js.IndexOf("});", requestStart, StringComparison.Ordinal);
+        Assert.True(requestEnd > requestStart, "Could not find the end of the settings save request");
+        Assert.Contains("...getAuthHeaders()", js[requestStart..requestEnd]);
+
         foreach (var path in new[]
         {
             "/api/settings/filename-format",
@@ -141,12 +150,7 @@ public class FrontendAppShellTests
             "/api/settings/external-series-metadata"
         })
         {
-            var requestStart = js.IndexOf($"fetch(apiUrl('{path}')", StringComparison.Ordinal);
-            Assert.True(requestStart >= 0, $"Expected a save request for {path}");
-
-            var requestEnd = js.IndexOf("});", requestStart, StringComparison.Ordinal);
-            Assert.True(requestEnd > requestStart, $"Could not find the end of the save request for {path}");
-            Assert.Contains("...getAuthHeaders()", js[requestStart..requestEnd]);
+            Assert.True(js.Contains($"path: '{path}'", StringComparison.Ordinal), $"Expected a save request for {path}");
         }
     }
 

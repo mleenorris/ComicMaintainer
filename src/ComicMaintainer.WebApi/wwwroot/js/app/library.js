@@ -6,7 +6,7 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
-        async function loadActiveLibraryView(_page = 1, refresh = false) {
+        async function loadActiveLibraryView({ refresh = false } = {}) {
             if (libraryViewMode === 'series') {
                 return loadSeriesLibrary({ refresh });
             }
@@ -109,7 +109,7 @@
             updateLibraryViewButtons();
             updateLibraryViewLayout();
             await setPreferences({ libraryViewMode: mode });
-            await loadActiveLibraryView(1, true);
+            await loadActiveLibraryView({ refresh: true });
         }
 
         function promptForForceReprocess(actionDescription, statusDescription) {
@@ -359,16 +359,7 @@
                 if (rootArrived) {
                     ensureFolderLoaded('', true).catch(() => {});
                 }
-                // Open folders keep their cached files across a reload; fetch
-                // them again if those were listed for another filter, search
-                // or sort.
-                const query = folderFilesQuery();
-                for (const f of newFolders) {
-                    const entry = f && f.path ? folderFiles.get(f.path) : null;
-                    if (entry && entry.query !== query && !collapsedDirectories.has(f.path)) {
-                        ensureFolderLoaded(f.path).catch(() => {});
-                    }
-                }
+                reloadStaleOpenFolders(newFolders).catch(() => {});
                 updateButtonVisibility();
                 ensureScrollObserver();
                 if (refresh) {
@@ -437,12 +428,12 @@
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId); // re-render to show loading state
                 loadSeriesIssues(detailId, true);
-                loadActiveLibraryView(1, true);
+                loadActiveLibraryView({ refresh: true });
                 return;
             }
             // Reload from page 1 with new search query
             currentSeriesDetailTitleKeys = null;
-            loadActiveLibraryView(1);
+            loadActiveLibraryView();
         }
         
         let sortMode = 'name'; // 'name', 'date', 'size'
@@ -516,13 +507,13 @@
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId);
                 loadSeriesIssues(detailId, true);
-                loadActiveLibraryView(1, true);
+                loadActiveLibraryView({ refresh: true });
                 return;
             }
 
             // Reload from page 1 with new filter
             currentSeriesDetailTitleKeys = null;
-            loadActiveLibraryView(1);
+            loadActiveLibraryView();
         }
         
         function setSort(mode) {
@@ -547,13 +538,13 @@
             // their number), so we just refresh the underlying series library
             // in the background and stay on the current series.
             if (currentSeriesDetailId) {
-                loadActiveLibraryView(1, true);
+                loadActiveLibraryView({ refresh: true });
                 return;
             }
 
             // Reload from page 1 with new sort order
             currentSeriesDetailTitleKeys = null;
-            loadActiveLibraryView(1);
+            loadActiveLibraryView();
         }
         
         function toggleHeaderFilterDropdown(event) {

@@ -568,7 +568,7 @@ test('a plain reload keeps open folders; a refresh re-collapses them and reloads
     assert.equal(folderFileCalls(page).length, 1, 'cached folder contents are reused');
     assert.equal(callsTo(page, '/api/files/counts').length, countsBefore);
 
-    await page.run('loadActiveLibraryView(1, true)');
+    await page.run('loadActiveLibraryView({ refresh: true })');
     await page.settle();
     assert.deepEqual(folderCalls(page).at(-1).query, { offset: '0', limit: '100', refresh: 'true' });
     assert.deepEqual(folderSections(page).map(section => section.collapsed), [true, true]);
@@ -612,6 +612,38 @@ test('a new filter or sort lists open folders\' files again, and closed ones onc
     await page.run('loadActiveLibraryView()');
     await page.settle();
     assert.equal(folderFileCalls(page).length, 6);
+});
+
+test('a new filter lists many open folders\' files again a few at a time', async () => {
+    const names = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const page = await bootFilesView({ folders: names.map(name => makeFolder(name)) });
+    let gate = null;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    page.route(folderFilesMatcher, async call => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+            if (gate) await gate.promise;
+            return { path: call.folder, files: [makeFile(`${call.folder}/${call.folder}.cbz`)] };
+        } finally {
+            inFlight--;
+        }
+    });
+    for (const name of names) await expandFolder(page, name);
+    assert.equal(folderFileCalls(page).length, names.length);
+
+    gate = deferred();
+    maxInFlight = 0;
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    assert.equal(folderFileCalls(page).length, names.length + 4, 'no more than 4 folders are fetched at once');
+
+    gate.resolve();
+    await page.settle();
+    assert.equal(maxInFlight, 4);
+    assert.deepEqual(folderFileCalls(page).slice(names.length).map(call => [call.folder, call.query]),
+        names.map(name => [name, { filter: 'unmarked' }]));
 });
 
 test('a folder\'s checkbox and expand all fetch files listed for an earlier filter again', async () => {

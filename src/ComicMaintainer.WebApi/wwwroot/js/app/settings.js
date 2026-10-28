@@ -602,7 +602,7 @@
                         try { await loadLibraryHealth(); } catch (_e) { /* ignore */ }
                     }
                     if (typeof loadActiveLibraryView === 'function') {
-                        try { await loadActiveLibraryView(1, true); } catch (_e) { /* ignore */ }
+                        try { await loadActiveLibraryView({ refresh: true }); } catch (_e) { /* ignore */ }
                     }
                 } else {
                     showMessage(result.error || 'Failed to reset database', 'error');

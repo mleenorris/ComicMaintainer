@@ -238,10 +238,13 @@
                 // series's issues in place, then the library view (kept
                 // behind an open series), which also updates the
                 // "… Unmarked" actions and the library health.
-                if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                if (libraryViewMode === 'series' && currentSeriesDetailId &&
+                    typeof loadSeriesIssues === 'function') {
                     await loadSeriesIssues(currentSeriesDetailId, true);
                 }
-                await loadActiveLibraryView(1, true);
+                if (typeof loadActiveLibraryView === 'function') {
+                    await loadActiveLibraryView({ refresh: true });
+                }
             } catch (err) {
                 console.error('clearSelectedProcessedStatus failed', err);
                 showMessage('Failed to clear processed status: ' + err.message, 'error');
@@ -547,7 +550,7 @@
                     showMessage(`Batch processing completed: ${successCount} of ${total} files processed successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`, successCount > 0 ? 'success' : 'warning');
                     
                     // Refresh file list to show updated status
-                    await loadActiveLibraryView(1, true);
+                    await loadActiveLibraryView({ refresh: true });
                 } else if (status.status === 'failed') {
                     // Job failed while we were away
                     console.error(`[JOB RESUME] Job ${activeJobId} already failed`);
@@ -565,7 +568,7 @@
                     showMessage(
                         `Batch processing was interrupted by a server restart after ${processed} of ${total} files. Re-run it to process the rest.`,
                         'warning');
-                    await loadActiveLibraryView(1, true);
+                    await loadActiveLibraryView({ refresh: true });
                 }
             } catch (error) {
                 // Network error or other exception
@@ -1161,7 +1164,7 @@
                 }
                 
                 showMessage('File deleted successfully!', 'success');
-                await loadActiveLibraryView(1, true);
+                await loadActiveLibraryView({ refresh: true });
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');
             }
@@ -1187,7 +1190,7 @@
                 }
 
                 showMessage('Metadata removed and file marked unprocessed.', 'success');
-                await loadActiveLibraryView(1, true);
+                await loadActiveLibraryView({ refresh: true });
             } catch (error) {
                 showMessage('Failed to remove metadata: ' + error.message, 'error');
             }
@@ -1201,7 +1204,7 @@
             if (libraryViewMode === 'series' && currentSeriesDetailId) {
                 await loadSeriesIssues(currentSeriesDetailId, true);
             } else {
-                await loadActiveLibraryView(1, true);
+                await loadActiveLibraryView({ refresh: true });
             }
         }
 
@@ -1402,7 +1405,7 @@
         
         function refreshFiles() {
             showMessage('Refreshing file list...', 'info');
-            loadActiveLibraryView(1, true);
+            loadActiveLibraryView({ refresh: true });
         }
         
         // Helper: toggle the progress indicator pill, adding the

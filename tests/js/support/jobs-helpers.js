@@ -103,7 +103,7 @@ function unexpectedError(path, reference) {
     }, { 'X-Correlation-Id': reference });
 }
 
-// The request loadActiveLibraryView(1, true) sends to reload the series library.
+// The request loadActiveLibraryView({ refresh: true }) sends to reload the series library.
 const LIBRARY_RELOAD = /^\/api\/files\/series\?offset=0&limit=60&refresh=true$/;
 
 // The job the progress tests track: Process Unmarked (one confirm(), no

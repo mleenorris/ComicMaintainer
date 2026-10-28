@@ -873,16 +873,36 @@
             allFoldersExpanded = true;
             renderFileList();
 
-            // Concurrency-limited loader for unloaded folders and for folders
-            // whose files were listed for another filter, search or sort.
-            const concurrency = 4;
+            // Load unloaded folders and folders whose files were listed for
+            // another filter, search or sort.
             const query = folderFilesQuery();
-            const queue = folderList
+            await loadFoldersConcurrently(folderList
                 .map(f => f.path || '')
                 .filter(dir => {
                     const e = folderFiles.get(dir);
                     return !e || e.status === 'error' || e.query !== query;
+                }));
+            updateToggleAllButton();
+        }
+
+        // Open folders keep their cached files across a reload; fetch them
+        // again, a few at a time, if those were listed for another filter,
+        // search or sort.
+        function reloadStaleOpenFolders(folders) {
+            const query = folderFilesQuery();
+            const stale = folders
+                .map(f => (f && f.path) || '')
+                .filter(dir => {
+                    const entry = dir ? folderFiles.get(dir) : null;
+                    return entry && entry.query !== query && !collapsedDirectories.has(dir);
                 });
+            return loadFoldersConcurrently(stale);
+        }
+
+        // Loads the given folders' files with a bounded number of requests in
+        // flight, so many folders don't fire a burst of fetches at once.
+        async function loadFoldersConcurrently(queue) {
+            const concurrency = 4;
             let active = 0;
             let index = 0;
             await new Promise(resolve => {
@@ -903,7 +923,6 @@
                 };
                 launch();
             });
-            updateToggleAllButton();
         }
 
         function collapseAllFolders() {

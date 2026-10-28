@@ -388,6 +388,12 @@ public partial class FileStoreService
                     // Without this merge, a normalize-then-rename sequence loses IsNormalized
                     // (the stub's default false wins), leaving the file permanently
                     // "unprocessed" until it is normalized again.
+                    if (fileInfo != null)
+                    {
+                        newEntity.FileSize = fileInfo.Length;
+                        newEntity.LastModified = fileInfo.LastWriteTime;
+                    }
+
                     newEntity.IsRenamed = newEntity.IsRenamed || entity.IsRenamed;
                     newEntity.IsNormalized = newEntity.IsNormalized || entity.IsNormalized;
                     newEntity.IsDuplicate = newEntity.IsDuplicate || entity.IsDuplicate;

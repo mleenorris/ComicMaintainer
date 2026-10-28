@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Win32.SafeHandles;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -431,7 +432,7 @@ public partial class ComicProcessorService
 
         var directoryPath = Path.GetDirectoryName(sourcePath)
             ?? throw new IOException("Cannot determine the source directory.");
-        var directoryFlag = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 0x4000 : 0x10000;
+        var directoryFlag = UsesArmOpenFlags ? 0x4000 : 0x10000;
         var descriptor = NativeFileSystem.OpenUnixDirectory(directoryPath, directoryFlag | 0x80000 | 0x200000);
         if (descriptor < 0)
         {
@@ -487,15 +488,306 @@ public partial class ComicProcessorService
             var error = Marshal.GetLastPInvokeError();
             if (error is not (22 or 38 or 95))
             {
-                throw new IOException($"Could not rename the file: {new Win32Exception(error).Message}");
+                throw RenameError(error);
             }
 
             OnLinuxRenameFallback();
-            throw new IOException("Atomic no-overwrite rename is not supported by this filesystem.");
+            MoveLinuxFileWithoutReplacing(
+                directoryDescriptor,
+                currentDirectory,
+                Path.GetFileName(sourcePath),
+                Path.GetFileName(targetPath));
         }
 
         return Path.Combine(ReadLinuxDirectoryPath(directoryDescriptor), Path.GetFileName(targetPath));
     }
+
+    /// <summary>
+    /// Renames <paramref name="sourceName"/> to <paramref name="targetName"/> inside the opened
+    /// directory on a filesystem without an atomic no-overwrite rename, such as NFS, ZFS before
+    /// 2.2 or a FUSE filesystem like an Unraid user share. The target is created atomically and
+    /// never replaces an existing file: as a hard link to the opened source or, where hard links
+    /// are unavailable, as an exclusively created copy. The source name is then removed only while
+    /// it still names that file, so a file that replaced it in the meantime is kept.
+    /// </summary>
+    [SupportedOSPlatform("linux")]
+    private void MoveLinuxFileWithoutReplacing(int directory, string directoryPath, string sourceName, string targetName)
+    {
+        _logger.LogDebug(
+            "Atomic no-overwrite rename is not supported for {FileName}; moving it without replacing an existing file",
+            LoggingHelper.SanitizeForLog(sourceName));
+
+        // O_PATH | O_NOFOLLOW | O_CLOEXEC: holds the file itself without following a link or opening it for I/O.
+        using var source = OpenLinuxFile(directory, sourceName, 0x200000 | LinuxNoFollowFlag | 0x80000 | LinuxLargeFileFlag);
+        var sourceLink = $"/proc/self/fd/{source.DangerousGetHandle().ToInt32()}";
+        var sourceFile = GetLinuxFileStatus(source);
+        if ((sourceFile.Mode & 0xF000) != 0x8000)
+        {
+            throw new IOException("Only regular files can be renamed.");
+        }
+
+        LinuxFileStatus? createdTarget = null;
+        LinuxFileStatus? copySourceStatus = null;
+        var copied = false;
+        try
+        {
+            // AT_FDCWD and AT_SYMLINK_FOLLOW on the /proc link: links exactly the file that is held.
+            if (LinkLinux(-100, sourceLink, directory, targetName, 0x400) == 0)
+            {
+                createdTarget = sourceFile;
+            }
+            else
+            {
+                var error = Marshal.GetLastPInvokeError();
+
+                // EPERM, EACCES, EXDEV, EMLINK, ENOSYS, EOPNOTSUPP: no hard link here, but a copy can work.
+                if (error is not (1 or 13 or 18 or 31 or 38 or 95))
+                {
+                    throw RenameError(error);
+                }
+
+                _logger.LogDebug(
+                    "Hard links are not available for {FileName} ({Reason}); copying it instead",
+                    LoggingHelper.SanitizeForLog(sourceName),
+                    new Win32Exception(error).Message);
+
+                // O_RDONLY | O_CLOEXEC on the /proc link reopens the held file for reading.
+                using var reader = OpenLinuxFile(-100, sourceLink, 0x80000 | LinuxLargeFileFlag);
+
+                // O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC: fails rather than replace or follow anything already there.
+                using var copy = OpenLinuxFile(directory, targetName, 0x1 | 0x40 | 0x80 | 0x80000 | LinuxLargeFileFlag, sourceFile.Mode & 0x1FFu);
+                createdTarget = GetLinuxFileStatus(copy);
+                var copySourceFile = GetLinuxFileStatus(source);
+                if (LinuxNameIsSameFile(directory, sourceName, sourceFile) &&
+                    !copySourceFile.HasSameContentsMetadata(sourceFile))
+                {
+                    throw new IOException("The file changed while it was being copied.");
+                }
+
+                copySourceStatus = copySourceFile;
+                copied = true;
+                CopyLinuxFile(reader, copy, sourceFile, sourceName);
+                if (LinuxNameIsSameFile(directory, sourceName, sourceFile) &&
+                    !GetLinuxFileStatus(source).HasSameContentsMetadata(copySourceFile))
+                {
+                    throw new IOException("The file changed while it was being copied.");
+                }
+            }
+
+            if (copied &&
+                LinuxNameIsSameFile(directory, sourceName, sourceFile) &&
+                !GetLinuxFileStatus(source).HasSameContentsMetadata(sourceFile))
+            {
+                throw new IOException("The file changed while it was being copied.");
+            }
+
+            if (!RemoveLinuxNameIfUnchanged(directory, directoryPath, sourceName, sourceFile, copySourceStatus))
+            {
+                throw new IOException("The file was moved or deleted while it was being renamed.");
+            }
+        }
+        catch (Exception) when (createdTarget is { } target)
+        {
+            try
+            {
+                RemoveLinuxNameIfUnchanged(directory, directoryPath, targetName, target);
+            }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "Could not remove {FileName} after its rename failed", LoggingHelper.SanitizeForLog(targetName));
+            }
+
+            throw;
+        }
+    }
+
+    [SupportedOSPlatform("linux")]
+    private void CopyLinuxFile(SafeFileHandle source, SafeFileHandle target, in LinuxFileStatus sourceStatus, string name)
+    {
+        var buffer = new byte[81920];
+        long offset = 0;
+        int read;
+        while ((read = RandomAccess.Read(source, buffer, offset)) > 0)
+        {
+            RandomAccess.Write(target, buffer.AsSpan(0, read), offset);
+            OnLinuxCopyChunk(offset, read);
+            offset += read;
+        }
+
+        if (SetLinuxFileOwner(target, sourceStatus.UserId, sourceStatus.GroupId) != 0)
+        {
+            throw RenameError(Marshal.GetLastPInvokeError());
+        }
+
+        try
+        {
+            // Keep what a rename keeps: the exact permissions (creating the file applied the umask)
+            // and the modification time.
+            File.SetUnixFileMode(target, (UnixFileMode)(sourceStatus.Mode & 0x1FF));
+            File.SetLastWriteTimeUtc(target, File.GetLastWriteTimeUtc(source));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Could not keep the permissions or modification time of {FileName}", LoggingHelper.SanitizeForLog(name));
+        }
+
+        RandomAccess.FlushToDisk(target);
+    }
+
+    protected virtual void OnLinuxCopyChunk(long offset, int bytesRead)
+    {
+    }
+
+    private static bool LinuxNameIsSameFile(int directory, string name, in LinuxFileStatus file)
+    {
+        var error = StatLinuxFile(directory, name, 0x100, out var current);
+        if (error == 2)
+        {
+            return false;
+        }
+
+        if (error != 0)
+        {
+            throw RenameError(error);
+        }
+
+        return current.IsSameFile(file);
+    }
+
+    /// <summary>
+    /// Removes <paramref name="name"/> from the opened directory if it still names
+    /// <paramref name="file"/>. The name is first moved to a private one and checked there, so a
+    /// file that has replaced it is never deleted: that file is linked back under its name or, if
+    /// that is not possible without risking another file, kept under the private name.
+    /// </summary>
+    /// <returns><see langword="false"/> if <paramref name="name"/> no longer exists.</returns>
+    private bool RemoveLinuxNameIfUnchanged(
+        int directory,
+        string directoryPath,
+        string name,
+        in LinuxFileStatus file,
+        LinuxFileStatus? contentsStatus = null)
+    {
+        // AT_SYMLINK_NOFOLLOW: a link that took the name is a different file, never its target.
+        var error = StatLinuxFile(directory, name, 0x100, out var current);
+        if (error == 2)
+        {
+            return false;
+        }
+
+        if (error != 0)
+        {
+            throw RenameError(error);
+        }
+
+        if (!current.IsSameFile(file))
+        {
+            return true;
+        }
+
+        var privateName = $".tmp_{Guid.NewGuid():N}";
+        if (MakeLinuxDirectory(directory, privateName, 0x1C0) != 0)
+        {
+            throw RenameError(Marshal.GetLastPInvokeError());
+        }
+
+        using var privateDirectory = OpenLinuxFile(
+            directory,
+            privateName,
+            (UsesArmOpenFlags ? 0x4000 : 0x10000) | LinuxNoFollowFlag | 0x80000 | LinuxLargeFileFlag);
+        var privateDirectoryStatus = GetLinuxFileStatus(privateDirectory);
+        if ((privateDirectoryStatus.Mode & 0xF000) != 0x4000 ||
+            (privateDirectoryStatus.Mode & 0x1FF) != 0x1C0 ||
+            privateDirectoryStatus.UserId != GetEffectiveUserId())
+        {
+            throw new IOException("Could not secure the temporary directory used to rename the file.");
+        }
+
+        var privateDescriptor = privateDirectory.DangerousGetHandle().ToInt32();
+        const string privateEntry = "entry";
+        try
+        {
+            error = StatLinuxFile(directory, name, 0x100, out current);
+            if (error == 2)
+            {
+                return false;
+            }
+
+            if (error != 0)
+            {
+                throw RenameError(error);
+            }
+
+            if (!current.IsSameFile(file))
+            {
+                return true;
+            }
+
+            if (contentsStatus is { } expectedContents && !current.HasSameContentsMetadata(expectedContents))
+            {
+                throw new IOException("The file changed while it was being copied.");
+            }
+
+            if (RenameLinux(directory, name, privateDescriptor, privateEntry) != 0)
+            {
+                error = Marshal.GetLastPInvokeError();
+                if (error == 2)
+                {
+                    return false;
+                }
+
+                throw RenameError(error);
+            }
+
+            // The entry is inside a newly created mode-0700 directory. Check it through the
+            // held descriptor so a replacement of the directory's shared name cannot redirect cleanup.
+            var replaced = StatLinuxFile(privateDescriptor, privateEntry, 0x100, out current) != 0 ||
+                !current.IsSameFile(file);
+            OnLinuxTemporaryEntryChecked(privateName);
+            if (replaced && LinkLinux(privateDescriptor, privateEntry, directory, name, 0) != 0)
+            {
+                var reason = new Win32Exception(Marshal.GetLastPInvokeError()).Message;
+                _logger.LogWarning(
+                    "A file replaced {FileName} while it was being renamed and could not be put back without risking another file ({Reason}); it was kept as {TemporaryPath}",
+                    LoggingHelper.SanitizeForLog(name),
+                    reason,
+                    LoggingHelper.SanitizeForLog(Path.Join(directoryPath, privateName, privateEntry)));
+                return true;
+            }
+
+            if (UnlinkLinux(privateDescriptor, privateEntry, 0) != 0)
+            {
+                var reason = new Win32Exception(Marshal.GetLastPInvokeError()).Message;
+                _logger.LogWarning(
+                    "Could not remove {TemporaryPath} after renaming {FileName}: {Reason}",
+                    LoggingHelper.SanitizeForLog(Path.Join(directoryPath, privateName, privateEntry)),
+                    LoggingHelper.SanitizeForLog(name),
+                    reason);
+            }
+
+            return true;
+        }
+        finally
+        {
+            var privatePathStatusError = StatLinuxFile(directory, privateName, 0x100, out var currentDirectory);
+            if (privatePathStatusError == 0 && currentDirectory.IsSameFile(privateDirectoryStatus))
+            {
+                UnlinkLinux(directory, privateName, 0x200);
+            }
+        }
+    }
+
+    protected virtual void OnLinuxTemporaryEntryChecked(string privateDirectoryName)
+    {
+    }
+
+    private static int MakeLinuxDirectory(int directory, string name, uint mode) =>
+        MakeLinuxDirectoryNative(directory, name, mode);
+
+    private static uint GetEffectiveUserId() => GetLinuxEffectiveUserId();
+
+    private static IOException RenameError(int error) =>
+        new($"Could not rename the file: {new Win32Exception(error).Message}");
 
     private static string ReadLinuxDirectoryPath(int descriptor)
     {
@@ -569,4 +861,172 @@ public partial class ComicProcessorService
         int targetDirectory,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName,
         uint flags);
+
+    /// <summary>
+    /// Whether open(2) uses the ARM and PowerPC values of O_DIRECTORY (0x4000) and O_NOFOLLOW
+    /// (0x8000); the other Linux architectures use 0x10000 and 0x20000.
+    /// </summary>
+    private static bool UsesArmOpenFlags =>
+        RuntimeInformation.ProcessArchitecture is Architecture.Arm or Architecture.Armv6 or Architecture.Arm64 or Architecture.Ppc64le;
+
+    private static int LinuxNoFollowFlag => UsesArmOpenFlags ? 0x8000 : 0x20000;
+
+    private static int LinuxLargeFileFlag => RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.Arm or Architecture.Armv6 => 0x20000,
+        Architecture.X86 => 0x8000,
+        _ => 0
+    };
+
+    private static SafeFileHandle OpenLinuxFile(int directory, string path, int flags, uint mode = 0)
+    {
+        var descriptor = OpenLinuxFileNative(directory, path, flags, mode);
+        if (descriptor < 0)
+        {
+            throw RenameError(Marshal.GetLastPInvokeError());
+        }
+
+        return new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
+    }
+
+    private static LinuxFileStatus GetLinuxFileStatus(SafeFileHandle file)
+    {
+        // AT_EMPTY_PATH: the descriptor itself.
+        var error = StatLinuxFile(file.DangerousGetHandle().ToInt32(), string.Empty, 0x1000, out var status);
+        return error == 0 ? status : throw RenameError(error);
+    }
+
+    /// <returns>0, or the error that prevented identifying the file.</returns>
+    private static int StatLinuxFile(int directory, string path, int flags, out LinuxFileStatus status)
+    {
+        // STATX_TYPE | STATX_MODE | STATX_INO | STATX_SIZE | STATX_MTIME | STATX_CTIME.
+        const uint requiredMask = 0x3C3;
+        if (StatLinuxFileNative(directory, path, flags, requiredMask, out status) != 0)
+        {
+            return Marshal.GetLastPInvokeError();
+        }
+
+        return (status.Mask & requiredMask) == requiredMask ? 0 : 61;
+    }
+
+    protected virtual int LinkLinux(
+        int sourceDirectory,
+        string sourceName,
+        int targetDirectory,
+        string targetName,
+        int flags) =>
+        LinkLinuxNative(sourceDirectory, sourceName, targetDirectory, targetName, flags);
+
+    protected virtual int RenameLinux(
+        int sourceDirectory,
+        string sourceName,
+        int targetDirectory,
+        string targetName) =>
+        RenameLinuxNative(sourceDirectory, sourceName, targetDirectory, targetName);
+
+    protected virtual int UnlinkLinux(int directory, string name, int flags) =>
+        UnlinkLinuxNative(directory, name, flags);
+
+    [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
+    private static extern int OpenLinuxFileNative(
+        int directory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags,
+        uint mode);
+
+    [DllImport("libc", EntryPoint = "mkdirat", SetLastError = true)]
+    private static extern int MakeLinuxDirectoryNative(
+        int directory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        uint mode);
+
+    [DllImport("libc", EntryPoint = "linkat", SetLastError = true)]
+    private static extern int LinkLinuxNative(
+        int sourceDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceName,
+        int targetDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName,
+        int flags);
+
+    [DllImport("libc", EntryPoint = "renameat", SetLastError = true)]
+    private static extern int RenameLinuxNative(
+        int sourceDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceName,
+        int targetDirectory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName);
+
+    [DllImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
+    private static extern int UnlinkLinuxNative(
+        int directory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        int flags);
+
+    [DllImport("libc", EntryPoint = "fchown", SetLastError = true)]
+    private static extern int SetLinuxFileOwner(
+        SafeFileHandle file,
+        uint owner,
+        uint group);
+
+    [DllImport("libc", EntryPoint = "geteuid")]
+    private static extern uint GetLinuxEffectiveUserId();
+
+    [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
+    private static extern int StatLinuxFileNative(
+        int directory,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags,
+        uint mask,
+        out LinuxFileStatus status);
+
+    /// <summary>The fields of Linux's 256-byte <c>struct statx</c> that identify a file.</summary>
+    [StructLayout(LayoutKind.Explicit, Size = 256)]
+    private struct LinuxFileStatus
+    {
+        [FieldOffset(0)]
+        public uint Mask;
+
+        [FieldOffset(28)]
+        public ushort Mode;
+
+        [FieldOffset(20)]
+        public uint UserId;
+
+        [FieldOffset(24)]
+        public uint GroupId;
+
+        [FieldOffset(32)]
+        public ulong Inode;
+
+        [FieldOffset(40)]
+        public ulong Size;
+
+        [FieldOffset(96)]
+        public long ChangeTimeSeconds;
+
+        [FieldOffset(104)]
+        public uint ChangeTimeNanoseconds;
+
+        [FieldOffset(112)]
+        public long ModificationTimeSeconds;
+
+        [FieldOffset(120)]
+        public uint ModificationTimeNanoseconds;
+
+        [FieldOffset(136)]
+        public uint DeviceMajor;
+
+        [FieldOffset(140)]
+        public uint DeviceMinor;
+
+        public readonly bool IsSameFile(in LinuxFileStatus other) =>
+            Inode == other.Inode && DeviceMajor == other.DeviceMajor && DeviceMinor == other.DeviceMinor;
+
+        public readonly bool HasSameContentsMetadata(in LinuxFileStatus other) =>
+            IsSameFile(other) &&
+            Size == other.Size &&
+            ChangeTimeSeconds == other.ChangeTimeSeconds &&
+            ChangeTimeNanoseconds == other.ChangeTimeNanoseconds &&
+            ModificationTimeSeconds == other.ModificationTimeSeconds &&
+            ModificationTimeNanoseconds == other.ModificationTimeNanoseconds;
+    }
 }

@@ -293,6 +293,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `comicmaintainer_scheduled_job_runs_total`), and the job's next run moves on by one interval.
 - **Database backups and restores work when the connection string is a `file:` URI**; such
   databases were mistaken for in-memory ones and never backed up.
+- **Backups can be downloaded, deleted and restored when the backup directory is the file system
+  root** (`AppSettings__DatabaseBackupDirectory=/`). They were created and listed, but every
+  action on one failed with 500 because its name was rejected as invalid.
 - **SQLite connections keep their settings when switching to WAL fails.** All the PRAGMAs ran
   as one command, so when `journal_mode=WAL` failed (a read-only database, or another connection
   holding a lock during the first switch) the `busy_timeout`, `synchronous`, `temp_store`,

@@ -354,7 +354,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   high, the batch buttons stayed enabled with nothing ticked, "Select all" could not clear them,
   and the next batch action was sent files that no longer exist. Issues the reloaded list no
   longer has are now unselected once it has fully loaded, and a deleted issue is unselected
-  straight away.
+  straight away. When a series can no longer be loaded by its id (its last issue is gone, or it
+  was given a new id), it is looked up by its titles first: issues it still has under a new id
+  stay selected, and the rest are unselected.
 - **Series images are revalidated like comic covers.** `GET /api/series-images/{key}` compared
   `If-None-Match` with its ETag as an exact string, so a client sending a weak tag (`W/"…"`), a
   list of tags or `*` without `If-Modified-Since` downloaded the whole image again instead of
@@ -363,7 +365,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of the API-wide `no-store`, which told browsers not to keep the image, and a tag that
   no longer matches gets the current image even when `If-Modified-Since` still matches.
   `If-Match`, `If-Unmodified-Since` and `If-Modified-Since` are applied in RFC 9110 order, and a
-  412 keeps `no-store`   instead of the image's `max-age`.
+  412 keeps `no-store` instead of the image's `max-age`.
 - **Metadata refresh progress finishes.** The job status was sent as a number, so the progress
   toast showed a digit, kept polling forever and never ran the final library refresh. Finished
   refresh jobs are now forgotten after 30 minutes (or once 50 newer ones finished) instead of

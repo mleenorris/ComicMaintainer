@@ -31,10 +31,13 @@
         // can remap the detail id if an external metadata refresh causes the
         // backend's series id (union-find representative) to change.
         function captureSeriesDetailIdentity(series) {
-            if (!series) {
-                currentSeriesDetailTitleKeys = null;
-                return;
-            }
+            currentSeriesDetailTitleKeys = seriesTitleKeys(series);
+        }
+
+        // The normalized title, canonical title and aliases of a series, or
+        // null when it has none.
+        function seriesTitleKeys(series) {
+            if (!series) return null;
             const keys = new Set();
             const add = (v) => {
                 const k = normalizeSeriesTitleKey(v);
@@ -45,14 +48,14 @@
             if (Array.isArray(series.aliases)) {
                 series.aliases.forEach(add);
             }
-            currentSeriesDetailTitleKeys = keys.size ? keys : null;
+            return keys.size ? keys : null;
         }
 
-        // Find a series in the current library whose title/canonical/aliases
-        // overlap with the given set of normalized keys.
-        function findSeriesByTitleKeys(keys) {
+        // Find a series in `library` (the current library unless given) whose
+        // title/canonical/aliases overlap with the given set of normalized keys.
+        function findSeriesByTitleKeys(keys, library = seriesLibrary) {
             if (!keys || !keys.size) return null;
-            for (const series of seriesLibrary) {
+            for (const series of library) {
                 if (!series) continue;
                 const titleKey = normalizeSeriesTitleKey(series.title);
                 if (titleKey && keys.has(titleKey)) return series;
@@ -139,7 +142,10 @@
                     filter: filterMode,
                     // Issues of the replaced list that this one has to list
                     // again to stay selected (see pruneSeriesIssueSelection).
-                    unconfirmedPaths: takeSeriesIssuePathsToConfirm(previous, filterMode)
+                    unconfirmedPaths: takeSeriesIssuePathsToConfirm(previous, filterMode),
+                    // The series' titles as last loaded, to look it up by if
+                    // its id stops resolving (see confirmIssuesOfMissingSeries).
+                    titles: previous ? previous.titles : null
                 };
                 seriesIssuesCache.set(seriesId, entry);
             }
@@ -150,6 +156,7 @@
                 entry.unconfirmedPaths = null;
             }
 
+            let seriesMissing = false;
             try {
                 let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=${page}`);
                 if (filterMode !== 'all') {
@@ -161,6 +168,7 @@
                 });
                 if (!response.ok) {
                     entry.error = true;
+                    seriesMissing = response.status === 404;
                 } else {
                     const data = await response.json();
                     const pageIssues = Array.isArray(data.issues) ? data.issues : [];
@@ -190,6 +198,11 @@
                     entry.allLoaded = entry.loadedPages.size >= entry.totalPages
                         || entry.issues.length >= entry.total;
                     entry.error = false;
+                    entry.titles = {
+                        title: data.title,
+                        canonical_title: data.canonical_title,
+                        aliases: data.aliases
+                    };
                     // Refresh the cached series metadata snapshot from the
                     // response so the detail view can render correctly even
                     // when the active filter excludes this series from the
@@ -232,6 +245,10 @@
             } else if (selectionPruned) {
                 updateSelectInfo();
             }
+
+            if (seriesMissing) {
+                await confirmIssuesOfMissingSeries(seriesId, entry);
+            }
         }
 
         // Hands the issue paths a cached series list stands for over to the
@@ -269,20 +286,26 @@
         // meanwhile — so the selection stops counting them and no batch action
         // is sent a path that is gone. Issues arrive in pages, and a path
         // missing from a partial list may be on a page still to come, so this
-        // waits for the last one. A list superseded meanwhile prunes nothing:
-        // one fetched with another filter than the active one, which may only
-        // hide an issue that is still there (setHeaderFilter() switches the
-        // filter at once, but drops the cached list only after saving the new
-        // filter), and one dropped from the cache (e.g. by that filter change).
-        // One remapped to a new series id is still cached and prunes as usual.
-        // Returns whether the selection changed.
+        // waits for the last one. Returns whether the selection changed.
         function pruneSeriesIssueSelection(entry) {
             if (!entry.unconfirmedPaths || !entry.allLoaded || entry.error) return false;
+            return unselectSeriesIssuesNotListed(entry, entry.issues);
+        }
+
+        // Unselects the paths `entry` has to confirm that `issues` does not
+        // list, and leaves it none to confirm. A list superseded meanwhile
+        // prunes nothing: one fetched with another filter than the active one,
+        // which may only hide an issue that is still there (setHeaderFilter()
+        // switches the filter at once, but drops the cached list only after
+        // saving the new filter), and one dropped from the cache (e.g. by that
+        // filter change). One remapped to a new series id is still cached and
+        // prunes as usual. Returns whether the selection changed.
+        function unselectSeriesIssuesNotListed(entry, issues) {
             if (entry.filter !== filterMode || ![...seriesIssuesCache.values()].includes(entry)) {
                 entry.unconfirmedPaths = null;
                 return false;
             }
-            const listedPaths = new Set(entry.issues
+            const listedPaths = new Set(issues
                 .map(issue => issue && issue.file_path)
                 .filter(path => typeof path === 'string' && path.length > 0));
             let pruned = false;
@@ -293,6 +316,57 @@
             }
             entry.unconfirmedPaths = null;
             return pruned;
+        }
+
+        // A 404 means the series id no longer resolves: every issue of the
+        // series was deleted or moved away, or a change elsewhere gave the
+        // series a new id. So the series is looked up by its titles, the way an
+        // open series follows a new id (see remapCurrentSeriesDetailId), before
+        // the issues the failed list had to confirm count as gone. If it lives
+        // on, its issue list decides which of them stay selected, as a reload's
+        // would; if not, none do. Without an answer they stay unconfirmed, for
+        // a retry or the next reload to settle.
+        async function confirmIssuesOfMissingSeries(seriesId, entry) {
+            const paths = entry.unconfirmedPaths;
+            if (!paths || ![...paths].some(path => selectedFiles.has(path))) return;
+            const getJson = async path => {
+                const response = await fetch(apiUrl(path), {
+                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            };
+            const titles = entry.titles || {};
+            const title = titles.canonical_title || titles.title;
+            let issues = [];
+            try {
+                // Searched without the filter, which may hide a series that
+                // still exists.
+                const found = title
+                    ? await getJson(`/api/files/series?per_page=-1&search=${encodeURIComponent(title)}`)
+                    : { series: [] };
+                const series = findSeriesByTitleKeys(seriesTitleKeys(titles), found.series || []);
+                if (series) {
+                    let path = `/api/files/series/${encodeURIComponent(series.id)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=1`;
+                    if (entry.filter !== 'all') {
+                        path += `&filter=${encodeURIComponent(entry.filter)}`;
+                    }
+                    const data = await getJson(path);
+                    issues = Array.isArray(data.issues) ? data.issues : [];
+                }
+            } catch (err) {
+                console.warn('Could not look up a series whose id no longer resolves', err);
+                return;
+            }
+            // A newer list has taken the paths over meanwhile.
+            if (entry.unconfirmedPaths !== paths) return;
+            if (!unselectSeriesIssuesNotListed(entry, issues)) return;
+            if (currentSeriesDetailId === seriesId) {
+                renderSeriesDetail(seriesId);
+            } else {
+                updateSelectInfo();
+            }
         }
 
         // Re-renders the issue grid contents from the cache after a new page

@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const { deferred } = require('./support/app');
 const { respond } = require('./support/dom');
 const {
-    seriesCard, issue, issuesBody, issuesPath, bootSeries, callsTo, text, issueCards
+    seriesCard, issue, issuesBody, libraryBody, issuesPath, bootSeries, callsTo, text, issueCards
 } = require('./support/series-helpers');
 
 const ISSUES = issuesPath('saga');
@@ -21,6 +21,10 @@ const selectionMeta = page => text(page.$('#seriesDetailPanel .series-detail-sel
 const tickIssue = (page, filePath) => page.click(issueCards(page)
     .find(card => card.dataset.filePath === filePath)
     .querySelector('.series-issue-select input[type="checkbox"]'));
+// Answers the lookup of a series whose id 404s (GET /api/files/series?search=…)
+// with `handler`.
+const routeSeriesLookup = (page, handler) =>
+    page.route(call => call.path === '/api/files/series' && 'search' in call.query, handler);
 // The observer watching the issues grid's sentinel (not the cover-image or
 // library-scroll observers).
 const sentinelObserver = page => page.intersectionObservers.find(observer =>
@@ -366,6 +370,90 @@ test('a filtered reload landing while a filter switch is being saved unselects n
     assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz']);
     assert.deepEqual(page.$$('.series-issue-card--selected').map(card => card.dataset.filePath), ['/comics/Saga/Saga 002.cbz']);
     assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+});
+
+// Regression test for #849: once its last issue is gone, a series' id no
+// longer resolves and its reload 404s.
+test('a reload that finds the series gone unselects its issues', async () => {
+    const series = seriesCard({ issue_count: 1 });
+    const page = await bootSeries({ series, issues: [issue(1)] });
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+
+    // The only issue is deleted in another tab, and the series lookup fails.
+    page.route(`GET ${ISSUES}`, 404);
+    let lookup = 500;
+    routeSeriesLookup(page, () => lookup);
+    page.eventSources.at(-1).emit('message', { type: 'file_processed', data: { filename: '/comics/Saga/Saga 001.cbz', success: true } });
+    await page.settle();
+    assert.equal(text(page.$('#seriesDetailPanel .empty-state')), 'Failed to load issues. Retry');
+    assert.deepEqual(callsTo(page, '/api/files/series').at(-1).query, { per_page: '-1', search: 'Saga' },
+        'the series is looked up by its title');
+    assert.equal(text(page.$('#selectInfo')), '1 file selected', 'nothing is unselected without an answer');
+
+    // On retry the lookup only finds a series whose title merely contains it.
+    lookup = libraryBody([seriesCard({ id: 'saga-art', title: 'The Art of Saga', canonical_title: 'The Art of Saga' })]);
+    page.click('#seriesDetailPanel .empty-state button');
+    await page.settle();
+    assert.equal(callsTo(page, issuesPath('saga-art')).length, 0);
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), []);
+    assert.equal(text(page.$('#selectInfo')), 'No files selected');
+    assert.equal(page.$('#batchUpdateBtn').disabled, true);
+});
+
+// A series can get a new id (e.g. a pinned name changed in another tab), so a
+// 404 for its old one only unselects what the series no longer lists.
+test('a reload that 404s keeps the issues the series still lists under a new id', async () => {
+    const page = await bootSeries();
+    page.run("setHeaderFilter('unmarked')");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+    assert.equal(text(page.$('#selectInfo')), '2 files selected');
+
+    // #1 is deleted, and the series is 'saga-2' now.
+    const renamed = seriesCard({ id: 'saga-2', title: 'Saga (2012)' });
+    page.route(`GET ${ISSUES}`, 404);
+    routeSeriesLookup(page, libraryBody([
+        seriesCard({ id: 'saga-art', title: 'The Art of Saga', canonical_title: 'The Art of Saga' }),
+        renamed
+    ]));
+    page.route(`GET ${issuesPath('saga-2')}`, issuesBody(renamed, [issue(2), issue(3)]));
+    page.eventSources.at(-1).emit('message', { type: 'file_processed', data: { filename: '/comics/Saga/Saga 001.cbz', success: true } });
+    await page.settle();
+
+    assert.deepEqual(callsTo(page, '/api/files/series').at(-1).query, { per_page: '-1', search: 'Saga' },
+        'the filter may hide the series, so the lookup does without it');
+    assert.deepEqual(callsTo(page, issuesPath('saga-2')).map(call => call.query),
+        [{ per_page: '-1', page: '1', filter: 'unmarked' }]);
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+});
+
+// The lookup takes a request of its own, so a reload that lists the issue again
+// meanwhile has the last word.
+test('a series lookup that answers after a newer reload unselects nothing', async () => {
+    const series = seriesCard({ issue_count: 1 });
+    let answer = () => issuesBody(series, [issue(1)]);
+    const page = await bootSeries({ series, routes: { [`GET ${ISSUES}`]: () => answer() } });
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    const lookup = deferred();
+    routeSeriesLookup(page, () => lookup.promise);
+
+    answer = () => 404;
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+    assert.equal(callsTo(page, '/api/files/series').at(-1).query.search, 'Saga', 'the lookup is pending');
+    // The issue is back by the time the user retries.
+    answer = () => issuesBody(series, [issue(1)]);
+    page.click('#seriesDetailPanel .empty-state button');
+    await page.settle();
+    assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz']);
+
+    lookup.resolve(libraryBody([]));
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 001.cbz']);
     assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });
 

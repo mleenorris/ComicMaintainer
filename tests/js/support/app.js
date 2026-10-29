@@ -4,10 +4,11 @@
 // each area's tests only route the requests they are about.
 //
 // initializeApp() (js/main.js) checks the session, then requests
-// /api/auth/user, /api/preferences, /api/active-job, /api/files/counts,
+// /api/auth/user, /api/suwayomi/status, /api/preferences, /api/active-job, /api/files/counts,
 // /api/files/series, /api/watcher/status and the current route's data (e.g. /api/overview for #/home, /api/settings for #/settings).
 // Unrouted requests answer 404, which the boot tolerates; bootRoutes() only
-// answers the session checks.
+// answers the session checks and the Suwayomi status probe (as disabled, so a
+// failed probe's warning does not reach every test's console).
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -41,7 +42,8 @@ function currentUser(overrides = {}) {
 function bootRoutes(user = {}) {
     return {
         'GET /api/auth/status': { autheliaEnabled: false, isAuthenticated: false },
-        'GET /api/auth/user': currentUser(user)
+        'GET /api/auth/user': currentUser(user),
+        'GET /api/suwayomi/status': { enabled: false, configured: false, connected: false }
     };
 }
 

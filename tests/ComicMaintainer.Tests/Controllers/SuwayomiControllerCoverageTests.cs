@@ -2,6 +2,7 @@ using System.Text.Json;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.WebApi.Controllers;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -10,11 +11,13 @@ namespace ComicMaintainer.Tests.Controllers;
 
 /// <summary>
 /// Request validation and error mapping of <see cref="SuwayomiController"/>:
-/// Suwayomi failures are user-facing 400s with the service's message.
+/// Suwayomi failures are user-facing 400s with the service's message, except
+/// for covers, which fail as 404s.
 /// </summary>
 public class SuwayomiControllerCoverageTests
 {
     private readonly Mock<ISuwayomiService> _suwayomi = new();
+    private readonly Mock<ISuwayomiSeriesAddService> _seriesAdder = new();
 
     [Fact]
     public async Task GetStatus_ReturnsTheConnectionStatus()
@@ -130,8 +133,133 @@ public class SuwayomiControllerCoverageTests
         Assert.Equal("No Suwayomi series matches 'Saga'", ErrorOf(result.Result));
     }
 
+    [Fact]
+    public async Task GetSources_ReturnsTheSources()
+    {
+        _suwayomi.Setup(s => s.GetSourcesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new SuwayomiSource { Id = "2499283573021220255", Name = "MangaDex", Lang = "en", DisplayName = "MangaDex (EN)" } });
+
+        var json = OkJson(await CreateController().GetSources(CancellationToken.None));
+
+        Assert.Equal("2499283573021220255", Assert.Single(json.GetProperty("sources").EnumerateArray()).GetProperty("Id").GetString());
+    }
+
+    [Fact]
+    public async Task GetSources_SuwayomiFailureIsBadRequest()
+    {
+        _suwayomi.Setup(s => s.GetSourcesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SuwayomiException("The Suwayomi integration is disabled."));
+
+        var result = await CreateController().GetSources(CancellationToken.None);
+
+        Assert.Equal("The Suwayomi integration is disabled.", ErrorOf(result.Result));
+    }
+
+    [Theory]
+    [InlineData(null, 1, "A search term is required")]
+    [InlineData("   ", 1, "A search term is required")]
+    [InlineData("Solo", 0, "Page must be between 1 and 100")]
+    [InlineData("Solo", 101, "Page must be between 1 and 100")]
+    public async Task SearchSource_InvalidRequestIsBadRequest(string? query, int page, string expected)
+    {
+        var result = await CreateController().SearchSource(42, query, page, CancellationToken.None);
+
+        Assert.Equal(expected, ErrorOf(result.Result));
+        _suwayomi.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task SearchSource_LimitsTheLengthOfTheTrimmedTerm()
+    {
+        var term = new string('a', 200);
+        var found = new SuwayomiSourceSearchResult { HasNextPage = true };
+        _suwayomi.Setup(s => s.SearchSourceAsync(42, term, 2, It.IsAny<CancellationToken>())).ReturnsAsync(found);
+        var controller = CreateController();
+
+        var accepted = await controller.SearchSource(42, "  " + term + "  ", 2, CancellationToken.None);
+        var refused = await controller.SearchSource(42, term + "a", 2, CancellationToken.None);
+
+        Assert.Same(found, Assert.IsType<OkObjectResult>(accepted.Result).Value);
+        Assert.Equal("Search terms are limited to 200 characters", ErrorOf(refused.Result));
+        _suwayomi.Verify(s => s.SearchSourceAsync(It.IsAny<long>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchSource_SuwayomiFailureIsBadRequest()
+    {
+        _suwayomi.Setup(s => s.SearchSourceAsync(42, "Solo", 1, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SuwayomiException("Could not reach the Suwayomi server: timed out"));
+
+        var result = await CreateController().SearchSource(42, "Solo", cancellationToken: CancellationToken.None);
+
+        Assert.Equal("Could not reach the Suwayomi server: timed out", ErrorOf(result.Result));
+    }
+
+    [Fact]
+    public async Task GetThumbnail_ServesTheCoverWithAPrivateCache()
+    {
+        var content = new byte[] { 0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50 };
+        _suwayomi.Setup(s => s.GetThumbnailAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SuwayomiThumbnail(content, "image/webp"));
+        var controller = CreateController();
+
+        var result = await controller.GetThumbnail(7, CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("image/webp", file.ContentType);
+        Assert.Same(content, file.FileContents);
+        Assert.Equal("private, max-age=86400", controller.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task GetThumbnail_SuwayomiFailureIsNotFoundAndUncached()
+    {
+        _suwayomi.Setup(s => s.GetThumbnailAsync(7, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SuwayomiException("The Suwayomi server returned HTTP 404 (Not Found)."));
+        var controller = CreateController();
+
+        var result = await controller.GetThumbnail(7, CancellationToken.None);
+
+        var notFound = Assert.IsType<NotFoundObjectResult>(result);
+        Assert.Equal(
+            "The Suwayomi server returned HTTP 404 (Not Found).",
+            JsonSerializer.SerializeToElement(notFound.Value).GetProperty("error").GetString());
+        Assert.Empty(controller.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task AddSeries_ReturnsTheOutcome()
+    {
+        var added = new SuwayomiAddSeriesResult
+        {
+            Series = new SuwayomiSeries { Id = 5, Title = "Solo Leveling", InLibrary = true },
+            LocalSeriesTitle = "Solo Leveling",
+            Downloads = new SuwayomiSeriesDownloadResult { ChapterCount = 3 }
+        };
+        _seriesAdder.Setup(a => a.AddSeriesAsync(5, It.IsAny<CancellationToken>())).ReturnsAsync(added);
+
+        var result = await CreateController().AddSeries(5, CancellationToken.None);
+
+        Assert.Same(added, Assert.IsType<OkObjectResult>(result.Result).Value);
+    }
+
+    [Fact]
+    public async Task AddSeries_SuwayomiFailureIsBadRequest()
+    {
+        const string message = "Added 'Solo Leveling' to the Suwayomi library, but its chapters could not be queued: timed out";
+        _seriesAdder.Setup(a => a.AddSeriesAsync(5, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SuwayomiException(message));
+
+        var result = await CreateController().AddSeries(5, CancellationToken.None);
+
+        Assert.Equal(message, ErrorOf(result.Result));
+    }
+
     private SuwayomiController CreateController() =>
-        new(_suwayomi.Object, Mock.Of<ILogger<SuwayomiController>>());
+        new(_suwayomi.Object, _seriesAdder.Object, Mock.Of<ILogger<SuwayomiController>>())
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
 
     private static JsonElement OkJson(ActionResult<object> result) =>
         JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(result.Result).Value);

@@ -861,6 +861,7 @@
                         <div class="empty-state-icon">${uiIcon('image')}</div>
                         <h2>No series found</h2>
                         <p>${searchQuery || filterMode !== 'all' ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
+                        ${renderSuwayomiSearchOffer(searchQuery)}
                     </div>
                 `);
                 return;

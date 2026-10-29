@@ -179,9 +179,12 @@ function requests(page, method, path) {
     return page.fetchCalls.filter(call => call.method === method && call.path === path);
 }
 
-/** The messages showMessage() has put on screen: [{ type, text, role }]. */
-function messages(page) {
-    return page.$$('#messageContainer .message').map(element => ({
+/**
+ * The messages showMessage() has put on screen: [{ type, text, role }]. They
+ * are the page's unless `container` selects a dialog's own message area.
+ */
+function messages(page, container = '#messageContainer') {
+    return page.$$(`${container} .message`).map(element => ({
         type: element.className.replace(/^message\s*/, ''),
         text: element.textContent,
         role: element.getAttribute('role')

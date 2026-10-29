@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -13,23 +14,32 @@ namespace ComicMaintainer.Core.Services;
 /// <summary>
 /// Talks to a Suwayomi server over its GraphQL endpoint
 /// (<c>{BaseUrl}/api/graphql</c>) so the service can queue downloads for the
-/// issues a locally-tracked series is missing.
+/// issues a locally-tracked series is missing, and find series on the
+/// server's sources and add them to its library.
 /// </summary>
 /// <remarks>
-/// Only series that are already in the Suwayomi library are considered:
-/// Suwayomi only keeps a chapter list (and therefore downloadable chapters)
-/// for library entries, and queueing downloads for arbitrary search hits would
-/// require adding them to the library first, which is a decision for the
-/// Suwayomi side to make.
+/// Downloads for a local series' missing issues only consider series that are
+/// already in the Suwayomi library: Suwayomi only keeps a chapter list (and
+/// therefore downloadable chapters) for library entries, and adding a series
+/// to the library is the user's decision. A series found by searching a source
+/// is only added when the user asks for it (<see cref="AddToLibraryAsync"/>).
 /// </remarks>
 public class SuwayomiService : ISuwayomiService
 {
     public const string HttpClientName = "Suwayomi";
 
     private const int MaxLibraryPageSize = 500;
+    private const string LocalSourceId = "0";
+    private const int MaxThumbnailBytes = 10 * 1024 * 1024;
     private const string UnexpectedResponseMessage = "The Suwayomi server returned an unexpected response.";
     private const string UnexpectedChapterListResponseMessage =
         "The Suwayomi server returned an unexpected response: data.chapters.nodes must be an array.";
+
+    // Searching a source and refreshing a chapter list make Suwayomi query the
+    // source's site, which can be far slower than the client's usual timeout.
+    private static readonly TimeSpan SourceSearchTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan ChapterFetchTimeout = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan ThumbnailTimeout = TimeSpan.FromSeconds(30);
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -182,6 +192,13 @@ public class SuwayomiService : ISuwayomiService
             throw new SuwayomiException(UnexpectedChapterListResponseMessage);
         }
 
+        return ReadChapters(nodes)
+            .OrderBy(c => c.ChapterNumber)
+            .ToList();
+    }
+
+    private static List<SuwayomiChapter> ReadChapters(JsonElement nodes)
+    {
         var chapters = new List<SuwayomiChapter>();
         foreach (var node in nodes.EnumerateArray())
         {
@@ -200,9 +217,7 @@ public class SuwayomiService : ISuwayomiService
             });
         }
 
-        return chapters
-            .OrderBy(c => c.ChapterNumber)
-            .ToList();
+        return chapters;
     }
 
     public async Task<SuwayomiDownloadResult> DownloadMissingIssuesAsync(
@@ -295,6 +310,19 @@ public class SuwayomiService : ISuwayomiService
             return result;
         }
 
+        await EnqueueChapterDownloadsAsync(chapterIds, cancellationToken);
+
+        _logger.LogInformation(
+            "Queued {Count} Suwayomi chapter download(s) for series {SeriesId} ({SeriesTitle})",
+            chapterIds.Count,
+            series.Id,
+            LoggingHelper.SanitizeForLog(series.Title));
+
+        return result;
+    }
+
+    private async Task EnqueueChapterDownloadsAsync(List<int> chapterIds, CancellationToken cancellationToken)
+    {
         const string mutation = """
             mutation Enqueue($ids: [Int!]!) {
               enqueueChapterDownloads(input: { ids: $ids }) {
@@ -308,14 +336,414 @@ public class SuwayomiService : ISuwayomiService
             mutation,
             new Dictionary<string, object?> { ["ids"] = chapterIds },
             cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SuwayomiSource>> GetSourcesAsync(CancellationToken cancellationToken = default)
+    {
+        const string queryText = """
+            query Sources {
+              sources {
+                nodes { id name lang displayName }
+              }
+            }
+            """;
+
+        using var document = await ExecuteAsync("Sources", queryText, null, cancellationToken);
+
+        var data = document.RootElement.GetProperty("data");
+        if (!data.TryGetProperty("sources", out var connection)
+            || connection.ValueKind != JsonValueKind.Object
+            || !connection.TryGetProperty("nodes", out var nodes)
+            || nodes.ValueKind != JsonValueKind.Array)
+        {
+            throw new SuwayomiException(UnexpectedResponseMessage);
+        }
+
+        var sources = new List<SuwayomiSource>();
+        foreach (var node in nodes.EnumerateArray())
+        {
+            // Local lists the files in Suwayomi's own local folder, which have
+            // nothing to download.
+            var id = GetSourceIdOrNull(node, "id");
+            if (id is null || id == LocalSourceId)
+            {
+                continue;
+            }
+
+            var name = GetStringOrNull(node, "name");
+            var displayName = GetStringOrNull(node, "displayName");
+            sources.Add(new SuwayomiSource
+            {
+                Id = id,
+                Name = string.IsNullOrWhiteSpace(name) ? id : name,
+                Lang = GetStringOrNull(node, "lang") ?? string.Empty,
+                DisplayName = !string.IsNullOrWhiteSpace(displayName)
+                    ? displayName
+                    : string.IsNullOrWhiteSpace(name) ? id : name
+            });
+        }
+
+        return sources
+            .DistinctBy(source => source.Id)
+            .OrderBy(source => source.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(source => source.Id, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    public async Task<SuwayomiSourceSearchResult> SearchSourceAsync(
+        long sourceId,
+        string query,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        if (sourceId <= 0)
+        {
+            throw new SuwayomiException("A Suwayomi source id is required.");
+        }
+
+        var term = query?.Trim();
+        if (string.IsNullOrEmpty(term))
+        {
+            throw new SuwayomiException("A search term is required.");
+        }
+
+        // Source ids are 64-bit, which Suwayomi's LongString scalar carries as
+        // a JSON string.
+        const string mutation = """
+            mutation SearchSource($source: LongString!, $query: String!, $page: Int!) {
+              fetchSourceManga(input: { source: $source, type: SEARCH, query: $query, page: $page }) {
+                mangas { id title inLibrary thumbnailUrl }
+                hasNextPage
+              }
+            }
+            """;
+
+        using var document = await ExecuteAsync(
+            "SearchSource",
+            mutation,
+            new Dictionary<string, object?>
+            {
+                ["source"] = sourceId.ToString(CultureInfo.InvariantCulture),
+                ["query"] = term,
+                ["page"] = Math.Max(1, page)
+            },
+            cancellationToken,
+            SourceSearchTimeout);
+
+        var data = document.RootElement.GetProperty("data");
+        if (!data.TryGetProperty("fetchSourceManga", out var payload)
+            || payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("mangas", out var mangas)
+            || mangas.ValueKind != JsonValueKind.Array)
+        {
+            throw new SuwayomiException(UnexpectedResponseMessage);
+        }
+
+        var found = mangas.EnumerateArray()
+            .Select(ReadSeries)
+            .OfType<SuwayomiSeries>()
+            .ToList();
+
+        // Sources order their results by their own notion of relevance, which
+        // often buries the exact title; OrderByDescending is stable, so the
+        // source's order holds within each score.
+        var normalizedTerm = Normalize(term);
+        return new SuwayomiSourceSearchResult
+        {
+            Series = found
+                .DistinctBy(series => series.Id)
+                .OrderByDescending(series => MatchScore(Normalize(series.Title), normalizedTerm))
+                .ToList(),
+            HasNextPage = GetBooleanOrNull(payload, "hasNextPage") ?? false
+        };
+    }
+
+    public async Task<SuwayomiAddToLibraryResult> AddToLibraryAsync(
+        int seriesId,
+        CancellationToken cancellationToken = default)
+    {
+        var series = await GetMangaAsync(seriesId, cancellationToken);
+        if (series.InLibrary)
+        {
+            // Setting inLibrary again would reset the date Suwayomi lists the
+            // series as added on.
+            return new SuwayomiAddToLibraryResult { Series = series, AlreadyInLibrary = true };
+        }
+
+        const string mutation = """
+            mutation AddToLibrary($id: Int!) {
+              updateManga(input: { id: $id, patch: { inLibrary: true } }) {
+                manga { id title inLibrary thumbnailUrl }
+              }
+            }
+            """;
+
+        using var document = await ExecuteAsync(
+            "AddToLibrary",
+            mutation,
+            new Dictionary<string, object?> { ["id"] = seriesId },
+            cancellationToken);
+
+        var data = document.RootElement.GetProperty("data");
+        if (!data.TryGetProperty("updateManga", out var payload)
+            || payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("manga", out var manga)
+            || ReadSeries(manga) is not { } added)
+        {
+            throw new SuwayomiException(UnexpectedResponseMessage);
+        }
+
+        if (!added.InLibrary)
+        {
+            throw new SuwayomiException($"The Suwayomi server did not add '{added.Title}' to its library.");
+        }
 
         _logger.LogInformation(
-            "Queued {Count} Suwayomi chapter download(s) for series {SeriesId} ({SeriesTitle})",
-            chapterIds.Count,
-            series.Id,
-            LoggingHelper.SanitizeForLog(series.Title));
+            "Added series {SeriesId} ({SeriesTitle}) to the Suwayomi library",
+            added.Id,
+            LoggingHelper.SanitizeForLog(added.Title));
+
+        return new SuwayomiAddToLibraryResult { Series = added, AlreadyInLibrary = false };
+    }
+
+    public async Task<SuwayomiSeriesDownloadResult> QueueSeriesDownloadsAsync(
+        int seriesId,
+        IEnumerable<string?>? ownedIssueNumbers = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (seriesId <= 0)
+        {
+            throw new SuwayomiException($"Suwayomi has no series with id {seriesId}.");
+        }
+
+        var owned = (ownedIssueNumbers ?? Enumerable.Empty<string?>())
+            .Select(text => TryParseIssueNumber(text, out var number) ? ChapterKey(number) : default(float?))
+            .OfType<float>()
+            .ToHashSet();
+
+        var chapters = await FetchChaptersAsync(seriesId, cancellationToken);
+        var result = new SuwayomiSeriesDownloadResult { ChapterCount = chapters.Count };
+        var queue = new List<SuwayomiChapter>();
+        var numbered = chapters.Where(c => c.ChapterNumber >= 0).ToList();
+
+        if (numbered.Count == 0)
+        {
+            // A oneshot, or a source that numbers nothing: every chapter counts.
+            foreach (var chapter in chapters)
+            {
+                if (chapter.IsDownloaded)
+                {
+                    result.AlreadyDownloadedCount++;
+                }
+                else
+                {
+                    queue.Add(chapter);
+                }
+            }
+        }
+        else
+        {
+            // Unnumbered chapters beside numbered ones are extras and notices
+            // the library could not place as issues.
+            result.UnnumberedChapterCount = chapters.Count - numbered.Count;
+
+            // Chapters sharing a number are usually the same chapter from
+            // different scanlators; one of them is enough.
+            foreach (var sameNumber in numbered.GroupBy(c => ChapterKey(c.ChapterNumber)).OrderBy(g => g.Key))
+            {
+                if (owned.Contains(sameNumber.Key))
+                {
+                    result.AlreadyInLocalLibraryCount++;
+                }
+                else if (sameNumber.Any(c => c.IsDownloaded))
+                {
+                    result.AlreadyDownloadedCount++;
+                }
+                else
+                {
+                    queue.Add(sameNumber.First());
+                    result.DuplicateChapterCount += sameNumber.Count() - 1;
+                }
+            }
+        }
+
+        if (queue.Count == 0)
+        {
+            return result;
+        }
+
+        await EnqueueChapterDownloadsAsync(queue.Select(c => c.Id).ToList(), cancellationToken);
+        result.QueuedChapters.AddRange(queue);
+
+        _logger.LogInformation(
+            "Queued {Count} Suwayomi chapter download(s) for series {SeriesId}",
+            queue.Count,
+            seriesId);
 
         return result;
+    }
+
+    public async Task<SuwayomiThumbnail> GetThumbnailAsync(int seriesId, CancellationToken cancellationToken = default)
+    {
+        if (seriesId <= 0)
+        {
+            throw new SuwayomiException($"Suwayomi has no series with id {seriesId}.");
+        }
+
+        var config = _settings.CurrentValue;
+        var endpoint = ResolveEndpoint(config);
+
+        // The REST API sits beside the GraphQL endpoint, so a server published
+        // under a path prefix keeps it.
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            new Uri(endpoint, $"v1/manga/{seriesId.ToString(CultureInfo.InvariantCulture)}/thumbnail"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("image/*"));
+        ApplyCredentials(request, config);
+
+        using var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(ThumbnailTimeout);
+
+        byte[] content;
+        try
+        {
+            using var response = await httpClient.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new SuwayomiException(
+                    $"The Suwayomi server returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).");
+            }
+
+            if (response.Content.Headers.ContentLength > MaxThumbnailBytes)
+            {
+                throw new SuwayomiException("The Suwayomi cover is too large.");
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+            content = await ReadCappedAsync(stream, MaxThumbnailBytes, timeout.Token);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
+        {
+            // Covers come from the source's site, so a source that is down
+            // fails every cover of a search; the search itself reports it.
+            _logger.LogDebug(ex, "Suwayomi cover request failed");
+            throw new SuwayomiException($"Could not reach the Suwayomi server: {ex.Message}", ex);
+        }
+
+        // The type is taken from the bytes, not the server's header, so
+        // nothing but an image is ever served from this origin.
+        var contentType = DetectImageContentType(content)
+            ?? throw new SuwayomiException("The Suwayomi server did not return a supported image.");
+        return new SuwayomiThumbnail(content, contentType);
+    }
+
+    private async Task<List<SuwayomiChapter>> FetchChaptersAsync(int seriesId, CancellationToken cancellationToken)
+    {
+        // Unlike the chapters query, which only reads what Suwayomi has
+        // stored, this refreshes the list from the source: a series that was
+        // just added has none stored yet. It answers in the source's order.
+        const string mutation = """
+            mutation FetchChapters($id: Int!) {
+              fetchChapters(input: { mangaId: $id }) {
+                chapters { id name chapterNumber isDownloaded }
+              }
+            }
+            """;
+
+        using var document = await ExecuteAsync(
+            "FetchChapters",
+            mutation,
+            new Dictionary<string, object?> { ["id"] = seriesId },
+            cancellationToken,
+            ChapterFetchTimeout);
+
+        var data = document.RootElement.GetProperty("data");
+        if (!data.TryGetProperty("fetchChapters", out var payload)
+            || payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("chapters", out var nodes)
+            || nodes.ValueKind != JsonValueKind.Array)
+        {
+            throw new SuwayomiException(UnexpectedResponseMessage);
+        }
+
+        return ReadChapters(nodes);
+    }
+
+    /// <summary>
+    /// Parses a local issue number such as "7", "007" or "10.5"; labels such
+    /// as "Annual" have no chapter to match.
+    /// </summary>
+    private static bool TryParseIssueNumber(string? text, out double number)
+    {
+        number = 0;
+        var trimmed = text?.Trim();
+        return !string.IsNullOrEmpty(trimmed)
+               && trimmed.All(c => char.IsAsciiDigit(c) || c == '.')
+               && double.TryParse(trimmed, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out number);
+    }
+
+    /// <summary>
+    /// Suwayomi stores chapter numbers as 32-bit floats, so 10.1 arrives as
+    /// 10.100000381…; narrowing both sides to that precision lets it equal
+    /// the local "10.1" while keeping 10.001 and 10.002 apart.
+    /// </summary>
+    private static float ChapterKey(double number) => (float)number;
+
+    private static async Task<byte[]> ReadCappedAsync(Stream source, int maxBytes, CancellationToken cancellationToken)
+    {
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await source.ReadAsync(chunk, cancellationToken)) > 0)
+        {
+            if (buffer.Length + read > maxBytes)
+            {
+                throw new SuwayomiException("The Suwayomi cover is too large.");
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
+    }
+
+    private static string? DetectImageContentType(byte[] data)
+    {
+        if (data.Length >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF)
+        {
+            return "image/jpeg";
+        }
+
+        if (data.Length >= 8
+            && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47
+            && data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A)
+        {
+            return "image/png";
+        }
+
+        // GIF87a / GIF89a
+        if (data.Length >= 6
+            && data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x38
+            && (data[4] == 0x37 || data[4] == 0x39) && data[5] == 0x61)
+        {
+            return "image/gif";
+        }
+
+        // RIFF....WEBP
+        if (data.Length >= 12
+            && data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46
+            && data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50)
+        {
+            return "image/webp";
+        }
+
+        return null;
     }
 
     private async Task<SuwayomiSeries> ResolveSeriesAsync(
@@ -405,6 +833,22 @@ public class SuwayomiService : ISuwayomiService
 
     private async Task<SuwayomiSeries> GetSeriesByIdAsync(int seriesId, CancellationToken cancellationToken)
     {
+        var series = await GetMangaAsync(seriesId, cancellationToken);
+        if (!series.InLibrary)
+        {
+            throw new SuwayomiException($"Suwayomi series with id {seriesId} is not in the library.");
+        }
+
+        return series;
+    }
+
+    private async Task<SuwayomiSeries> GetMangaAsync(int seriesId, CancellationToken cancellationToken)
+    {
+        if (seriesId <= 0)
+        {
+            throw new SuwayomiException($"Suwayomi has no series with id {seriesId}.");
+        }
+
         const string queryText = """
             query Manga($id: Int!) {
               manga(id: $id) { id title inLibrary thumbnailUrl }
@@ -428,11 +872,6 @@ public class SuwayomiService : ISuwayomiService
         if (series is null)
         {
             throw new SuwayomiException($"Suwayomi has no series with id {seriesId}.");
-        }
-
-        if (!series.InLibrary)
-        {
-            throw new SuwayomiException($"Suwayomi series with id {seriesId} is not in the library.");
         }
 
         return series;
@@ -527,23 +966,18 @@ public class SuwayomiService : ISuwayomiService
     /// (disabled, misconfigured, transport error, HTTP error, GraphQL errors)
     /// so callers have a single thing to catch. <paramref name="operationName"/>
     /// identifies the document in the error logged if Suwayomi rejects it.
+    /// <paramref name="timeout"/> replaces the client's usual timeout for a
+    /// document that makes Suwayomi query a source's site.
     /// </summary>
     private async Task<JsonDocument> ExecuteAsync(
         string operationName,
         string query,
         IDictionary<string, object?>? variables,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? timeout = null)
     {
         var config = _settings.CurrentValue;
-        if (!config.EnableSuwayomi)
-        {
-            throw new SuwayomiException("The Suwayomi integration is disabled.");
-        }
-
-        if (!TryBuildEndpoint(config.SuwayomiBaseUrl, out var endpoint))
-        {
-            throw new SuwayomiException("No valid Suwayomi server URL is configured.");
-        }
+        var endpoint = ResolveEndpoint(config);
 
         var payload = JsonSerializer.Serialize(
             new { query, variables },
@@ -553,15 +987,13 @@ public class SuwayomiService : ISuwayomiService
         {
             Content = new StringContent(payload, Encoding.UTF8, "application/json")
         };
-
-        if (!string.IsNullOrWhiteSpace(config.SuwayomiUsername))
-        {
-            var credentials = Convert.ToBase64String(
-                Encoding.UTF8.GetBytes($"{config.SuwayomiUsername}:{config.SuwayomiPassword}"));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
-        }
+        ApplyCredentials(request, config);
 
         using var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        if (timeout is { } requestTimeout)
+        {
+            httpClient.Timeout = requestTimeout;
+        }
 
         HttpResponseMessage response;
         try
@@ -685,6 +1117,35 @@ public class SuwayomiService : ISuwayomiService
             && !(error.TryGetProperty("path", out var path)
                 && path.ValueKind == JsonValueKind.Array
                 && path.GetArrayLength() > 0));
+
+    /// <summary>
+    /// The GraphQL endpoint of the configured server; throws when the
+    /// integration is disabled or the URL is not usable.
+    /// </summary>
+    private static Uri ResolveEndpoint(AppSettings config)
+    {
+        if (!config.EnableSuwayomi)
+        {
+            throw new SuwayomiException("The Suwayomi integration is disabled.");
+        }
+
+        if (!TryBuildEndpoint(config.SuwayomiBaseUrl, out var endpoint))
+        {
+            throw new SuwayomiException("No valid Suwayomi server URL is configured.");
+        }
+
+        return endpoint;
+    }
+
+    private static void ApplyCredentials(HttpRequestMessage request, AppSettings config)
+    {
+        if (!string.IsNullOrWhiteSpace(config.SuwayomiUsername))
+        {
+            var credentials = Convert.ToBase64String(
+                Encoding.UTF8.GetBytes($"{config.SuwayomiUsername}:{config.SuwayomiPassword}"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+        }
+    }
 
     /// <summary>
     /// Builds the GraphQL endpoint for a configured base URL. Only absolute
@@ -822,6 +1283,30 @@ public class SuwayomiService : ISuwayomiService
             JsonValueKind.String when int.TryParse(value.GetString(), out var parsed) => parsed,
             _ => null
         };
+    }
+
+    /// <summary>
+    /// Reads a 64-bit source id, which Suwayomi's LongString scalar sends as
+    /// a string of digits, in canonical form; null for anything else.
+    /// </summary>
+    private static string? GetSourceIdOrNull(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        var text = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            _ => null
+        };
+
+        return long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+            ? id.ToString(CultureInfo.InvariantCulture)
+            : null;
     }
 
     private static double? GetDoubleOrNull(JsonElement element, string propertyName)

@@ -346,7 +346,9 @@
         }
         
         function showMessage(message, type = 'info', options = {}) {
-            const container = document.getElementById('messageContainer');
+            // An open dialog covers #messageContainer, so a dialog that stays
+            // open after an action passes its own live region as `container`.
+            const container = options.container || document.getElementById('messageContainer');
             const messageEl = document.createElement('div');
             messageEl.className = `message ${type}`;
             // #messageContainer is a polite live region, which is right for

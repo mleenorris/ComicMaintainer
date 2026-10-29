@@ -5,7 +5,8 @@ namespace ComicMaintainer.Core.Interfaces;
 /// <summary>
 /// Client for a <see href="https://github.com/Suwayomi/Suwayomi-Server">Suwayomi</see>
 /// server, used to queue downloads for the issues a series in the local
-/// library is missing.
+/// library is missing, and to find series on Suwayomi's sources and add them
+/// to its library.
 /// </summary>
 public interface ISuwayomiService
 {
@@ -69,4 +70,46 @@ public interface ISuwayomiService
         SuwayomiLibrarySnapshot librarySnapshot,
         IEnumerable<string>? alternateTitles = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists the catalogue sources installed on the Suwayomi server, by
+    /// display name. Suwayomi's own Local source is left out.
+    /// </summary>
+    Task<IReadOnlyList<SuwayomiSource>> GetSourcesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Asks a Suwayomi source to search its site for <paramref name="query"/>.
+    /// Results keep the source's order except that titles matching the query
+    /// come first.
+    /// </summary>
+    Task<SuwayomiSourceSearchResult> SearchSourceAsync(
+        long sourceId,
+        string query,
+        int page = 1,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Adds a series to the Suwayomi library, unless it is already there.
+    /// </summary>
+    Task<SuwayomiAddToLibraryResult> AddToLibraryAsync(
+        int seriesId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Refreshes a series' chapter list from its source and queues the
+    /// chapters that are neither downloaded on the Suwayomi side nor in
+    /// <paramref name="ownedIssueNumbers"/>: one chapter per number, and
+    /// unnumbered chapters only when the series has no numbered ones.
+    /// </summary>
+    /// <param name="ownedIssueNumbers">
+    /// Issue numbers the local library already has, such as "7" or "10.5";
+    /// other labels are ignored.
+    /// </param>
+    Task<SuwayomiSeriesDownloadResult> QueueSeriesDownloadsAsync(
+        int seriesId,
+        IEnumerable<string?>? ownedIssueNumbers = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Fetches a series' cover image from the Suwayomi server.</summary>
+    Task<SuwayomiThumbnail> GetThumbnailAsync(int seriesId, CancellationToken cancellationToken = default);
 }

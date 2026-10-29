@@ -38,6 +38,7 @@ public class WriteOperationAuthorizationConventionTests
     [InlineData("Files", AuthorizationPolicies.CanModifyLibrary)]
     [InlineData("files", AuthorizationPolicies.CanModifyLibrary)]
     [InlineData("Watcher", AuthorizationPolicies.CanModifyLibrary)]
+    [InlineData("Suwayomi", AuthorizationPolicies.CanModifyLibrary)]
     [InlineData("Settings", AuthorizationPolicies.CanAdminister)]
     [InlineData("ScheduledJobs", AuthorizationPolicies.CanAdminister)]
     public void WriteActionOnProtectedController_GetsTheControllersPolicy(string controllerName, string expectedPolicy)

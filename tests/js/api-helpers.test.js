@@ -57,6 +57,21 @@ test('showMessage keeps persistent messages until the caller removes them', t =>
     assert.deepEqual(messages(page), []);
 });
 
+test('showMessage shows a message in the container it is given, such as an open dialog\'s', t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = apiPage();
+    const element = page.run(`(() => {
+        const box = document.createElement('div');
+        box.id = 'dialogMessages';
+        document.body.appendChild(box);
+        return showMessage('Could not add', 'error', { container: box });
+    })()`);
+    assert.deepEqual(messages(page, '#dialogMessages'), [{ type: 'error', text: 'Could not add', role: 'alert' }]);
+    assert.deepEqual(messages(page), []);
+    t.mock.timers.tick(5000);
+    assert.equal(element.isConnected, false);
+});
+
 /** Fetch `path`, throw apiResponseError() for a failure and report what was caught, as the app's callers do. */
 function reportFailure(page, label, path, method = 'GET') {
     return page.run(`fetch(apiUrl('${path}'), { method: '${method}' })

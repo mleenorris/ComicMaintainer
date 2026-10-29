@@ -72,6 +72,110 @@ public class SuwayomiDownloadResult
 }
 
 /// <summary>
+/// A catalogue source on the Suwayomi server: one site, in one language, of
+/// an installed extension.
+/// </summary>
+public class SuwayomiSource
+{
+    /// <summary>
+    /// Source id. Suwayomi ids are 64-bit numbers, kept as a string so
+    /// JavaScript clients do not round them.
+    /// </summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Site name, such as "MangaDex".</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Language code, such as "en", or "all" for multi-language sources.</summary>
+    public string Lang { get; set; } = string.Empty;
+
+    /// <summary>Name with the language, such as "MangaDex (EN)".</summary>
+    public string DisplayName { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// One page of series a Suwayomi source found for a search.
+/// </summary>
+public class SuwayomiSourceSearchResult
+{
+    /// <summary>The series found, best title match first.</summary>
+    public List<SuwayomiSeries> Series { get; set; } = new();
+
+    /// <summary>True when the source has further pages of results.</summary>
+    public bool HasNextPage { get; set; }
+}
+
+/// <summary>
+/// Outcome of adding a series to the Suwayomi library.
+/// </summary>
+public class SuwayomiAddToLibraryResult
+{
+    /// <summary>The series as Suwayomi lists it after the add.</summary>
+    public SuwayomiSeries Series { get; set; } = new();
+
+    /// <summary>True when the series was already in the Suwayomi library.</summary>
+    public bool AlreadyInLibrary { get; set; }
+}
+
+/// <summary>
+/// Outcome of queueing the chapters of a Suwayomi series that are neither
+/// downloaded on the Suwayomi side nor already in the local library.
+/// </summary>
+public class SuwayomiSeriesDownloadResult
+{
+    /// <summary>Chapters Suwayomi lists for the series.</summary>
+    public int ChapterCount { get; set; }
+
+    /// <summary>Chapters that were added to the Suwayomi download queue.</summary>
+    public List<SuwayomiChapter> QueuedChapters { get; set; } = new();
+
+    /// <summary>Chapter numbers skipped because the local library has that issue.</summary>
+    public int AlreadyInLocalLibraryCount { get; set; }
+
+    /// <summary>Chapter numbers skipped because Suwayomi has already downloaded them.</summary>
+    public int AlreadyDownloadedCount { get; set; }
+
+    /// <summary>
+    /// Chapters skipped because another chapter with the same number (usually
+    /// another scanlation) was queued instead.
+    /// </summary>
+    public int DuplicateChapterCount { get; set; }
+
+    /// <summary>
+    /// Chapters skipped because they have no chapter number (extras,
+    /// announcements) while the series has numbered chapters.
+    /// </summary>
+    public int UnnumberedChapterCount { get; set; }
+}
+
+/// <summary>
+/// Outcome of adding a series to the Suwayomi library and queueing the
+/// chapters the local library is missing.
+/// </summary>
+public class SuwayomiAddSeriesResult
+{
+    /// <summary>The series as Suwayomi lists it after the add.</summary>
+    public SuwayomiSeries Series { get; set; } = new();
+
+    /// <summary>True when the series was already in the Suwayomi library.</summary>
+    public bool AlreadyInLibrary { get; set; }
+
+    /// <summary>
+    /// Title of the local series whose issues were left out of the queue, or
+    /// null when no local series has the Suwayomi title.
+    /// </summary>
+    public string? LocalSeriesTitle { get; set; }
+
+    /// <summary>What was queued, and why the other chapters were not.</summary>
+    public SuwayomiSeriesDownloadResult Downloads { get; set; } = new();
+}
+
+/// <summary>
+/// A series cover fetched from the Suwayomi server.
+/// </summary>
+public sealed record SuwayomiThumbnail(byte[] Content, string ContentType);
+
+/// <summary>
 /// Raised when a Suwayomi request cannot be completed (not configured,
 /// unreachable, or the server returned an error).
 /// </summary>

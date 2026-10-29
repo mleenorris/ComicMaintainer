@@ -1,27 +1,40 @@
+using System.Globalization;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
 /// <summary>
 /// Endpoints for the Suwayomi download integration: probe the configured
-/// server, look up a series in its library, and queue downloads for the issues
-/// a local series is missing.
+/// server, look up a series in its library, queue downloads for the issues
+/// a local series is missing, and find series on Suwayomi's sources to add
+/// to its library.
 /// </summary>
 [ApiController]
 [Route("api/suwayomi")]
 [Authorize]
 public class SuwayomiController : ControllerBase
 {
+    private const int MaxSearchTermLength = 200;
+    private const int MaxSourcePage = 100;
+
     private readonly ISuwayomiService _suwayomi;
+    private readonly ISuwayomiSeriesAddService _seriesAdder;
     private readonly ILogger<SuwayomiController> _logger;
 
-    public SuwayomiController(ISuwayomiService suwayomi, ILogger<SuwayomiController> logger)
+    public SuwayomiController(
+        ISuwayomiService suwayomi,
+        ISuwayomiSeriesAddService seriesAdder,
+        ILogger<SuwayomiController> logger)
     {
         _suwayomi = suwayomi;
+        _seriesAdder = seriesAdder;
         _logger = logger;
     }
 
@@ -58,6 +71,104 @@ public class SuwayomiController : ControllerBase
         {
             var chapters = await _suwayomi.GetChaptersAsync(seriesId, cancellationToken);
             return Ok(new { chapters });
+        }
+        catch (SuwayomiException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>Lists the catalogue sources installed on the Suwayomi server.</summary>
+    [HttpGet("sources")]
+    public async Task<ActionResult<object>> GetSources(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var sources = await _suwayomi.GetSourcesAsync(cancellationToken);
+            return Ok(new { sources });
+        }
+        catch (SuwayomiException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Searches one Suwayomi source's site for series. Suwayomi asks the site
+    /// itself, so an answer can take a while.
+    /// </summary>
+    [HttpGet("sources/{sourceId:long:min(1)}/series")]
+    [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
+    public async Task<ActionResult<SuwayomiSourceSearchResult>> SearchSource(
+        long sourceId,
+        [FromQuery] string? query,
+        [FromQuery] int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        var term = query?.Trim();
+        if (string.IsNullOrEmpty(term))
+        {
+            return BadRequest(new { error = "A search term is required" });
+        }
+
+        if (term.Length > MaxSearchTermLength)
+        {
+            return BadRequest(new
+            {
+                error = $"Search terms are limited to {MaxSearchTermLength.ToString(CultureInfo.InvariantCulture)} characters"
+            });
+        }
+
+        if (page is < 1 or > MaxSourcePage)
+        {
+            return BadRequest(new
+            {
+                error = $"Page must be between 1 and {MaxSourcePage.ToString(CultureInfo.InvariantCulture)}"
+            });
+        }
+
+        try
+        {
+            return Ok(await _suwayomi.SearchSourceAsync(sourceId, term, page, cancellationToken));
+        }
+        catch (SuwayomiException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Serves a Suwayomi series' cover, which the Suwayomi server only hands
+    /// to clients holding its credentials.
+    /// </summary>
+    [HttpGet("series/{seriesId:int:min(1)}/thumbnail")]
+    public async Task<IActionResult> GetThumbnail(int seriesId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var thumbnail = await _suwayomi.GetThumbnailAsync(seriesId, cancellationToken);
+            Response.Headers[HeaderNames.CacheControl] = "private, max-age=86400";
+            return File(thumbnail.Content, thumbnail.ContentType);
+        }
+        catch (SuwayomiException ex)
+        {
+            // A 404 tells the page to show its placeholder instead of retrying.
+            return NotFound(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Adds a series to the Suwayomi library and queues downloads for the
+    /// chapters this library does not have, leaving out the issues of a local
+    /// series with the same title.
+    /// </summary>
+    [HttpPost("series/{seriesId:int:min(1)}/add")]
+    [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
+    public async Task<ActionResult<SuwayomiAddSeriesResult>> AddSeries(int seriesId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _seriesAdder.AddSeriesAsync(seriesId, cancellationToken));
         }
         catch (SuwayomiException ex)
         {

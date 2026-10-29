@@ -291,6 +291,7 @@ internal static class CoreServiceCollectionExtensions
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
             });
         services.AddSingleton<ISuwayomiService, SuwayomiService>();
+        services.AddSingleton<ISuwayomiSeriesAddService, SuwayomiSeriesAddService>();
         services.AddSingleton<ISuwayomiDownloadImportService, SuwayomiDownloadImportService>();
         services.AddSingleton<ComicVineSeriesMetadataService>();
         services.AddSingleton<MangaDexSeriesMetadataService>();

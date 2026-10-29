@@ -574,7 +574,7 @@ empty body.
 
 ## Suwayomi Downloads
 
-Queue downloads for missing issues on a connected [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server. All endpoints require authentication; `POST` requires library write permission.
+Queue downloads for missing issues on a connected [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server, and find series on its sources to add to its library. All endpoints require authentication; `POST` requires library write permission.
 
 ### GET /api/suwayomi/status
 
@@ -653,6 +653,77 @@ Queue downloads for the issue numbers a series is missing locally.
 ```
 
 Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable, or no matching series is in the Suwayomi library.
+
+### GET /api/suwayomi/sources
+
+List the catalogue sources installed on the server (one per extension and language), ordered by display name. Suwayomi's Local source is left out. Source ids are 64-bit numbers, returned as strings.
+
+**Response:**
+```json
+{
+  "sources": [
+    { "id": "2499283573021220255", "name": "MangaDex", "lang": "en", "displayName": "MangaDex (EN)" }
+  ]
+}
+```
+
+`lang` is `all` for a source that covers several languages. Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured or the server is unreachable.
+
+### GET /api/suwayomi/sources/{sourceId}/series
+
+Search one source's site for series. Suwayomi asks the site itself, so an answer can take up to a minute. The titles closest to `query` come first; otherwise the source's order is kept, including results that only match an alternative title.
+
+**Query Parameters:**
+- `query` (string, required) - Title to search for, up to 200 characters.
+- `page` (int, optional) - Page of the source's results, 1-100 (default 1).
+
+**Response:**
+```json
+{
+  "series": [
+    { "id": 812, "title": "Solo Leveling", "inLibrary": false, "thumbnailUrl": "/api/v1/manga/812/thumbnail" }
+  ],
+  "hasNextPage": true
+}
+```
+
+`id` is the series' id on the Suwayomi server, as taken by the thumbnail and add endpoints below. Returns `400` with `{ "error": "..." }` for a missing or overlong `query`, a `page` out of range, or when Suwayomi cannot search the source.
+
+### GET /api/suwayomi/series/{id}/thumbnail
+
+Serve the cover of a Suwayomi series, fetched with the configured server credentials. `thumbnailUrl` in the results above is a path on the Suwayomi server, which browsers cannot load from a server that requires a login. The response is a JPEG, PNG, GIF or WebP image, typed by its content rather than the server's header, and may be cached privately for a day. Covers over 10 MiB are refused. Returns `404` with `{ "error": "..." }` when the cover cannot be fetched.
+
+### POST /api/suwayomi/series/{id}/add
+
+Add a series to the Suwayomi library (unless it is already there) and queue downloads for the chapters this library does not have. No request body.
+
+Suwayomi first refreshes the series' chapter list from the source. Chapters are then left out when:
+- their number matches an issue of a local series whose title, canonical title or alias equals the Suwayomi title (ignoring case, spacing and punctuation);
+- Suwayomi has already downloaded a chapter with that number;
+- another chapter has the same number (usually another scanlation group's release); the first one in the source's list is queued;
+- they have no chapter number (extras, notices) while other chapters do. When no chapter has a number, as with a oneshot, every chapter not yet downloaded is queued.
+
+**Response:**
+```json
+{
+  "series": { "id": 812, "title": "Solo Leveling", "inLibrary": true, "thumbnailUrl": "/api/v1/manga/812/thumbnail" },
+  "alreadyInLibrary": false,
+  "localSeriesTitle": "Solo Leveling",
+  "downloads": {
+    "chapterCount": 14,
+    "queuedChapters": [
+      { "id": 9051, "name": "Chapter 12", "chapterNumber": 12, "isDownloaded": false },
+      { "id": 9052, "name": "Chapter 13", "chapterNumber": 13, "isDownloaded": false }
+    ],
+    "alreadyInLocalLibraryCount": 11,
+    "alreadyDownloadedCount": 0,
+    "duplicateChapterCount": 0,
+    "unnumberedChapterCount": 1
+  }
+}
+```
+
+`localSeriesTitle` is `null` when no local series has the Suwayomi title. The downloaded chapters reach the library through the download import below. Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable, or it has no series with that id. When the series was added but its chapters could not be queued, the error says so (for example `Added 'Solo Leveling' to the Suwayomi library, but its chapters could not be queued: ...`); repeating the request queues them without adding the series again.
 
 ### Importing Suwayomi downloads
 

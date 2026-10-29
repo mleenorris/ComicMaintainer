@@ -21,7 +21,7 @@ public class SuwayomiControllerTests
                 It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SuwayomiDownloadResult { Series = new SuwayomiSeries { Id = 4, Title = "Ore dake Level Up na Ken" } });
-        var controller = new SuwayomiController(suwayomi.Object, Mock.Of<ILogger<SuwayomiController>>());
+        var controller = new SuwayomiController(suwayomi.Object, Mock.Of<ISuwayomiSeriesAddService>(), Mock.Of<ILogger<SuwayomiController>>());
 
         var response = await controller.DownloadMissing(
             new SuwayomiController.DownloadMissingRequest

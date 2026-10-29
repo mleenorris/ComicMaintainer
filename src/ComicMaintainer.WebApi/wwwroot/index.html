@@ -166,6 +166,7 @@
             <button type="button" class="sidebar-link" onclick="scanUnmarkedFiles()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span>Scan Unmarked</span></button>
             <button type="button" class="sidebar-link" onclick="openDuplicateReviewModal()"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Review Duplicates</span></button>
             <button type="button" class="sidebar-link" onclick="openCombineFoldersModal()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span>Combine Folders</span></button>
+            <button type="button" class="sidebar-link" id="sidebarSuwayomiSearchItem" onclick="openSuwayomiSearchModal()" data-requires-write data-suwayomi-search-entry hidden><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Find on Suwayomi</span></button>
             <button type="button" class="sidebar-link" onclick="openProcessingHistoryModal()"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span>Processing History</span></button>
             <button type="button" class="sidebar-link" onclick="refreshFiles()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><span>Refresh Library</span></button>
 
@@ -236,6 +237,9 @@
                         </button>
                         <button class="settings-dropdown-item" onclick="openCombineFoldersModal(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Combine Folders
+                        </button>
+                        <button class="settings-dropdown-item" id="suwayomiSearchMenuItem" onclick="openSuwayomiSearchModal(); closeSettingsMenu();" data-requires-write data-suwayomi-search-entry hidden>
+                            <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Find on Suwayomi
                         </button>
                         <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-history"/></svg> Processing History
@@ -2049,6 +2053,30 @@
             </div>
         </div>
     </div>
+
+    <!-- Find on Suwayomi Modal -->
+    <div class="modal" id="suwayomiSearchModal" role="dialog" aria-modal="true" aria-labelledby="suwayomiSearchModalTitle" aria-hidden="true">
+        <div class="modal-content suwayomi-search-modal-content">
+            <div class="modal-header">
+                <h2 id="suwayomiSearchModalTitle">Find a Series on Suwayomi</h2>
+                <button class="close-btn" onclick="closeSuwayomiSearchModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="form-hint suwayomi-search-intro">Searches the sources installed on your Suwayomi server. Adding a series puts it in the Suwayomi library and downloads the issues your library does not have yet.</p>
+                <form id="suwayomiSearchForm" class="suwayomi-search-form" role="search" onsubmit="runSuwayomiSearch(); return false;">
+                    <label for="suwayomiSearchInput" class="visually-hidden">Series title</label>
+                    <input type="search" id="suwayomiSearchInput" placeholder="Series title" maxlength="200" autocomplete="off">
+                    <label for="suwayomiSearchLanguage" class="visually-hidden">Source language</label>
+                    <select id="suwayomiSearchLanguage" onchange="changeSuwayomiSearchLanguage()">
+                        <option value="*">All languages</option>
+                    </select>
+                    <button type="submit" class="btn btn-primary" id="suwayomiSearchButton"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Search</button>
+                </form>
+                <p id="suwayomiSearchStatus" class="suwayomi-search-status" role="status" aria-live="polite"></p>
+                <div id="suwayomiSearchResults" class="suwayomi-search-results"></div>
+            </div>
+        </div>
+    </div>
     
     
     <!-- External JavaScript -->
@@ -2089,6 +2117,7 @@
     <script src="/js/app/router.js?v=__APP_VERSION__"></script>
     <script src="/js/app/library.js?v=__APP_VERSION__"></script>
     <script src="/js/app/series.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/suwayomi-search.js?v=__APP_VERSION__"></script>
     <script src="/js/app/file-list.js?v=__APP_VERSION__"></script>
     <script src="/js/app/file-actions.js?v=__APP_VERSION__"></script>
     <script src="/js/app/jobs.js?v=__APP_VERSION__"></script>

@@ -47,6 +47,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [Use Docker Secrets](docs/DOCKER_DEPLOYMENT_DOTNET.md#2-use-docker-secrets-recommended-for-production).
 
 ### Added
+- **Find a series on Suwayomi and add it.** When the Suwayomi integration is enabled, a library
+  search that finds no series offers **Search Suwayomi for "…"**, and **Find on Suwayomi** in the
+  sidebar and the ⋮ menu opens the same dialog. It looks the title up in the Suwayomi library and
+  on the installed sources for one language (the browser's language by default, plus
+  multi-language sources; **All languages** searches every source; the choice is remembered per
+  browser), and lists the matches with their covers. **Add & download** puts a series in the
+  Suwayomi library and queues downloads for the chapters this library does not have: it leaves
+  out chapters whose number matches an issue of a local series with the same title, canonical
+  title or alias, chapters Suwayomi has already downloaded, other groups' releases of the same
+  chapter, and unnumbered extras. The chapters reach the library through the Suwayomi download
+  import. Hidden from read-only accounts. API: `GET /api/suwayomi/sources`,
+  `GET /api/suwayomi/sources/{sourceId}/series`, `GET /api/suwayomi/series/{id}/thumbnail` and
+  `POST /api/suwayomi/series/{id}/add`; see [Suwayomi Downloads](docs/API.md#suwayomi-downloads).
 - **Pending email deliveries can be cancelled.** Email Delivery History gives every pending
   delivery a **Cancel** button and adds **Cancel All Pending**, which covers every page. A
   delivery still in the queue is cancelled at once; one being prepared (converted to EPUB/AZW3

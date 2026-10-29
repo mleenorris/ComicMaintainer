@@ -535,24 +535,25 @@
             return await response.json();
         }
 
-        // Probes the Suwayomi server once per page load and re-renders the open
-        // series detail when the answer changes, so the download action appears
-        // without requiring a manual refresh.
+        // Probes the Suwayomi server once per page load and, when the answer
+        // changes, re-renders the open series detail and shows or hides the
+        // "Find on Suwayomi" actions, so they appear without a manual refresh.
         function refreshSuwayomiAvailability() {
             if (suwayomiStatusPromise) return suwayomiStatusPromise;
             suwayomiStatusPromise = (async () => {
+                let available = false;
                 try {
                     const status = await fetchSuwayomiStatus();
-                    const available = !!(status && status.enabled && status.connected);
-                    if (available !== suwayomiAvailable) {
-                        suwayomiAvailable = available;
-                        if (currentSeriesDetailId) {
-                            renderSeriesDetail(currentSeriesDetailId);
-                        }
-                    }
+                    available = !!(status && status.enabled && status.connected);
                 } catch (err) {
                     console.warn('Suwayomi status check failed', err);
-                    suwayomiAvailable = false;
+                }
+                if (available !== suwayomiAvailable) {
+                    suwayomiAvailable = available;
+                    if (currentSeriesDetailId) {
+                        renderSeriesDetail(currentSeriesDetailId);
+                    }
+                    updateSuwayomiSearchEntryPoints();
                 }
                 return suwayomiAvailable;
             })();

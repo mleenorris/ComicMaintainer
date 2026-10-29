@@ -42,6 +42,9 @@
             }
             
             loadCurrentUser();
+
+            // Decides whether the "Find on Suwayomi" actions are offered.
+            refreshSuwayomiAvailability();
             
             // Initialize SSE connection for real-time updates
             initEventSource();

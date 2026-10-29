@@ -5871,3 +5871,155 @@ summary:focus-visible,
     content-visibility: auto;
     contain-intrinsic-block-size: auto 56px;
 }
+
+/* ── Find a series on Suwayomi ─────────────────────────────────────────── */
+.suwayomi-search-modal-content {
+    max-width: 720px;
+}
+
+.suwayomi-search-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 8px;
+}
+
+.suwayomi-search-form input,
+.suwayomi-search-form select {
+    min-width: 0;
+    min-height: var(--control-height);
+    padding: 8px 12px;
+    border: 1px solid var(--border-input);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: var(--text-md);
+    background: var(--bg-raised);
+    color: var(--text-primary);
+}
+
+.suwayomi-search-form input {
+    flex: 1 1 220px;
+}
+
+.suwayomi-search-form select {
+    flex: 0 1 220px;
+}
+
+.suwayomi-search-form input:focus,
+.suwayomi-search-form select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px var(--accent-primary-soft);
+}
+
+.suwayomi-search-status {
+    min-height: 1.5em;
+    margin-bottom: 8px;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+
+.suwayomi-search-section {
+    margin-bottom: 16px;
+}
+
+.suwayomi-search-section-title {
+    margin: 0 0 8px;
+    font-size: var(--text-md);
+    color: var(--text-secondary);
+}
+
+.suwayomi-search-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.suwayomi-search-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    background: var(--bg-raised);
+}
+
+.suwayomi-search-cover {
+    flex: 0 0 48px;
+    aspect-ratio: 2 / 3;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: var(--bg-hover);
+}
+
+.suwayomi-search-cover img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* No broken-image glyph while the cover loads, or when it cannot. */
+.suwayomi-search-cover img:not([src]) {
+    visibility: hidden;
+}
+
+.suwayomi-search-info {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+}
+
+.suwayomi-search-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.suwayomi-search-badge {
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-primary-soft);
+    color: var(--accent-text);
+    font-size: var(--text-xs);
+    font-weight: 600;
+}
+
+.suwayomi-search-item .btn {
+    flex: 0 0 auto;
+}
+
+.suwayomi-search-failures {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+
+.suwayomi-search-failures summary {
+    cursor: pointer;
+}
+
+.suwayomi-search-failures ul {
+    margin: 6px 0 0 18px;
+}
+
+.empty-state .suwayomi-search-offer {
+    margin-top: 16px;
+    white-space: normal;
+}
+
+@media (max-width: 480px) {
+    .suwayomi-search-item {
+        flex-wrap: wrap;
+    }
+
+    .suwayomi-search-item .btn {
+        flex: 1 1 100%;
+    }
+}

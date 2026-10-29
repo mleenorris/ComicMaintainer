@@ -159,6 +159,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **The file watcher recovers after it stops with an error.** When a network share disconnected,
+  the watched folder was removed, or (on Linux) an error ended the watcher's event loop, the
+  watcher stayed dead until the service restarted, so new comics went undetected; on Linux it
+  still reported itself as running. The watcher is now recreated, retrying after 1 s and then
+  twice as long each time, up to 1 min, while the folder is unavailable, and the folder is
+  rescanned for files that arrived in the meantime. A buffer overflow still only triggers a
+  rescan. A slow or stalled browser connection no longer holds up the recovery, and changing
+  the watched folder while the watcher is being recreated watches the new folder. A browser
+  that does not accept a live update within 10 s is disconnected from the live updates, so it
+  can no longer delay them for everyone else.
 - **The Library Scan retries files changed on disk whose re-normalize failed.** With
   `reprocessModified` on, the scan recorded a changed file's new size and modified time before
   re-normalizing it, and again afterwards whatever the outcome. So a re-normalize that could not

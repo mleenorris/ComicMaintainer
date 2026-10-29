@@ -300,10 +300,10 @@
         }
 
         // Hands the issue paths a list dropped by an id remap still had to
-        // confirm over to the list of the series' new id: to the one cached
-        // under it, or else to the one loaded for it next. The dropped list is
-        // left nothing to prune, so its pending reload or 404 lookup cannot
-        // unselect anything.
+        // confirm over to the list of the series' new id: to a reload of the
+        // one cached under it, or else to the one loaded for it next. The
+        // dropped list is left nothing to prune, so its pending reload or 404
+        // lookup cannot unselect anything.
         function handSeriesIssuePathsOver(cached, seriesId) {
             const paths = cached.unconfirmedPaths;
             cached.unconfirmedPaths = null;
@@ -314,16 +314,11 @@
                 return;
             }
             if (replacement.filter !== filterMode) return;
-            if (replacement.unconfirmedPaths) {
-                // Added in place: a pending 404 lookup of the replacement
-                // still owns the set and confirms these paths too.
-                for (const path of paths) replacement.unconfirmedPaths.add(path);
-            } else {
-                replacement.unconfirmedPaths = paths;
-            }
-            if (pruneSeriesIssueSelection(replacement)) {
-                updateSelectInfo();
-            }
+            // The cached list may predate the change that remapped the series,
+            // so rather than pruning against it, it is reloaded, and the
+            // reload confirms these paths along with its own.
+            replacement.unconfirmedPaths = new Set([...(replacement.unconfirmedPaths || []), ...paths]);
+            loadSeriesIssues(seriesId, true);
         }
 
         // Once a reloaded issue list is complete, unselects the issues of the

@@ -508,8 +508,9 @@ test('a series remapped while its 404 lookup is pending unselects what the new i
     assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
 });
 
-// When the new id's list is cached already, it takes the pending issues over.
-test('a series remapped to a cached list while its reload is pending is pruned by that list', async () => {
+// When the new id's list is cached already, a reload of it takes the pending
+// issues over.
+test('a series remapped to a cached list while its reload is pending is pruned by a reload of that list', async () => {
     const page = await bootSeries();
     page.route(`GET ${issuesPath('saga-2')}`, issuesBody(seriesCard({ id: 'saga-2' }), [issue(2), issue(3)]));
     page.run("loadSeriesIssues('saga-2')");
@@ -531,6 +532,38 @@ test('a series remapped to a cached list while its reload is pending is pruned b
     reload.resolve(issuesBody(seriesCard(), []));
     await page.settle();
     assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+});
+
+// The cached list of the new id may predate the change that remapped the
+// series, so it is reloaded rather than pruned against.
+test('a series remapped to a stale cached list keeps the issues a fresh reload of it lists', async () => {
+    const page = await bootSeries();
+    let saga2 = [issue(2), issue(3)];
+    page.route(`GET ${issuesPath('saga-2')}`, () => issuesBody(seriesCard({ id: 'saga-2' }), saga2));
+    page.run("loadSeriesIssues('saga-2')");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+
+    const reload = deferred();
+    page.route(`GET ${ISSUES}`, () => reload.promise);
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+
+    // #1 moved to 'saga-2' after its list was cached.
+    saga2 = [issue(1), issue(2), issue(3)];
+    await reloadLibrary(page, [seriesCard({ id: 'saga-2' })]);
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(callsTo(page, issuesPath('saga-2')).length, 2, 'the cached list is reloaded');
+    assert.deepEqual(paths(page).filter(Boolean), [
+        '/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz', '/comics/Saga/Saga 003.cbz'
+    ]);
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '2 files selected');
+
+    reload.resolve(issuesBody(seriesCard(), []));
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz']);
 });
 
 test('a deep link to a series outside the loaded library renders from its issues response', async () => {

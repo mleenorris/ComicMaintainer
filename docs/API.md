@@ -266,6 +266,8 @@ A request whose `files` is missing or an empty list is rejected with `400`
 (`No files provided`). A request naming any file outside the watched directory is
 rejected with `400` (`One or more file paths are outside the allowed directory`)
 before any file is updated.
+If `files` is explicitly `null`, model validation rejects the request with `400`
+(`The Files field is required.`), rather than returning `No files provided`.
 
 ### POST /api/files/cleanup-stale
 

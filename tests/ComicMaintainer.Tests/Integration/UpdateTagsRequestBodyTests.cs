@@ -36,16 +36,32 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
-        try
+        Exception? cleanupError = null;
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            Directory.Delete(_root, recursive: true);
+            try
+            {
+                Directory.Delete(_root, recursive: true);
+                return;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return;
+            }
+            catch (IOException ex)
+            {
+                cleanupError = ex;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                cleanupError = ex;
+            }
+
+            if (attempt < 2)
+                Thread.Sleep(100 * (attempt + 1));
         }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
+
+        Console.Error.WriteLine($"Failed to delete test directory '{_root}' after 3 attempts: {cleanupError}");
     }
 
     [Fact]
@@ -123,8 +139,8 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
     [InlineData("""{"file": {path}, "tags": {"series": "Superman", "issue": "2"}}""", "No files provided")]
     [InlineData("{}", "No files provided")]
     [InlineData("""{"files": [], "metadata": {"series": "Superman"}}""", "No files provided")]
-    [InlineData("""{"files": null, "metadata": {"series": "Superman"}}""", "The Files field is required.")]
-    public async Task PostWithoutFilesIsRejectedAndChangesNothing(string body, string expectedError)
+    [InlineData("""{"files": null, "metadata": {"series": "Superman"}}""", null)]
+    public async Task PostWithoutFilesIsRejectedAndChangesNothing(string body, string? expectedError)
     {
         var path = WriteCbz("Batman #001.cbz");
         var original = await File.ReadAllBytesAsync(path);
@@ -135,7 +151,20 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
             new StringContent(body.Replace("{path}", JsonSerializer.Serialize(path)), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains(expectedError, await response.Content.ReadAsStringAsync());
+        var responseBody = await response.Content.ReadAsStringAsync();
+        if (expectedError is not null)
+        {
+            Assert.Contains(expectedError, responseBody);
+        }
+        else
+        {
+            using var validation = JsonDocument.Parse(responseBody);
+            Assert.True(
+                validation.RootElement.TryGetProperty("errors", out var errors)
+                && errors.EnumerateObject().Any(error => string.Equals(error.Name, "Files", StringComparison.OrdinalIgnoreCase)),
+                $"Expected a validation error for files, but got: {responseBody}");
+        }
+
         Assert.Equal(original, await File.ReadAllBytesAsync(path));
     }
 

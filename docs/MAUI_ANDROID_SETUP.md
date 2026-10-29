@@ -119,7 +119,6 @@ public static class MauiProgram
             options.WatchedDirectory = Path.Combine(appDataPath, "watched");
             options.DuplicateDirectory = Path.Combine(appDataPath, "duplicates");
             options.ConfigDirectory = Path.Combine(appDataPath, "config");
-            options.WatcherEnabled = true;
         });
 
         // Register services

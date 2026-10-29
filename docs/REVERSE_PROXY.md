@@ -31,10 +31,53 @@ ComicMaintainer supports reverse proxy deployment with the following features:
 
 ### Automatic Proxy Header Handling
 The application automatically respects standard reverse proxy headers:
-- `X-Forwarded-For`: Client IP address
+- `X-Forwarded-For`: Client IP address, used to rate-limit each client separately when the request comes from a
+  trusted proxy (see [Trusted Proxies and Rate Limiting](#trusted-proxies-and-rate-limiting))
 - `X-Forwarded-Proto`: Original protocol (http/https)
 - `X-Forwarded-Host`: Original hostname
 - `X-Forwarded-Prefix`: Path prefix for subdirectory deployments
+
+### Trusted Proxies and Rate Limiting
+ComicMaintainer limits each client address that is not signed in to 100 requests a minute (signed-in users get 1000
+each); further requests are delayed until the next minute or rejected with `429 Too Many Requests`. Behind a reverse
+proxy every request comes from the proxy's address, so unless the proxy is trusted, all signed-out visitors share
+that one limit: a single client, such as a password-guessing script, can use it up and stop everyone from signing in
+until the minute is over.
+
+Set `TRUSTED_PROXIES` to the address your reverse proxy connects to ComicMaintainer from. The default
+`TRUSTED_PROXY_HOPS=1` uses only the right-most `X-Forwarded-For` entry, which the proxy directly connected to the app
+appended:
+
+```yaml
+environment:
+  - TRUSTED_PROXIES=172.18.0.0/16  # Subnet of the proxy's Docker network (or the proxy's fixed IP)
+```
+
+- Entries are comma-separated IPv4 or IPv6 addresses or CIDR ranges (e.g. `172.18.0.0/16, 10.0.0.5, fd00::/8`).
+  Hostnames are not supported, and the app refuses to start on an invalid entry. Choose them as described in
+  [Choosing `AUTHELIA_TRUSTED_PROXIES`](AUTHELIA.md#choosing-authelia_trusted_proxies). The value can also be set in
+  `appsettings.json` as `ReverseProxySettings:TrustedProxies`; the environment variable takes precedence.
+- One forwarded hop is used by default. If requests pass through multiple proxies (for example a CDN in front of
+  SWAG), set `TRUSTED_PROXY_HOPS` to the number of right-most entries to follow (or use
+  `ReverseProxySettings:ForwardedHopLimit` in `appsettings.json`). It must be a positive integer; the environment
+  variable takes precedence. Entries beyond the first are followed only while the current address is trusted.
+- With Authelia enabled, the addresses in `AUTHELIA_TRUSTED_PROXIES` are trusted for this as well, so an Authelia
+  deployment usually needs no extra setting.
+- The proxy must **append** the client address to `X-Forwarded-For`. nginx does this with
+  `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, which SWAG's `proxy.conf` and the nginx examples
+  in this guide include; Traefik, Caddy and Apache add it by default. The header is read from the right, and so is
+  ignored on requests that do not come from a trusted proxy.
+- Keep the hop limit at one unless every additional proxy is trusted and reliably appends its actual peer address.
+  For example, Docker's userland proxy can relay traffic through the bridge gateway (`172.18.0.1`), producing a
+  header like `<client-supplied>, 172.18.0.1`. With the default one-hop limit the gateway is used as the partition,
+  not the client-controlled entry to its left. Those gateway-relayed clients therefore share a rate limit; increasing
+  the hop limit in this setup would let them choose separate partitions using that entry.
+- Keep the list narrow: a host in it can choose which address its requests are counted against. The list only
+  affects rate limiting and never makes a request trusted for authentication: the connection's address is not
+  rewritten, and the Authelia headers are still checked against it.
+
+At startup, the log lists the trusted proxies:
+`Rate limiting counts anonymous requests from 172.18.0.0/16 per X-Forwarded-For client address, up to 1 hop(s)`.
 
 ### Base Path Support
 You can deploy ComicMaintainer at a subdirectory path using the `BASE_PATH` environment variable:
@@ -101,6 +144,7 @@ services:
       - WATCHED_DIR=/watched_dir
       - PUID=1000
       - PGID=1000
+      - TRUSTED_PROXIES=172.18.0.0/16  # Subnet of swag-network (see Trusted Proxies and Rate Limiting)
     volumes:
       - /path/to/comics:/watched_dir
       - /path/to/config:/Config
@@ -135,6 +179,7 @@ services:
       - BASE_PATH=/comics  # Required for subfolder
       - PUID=1000
       - PGID=1000
+      - TRUSTED_PROXIES=172.18.0.0/16  # Subnet of swag-network (see Trusted Proxies and Rate Limiting)
     volumes:
       - /path/to/comics:/watched_dir
       - /path/to/config:/Config
@@ -616,6 +661,18 @@ docker exec comictagger-watcher cat /Config/Log/ComicMaintainer.log | grep "X-Fo
 - Verify the auth middleware is enabled
 - Test basic auth: `curl -u user:pass https://comics.example.com`
 
+### Issue: "429 Too Many Requests" When Signing In
+**Symptoms:**
+- Signing in fails with `429 Too Many Requests` for every user at once, and works again within a minute
+
+**Solution:**
+- Set `TRUSTED_PROXIES` to your proxy's address (see [Trusted Proxies and Rate Limiting](#trusted-proxies-and-rate-limiting)).
+  Without it, all signed-out visitors share the proxy's rate limit, so a single busy client uses it up for everyone.
+- Check that the startup log line `Rate limiting counts anonymous requests from ...` lists the address your proxy
+  connects from
+- Verify the proxy appends the client address to `X-Forwarded-For` (nginx:
+  `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`)
+
 ### Issue: Slow Performance Behind Proxy
 **Solution:**
 - Enable HTTP/2 in your proxy configuration
@@ -631,6 +688,8 @@ docker exec comictagger-watcher cat /Config/Log/ComicMaintainer.log | grep "X-Fo
 4. **Set Proper Headers**: Ensure security headers (HSTS, CSP) are configured
 5. **Monitor Logs**: Regularly check both proxy and application logs
 6. **Keep Updated**: Update both the reverse proxy and ComicMaintainer regularly
+7. **Trust Only Your Proxy**: Set `TRUSTED_PROXIES` to your proxy's address, as narrowly as possible, so that each
+   client gets its own rate limit (see [Trusted Proxies and Rate Limiting](#trusted-proxies-and-rate-limiting))
 
 ## Additional Resources
 

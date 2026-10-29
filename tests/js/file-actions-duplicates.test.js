@@ -189,6 +189,29 @@ test('Review Duplicate on a duplicate issue opens the review on that file', asyn
     assert.deepEqual(shown(page), { counter: '1 of 3', name: 'Saga 001.cbz', path: A });
 });
 
+test('a modification time ahead of the browser\'s clock reads Just now, or the date when further ahead', async t => {
+    // Written moments ago by a server whose clock is a few seconds ahead, and a file dated in the future.
+    const justWritten = duplicateFile({ modified: Math.floor(Date.now() / 1000) + 5 });
+    const ahead = duplicateFile({ relative_path: C, name: 'Saga 002.cbz', modified: new Date(2099, 0, 15, 12).getTime() / 1000 });
+    const page = await bootSeriesPage({
+        issues: [
+            seriesIssue({ file_path: A, duplicate: true }),
+            seriesIssue({ file_path: C, file_name: 'Saga 002.cbz', title: 'Saga 002', issue: '2', duplicate: true })
+        ],
+        routes: { 'GET /api/files': filesPage([justWritten, ahead]) }
+    });
+    t.after(() => page.close());
+
+    clickIssueAction(page, A, 'Review Duplicate');
+    await page.settle();
+    assert.deepEqual(shown(page), { counter: '1 of 2', name: 'Saga 001.cbz', path: A });
+    assert.equal(page.$('#duplicateReviewModified').textContent, 'Just now');
+
+    page.click('#duplicateReviewNextBtn');
+    assert.deepEqual(shown(page), { counter: '2 of 2', name: 'Saga 002.cbz', path: C });
+    assert.equal(page.$('#duplicateReviewModified').textContent, '2099-01-15');
+});
+
 test('no duplicates shows the empty state and the per-file actions do nothing', async t => {
     const page = await boot({ files: [] });
     t.after(() => page.close());

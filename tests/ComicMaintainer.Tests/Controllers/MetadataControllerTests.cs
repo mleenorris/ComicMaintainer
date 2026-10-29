@@ -103,7 +103,7 @@ public class MetadataControllerTests
     [Fact]
     public async Task RefreshSelected_RejectsEmptyBody()
     {
-        var result = await _controller.RefreshSelected(new MetadataController.RefreshSelectedRequest(), CancellationToken.None);
+        var result = await _controller.RefreshSelected(new MetadataController.RefreshSelectedRequest());
         Assert.IsType<BadRequestObjectResult>(result.Result);
     }
 

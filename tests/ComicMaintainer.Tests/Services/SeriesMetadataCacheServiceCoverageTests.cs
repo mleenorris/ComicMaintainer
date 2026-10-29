@@ -264,6 +264,25 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshAsync_CallerCancelsDuringLookup_RethrowsWithoutLoggingAProviderFailure()
+    {
+        await SeedAsync(Entity("series-x", "Series X Canonical"));
+        using var cts = new CancellationTokenSource();
+        _external.Setup(e => e.LookupSeriesAsync("Series X", cts.Token))
+            .Callback(() => cts.Cancel())
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var before = _service.ChangeVersion;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => _service.RefreshAsync("Series X", cts.Token));
+
+        Assert.DoesNotContain(_logger.Entries, e => e.Level >= LogLevel.Warning);
+        Assert.Equal(before, _service.ChangeVersion);
+        var persisted = await _service.GetAsync("series-x");
+        Assert.Equal("success", persisted!.LookupStatus);
+        Assert.Null(persisted.LastLookupUtc);
+    }
+
+    [Fact]
     public async Task RefreshAsync_ExistingRecord_LookupWithBlankCanonicalAndNullAliases_KeepsCanonical()
     {
         var entity = Entity("series-y", "Series Y");

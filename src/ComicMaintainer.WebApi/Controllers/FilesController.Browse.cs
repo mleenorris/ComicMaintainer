@@ -172,7 +172,9 @@ public partial class FilesController
     {
         try
         {
-            var decodedPath = DecodeBase64UrlSafe(encodedPath ?? string.Empty);
+            if (!TryDecodeBase64UrlSafe(encodedPath ?? string.Empty, out var decodedPath))
+                return BadRequest("Invalid folder path");
+
             _logger.LogDebug("GetFolderFiles: DecodedPath={DecodedPath}, Filter={Filter}",
                 LoggingHelper.SanitizeForLog(decodedPath), LoggingHelper.SanitizeForLog(filter));
 

@@ -73,24 +73,25 @@ jobs:
           
           ## Configuration
           
-          The application uses environment variables for configuration. You can create a `.env` file
-          in the same directory as the executable, or set environment variables in Windows.
+          The application is configured with environment variables; it does not read a `.env` file.
+          Set them in Windows (System Properties > Environment Variables) or, for a service, in the NSSM GUI.
           
           ### Required Environment Variables:
           - `WATCHED_DIR`: Directory to watch for comic files (required)
           
           ### Optional Environment Variables:
           - `DUPLICATE_DIR`: Directory for duplicate files
-          - `WEB_PORT`: Port for web interface (default: 5000)
-          - `GUNICORN_WORKERS`: Number of worker processes (default: 2)
-          - `DEBUG_MODE`: Enable debug logging (default: false)
+          - `ASPNETCORE_URLS`: Address and port of the web interface (default: http://localhost:5000; use http://+:5000 to allow other devices)
+          - `AppSettings__MaxWorkers`: Number of files processed in parallel (default: 4)
           
-          ### Example .env file:
+          The filename format, issue number padding and automatic rename/normalize are set on the Settings page of the web interface.
+          
+          ### Example (Command Prompt):
           ```
-          WATCHED_DIR=C:\Comics\ToProcess
-          DUPLICATE_DIR=C:\Comics\Duplicates
-          WEB_PORT=5000
-          DEBUG_MODE=false
+          set WATCHED_DIR=C:\Comics\ToProcess
+          set DUPLICATE_DIR=C:\Comics\Duplicates
+          set ASPNETCORE_URLS=http://+:5000
+          ComicMaintainer.WebApi.exe
           ```
           
           ## Running as a Windows Service
@@ -137,7 +138,8 @@ jobs:
         run: |
           $envContent = @"
           # ComicMaintainer Configuration
-          # Copy this file to the same directory as ComicMaintainer.WebApi.exe
+          # The application does not read this file. Set these as Windows environment variables,
+          # or paste them into the Environment tab of the NSSM service.
           
           # Required: Directory to watch for comic files
           WATCHED_DIR=C:\Comics\ToProcess
@@ -145,20 +147,11 @@ jobs:
           # Optional: Directory for duplicate files
           DUPLICATE_DIR=C:\Comics\Duplicates
           
-          # Optional: Web interface port (default: 5000)
-          WEB_PORT=5000
+          # Optional: Address and port of the web interface (default: http://localhost:5000)
+          ASPNETCORE_URLS=http://+:5000
           
-          # Optional: Number of worker processes (default: 2)
-          GUNICORN_WORKERS=2
-          
-          # Optional: Enable debug logging (default: false)
-          DEBUG_MODE=false
-          
-          # Optional: Maximum concurrent file processing workers (default: 4)
-          MAX_WORKERS=4
-          
-          # Optional: Database cache size in MB (default: 64)
-          DB_CACHE_SIZE_MB=64
+          # Optional: Number of files processed in parallel (default: 4)
+          AppSettings__MaxWorkers=4
           "@
           
           $envContent | Out-File -FilePath "publish/win-x64/.env.example" -Encoding UTF8

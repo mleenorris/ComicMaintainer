@@ -857,6 +857,21 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
             _normalizedPaths.OrderBy(p => p, StringComparer.Ordinal));
     }
 
+    [Fact]
+    public async Task CombineFolders_PreservesSourceDirectoriesWithPendingSuwayomiImports()
+    {
+        var files = ArrangeSeriesCombineOnDisk();
+        SetupFiles(files);
+        var staging = Path.Combine(Dir("Foo (Old)"), ".tmp_0123456789abcdef.suwayomi-import");
+        File.WriteAllText(staging, "pending import");
+
+        await CombineSeriesFoldersAsync();
+
+        Assert.True(Directory.Exists(Dir("Foo (Old)")));
+        Assert.True(File.Exists(staging));
+        Assert.True(File.Exists(Path.Combine(Dir("Foo"), "Foo Legacy 002.cbz")));
+    }
+
     [Theory]
     [InlineData("Foo Canon", null, "success", "Foo Canon")]
     [InlineData("Foo Canon", null, "MANUAL_MATCH", "Foo Canon")]

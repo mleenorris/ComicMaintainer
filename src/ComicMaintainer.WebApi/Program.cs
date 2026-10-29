@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Startup;
 
 // Configure Serilog for dual logging: console (clean) and file (debug)
@@ -60,6 +61,10 @@ logger.LogInformation("║         Comic Maintainer - .NET Edition          ║"
 logger.LogInformation("║                  Version {Version}║", version.PadRight(24));
 logger.LogInformation("╚══════════════════════════════════════════════════╝");
 
+// Report where the JWT signing secret came from (see Startup/JwtSecretResolver.cs). It was resolved while the
+// services were registered, before this logger existed.
+app.Services.GetRequiredService<JwtSigningSecret>().LogSource(logger);
+
 // Initialize database and seed roles
 await app.InitializeComicMaintainerDatabaseAsync(logger);
 
@@ -75,6 +80,19 @@ logger.LogInformation("Watcher Status: {Status} (Rename: {Rename}, Normalize: {N
     watcherEnabled ? "Enabled" : "Disabled",
     appSettingsValue.WatcherEnableRename,
     appSettingsValue.WatcherEnableNormalize);
+
+// The settings API range-checks the padding, but user-settings.json and the environment don't.
+// Filenames clamp it, so name the value that is actually used.
+var effectiveIssueNumberPadding = ComicFileProcessor.ClampIssueNumberPadding(appSettingsValue.IssueNumberPadding);
+if (effectiveIssueNumberPadding != appSettingsValue.IssueNumberPadding)
+{
+    logger.LogWarning(
+        "IssueNumberPadding {Padding} is outside the supported range 0-{MaxPadding}; using {EffectivePadding} instead",
+        appSettingsValue.IssueNumberPadding,
+        AppSettings.MaxIssueNumberPadding,
+        effectiveIssueNumberPadding);
+    appSettingsValue.IssueNumberPadding = effectiveIssueNumberPadding;
+}
 
 app.Run();
 

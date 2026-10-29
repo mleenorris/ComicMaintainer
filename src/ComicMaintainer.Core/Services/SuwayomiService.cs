@@ -27,6 +27,9 @@ public class SuwayomiService : ISuwayomiService
     public const string HttpClientName = "Suwayomi";
 
     private const int MaxLibraryPageSize = 500;
+    private const string UnexpectedResponseMessage = "The Suwayomi server returned an unexpected response.";
+    private const string UnexpectedChapterListResponseMessage =
+        "The Suwayomi server returned an unexpected response: data.chapters.nodes must be an array.";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -88,7 +91,7 @@ public class SuwayomiService : ISuwayomiService
                 || !data.TryGetProperty("aboutServer", out var about)
                 || about.ValueKind != JsonValueKind.Object)
             {
-                throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+                throw new SuwayomiException(UnexpectedResponseMessage);
             }
 
             status.Connected = true;
@@ -168,15 +171,18 @@ public class SuwayomiService : ISuwayomiService
             new Dictionary<string, object?> { ["id"] = seriesId },
             cancellationToken);
 
-        var chapters = new List<SuwayomiChapter>();
-        if (!document.RootElement.TryGetProperty("data", out var data)
+        if (document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty("data", out var data)
+            || data.ValueKind != JsonValueKind.Object
             || !data.TryGetProperty("chapters", out var connection)
+            || connection.ValueKind != JsonValueKind.Object
             || !connection.TryGetProperty("nodes", out var nodes)
             || nodes.ValueKind != JsonValueKind.Array)
         {
-            return chapters;
+            throw new SuwayomiException(UnexpectedChapterListResponseMessage);
         }
 
+        var chapters = new List<SuwayomiChapter>();
         foreach (var node in nodes.EnumerateArray())
         {
             var id = GetInt32OrNull(node, "id");
@@ -466,7 +472,7 @@ public class SuwayomiService : ISuwayomiService
                 || !connection.TryGetProperty("nodes", out var nodes)
                 || nodes.ValueKind != JsonValueKind.Array)
             {
-                throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+                throw new SuwayomiException(UnexpectedResponseMessage);
             }
 
             foreach (var node in nodes.EnumerateArray())
@@ -482,7 +488,7 @@ public class SuwayomiService : ISuwayomiService
                 || pageInfo.ValueKind != JsonValueKind.Object
                 || GetBooleanOrNull(pageInfo, "hasNextPage") is not { } hasNextPage)
             {
-                throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+                throw new SuwayomiException(UnexpectedResponseMessage);
             }
 
             if (!hasNextPage)
@@ -493,7 +499,7 @@ public class SuwayomiService : ISuwayomiService
             after = GetStringOrNull(pageInfo, "endCursor");
             if (string.IsNullOrWhiteSpace(after))
             {
-                throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+                throw new SuwayomiException(UnexpectedResponseMessage);
             }
         }
     }
@@ -599,7 +605,7 @@ public class SuwayomiService : ISuwayomiService
             {
                 if (document.RootElement.ValueKind != JsonValueKind.Object)
                 {
-                    throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+                    throw new SuwayomiException(UnexpectedResponseMessage);
                 }
 
                 if (document.RootElement.TryGetProperty("errors", out var errors)
@@ -646,7 +652,7 @@ public class SuwayomiService : ISuwayomiService
                 if (!document.RootElement.TryGetProperty("data", out var data)
                     || data.ValueKind != JsonValueKind.Object)
                 {
-                    throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+                    throw new SuwayomiException(UnexpectedResponseMessage);
                 }
             }
             catch
@@ -774,7 +780,11 @@ public class SuwayomiService : ISuwayomiService
         return 0;
     }
 
-    private static string Normalize(string value)
+    /// <summary>
+    /// Lower-cases <paramref name="value"/> and keeps only letters and digits,
+    /// so titles that differ only in punctuation or spacing compare equal.
+    /// </summary>
+    internal static string Normalize(string value)
     {
         var filtered = value
             .ToLowerInvariant()

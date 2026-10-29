@@ -259,15 +259,31 @@ for per-file fields such as `issue`.
 }
 ```
 
-Returns `200` with an empty body. A file that cannot be written, for example because
-it does not exist, is skipped without being reported, so check the result with `GET`.
+**Response (200 OK):** empty body; every file was updated.
+
+**Response (207 Multi-Status):** some files could not be updated (missing, not a comic
+archive, or unreadable); the rest were.
+```json
+{
+  "failed": ["/comics/Batman/Batman #002.cbz"]
+}
+```
+
+**Error Response (400 - Bad Request):** the request is invalid, an outside path was
+provided, or none of the files could be updated.
+```json
+{
+  "error": "Failed to update tags",
+  "failed": ["/comics/Batman/Batman #001.cbz"]
+}
+```
 
 A request whose `files` is missing or an empty list is rejected with `400`
 (`No files provided`). A request naming any file outside the watched directory is
 rejected with `400` (`One or more file paths are outside the allowed directory`)
-before any file is updated.
-If `files` is explicitly `null`, model validation rejects the request with `400`
-(`The Files field is required.`), rather than returning `No files provided`.
+before any file is updated. If `files` is explicitly `null`, model validation rejects
+the request with `400` (`The Files field is required.`), rather than returning
+`No files provided`.
 
 ### POST /api/files/cleanup-stale
 
@@ -483,8 +499,8 @@ Set issue number padding.
 }
 ```
 
-A negative padding is not saved; the response is `500` with
-`{"error": "Failed to update issue number padding"}`.
+`padding` must be between 0 and 10; other values are rejected with `400` and
+`{ "error": "..." }`.
 
 ### GET /api/settings/watcher-enable-rename
 ### GET /api/settings/watcher-enable-normalize
@@ -628,6 +644,30 @@ Queue downloads for the issue numbers a series is missing locally.
 ```
 
 Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable, or no matching series is in the Suwayomi library.
+
+### Importing Suwayomi downloads
+
+Suwayomi saves chapters as `<downloads>/<source>/<series>/<chapter>.cbz`. When a downloads folder is configured, the `suwayomi-download-import` scheduled job (enabled by default, every 15 minutes; see the **Scheduled Jobs** page) moves each finished archive into the library as `<series folder>/<chapter>.cbz`, then removes the download folders it emptied. The file watcher then processes the moved files like any other new file. Importing works whether or not the Suwayomi integration above is enabled.
+
+The series folder is, in order: a folder in the import folder named like the Suwayomi series folder (ignoring case, spacing and punctuation); the existing library folder of the one series whose title, canonical title or alias matches; or a new folder named after the Suwayomi series folder in the import folder. A name already taken gets a ` (2)`, ` (3)`, … suffix. Archives written in the last 30 seconds (or the watcher's stability delay, if longer), archives that cannot be opened, and archives directly in the downloads folder are left in place. Chapters saved as loose images are not imported; enable **Save as CBZ archive** in Suwayomi's download settings.
+
+Each archive is first moved under a hidden staging name (`.tmp_<id>.suwayomi-import`) that neither the file watcher nor Library Scan picks up, then renamed to its chapter name. Staged moves are recorded in `suwayomi-import-pending.json` in the config folder, so a chapter staged when ComicMaintainer stopped is published on the next run (or dropped, if its download is still in place, so that it is imported afresh). A permission error stops the run and is shown in its summary.
+
+The folders are set with `PUT /api/settings/suwayomi` (administrators only), alongside the server settings, or with the `SUWAYOMI_DOWNLOADS_DIR` and `SUWAYOMI_IMPORT_DIR` environment variables:
+
+```json
+{
+  "enabled": true,
+  "baseUrl": "http://suwayomi:4567",
+  "downloadsDirectory": "/suwayomi/downloads/mangas",
+  "importDirectory": "Manga"
+}
+```
+
+- `downloadsDirectory` - Absolute path to the folder Suwayomi saves chapters to, as mounted in this service. It must exist and must neither contain nor sit inside the watched, duplicates, config or temp directories. ComicMaintainer needs write access to it.
+- `importDirectory` - Library folder that new series folders are created in: relative to the watched directory, or absolute inside it. Empty means the watched directory itself.
+
+Omit either field to keep its stored value; send `""` to clear it (clearing `downloadsDirectory` turns importing off). An invalid folder returns `400` with `{ "error": "..." }`. `GET /api/settings` returns the current values as `suwayomi_downloads_directory` and `suwayomi_import_directory`.
 
 ## Events
 
@@ -836,7 +876,11 @@ environment; in production the correlation id is the link to the full detail in 
 
 ## Rate Limiting
 
-Currently, there is no rate limiting implemented. Consider adding rate limiting if the API is exposed to the internet.
+Requests are rate-limited per minute: 100 for each client address that is not signed in, and 1000 for each signed-in
+user. Requests over the limit are delayed until the next minute, or rejected with `429 Too Many Requests` when too
+many are already waiting (10 per client address, 100 per user). Behind a reverse proxy, set `TRUSTED_PROXIES` so that
+signed-out clients are counted by the address the proxy forwards in `X-Forwarded-For` instead of all sharing the
+proxy's; see [Trusted Proxies and Rate Limiting](REVERSE_PROXY.md#trusted-proxies-and-rate-limiting).
 
 ## CORS
 

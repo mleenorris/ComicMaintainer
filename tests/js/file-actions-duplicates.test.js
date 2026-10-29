@@ -608,9 +608,9 @@ test('Close, the close button and Escape close the review', async t => {
     assert.ok(!isModalOpen(page, 'duplicateReviewModal'));
 });
 
-test('read-only users can review duplicates but Delete All is hidden from them', async t => {
+test('read-only users can review duplicates but the delete actions are hidden from them', async t => {
     const page = await boot({
-        user: { canModifyLibrary: false, canAdminister: false },
+        user: { canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] },
         routes: {
             'GET /api/files/counts': { total: 6, processed: 4, unprocessed: 2, duplicates: 3, combinableFolders: 0 }
         },
@@ -634,5 +634,6 @@ test('read-only users can review duplicates but Delete All is hidden from them',
     assert.ok(isModalOpen(page, 'duplicateReviewModal'));
     assert.equal(shown(page).counter, '1 of 3');
     assert.ok(!visible(page.$('#duplicateReviewDeleteAllBtn')));
+    assert.ok(!visible(reviewButton(page, 'Delete Duplicate')));
     assert.ok(visible(reviewButton(page, 'View Info')));
 });

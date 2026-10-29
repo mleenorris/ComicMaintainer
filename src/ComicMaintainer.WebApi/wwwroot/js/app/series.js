@@ -686,21 +686,21 @@
                                                     ${uiIcon('check-circle')} Mark Read
                                                 </button>`
                                             }
-                                            <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="processSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                            <div class="dropdown-divider" data-requires-write></div>
+                                            <button class="dropdown-item" data-requires-write onclick="processSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('play')} Process
                                             </button>
-                                            <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                            <button class="dropdown-item" data-requires-write onclick="renameSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('pencil')} Rename
                                             </button>
-                                            <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                            <button class="dropdown-item" data-requires-write onclick="normalizeSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('tag')} Normalize
                                             </button>
-                                            <button class="dropdown-item" onclick="removeFileMetadata('${escapeJs(issue.file_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
+                                            <button class="dropdown-item" data-requires-write onclick="removeFileMetadata('${escapeJs(issue.file_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
                                                 ${uiIcon('eraser')} Remove Metadata
                                             </button>
-                                            <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                            <div class="dropdown-divider" data-requires-write></div>
+                                            <button class="dropdown-item" data-requires-write onclick="deleteSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('trash')} Delete
                                             </button>
                                         </div>
@@ -798,6 +798,10 @@
             const someIssuesSelected = selectableIssuePaths.some(path => selectedFiles.has(path));
             const gridItems = buildSeriesIssuesGridItems(issues);
 
+            // Every Series Actions item needs write access, so read-only users
+            // don't get the menu at all: data-requires-write is on the dropdown
+            // and, like the issue menus, on each item (an open menu is moved
+            // to <body>, out of the dropdown).
             renderHtml(fileList, html`
                 <div class="series-detail" id="seriesDetailPanel">
                     <div class="series-detail-header">
@@ -812,25 +816,25 @@
                                 ${rawHtml(renderSeriesSynopsis(series))}
                                 <div class="series-detail-actions">
                                     ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">${uiIcon('book-open')} Read First Issue</button>` : ''}
-                                    <div class="file-actions-dropdown series-actions-dropdown">
+                                    <div class="file-actions-dropdown series-actions-dropdown" data-requires-write>
                                         <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${jsArg(SERIES_ACTIONS_DROPDOWN_KEY)}')">
                                             ${uiIcon('settings')} Actions
                                         </button>
                                         <div class="dropdown-menu" id="${getDropdownId(SERIES_ACTIONS_DROPDOWN_KEY)}">
-                                            <button class="dropdown-item" onclick="openManageSeriesNamesModal('${jsArg(series.title)}'); closeAllDropdowns();">
+                                            <button class="dropdown-item" data-requires-write onclick="openManageSeriesNamesModal('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 ${uiIcon('tag')} Manage Names
                                             </button>
-                                            <button class="dropdown-item" onclick="openSeriesFoldersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
+                                            <button class="dropdown-item" data-requires-write onclick="openSeriesFoldersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
                                                 ${uiIcon('folder')} Manage Folders
                                             </button>
-                                            <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">
+                                            <div class="dropdown-divider" data-requires-write></div>
+                                            <button class="dropdown-item" data-requires-write onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 ${uiIcon('globe')} Refresh Metadata
                                             </button>
-                                            <button class="dropdown-item" onclick="refreshSeriesFolder('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
+                                            <button class="dropdown-item" data-requires-write onclick="refreshSeriesFolder('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
                                                 ${uiIcon('folder')} Refresh Folder
                                             </button>
-                                            <button class="dropdown-item" onclick="updateSeriesCoversDirect('${jsArg(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
+                                            <button class="dropdown-item" data-requires-write onclick="updateSeriesCoversDirect('${jsArg(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
                                                 ${uiIcon('image')} Update Covers
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForSeries('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();">
@@ -839,8 +843,8 @@
                                             <button class="dropdown-item" data-requires-write onclick="openEmailSubscriptionModal('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 ${uiIcon('copy')} Auto-send New Issues
                                             </button>
-                                            <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
+                                            <div class="dropdown-divider" data-requires-write></div>
+                                            <button class="dropdown-item" data-requires-write onclick="resetSeriesProcessedStatus('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
                                                 ${uiIcon('rotate-ccw')} Reset Processed Status
                                             </button>
                                         </div>

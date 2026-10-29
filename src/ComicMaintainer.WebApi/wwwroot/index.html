@@ -1280,7 +1280,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="saveTags()">Save</button>
+                <button class="btn btn-primary" data-requires-write onclick="saveTags()">Save</button>
             </div>
         </div>
     </div>
@@ -1852,7 +1852,7 @@
                          <button class="btn" onclick="openDuplicateTags()"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> View/Edit Tags</button>
                          <button class="btn" onclick="openDuplicateReader()"><svg class="icon" aria-hidden="true"><use href="#i-book-open"/></svg> Read Comic</button>
                          <button class="btn" id="duplicateReviewReadToggleBtn" onclick="toggleDuplicateReadStatus()"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Mark Read</button>
-                         <button class="btn btn-danger" onclick="deleteCurrentDuplicate()"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete Duplicate</button>
+                         <button class="btn btn-danger" onclick="deleteCurrentDuplicate()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete Duplicate</button>
                          <button class="btn btn-danger" id="duplicateReviewDeleteAllBtn" onclick="deleteAllDuplicates()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete All Duplicates</button>
                      </div>
                      <div class="duplicate-review-tip">
@@ -1918,10 +1918,10 @@
                  <div id="seriesFoldersEmptyState" class="duplicate-review-empty" style="display: none;">
                      No folders found for this series.
                  </div>
-                 <div id="seriesFoldersMergeNote" class="duplicate-review-tip" style="display: none;"></div>
+                 <div id="seriesFoldersMergeNote" class="duplicate-review-tip" data-requires-write style="display: none;"></div>
              </div>
              <div class="modal-footer">
-                 <button class="btn" id="seriesFoldersMergeBtn" onclick="openMergeForSeriesFolders()" disabled><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Merge Folders</button>
+                 <button class="btn" id="seriesFoldersMergeBtn" onclick="openMergeForSeriesFolders()" data-requires-write disabled><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Merge Folders</button>
                  <button class="btn" onclick="closeSeriesFoldersModal()">Close</button>
              </div>
          </div>
@@ -1967,7 +1967,7 @@
                      <label style="font-weight: 600; color: var(--text-secondary);">User Aliases</label>
                      <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Add alternative names so the library will merge folders that share these titles.</p>
                      <div id="manageSeriesUserAliases" style="padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px; min-height: 36px;">None</div>
-                     <div style="display: flex; gap: 8px; margin-top: 8px;">
+                     <div style="display: flex; gap: 8px; margin-top: 8px;" data-requires-write>
                          <input type="text" id="manageSeriesNewAlias" placeholder="Add an alias (e.g. The Dark Knight)" autocomplete="off" style="flex: 1; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary);">
                          <button class="btn btn-small" type="button" onclick="addManageSeriesAlias()"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add</button>
                      </div>
@@ -1979,7 +1979,7 @@
                          <img id="manageSeriesImagePreview" alt="Series cover preview" style="width: 96px; height: 144px; object-fit: cover; border-radius: 6px; background: var(--bg-hover); border: 1px solid var(--border-primary); display: block;" />
                          <div style="flex: 1; display: flex; flex-direction: column; gap: 6px;">
                              <div id="manageSeriesImageStatus" style="font-size: 12px; color: var(--text-secondary);">No image cached.</div>
-                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                             <div style="display: flex; gap: 8px; flex-wrap: wrap;" data-requires-write>
                                  <input type="file" id="manageSeriesImageInput" accept="image/jpeg,image/png,image/webp" style="display: none;" onchange="uploadManageSeriesImage()">
                                  <button class="btn btn-small" type="button" onclick="document.getElementById('manageSeriesImageInput').click()"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg> Upload Image</button>
                                  <button class="btn btn-small" type="button" onclick="openFetchSeriesImageFromProvider()" title="Search the configured external metadata providers for a cover image"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> Fetch from Provider</button>
@@ -2008,10 +2008,10 @@
                  </div>
              </div>
              <div class="modal-footer">
-                 <button class="btn btn-small" type="button" onclick="refreshSeriesMetadata()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh from Provider</button>
-                 <button class="btn btn-small" type="button" onclick="clearSeriesExternalMetadata()" title="Remove cached provider aliases, source, and downloaded image for this series. User aliases and uploaded images are kept."><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clear External Metadata</button>
-                 <button class="btn btn-small" type="button" onclick="checkCombinableFoldersFromManageSeries()" title="Re-scan the library for folders that can now be merged with this series"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Check for Combinable Folders</button>
-                 <button class="btn btn-primary" type="button" onclick="saveManageSeriesNames()"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg> Save</button>
+                 <button class="btn btn-small" type="button" data-requires-write onclick="refreshSeriesMetadata()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh from Provider</button>
+                 <button class="btn btn-small" type="button" data-requires-write onclick="clearSeriesExternalMetadata()" title="Remove cached provider aliases, source, and downloaded image for this series. User aliases and uploaded images are kept."><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clear External Metadata</button>
+                 <button class="btn btn-small" type="button" data-requires-write onclick="checkCombinableFoldersFromManageSeries()" title="Re-scan the library for folders that can now be merged with this series"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Check for Combinable Folders</button>
+                 <button class="btn btn-primary" type="button" data-requires-write onclick="saveManageSeriesNames()"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg> Save</button>
                  <button class="btn" type="button" onclick="closeManageSeriesNamesModal()">Close</button>
              </div>
          </div>

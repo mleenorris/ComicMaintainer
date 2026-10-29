@@ -315,14 +315,13 @@ test('a reload that finishes after the series page was left still corrects the s
 });
 
 test('a reload with another filter than the list it replaces unselects nothing that filter hides', async () => {
-    // The page's first request goes out before the saved "unmarked" filter
-    // is applied; that filter hides #4 and #5, which are still there.
     const server = { unmarked: [1, 2] };
+    const save = deferred();
     const page = await bootLibrary({
         hash: '#/series/series-1',
         series: makeSeriesList(2),
-        prefs: { filterMode: 'unmarked' },
         routes: {
+            'PUT /api/preferences': () => save.promise,
             [`GET ${ISSUES_PATH}`]: call => issuesResponse(
                 (call.query.filter === 'unmarked' ? server.unmarked : [1, 2, 4, 5]).map(n => makeIssue(n)))
         }
@@ -331,11 +330,17 @@ test('a reload with another filter than the list it replaces unselects nothing t
     toggleIssue(page, 4);
     toggleIssue(page, 5);
 
+    // The user changes the filter while the preference save is pending. A
+    // reload started during that save must not unselect issues the new filter
+    // hides.
+    page.run("setHeaderFilter('unmarked')");
     fileProcessed(page, filePath(1));
     await page.settle();
     assert.equal(callsTo(page, ISSUES_PATH).at(-1).query.filter, 'unmarked');
     assert.deepEqual(selected(page), [filePath(4), filePath(5)]);
     assert.equal(page.$('#selectInfo').textContent, '2 files selected');
+    save.resolve({});
+    await page.settle();
 
     // Under the filter of the list it replaces, a reload does unselect the
     // issues it no longer lists.

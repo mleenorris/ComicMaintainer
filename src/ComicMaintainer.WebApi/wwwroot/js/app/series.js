@@ -269,9 +269,16 @@
         // meanwhile — so the selection stops counting them and no batch action
         // is sent a path that is gone. Issues arrive in pages, and a path
         // missing from a partial list may be on a page still to come, so this
-        // waits for the last one. Returns whether the selection changed.
+        // waits for the last one. A list dropped from the cache meanwhile
+        // (e.g. by a filter change) has been superseded and prunes nothing;
+        // one remapped to a new series id is still cached and prunes as usual.
+        // Returns whether the selection changed.
         function pruneSeriesIssueSelection(entry) {
             if (!entry.unconfirmedPaths || !entry.allLoaded || entry.error) return false;
+            if (![...seriesIssuesCache.values()].includes(entry)) {
+                entry.unconfirmedPaths = null;
+                return false;
+            }
             const listedPaths = new Set(entry.issues
                 .map(issue => issue && issue.file_path)
                 .filter(path => typeof path === 'string' && path.length > 0));

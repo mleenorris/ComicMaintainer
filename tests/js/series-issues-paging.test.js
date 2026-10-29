@@ -294,6 +294,39 @@ test('an issue selected while a reload is pending is unselected if the reload no
     assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });
 
+// A filter change drops the cached list, so a reload of it that lands after
+// the newer list must not unselect an issue the old filter merely hides now.
+test('a filtered reload landing after a filter switch unselects nothing', async () => {
+    const series = seriesCard({ issue_count: 2 });
+    const unmarkedReload = deferred();
+    let unmarkedAnswer = () => issuesBody(series, [issue(1), issue(2)], { issue_count: 2 });
+    const page = await bootSeries({
+        series,
+        routes: {
+            [`GET ${ISSUES}`]: call => (call.query.filter === 'unmarked'
+                ? unmarkedAnswer()
+                : issuesBody(series, [issue(1), issue(2)], { issue_count: 2 }))
+        }
+    });
+    page.run("setHeaderFilter('unmarked')");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+
+    unmarkedAnswer = () => unmarkedReload.promise;
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+    // #2 is marked meanwhile; the user switches to All, which still lists it.
+    page.run("setHeaderFilter('all')");
+    await page.settle();
+    assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz']);
+
+    unmarkedReload.resolve(issuesBody(series, [issue(1)], { issue_count: 1 }));
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+});
+
 test('a deep link to a series outside the loaded library renders from its issues response', async () => {
     const gate = deferred();
     const lost = seriesCard({ id: 'lost', title: 'Lost Series', canonical_title: 'Lost Series', aliases: ['LS'] });

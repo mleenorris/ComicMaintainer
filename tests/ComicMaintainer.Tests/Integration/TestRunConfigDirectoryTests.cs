@@ -1,4 +1,5 @@
 using ComicMaintainer.Tests.Helpers;
+using ComicMaintainer.Tests.Startup;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace ComicMaintainer.Tests.Integration;
@@ -6,9 +7,13 @@ namespace ComicMaintainer.Tests.Integration;
 /// <summary>
 /// Regression test for #876: hosts booted through <c>WebApplicationFactory&lt;Program&gt;</c> used to write
 /// their logs and a bootstrap user-settings.json to /Config (or $TMPDIR/ComicMaintainer), where they
-/// accumulated across runs. They now write to the per-run <see cref="TestRunConfigDirectory"/>.
+/// accumulated across runs. They now write to the per-run <see cref="TestRunConfigDirectory"/>. The app's
+/// Serilog factory writes through the process-wide <c>Log.Logger</c>, which each host replaces when it starts,
+/// and hosts given a config directory of their own log there, so the test runs in the non-parallel
+/// environment collection.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection(AppSettingsEnvironmentPostConfigureTests.EnvironmentCollection.Name)]
 public class TestRunConfigDirectoryTests
 {
     [Fact]

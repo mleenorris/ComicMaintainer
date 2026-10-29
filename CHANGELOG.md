@@ -159,6 +159,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which other accounts could previously change or run.
 
 ### Fixed
+- **`CONFIG_DIR` now holds the database and the DataProtection keys too.** The logs,
+  `user-settings.json` and backups followed `CONFIG_DIR`, but the SQLite database and the keys
+  stayed in `/Config` (or `AppSettings:ConfigDirectory`). In Docker, with the config volume
+  mounted at a custom `CONFIG_DIR`, the accounts, file state and history were therefore kept in
+  the container and lost when it was recreated. Outside Docker, a non-root user could not open
+  the database at all. The directory is now chosen once (`CONFIG_DIR`, then
+  `AppSettings:ConfigDirectory`, then `/Config`) and used for all of them, and the container
+  makes a custom `CONFIG_DIR` writable by `PUID`. At startup the container now only gives `PUID`
+  access to the config directories (`/Config` and `CONFIG_DIR`); it no longer makes them readable
+  by everyone, even when one is inside `/watched_dir` or `/duplicates`. If the directory cannot be
+  created, everything falls back to one temporary directory and a warning says so.
+  **Upgrade note:** stop the app before upgrading and preserve its existing database and
+  `DataProtection-Keys` directory. The old database/key location is the previous effective
+  `AppSettings:ConfigDirectory` value (from `AppSettings__ConfigDirectory` or `appsettings.json`),
+  not necessarily `/Config`. Copy `comicmaintainer.db` and any SQLite `-wal`, `-shm` or
+  `-journal` sidecar files together, along with `DataProtection-Keys`, into the new `CONFIG_DIR`.
+  If the previous effective `AppSettings:ConfigDirectory` already equals `CONFIG_DIR`, no
+  database/key relocation is needed. Keep the originals until startup confirms the existing
+  accounts and history are present. For Docker, copy the state out of the old container before
+  removing it: its writable layer may contain the only copy. For example, while the old container
+  is stopped, use `docker cp <container>:<old-config-dir>/comicmaintainer.db <host-config-dir>/`
+  and also copy any sidecars and `<old-config-dir>/DataProtection-Keys`.
+  Logs, settings and backups previously followed `CONFIG_DIR` (default `/Config`); if that
+  previous directory differs from the new resolved directory, preserve `user-settings.json` and
+  `backups` from it there as well.
 - **The file watcher recovers after it stops with an error.** When a network share disconnected,
   the watched folder was removed, or (on Linux) an error ended the watcher's event loop, the
   watcher stayed dead until the service restarted, so new comics went undetected; on Linux it

@@ -2,9 +2,9 @@ name: Integration Tests (E2E Container)
 
 on:
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, dotnet ]
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, dotnet ]
   workflow_dispatch:
 
 permissions:

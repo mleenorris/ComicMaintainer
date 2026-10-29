@@ -273,6 +273,7 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
                 builder.UseSetting("AppSettings:WatchedDirectory", watched);
                 builder.UseSetting("AppSettings:DuplicateDirectory", duplicates);
                 builder.UseSetting("AppSettings:ConfigDirectory", config);
+                builder.UseSetting("CONFIG_DIR", config);
                 builder.UseSetting("AutheliaSettings:Enabled", "true");
                 builder.UseSetting("AutheliaSettings:AdminGroups", "admins, operators");
                 builder.UseSetting("AutheliaSettings:TrustedProxies", "172.18.0.0/16");

@@ -28,6 +28,7 @@ public sealed class DocumentedEnvironmentVariablesTests
     {
         ["PUID"] = "entrypoint.dotnet.sh",
         ["PGID"] = "entrypoint.dotnet.sh",
+        ["CONFIG_DIR"] = "src/ComicMaintainer.WebApi/Startup/ConfigDirectoryResolver.cs",
         ["JWT_SECRET"] = "src/ComicMaintainer.WebApi/Startup/JwtSecretResolver.cs",
         ["ADMIN_USERNAME"] = "src/ComicMaintainer.WebApi/Startup/WebApplicationExtensions.cs",
         ["ADMIN_EMAIL"] = "src/ComicMaintainer.WebApi/Startup/WebApplicationExtensions.cs",
@@ -40,6 +41,7 @@ public sealed class DocumentedEnvironmentVariablesTests
     /// <summary>The README setting of variables in <see cref="ReadElsewhere"/> whose setting is not named after the variable.</summary>
     private static readonly Dictionary<string, string> SettingNameOf = new(StringComparer.Ordinal)
     {
+        ["CONFIG_DIR"] = "ConfigDirectory",
         ["TRUSTED_PROXIES"] = "ReverseProxySettings:TrustedProxies",
         ["TRUSTED_PROXY_HOPS"] = "ReverseProxySettings:ForwardedHopLimit",
     };

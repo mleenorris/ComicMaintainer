@@ -43,6 +43,7 @@ public sealed class RateLimitingIntegrationTests : IAsyncLifetime
             builder.UseSetting("AppSettings:WatchedDirectory", watched);
             builder.UseSetting("AppSettings:DuplicateDirectory", duplicates);
             builder.UseSetting("AppSettings:ConfigDirectory", config);
+            builder.UseSetting("CONFIG_DIR", config);
             builder.UseSetting("ReverseProxySettings:TrustedProxies", "172.18.0.0/16");
             builder.ConfigureServices(services => services.AddSingleton<IStartupFilter, ProxyPeerStartupFilter>());
         });

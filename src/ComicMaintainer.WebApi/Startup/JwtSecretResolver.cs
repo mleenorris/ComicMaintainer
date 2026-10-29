@@ -81,12 +81,18 @@ internal static class JwtSecretResolver
 
     private static bool IsPublishedPlaceholder(string secret) => Array.IndexOf(PublishedPlaceholders, secret.Trim()) >= 0;
 
-    // CONFIG_DIR wins over AppSettings:ConfigDirectory, as in AppSettingsEnvironmentPostConfigure, so the key is kept
-    // in the config directory the deployment chose.
+    // Program publishes the resolved directory (including its temporary fallback). When registered on its own,
+    // CONFIG_DIR still takes precedence over AppSettings:ConfigDirectory.
     private static string ResolveKeyDirectory(IConfiguration configuration)
     {
-        var configDirectory = Environment.GetEnvironmentVariable("CONFIG_DIR");
-        return string.IsNullOrEmpty(configDirectory)
+        var resolvedDirectory = configuration[ConfigDirectoryResolver.ResolvedDirectoryConfigurationKey];
+        if (!string.IsNullOrWhiteSpace(resolvedDirectory))
+        {
+            return resolvedDirectory;
+        }
+
+        var configDirectory = Environment.GetEnvironmentVariable(ConfigDirectoryResolver.EnvironmentVariable);
+        return string.IsNullOrWhiteSpace(configDirectory)
             ? CoreServiceCollectionExtensions.ResolveConfigDirectory(configuration)
             : configDirectory;
     }

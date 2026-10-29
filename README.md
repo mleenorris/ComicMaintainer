@@ -246,7 +246,7 @@ Settings are read from these sources; a later source overrides an earlier one:
 |---------|---------------------|---------|-------------|
 | WatchedDirectory | WATCHED_DIR | /watched_dir | Directory to watch for comic files |
 | DuplicateDirectory | DUPLICATE_DIR | /duplicates | Directory for duplicate files |
-| ConfigDirectory | CONFIG_DIR | /Config | Directory for configuration data |
+| ConfigDirectory | CONFIG_DIR | /Config | Directory for the database, DataProtection keys, logs, settings and backups (`CONFIG_DIR` wins) |
 | PUID | PUID | 99 | User ID for file permissions (Docker image only) |
 | PGID | PGID | 100 | Group ID for file permissions (Docker image only) |
 | EnableExternalSeriesMetadata | ENABLE_EXTERNAL_SERIES_METADATA | false | Enable ComicVine alias lookups for series grouping |

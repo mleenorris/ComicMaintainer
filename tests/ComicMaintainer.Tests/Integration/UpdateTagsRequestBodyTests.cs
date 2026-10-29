@@ -210,6 +210,7 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
             ["AppSettings:WatchedDirectory"] = WatchedDirectory,
             ["AppSettings:DuplicateDirectory"] = Path.Join(_root, "duplicates"),
             ["AppSettings:ConfigDirectory"] = Path.Join(_root, "config"),
+            ["CONFIG_DIR"] = Path.Join(_root, "config"),
             ["AppSettings:TempFileDirectory"] = Path.Join(_root, "temp"),
         };
         foreach (var directory in directories.Values)

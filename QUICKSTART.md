@@ -56,6 +56,9 @@ export CONFIG_DIR=/path/to/config
 dotnet run
 ```
 
+`CONFIG_DIR` holds the SQLite database, DataProtection keys, logs and `user-settings.json`, so it
+must be writable by the user running the app.
+
 Or create an `appsettings.json` file:
 
 ```json

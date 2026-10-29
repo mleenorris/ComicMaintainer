@@ -14,7 +14,7 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
 {
     private static readonly string[] StringVariables =
     [
-        "WATCHED_DIR", "DUPLICATE_DIR", "CONFIG_DIR", "BASE_PATH", "COMICVINE_API_KEY", "COMICVINE_BASE_URL",
+        "WATCHED_DIR", "DUPLICATE_DIR", "BASE_PATH", "COMICVINE_API_KEY", "COMICVINE_BASE_URL",
         "MANGADEX_BASE_URL", "ANILIST_BASE_URL", "SUWAYOMI_BASE_URL", "SUWAYOMI_USERNAME", "SUWAYOMI_PASSWORD",
         "SERIES_IMAGE_CACHE_DIR", "SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "EMAIL_FROM_ADDRESS",
         "EMAIL_FROM_NAME", "ERROR_REPORTING_GITHUB_TOKEN", "ERROR_REPORTING_ASSIGNEE",
@@ -119,7 +119,6 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
 
         Assert.Equal("env:WATCHED_DIR", options.WatchedDirectory);
         Assert.Equal("env:DUPLICATE_DIR", options.DuplicateDirectory);
-        Assert.Equal("env:CONFIG_DIR", options.ConfigDirectory);
         Assert.Equal("env:BASE_PATH", options.BasePath);
         Assert.Equal("env:COMICVINE_API_KEY", options.ComicVineApiKey);
         Assert.Equal("env:COMICVINE_BASE_URL", options.ComicVineBaseUrl);
@@ -149,6 +148,19 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
         Assert.Equal(20, options.EmailMaxSendsPerHour);
         Assert.Equal(200, options.EmailMaxSendsPerDay);
         Assert.Equal(30, options.EmailMinSecondsBetweenSends);
+    }
+
+    [Fact]
+    public void ConfigDir_IsLeftToProgram()
+    {
+        // Program resolves CONFIG_DIR and publishes the directory it actually uses (possibly a temp
+        // fallback) as AppSettings:ConfigDirectory; re-applying CONFIG_DIR here would undo that.
+        _environment.Set("CONFIG_DIR", "/env/config");
+        var options = new AppSettings { ConfigDirectory = "/resolved/config" };
+
+        PostConfigure.PostConfigure(Options.DefaultName, options);
+
+        Assert.Equal("/resolved/config", options.ConfigDirectory);
     }
 
     [Theory]

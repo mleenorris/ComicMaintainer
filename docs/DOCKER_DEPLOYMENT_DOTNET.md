@@ -73,7 +73,7 @@ docker run -d \
 | `ASPNETCORE_URLS` | http://+:5000 | Server URLs. To use another port, change the host side of the port mapping (`-p 8080:5000`) instead; the container health check probes port 5000 |
 | `WATCHED_DIR` | /watched_dir | Directory to watch for comics |
 | `DUPLICATE_DIR` | /duplicates | Directory for duplicate files |
-| `CONFIG_DIR` | /Config | Configuration and database directory |
+| `CONFIG_DIR` | /Config | Directory for the database, DataProtection keys, logs and settings (mount your config volume here) |
 | `PUID` | 99 | User ID for file operations (dynamically created) |
 | `PGID` | 100 | Group ID for file operations (dynamically created) |
 | `AppSettings__MaxWorkers` | 4 | Files processed in parallel (read at startup) |
@@ -90,7 +90,7 @@ docker run -d \
 
 - `/watched_dir` - Directory containing comic files to process
 - `/duplicates` - Directory where duplicate files are moved
-- `/Config` - Configuration files, SQLite database and the generated JWT signing key (`jwt-secret.key`)
+- `/Config` - Configuration files, SQLite database, DataProtection keys, logs and settings, including the generated JWT signing key (`jwt-secret.key`); use the configured `CONFIG_DIR` when it points elsewhere
 
 ## Security Best Practices
 

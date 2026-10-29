@@ -1,8 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 
 namespace ComicMaintainer.Tests.Integration;
 
@@ -13,13 +17,34 @@ namespace ComicMaintainer.Tests.Integration;
 /// exercising more controllers end-to-end via <see cref="WebApplicationFactory{TEntryPoint}"/>.
 /// </summary>
 [Trait("Category", "Integration")]
-public class PublicApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class PublicApiIntegrationTests : IClassFixture<PublicApiIntegrationTests.TestFactory>
 {
     private readonly HttpClient _client;
 
-    public PublicApiIntegrationTests(WebApplicationFactory<Program> factory)
+    public PublicApiIntegrationTests(TestFactory factory)
     {
         _client = factory.CreateClient();
+    }
+
+    public sealed class TestFactory : WebApplicationFactory<Program>
+    {
+        private readonly string _configDirectory = Path.Join(
+            Path.GetTempPath(), "ComicMaintainer.Tests", "PublicApi-" + Guid.NewGuid().ToString("N"));
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseSetting("CONFIG_DIR", _configDirectory);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing)
+            {
+                SqliteConnection.ClearAllPools();
+                TestIO.TryDeleteDirectory(_configDirectory);
+            }
+        }
     }
 
     [Fact]

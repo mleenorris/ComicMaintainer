@@ -127,6 +127,7 @@ public sealed class ProgramTests : IDisposable
             ["AppSettings:WatchedDirectory"] = WatchedDirectory,
             ["AppSettings:DuplicateDirectory"] = DuplicateDirectory,
             ["AppSettings:ConfigDirectory"] = ConfigDirectory,
+            ["CONFIG_DIR"] = ConfigDirectory,
         };
         foreach (var (key, value) in settings)
         {

@@ -122,6 +122,7 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
                 ["AppSettings:WatchedDirectory"] = WatchedDirectory,
                 ["AppSettings:DuplicateDirectory"] = DuplicateDirectory,
                 ["AppSettings:ConfigDirectory"] = ConfigDirectory,
+                ["CONFIG_DIR"] = ConfigDirectory,
                 ["AppSettings:TempFileDirectory"] = Path.Join(_root, "temp"),
             };
             foreach (var directory in overrides.Values)

@@ -69,6 +69,7 @@ public sealed class UpdateTagsEndpointTests : IDisposable
             ["AppSettings:WatchedDirectory"] = WatchedDirectory,
             ["AppSettings:DuplicateDirectory"] = Path.Join(_root, "duplicates"),
             ["AppSettings:ConfigDirectory"] = Path.Join(_root, "config"),
+            ["CONFIG_DIR"] = Path.Join(_root, "config"),
         };
         foreach (var directory in overrides.Values)
         {

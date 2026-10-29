@@ -412,6 +412,20 @@ test('Adopt as Canonical without a loaded series record pins the name alone, kee
     assert.deepEqual(callsTo(page, ALIASES, 'PUT')[0].body, { aliases: listed });
 });
 
+test('a record from a later response does not count as the loaded one for Adopt as Canonical', async () => {
+    const page = await searchedPage(respond(500));
+    page.route('POST /api/metadata/refresh/Saga', metadataRecord({ user_aliases: ['Stored Saga'] }));
+    page.route(`PUT ${NAME}`, call => metadataRecord({ user_aliases: ['Stored Saga'], series_name: call.body.name }));
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Refresh from Provider'));
+    await page.settle();
+
+    await onResult(page, 0, 'Adopt as Canonical');
+
+    assert.equal(callsTo(page, ALIASES).length, 0, 'the adopted aliases still wait for Save');
+    assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga (Image Comics)' }]);
+    assert.deepEqual(userAliases(page), ['Stored Saga', 'Saga', 'Saga (Image Comics)', 'サーガ', 'Saga Deluxe']);
+});
+
 test('Use This Match asks first, then replaces the cached provider metadata', async () => {
     const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'] }));
     page.route('GET /api/series-images/saga', respond(200, 'PNGDATA', { 'Content-Type': 'image/png' }));

@@ -10,18 +10,21 @@
         // External Series Metadata (manual refresh + alias management)
         // ====================================================================
 
-        let manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false, nameChoices: 0 };
+        // recordLoaded: the initial GET of the series record succeeded.
+        // hasRecord: a record from the server is listed, so the alias list
+        // includes the stored aliases.
+        let manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false, hasRecord: false, nameChoices: 0 };
 
         // Keep a record a Manage Names request sent back. The other controls
         // save straight away but alias edits wait for Save, so once the list
         // has been edited the edits replace the stored aliases in it, for Save
-        // to persist. Without a loaded record the stored aliases were never
+        // to persist. Without a server record the stored aliases were never
         // listed, so the aliases added meanwhile are merged into them instead.
         function setManageSeriesRecord(record) {
-            const { record: current, aliasesEdited, recordLoaded } = manageSeriesState;
+            const { record: current, aliasesEdited, hasRecord } = manageSeriesState;
             if (aliasesEdited && current && record) {
                 const edited = current.user_aliases || [];
-                if (recordLoaded) {
+                if (hasRecord) {
                     record.user_aliases = edited;
                 } else {
                     const merged = [...(record.user_aliases || [])];
@@ -32,7 +35,7 @@
                 }
             }
             manageSeriesState.record = record;
-            manageSeriesState.recordLoaded = Boolean(record);
+            if (record) manageSeriesState.hasRecord = true;
         }
 
         async function refreshAllExternalMetadata() {
@@ -448,7 +451,7 @@
         }
 
         async function openManageSeriesNamesModal(seriesTitle) {
-            manageSeriesState = { seriesTitle, record: null, aliasesEdited: false, recordLoaded: false, nameChoices: 0 };
+            manageSeriesState = { seriesTitle, record: null, aliasesEdited: false, recordLoaded: false, hasRecord: false, nameChoices: 0 };
             document.getElementById('manageSeriesTitle').textContent = seriesTitle;
             document.getElementById('manageSeriesProviderAliases').textContent = 'Loading...';
             document.getElementById('manageSeriesProviderSource').textContent = '';
@@ -468,24 +471,28 @@
 
         function closeManageSeriesNamesModal() {
             document.getElementById('manageSeriesNamesModal').classList.remove('active');
-            manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false, nameChoices: 0 };
+            manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false, hasRecord: false, nameChoices: 0 };
         }
 
         async function loadManageSeriesRecord() {
-            const { seriesTitle } = manageSeriesState;
+            const state = manageSeriesState;
+            const { seriesTitle } = state;
             if (!seriesTitle) return;
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}`), {
                     headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
+                if (state !== manageSeriesState) return;
                 if (!response.ok) {
                     showMessage('Failed to load series metadata', 'error');
                     return;
                 }
                 const record = await response.json();
+                if (state !== manageSeriesState) return;
                 // Aliases added while the record loaded are merged into it.
                 setManageSeriesRecord(record);
+                state.recordLoaded = true;
                 const prefSelect = document.getElementById('manageSeriesPreferredLanguage');
                 if (prefSelect) {
                     prefSelect.value = record.preferred_language || '';

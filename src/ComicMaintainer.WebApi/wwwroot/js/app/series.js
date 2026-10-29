@@ -246,17 +246,19 @@
             const pending = cached.unconfirmedPaths;
             cached.unconfirmedPaths = null;
             if (cached.filter !== filter) return null;
+            // Every path is taken, selected or not: the old cards stay
+            // clickable while the reload is pending, so whether a path is
+            // selected is only checked when pruning.
             const paths = new Set();
             for (const path of pending || []) {
-                if (typeof path === 'string' && path.length > 0 && selectedFiles.has(path)) {
+                if (typeof path === 'string' && path.length > 0) {
                     paths.add(path);
                 }
             }
             for (const issue of cached.issues) {
-                if (typeof issue.file_path === 'string' && issue.file_path.length > 0) {
-                    if (selectedFiles.has(issue.file_path)) {
-                        paths.add(issue.file_path);
-                    }
+                const path = issue && issue.file_path;
+                if (typeof path === 'string' && path.length > 0) {
+                    paths.add(path);
                 }
             }
             return paths.size > 0 ? paths : null;

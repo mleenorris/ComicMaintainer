@@ -270,6 +270,30 @@ test('a reload that comes in pages unselects a vanished issue only once its last
     assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });
 
+// The old cards stay clickable while a forced reload is pending, so an issue
+// selected then is checked against the reloaded list too.
+test('an issue selected while a reload is pending is unselected if the reload no longer lists it', async () => {
+    const series = seriesCard({ issue_count: 2 });
+    let answer = () => issuesBody(series, [issue(1), issue(2)], { issue_count: 2 });
+    const page = await bootSeries({ series, routes: { [`GET ${ISSUES}`]: () => answer() } });
+    assert.equal(text(page.$('#selectInfo')), 'No files selected');
+
+    const reload = deferred();
+    answer = () => reload.promise;
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+    assert.equal(text(page.$('#selectInfo')), '2 files selected');
+
+    // #2 was deleted meanwhile.
+    reload.resolve(issuesBody(series, [issue(1)], { issue_count: 1 }));
+    await page.settle();
+    assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz']);
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 001.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+});
+
 test('a deep link to a series outside the loaded library renders from its issues response', async () => {
     const gate = deferred();
     const lost = seriesCard({ id: 'lost', title: 'Lost Series', canonical_title: 'Lost Series', aliases: ['LS'] });

@@ -162,47 +162,128 @@ List all comic files in the watched directory.
 }
 ```
 
-### GET /api/files/tags
+### GET /api/files/{encodedFilePath}/tags
 
-Get metadata tags for a specific file.
+Get the metadata stored in a file's `ComicInfo.xml`.
 
-**Query Parameters:**
-- `file` (required) - File path
+`{encodedFilePath}` is the file's full path, encoded as UTF-8 and then as base64url
+(`-` and `_` in place of `+` and `/`; the trailing `=` padding is optional). The file
+must be inside the watched directory. For example, `/comics/Batman/Batman #001.cbz`
+is encoded as `L2NvbWljcy9CYXRtYW4vQmF0bWFuICMwMDEuY2J6`:
+
+```bash
+printf '%s' '/comics/Batman/Batman #001.cbz' | base64 | tr -d '\n=' | tr '+/' '-_'
+```
+
+```python
+import base64
+path = '/comics/Batman/Batman #001.cbz'
+encoded = base64.urlsafe_b64encode(path.encode()).decode().rstrip('=')
+```
 
 **Response:**
 ```json
 {
   "series": "Batman",
-  "issue": "1",
   "title": "The Dark Knight",
-  "year": "2023",
-  "publisher": "DC Comics"
+  "issue": "1",
+  "volume": "2016",
+  "publisher": "DC Comics",
+  "year": 2023,
+  "summary": "Gotham's protector returns.",
+  "authors": ["Tom King"],
+  "tags": ["Superhero"],
+  "isUserEdited": false,
+  "userLockedFieldsMask": 0
 }
 ```
 
-### POST /api/files/tags
+`authors` holds the `<Writer>` entries and `tags` the `<Tag>` entries. Fields the file
+does not set are `null` (or `[]`). A file without a `ComicInfo.xml` reports only `series`,
+taken from its folder name, and `issue`, taken from its file name. `isUserEdited` and
+`userLockedFieldsMask` are not stored in the file: they are always `false` and `0` here,
+and the endpoints below ignore them.
 
-Update metadata tags for a file.
+`400` when the path cannot be decoded (`Invalid file path`) or is outside the watched
+directory (`File path is outside the allowed directory`). `404` when the file does not
+exist, is not a comic archive, or cannot be read.
+
+### PUT /api/files/{encodedFilePath}/tags
+
+Replace the metadata of one file. Requires library write permission. `{encodedFilePath}`
+is encoded as for `GET`, and the body takes the fields of the `GET` response.
 
 **Request Body:**
 ```json
 {
-  "file": "/comics/Batman/Batman #001.cbz",
-  "tags": {
+  "series": "Batman",
+  "issue": "1",
+  "title": "The Dark Knight",
+  "publisher": "DC Comics",
+  "year": 2023,
+  "authors": ["Tom King"]
+}
+```
+
+Returns `200` with an empty body. The metadata replaces the file's `ComicInfo.xml`
+rather than being merged into it: every field the body leaves out is removed, as is
+every text or number field set to `null`. `authors` and `tags` cannot be `null` (that
+is rejected with a `400` validation error); send `[]` or leave them out to clear them.
+Elements the API does not model, such as `<Genre>` or `<Penciller>`, are always
+dropped, even when you send back exactly what `GET` returned.
+
+`400` for the same path errors as `GET`, and `400` (`Failed to update tags`) when the
+file does not exist or is not a comic archive.
+
+### POST /api/files/tags
+
+Write the same metadata to one or more files. Requires library write permission.
+
+`files` lists plain paths (not base64url-encoded); empty entries are ignored.
+`metadata` takes the fields of the `GET` response and replaces each file's
+`ComicInfo.xml` as `PUT` does. Every field it leaves out, including `issue`, is removed
+from every file, and leaving out `metadata` altogether clears all their tags. Use `PUT`
+for per-file fields such as `issue`.
+
+**Request Body:**
+```json
+{
+  "files": ["/comics/Batman/Batman #001.cbz"],
+  "metadata": {
     "series": "Batman",
     "issue": "1",
-    "title": "The Dark Knight"
+    "title": "The Dark Knight",
+    "publisher": "DC Comics",
+    "year": 2023
   }
 }
 ```
 
-**Response:**
+**Response (200 OK):** empty body; every file was updated.
+
+**Response (207 Multi-Status):** some files could not be updated (missing, not a comic
+archive, or unreadable); the rest were.
 ```json
 {
-  "success": true,
-  "file": "/comics/Batman/Batman #001.cbz"
+  "failed": ["/comics/Batman/Batman #002.cbz"]
 }
 ```
+
+**Error Response (400 - Bad Request):** the request is invalid, an outside path was
+provided, or none of the files could be updated.
+```json
+{
+  "error": "Failed to update tags",
+  "failed": ["/comics/Batman/Batman #001.cbz"]
+}
+```
+
+A request whose `files` is missing or an empty list is rejected with `400`
+(`No files provided`). A request naming any file outside the watched directory is
+rejected with `400` (`One or more file paths are outside the allowed directory`)
+before any file is updated. If `files` is explicitly `null`, model validation rejects
+the request with `400` (`The Files field is required.`), rather than returning
+`No files provided`.
 
 ### POST /api/files/cleanup-stale
 
@@ -350,6 +431,13 @@ Cancel a running job.
 
 ## Settings
 
+Changing a setting requires the `CanAdminister` policy. This normally means the
+`Admin` role, but when Authelia is enabled without `AUTHELIA_ADMIN_GROUPS`, every
+signed-in user who is not `ReadOnly` (local accounts included) passes it; see
+[Role Mapping](AUTHELIA.md#role-mapping). Each
+`PUT /api/settings/...` endpoint below also accepts `POST`, a legacy alias with the
+same body and response.
+
 ### GET /api/settings/filename-format
 
 Get the current filename format template and the built-in default (the
@@ -363,7 +451,7 @@ format "Reset Filename Format" on the settings page restores).
 }
 ```
 
-### POST /api/settings/filename-format
+### PUT /api/settings/filename-format
 
 Update the filename format template.
 
@@ -377,24 +465,26 @@ Update the filename format template.
 **Response:**
 ```json
 {
-  "success": true,
-  "format": "{series} v{volume} #{issue_no_pad}"
+  "message": "Filename format updated successfully"
 }
 ```
 
+A blank format is not saved; the response is `500` with
+`{"error": "Failed to update filename format"}`.
+
 ### GET /api/settings/issue-number-padding
 
-Get issue number padding setting.
+Get the minimum number of digits `{issue}` is padded to in generated filenames
+(default 4, so issue 1 becomes `0001`). `{issue_no_pad}` is never padded.
 
 **Response:**
 ```json
 {
-  "padding": 4,
-  "default": 4
+  "padding": 4
 }
 ```
 
-### POST /api/settings/issue-number-padding
+### PUT /api/settings/issue-number-padding
 
 Set issue number padding.
 
@@ -408,14 +498,17 @@ Set issue number padding.
 **Response:**
 ```json
 {
-  "success": true,
-  "padding": 6
+  "message": "Issue number padding updated successfully"
 }
 ```
 
-### GET /api/watcher/enabled
+`padding` must be between 0 and 10; other values are rejected with `400` and
+`{ "error": "..." }`.
 
-Get watcher enabled state.
+### GET /api/settings/watcher-enable-rename
+### GET /api/settings/watcher-enable-normalize
+
+Whether processing renames files, or normalizes their metadata.
 
 **Response:**
 ```json
@@ -424,9 +517,16 @@ Get watcher enabled state.
 }
 ```
 
-### POST /api/watcher/enabled
+### PUT /api/settings/watcher-enable-rename
+### PUT /api/settings/watcher-enable-normalize
 
-Enable or disable the watcher.
+Turn renaming or normalizing on or off in the full processing pipeline. Despite the
+names, these settings apply to processing runs on request and processing jobs, not only
+to the watcher: with a step off, the pipeline skips it but still marks the file as
+renamed or normalized. Rename-only (`/api/jobs/rename-selected`) and normalize-only
+(`/api/jobs/normalize-selected`) jobs are exceptions and perform their operation even
+when the corresponding setting is off. With both settings off, the watcher still tracks
+files but processes none of them automatically.
 
 **Request Body:**
 ```json
@@ -438,14 +538,15 @@ Enable or disable the watcher.
 **Response:**
 ```json
 {
-  "success": true,
-  "enabled": false
+  "message": "Watcher enable rename updated successfully"
 }
 ```
 
-### GET /api/watcher/status
+(`Watcher enable normalize updated successfully` for the normalize setting.)
 
-Get watcher process status.
+### GET /api/watcher
+
+Get the file watcher state. `GET /api/watcher/status` is a legacy alias.
 
 **Response:**
 ```json
@@ -454,6 +555,16 @@ Get watcher process status.
   "enabled": true
 }
 ```
+
+`enabled` always equals `running`. The watcher runs whenever the watched directory
+exists and cannot be stopped through the API; use the `watcher-enable-rename` and
+`watcher-enable-normalize` settings above to control what it does.
+
+`PUT /api/watcher` and `POST /api/watcher/enable` are deprecated no-ops kept for old
+clients and scheduled for removal in v3.0. They change nothing: `PUT` returns the
+current state as `enabled` (equal to `running`) with a `message` saying the watcher is
+controlled by the rename and normalize settings, and `POST` returns `200` with an
+empty body.
 
 ## Suwayomi Downloads
 
@@ -536,6 +647,30 @@ Queue downloads for the issue numbers a series is missing locally.
 ```
 
 Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable, or no matching series is in the Suwayomi library.
+
+### Importing Suwayomi downloads
+
+Suwayomi saves chapters as `<downloads>/<source>/<series>/<chapter>.cbz`. When a downloads folder is configured, the `suwayomi-download-import` scheduled job (enabled by default, every 15 minutes; see the **Scheduled Jobs** page) moves each finished archive into the library as `<series folder>/<chapter>.cbz`, then removes the download folders it emptied. The file watcher then processes the moved files like any other new file. Importing works whether or not the Suwayomi integration above is enabled.
+
+The series folder is, in order: a folder in the import folder named like the Suwayomi series folder (ignoring case, spacing and punctuation); the existing library folder of the one series whose title, canonical title or alias matches; or a new folder named after the Suwayomi series folder in the import folder. A name already taken gets a ` (2)`, ` (3)`, … suffix. Archives written in the last 30 seconds (or the watcher's stability delay, if longer), archives that cannot be opened, and archives directly in the downloads folder are left in place. Chapters saved as loose images are not imported; enable **Save as CBZ archive** in Suwayomi's download settings.
+
+Each archive is first moved under a hidden staging name (`.tmp_<id>.suwayomi-import`) that neither the file watcher nor Library Scan picks up, then renamed to its chapter name. Staged moves are recorded in `suwayomi-import-pending.json` in the config folder, so a chapter staged when ComicMaintainer stopped is published on the next run (or dropped, if its download is still in place, so that it is imported afresh). A permission error stops the run and is shown in its summary.
+
+The folders are set with `PUT /api/settings/suwayomi` (administrators only), alongside the server settings, or with the `SUWAYOMI_DOWNLOADS_DIR` and `SUWAYOMI_IMPORT_DIR` environment variables:
+
+```json
+{
+  "enabled": true,
+  "baseUrl": "http://suwayomi:4567",
+  "downloadsDirectory": "/suwayomi/downloads/mangas",
+  "importDirectory": "Manga"
+}
+```
+
+- `downloadsDirectory` - Absolute path to the folder Suwayomi saves chapters to, as mounted in this service. It must exist and must neither contain nor sit inside the watched, duplicates, config or temp directories. ComicMaintainer needs write access to it.
+- `importDirectory` - Library folder that new series folders are created in: relative to the watched directory, or absolute inside it. Empty means the watched directory itself.
+
+Omit either field to keep its stored value; send `""` to clear it (clearing `downloadsDirectory` turns importing off). An invalid folder returns `400` with `{ "error": "..." }`. `GET /api/settings` returns the current values as `suwayomi_downloads_directory` and `suwayomi_import_directory`.
 
 ## Events
 
@@ -744,7 +879,11 @@ environment; in production the correlation id is the link to the full detail in 
 
 ## Rate Limiting
 
-Currently, there is no rate limiting implemented. Consider adding rate limiting if the API is exposed to the internet.
+Requests are rate-limited per minute: 100 for each client address that is not signed in, and 1000 for each signed-in
+user. Requests over the limit are delayed until the next minute, or rejected with `429 Too Many Requests` when too
+many are already waiting (10 per client address, 100 per user). Behind a reverse proxy, set `TRUSTED_PROXIES` so that
+signed-out clients are counted by the address the proxy forwards in `X-Forwarded-For` instead of all sharing the
+proxy's; see [Trusted Proxies and Rate Limiting](REVERSE_PROXY.md#trusted-proxies-and-rate-limiting).
 
 ## CORS
 
@@ -768,7 +907,7 @@ curl -X POST http://localhost:5000/api/jobs/process-all
 curl http://localhost:5000/api/jobs/job-abc123
 
 # Update filename format
-curl -X POST http://localhost:5000/api/settings/filename-format \
+curl -X PUT http://localhost:5000/api/settings/filename-format \
   -H "Content-Type: application/json" \
   -d '{"format": "{series} - Chapter {issue}"}'
 ```

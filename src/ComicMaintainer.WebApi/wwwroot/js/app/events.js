@@ -301,7 +301,7 @@
                 if (libraryViewMode === 'series' && currentSeriesDetailId) {
                     loadSeriesIssues(currentSeriesDetailId, true);
                 } else {
-                    loadActiveLibraryView(1, false);
+                    loadActiveLibraryView();
                 }
             }, FILE_LIST_REFRESH_DEBOUNCE_DELAY);
 
@@ -335,8 +335,12 @@
                 console.log(`SSE: Job ${jobId} finished with status: ${status}`);
                 scheduleLibraryHealthRefresh(250);
                 
-                // Allow a brief moment for final updates, then finalize
-                setTimeout(async () => {
+                // Allow a brief moment for final updates, then finalize. The
+                // finalize (and the close it schedules) is dropped when another
+                // job takes the progress modal over and does nothing once this
+                // job is no longer the current one, so it never retitles,
+                // deactivates or closes the next job's progress.
+                jobProgress.scheduleJobFinalize(jobId, async () => {
                     if (status === 'completed') {
                         // Update modal title and call completeProgress to show close button
                         document.getElementById('progressTitle').textContent = `Completed! All ${total} items processed (${successCount} succeeded, ${errorCount} failed)`;
@@ -355,22 +359,23 @@
                             await loadSeriesIssues(currentSeriesDetailId, true);
                             scheduleLibraryHealthRefresh();
                         } else {
-                            await loadActiveLibraryView(1, true);
+                            await loadActiveLibraryView({ refresh: true });
                         }
-                        // Close modal after refresh completes
-                        setTimeout(closeProgressModal, 1000);
+                        // Close modal after refresh completes, unless another job
+                        // was started meanwhile
+                        jobProgress.scheduleProgressModalClose(jobId, 1000);
                     } else if (status === 'failed') {
                         document.getElementById('progressTitle').textContent = 'Failed - Job processing failed';
                         completeProgress();
                         hasActiveJob = false;
                         currentJobTitle = null;
-                        setTimeout(closeProgressModal, 3000);
+                        jobProgress.scheduleProgressModalClose(jobId, 3000);
                     } else if (status === 'cancelled') {
                         document.getElementById('progressTitle').textContent = 'Cancelled - Job was cancelled';
                         completeProgress();
                         hasActiveJob = false;
                         currentJobTitle = null;
-                        setTimeout(closeProgressModal, 2000);
+                        jobProgress.scheduleProgressModalClose(jobId, 2000);
                     } else if (status === 'interrupted') {
                         document.getElementById('progressTitle').textContent =
                             `Interrupted - the server restarted after ${processed} of ${total} items`;
@@ -379,7 +384,7 @@
                         currentJobTitle = null;
                         // Left open longer than the other outcomes: the job did not finish and
                         // the user may need to re-run it, so the message should not flash past.
-                        setTimeout(closeProgressModal, 5000);
+                        jobProgress.scheduleProgressModalClose(jobId, 5000);
                     }
                 }, 500);
             }

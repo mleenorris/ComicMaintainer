@@ -115,6 +115,29 @@ test('a network failure is reported', async () => {
     assert.deepEqual(messages(page).filter(m => m.type === 'error').map(m => m.text), ['Failed to load series: Failed to fetch']);
 });
 
+test('a failure without a reference is not reported with an earlier request\'s', async () => {
+    // The library counts fail with a reference while the library opens...
+    const page = await bootLibrary({
+        series: makeSeriesList(2),
+        routes: { 'GET /api/files/counts': respond(500, { error: 'boom' }, { 'X-Correlation-Id': 'corr-counts' }) }
+    });
+    assert.equal(callsTo(page, '/api/files/counts').length, 1);
+
+    // ...then changing the filter fails offline, or on a proxy's error page.
+    for (const [filter, failure, text] of [
+        ['unread', () => { throw new TypeError('Failed to fetch'); }, 'Failed to load series: Failed to fetch'],
+        ['duplicates', respond(502, 'Bad Gateway'), 'Failed to load series: HTTP error! status: 502']
+    ]) {
+        page.$('#messageContainer').replaceChildren();
+        page.route('GET /api/files/series', failure);
+        page.click(`#headerFilterMenu [data-filter="${filter}"]`);
+        await page.settle();
+
+        assert.equal(seriesCalls(page).at(-1).query.filter, filter);
+        assert.deepEqual(messages(page).filter(m => m.type === 'error').map(m => m.text), [text]);
+    }
+});
+
 test('an expired session sends the user to the login page', async () => {
     const page = await bootLibrary({ routes: { 'GET /api/files/series': 401 } });
 
@@ -217,7 +240,7 @@ test('a refresh reloads from the start with refresh=true and refreshes the libra
     await page.settle();
     const countsBefore = callsTo(page, '/api/files/counts').length;
 
-    await page.run('loadActiveLibraryView(1, true)');
+    await page.run('loadActiveLibraryView({ refresh: true })');
     await page.settle();
 
     assert.deepEqual(seriesCalls(page).at(-1).query, { offset: '0', limit: '60', refresh: 'true' });

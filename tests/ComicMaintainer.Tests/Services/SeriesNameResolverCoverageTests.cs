@@ -519,6 +519,68 @@ public class SeriesNameResolverCoverageTests
             && e.Message.Contains("Failed to resolve external metadata for series Some Series"));
     }
 
+    [Theory]
+    [InlineData("user-selected")]
+    [InlineData("matched")]
+    [InlineData("cleared-check")]
+    [InlineData("external")]
+    [InlineData("persist")]
+    [InlineData("folder-alias")]
+    public async Task ResolveAsync_CallerCancelsMidResolution_ThrowsInsteadOfFallingBack(string cancelledAt)
+    {
+        using var cts = new CancellationTokenSource();
+        SeriesMetadataCacheRecord? Cancel()
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        }
+        // "kaibutsu" is read by the user-selected step, the matched step and then the cleared-status check.
+        switch (cancelledAt)
+        {
+            case "user-selected":
+                SetupGetAsyncSequence("kaibutsu", Cancel);
+                break;
+            case "matched":
+                SetupGetAsyncSequence("kaibutsu", () => null, Cancel);
+                break;
+            case "cleared-check":
+                SetupGetAsyncSequence("kaibutsu", () => null, () => null, Cancel);
+                break;
+            case "persist":
+                _cache.Setup(c => c.PersistExternalLookupAsync("Kaibutsu", It.IsAny<ExternalSeriesMetadata>(), It.IsAny<CancellationToken>()))
+                      .Callback(() => cts.Cancel())
+                      .ThrowsAsync(new OperationCanceledException(cts.Token));
+                break;
+            case "folder-alias":
+                SetupGetAsyncSequence("kaiju-no-8", Cancel);
+                break;
+        }
+        var lookup = _external.Setup(e => e.LookupSeriesAsync("Kaibutsu", It.IsAny<CancellationToken>()));
+        if (cancelledAt == "external")
+        {
+            lookup.Callback(() => cts.Cancel()).ThrowsAsync(new OperationCanceledException(cts.Token));
+        }
+        else
+        {
+            lookup.ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Kaiju No. 8", Source = "AniList" });
+        }
+        var resolver = CreateResolver();
+
+        // Falling back to "Kaibutsu" would let the rename pipeline move the file to that name.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resolver.ResolveAsync(
+            "/library/Kaibutsu/c1.cbz",
+            new ComicMetadata { Series = "Kaibutsu" },
+            mutateCache: true,
+            cts.Token));
+
+        Assert.DoesNotContain(_logger.Entries, e => e.Level == LogLevel.Warning);
+        VerifyNoAliasWrites();
+        if (cancelledAt is "user-selected" or "matched" or "cleared-check")
+        {
+            _external.Verify(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+    }
+
     [Fact]
     public async Task ResolveAsync_ExternalLookupWithBlankCanonical_IsIgnored()
     {

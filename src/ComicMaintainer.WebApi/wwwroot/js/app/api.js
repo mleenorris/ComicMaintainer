@@ -22,67 +22,59 @@
         // identical for a permissions problem, a corrupt archive and a database
         // lock.
         //
-        // Rather than thread the id through the hundreds of individual fetch call
-        // sites, the most recent failing API response is remembered here.
-        // Decoration is opt-in per message — a caller passes
-        // `{ reference: true }` to showMessage() — because only the caller knows
-        // whether the failure it is reporting is the API call that produced the
-        // id: a clipboard denial, a validation message or a JavaScript error that
-        // merely happens to follow an API failure would otherwise be stamped with
-        // an unrelated id and send an operator to the wrong log line.
+        // The id travels with the failure it belongs to: a caller that turns a
+        // failed response into an Error builds it with apiResponseError(), which
+        // keeps that response's id as `error.correlationId`, and reports the
+        // caught error with `{ reference: error }` so showMessage() quotes that
+        // id and no other. A failure without one — a request that never reached
+        // the server, or a proxy error page without the header — is reported
+        // without a reference: quoting whichever request happened to fail before
+        // it would send an operator to the wrong log line. Decoration is opt-in
+        // per message for the same reason; a clipboard denial, a validation
+        // message or a JavaScript error has no request of its own to point at.
 
-        const API_FAILURE_REFERENCE_WINDOW_MS = 15000;
-        let lastApiFailure = null;
-
-        function recordApiFailure(response) {
+        /**
+         * The correlation id of a failed API response, or null when it has none
+         * worth reporting.
+         */
+        function apiFailureReference(response) {
             try {
                 // 401/403 are routine — an expired session or a read-only user —
                 // and are already explained by their own handling, so a support
                 // reference would be noise.
-                if (response.status === 401 || response.status === 403) return;
-                const reference = response.headers.get('X-Correlation-Id');
-                if (!reference) return;
-                lastApiFailure = { reference, at: Date.now() };
+                if (response.status === 401 || response.status === 403) return null;
+                return response.headers.get('X-Correlation-Id') || null;
             } catch {
                 // Opaque (cross-origin) responses disallow header access; there
-                // is nothing to record and nothing to report.
+                // is nothing to report.
+                return null;
             }
         }
 
         /**
-         * The reference of a *recent* API failure, or null. The time window
-         * matters: a stale id pointing at an unrelated request is worse than no
-         * id at all.
+         * The Error to throw for a failed API response: `message` (by default
+         * the HTTP status) with the response's `status` and `correlationId`
+         * attached, so reporting it quotes this request's reference.
          */
-        function recentApiFailureReference() {
-            if (!lastApiFailure) return null;
-            if (Date.now() - lastApiFailure.at > API_FAILURE_REFERENCE_WINDOW_MS) return null;
-            return lastApiFailure.reference;
+        function apiResponseError(response, message) {
+            const error = new Error(message ?? `HTTP error! status: ${response.status}`);
+            error.status = response.status;
+            error.correlationId = apiFailureReference(response);
+            return error;
         }
 
         /**
          * Append a correlation reference to an error message. `reference` is
-         * either an explicit id or `true`, meaning "the API call that just
-         * failed" — callers only pass it when the message they are reporting
-         * came from a failed API request.
+         * either an explicit id or the error being reported, whose own
+         * `correlationId` (see apiResponseError) is used; an error without one,
+         * such as a network failure, leaves the message as it is.
          */
         function withApiFailureReference(message, reference) {
-            const ref = reference === true ? recentApiFailureReference() : reference;
-            if (!ref) return message;
+            const ref = typeof reference === 'string' ? reference : reference?.correlationId;
+            if (typeof ref !== 'string' || !ref) return message;
             if (String(message).includes(ref)) return message;
             return `${message} (ref: ${ref})`;
         }
-
-        (function instrumentApiFailures() {
-            if (typeof window.fetch !== 'function') return;
-            const nativeFetch = window.fetch.bind(window);
-            window.fetch = function (input, init) {
-                return nativeFetch(input, init).then(response => {
-                    if (response && !response.ok) recordApiFailure(response);
-                    return response;
-                });
-            };
-        })();
 
         // Helper function to decode JWT token and extract expiration
         function decodeJwtToken(token) {
@@ -366,8 +358,8 @@
             }
             // An error the user may have to report is only actionable if it can
             // be tied back to the server log, so a caller reporting a failed API
-            // call passes `reference: true` (or an explicit id) to have the
-            // correlation id of that call appended.
+            // call passes the caught error as `reference` (or an explicit id) to
+            // have the correlation id of that call appended.
             messageEl.textContent = options.reference
                 ? withApiFailureReference(message, options.reference)
                 : message;

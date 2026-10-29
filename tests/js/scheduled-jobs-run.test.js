@@ -232,6 +232,21 @@ test('a Run now request that fails says why and re-enables the button', async (t
     }
 });
 
+test('a Run now failure without a reference is not reported with the one of a failed save', async (t) => {
+    const SAVE = '/api/scheduled-jobs/library-scan';
+    const { page } = await openJobsPage(t, [h.scheduledJob()], {
+        [`PUT ${SAVE}`]: h.unexpectedError(SAVE, 'req-500a'),
+        [`POST ${RUN}`]: () => { throw new TypeError('Failed to fetch'); }
+    });
+    h.clickJobAction(page, 'library-scan', 'save');
+    await page.settle();
+    assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: `Failed to save Library Scan: ${h.UNEXPECTED_ERROR} (ref: req-500a)` }]);
+
+    h.clickJobAction(page, 'library-scan', 'run');
+    await page.settle();
+    assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to start Library Scan: Failed to fetch' }]);
+});
+
 test('a Run now request rejected for an expired session goes to the login page', async (t) => {
     const { page } = await openJobsPage(t, [h.scheduledJob()], { [`POST ${RUN}`]: 401 });
     h.clickJobAction(page, 'library-scan', 'run');

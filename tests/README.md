@@ -230,7 +230,11 @@ required for merge, add their check names to branch protection for
   1. **In-process API integration tests** (`tests/ComicMaintainer.Tests/Integration/`):
      spin up the real Web API via `WebApplicationFactory<Program>` and exercise it
      over HTTP. Real EF Core (SQLite) is used, so DB migrations and most
-     middleware run end-to-end.
+     middleware run end-to-end. A module initializer
+     (`Helpers/TestRunConfigDirectory.cs`) points `CONFIG_DIR` at a per-run
+     temp directory, overriding any value set in your shell, so the hosts'
+     logs and bootstrap `user-settings.json` never land in `/Config`. The
+     directory is deleted when the test process exits.
   2. **End-to-end container smoke test** (`scripts/container-smoke-test.sh`):
      builds the Docker image (`Dockerfile.dotnet`), starts a container, verifies
      `/api/version` is healthy, and checks that the file watcher reacts to a
@@ -260,7 +264,10 @@ docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
 2. **Use meaningful names**: Test names should describe what they test
 3. **Follow AAA pattern**: Arrange, Act, Assert
 4. **One assertion per test**: Focus on testing one thing
-5. **Clean up resources**: Dispose of resources in test teardown
+5. **Clean up resources**: Dispose of resources in test teardown. A test class
+   that creates a temp directory implements `IDisposable` and deletes it there
+   with `TestIO.TryDeleteDirectory` (`Helpers/TestIO.cs`), which is best effort:
+   a missing directory, `IOException` and `UnauthorizedAccessException` are ignored
 6. **Mock external dependencies**: Keep tests fast and reliable
 
 ## Current Test Coverage
@@ -271,7 +278,7 @@ JavaScript with `npm run test:coverage`.
 | Suite | Tests | Lines | Branches |
 |---|---|---|---|
 | .NET (`ComicMaintainer.Core`, `ComicMaintainer.WebApi`) | 4,678 | 99.0% | 97.5% |
-| JavaScript (`wwwroot/**/*.js`) | 1,130 | 99.9% | 98.3% |
+| JavaScript (`wwwroot/**/*.js`) | 1,136 | 99.9% | 98.3% |
 
 The **Unit Tests** CI job collects .NET coverage from `Category!=Integration`
 only (4,610 tests: 98.8% lines, 97.4% branches); the OpenTelemetry wiring in

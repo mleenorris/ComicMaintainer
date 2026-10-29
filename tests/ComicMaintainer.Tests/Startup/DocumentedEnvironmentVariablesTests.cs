@@ -28,11 +28,20 @@ public sealed class DocumentedEnvironmentVariablesTests
     {
         ["PUID"] = "entrypoint.dotnet.sh",
         ["PGID"] = "entrypoint.dotnet.sh",
-        ["JWT_SECRET"] = "src/ComicMaintainer.WebApi/Startup/AuthServiceCollectionExtensions.cs",
+        ["JWT_SECRET"] = "src/ComicMaintainer.WebApi/Startup/JwtSecretResolver.cs",
         ["ADMIN_USERNAME"] = "src/ComicMaintainer.WebApi/Startup/WebApplicationExtensions.cs",
         ["ADMIN_EMAIL"] = "src/ComicMaintainer.WebApi/Startup/WebApplicationExtensions.cs",
         ["ADMIN_PASSWORD"] = "src/ComicMaintainer.WebApi/Startup/WebApplicationExtensions.cs",
         ["CORS_ALLOWED_ORIGINS"] = "src/ComicMaintainer.WebApi/Startup/WebServiceCollectionExtensions.cs",
+        ["TRUSTED_PROXIES"] = "src/ComicMaintainer.WebApi/Startup/WebServiceCollectionExtensions.cs",
+        ["TRUSTED_PROXY_HOPS"] = "src/ComicMaintainer.WebApi/Startup/WebServiceCollectionExtensions.cs",
+    };
+
+    /// <summary>The README setting of variables in <see cref="ReadElsewhere"/> whose setting is not named after the variable.</summary>
+    private static readonly Dictionary<string, string> SettingNameOf = new(StringComparer.Ordinal)
+    {
+        ["TRUSTED_PROXIES"] = "ReverseProxySettings:TrustedProxies",
+        ["TRUSTED_PROXY_HOPS"] = "ReverseProxySettings:ForwardedHopLimit",
     };
 
     /// <summary>Framework and runtime variables explicitly supported by the app or its documentation.</summary>
@@ -45,8 +54,8 @@ public sealed class DocumentedEnvironmentVariablesTests
         "OTEL_SERVICE_NAME",
     };
 
-    /// <summary>A value of each shape a setting takes: a path or name, either flag value, and a number.</summary>
-    private static readonly string[] ProbeValues = ["/documented/value", "true", "false", "12345"];
+    /// <summary>A value of each shape a setting takes: a path or name, either flag value, and a small and a large number.</summary>
+    private static readonly string[] ProbeValues = ["/documented/value", "true", "false", "1", "12345"];
 
     // AppSettingsEnvironmentPostConfigure is internal to the WebApi assembly (no InternalsVisibleTo).
     private static readonly IPostConfigureOptions<AppSettings> PostConfigure = (IPostConfigureOptions<AppSettings>)Activator.CreateInstance(
@@ -76,7 +85,7 @@ public sealed class DocumentedEnvironmentVariablesTests
 
             if (ReadElsewhere.ContainsKey(row.Variable))
             {
-                Assert.Equal(row.Variable, row.Setting);
+                Assert.Equal(SettingNameOf.GetValueOrDefault(row.Variable, row.Variable), row.Setting);
                 return;
             }
 

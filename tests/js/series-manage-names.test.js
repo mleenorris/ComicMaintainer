@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
-const { deferred } = require('./support/app');
+const { deferred, addReadOnlyGate, isDisplayed } = require('./support/app');
 const {
     bootSeries, metadataRecord, messages, lastMessage, callsTo, text, libraryRefreshes, openManageNames, optionTexts,
     buttonIn, answerConfirm
@@ -433,6 +433,22 @@ test('an alias typed after a failed load is listed as a selectable name', async 
     assert.deepEqual(optionTexts(nameSelect(page)), [AUTOMATIC, 'Saga Reborn (your alias)']);
 });
 
+test('aliases typed after a failed load join the stored ones a later response brings', async () => {
+    const page = await bootSeries();
+    await openManageNames(page, respond(503));
+    page.route('POST /api/metadata/refresh/Saga', metadataRecord({ user_aliases: ['My Saga'], lookup_status: 'success' }));
+
+    addAlias(page, 'Saga Reborn');
+    await press(page, 'Refresh from Provider');
+
+    assert.deepEqual(userAliases(page), ['My Saga', 'Saga Reborn']);
+    page.click(removeButton(page, 'My Saga'));
+    page.route(`PUT ${RECORD}/aliases`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    await press(page, 'Save');
+    assert.deepEqual(callsTo(page, `${RECORD}/aliases`, 'PUT')[0].body, { aliases: ['Saga Reborn'] },
+        'once listed, a stored alias can be removed');
+});
+
 test('failing to save the aliases keeps the modal open', async () => {
     const page = await bootSeries();
     await openManageNames(page, metadataRecord({ user_aliases: ['My Saga'] }));
@@ -449,6 +465,65 @@ test('failing to save the aliases keeps the modal open', async () => {
     assert.ok(modalOpen(page));
     assert.ok(logged(page, 'saveManageSeriesNames failed'));
     assert.equal(libraryRefreshes(page), refreshes);
+});
+
+test('unsaved alias edits survive a preferred-language change and are what Save persists (#848)', async () => {
+    const page = await bootSeries();
+    await openManageNames(page, metadataRecord({ user_aliases: ['My Saga', 'Old Saga'] }));
+    // The server answers with the stored aliases: it has not seen the edits.
+    page.route(`PUT ${RECORD}/preferred-language`, call => metadataRecord({
+        preferred_language: call.body.language,
+        user_aliases: ['My Saga', 'Old Saga']
+    }));
+
+    addAlias(page, 'New Saga');
+    page.click(removeButton(page, 'Old Saga'));
+    page.input(languageSelect(page), 'ko');
+    await page.settle();
+
+    assert.deepEqual(lastMessage(page), { text: 'Preferred language set to ko', type: 'success' });
+    assert.deepEqual(userAliases(page), ['My Saga', 'New Saga']);
+
+    page.route(`PUT ${RECORD}/aliases`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    await press(page, 'Save');
+    assert.deepEqual(callsTo(page, `${RECORD}/aliases`, 'PUT')[0].body, { aliases: ['My Saga', 'New Saga'] });
+    assert.deepEqual(lastMessage(page), { text: 'Series names saved', type: 'success' });
+});
+
+test('picking a name, refreshing or clearing external metadata keeps unsaved alias edits (#848)', async () => {
+    const page = await bootSeries();
+    const stored = { aliases: ['Saga Comic'], user_aliases: ['My Saga', 'Old Saga'] };
+    await openManageNames(page, metadataRecord(stored));
+    page.route(`PUT ${RECORD}/name`, call => metadataRecord({
+        ...stored,
+        series_name: call.body.name,
+        resolved_series_name: call.body.name
+    }));
+    page.route('POST /api/metadata/refresh/Saga', metadataRecord({ ...stored, lookup_status: 'success' }));
+    page.route(`DELETE ${RECORD}/external`, metadataRecord({ user_aliases: stored.user_aliases }));
+    answerConfirm(page, true);
+    const edited = ['My Saga', 'New Saga'];
+
+    addAlias(page, 'New Saga');
+    page.click(removeButton(page, 'Old Saga'));
+
+    page.input(nameSelect(page), 'Saga Comic');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { text: 'Series name set to "Saga Comic"', type: 'success' });
+    assert.deepEqual(userAliases(page), edited, 'after picking a name');
+
+    await press(page, 'Refresh from Provider');
+    assert.deepEqual(lastMessage(page), { text: 'Metadata refreshed', type: 'success' });
+    assert.deepEqual(userAliases(page), edited, 'after a refresh');
+
+    await press(page, 'Clear External Metadata');
+    assert.deepEqual(lastMessage(page), { text: 'External metadata cleared', type: 'success' });
+    assert.deepEqual(userAliases(page), edited, 'after clearing the external metadata');
+    assert.deepEqual(optionValues(nameSelect(page)), ['', 'Saga', ...edited]);
+
+    page.route(`PUT ${RECORD}/aliases`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    await press(page, 'Save');
+    assert.deepEqual(callsTo(page, `${RECORD}/aliases`, 'PUT')[0].body, { aliases: edited });
 });
 
 test('Refresh from Provider reloads the provider names, image and lookup status', async () => {
@@ -570,4 +645,36 @@ test('a failure while opening Combine Folders is reported', async () => {
     assert.deepEqual(lastMessage(page), { text: 'Failed to check for combinable folders', type: 'error' });
     assert.ok(logged(page, 'checkCombinableFoldersFromManageSeries failed'));
     assert.equal(modalOpen(page), false);
+});
+
+test('read-only users are offered none of the controls that change the series', async () => {
+    // The buttons a user is shown once the modal lists a user alias and a
+    // provider search result, and whether they can type a new alias.
+    const shown = async user => {
+        const page = await bootSeries({ user, beforeScripts: addReadOnlyGate });
+        page.route(`GET ${RECORD}`, metadataRecord({ user_aliases: ['My Saga'] }));
+        page.route('GET /api/metadata/search', { results: [{ canonical_title: 'Saga', source: 'ComicVine', aliases: [] }] });
+        // Read-only users don't get the Actions menu that opens it.
+        await page.run("openManageSeriesNamesModal('Saga')");
+        await page.settle();
+        page.click(`${MODAL} button[onclick="searchExternalSeries()"]`);
+        await page.settle();
+        return {
+            buttons: page.$$(`${MODAL} button`).filter(isDisplayed).map(text),
+            newAlias: isDisplayed(page.$('#manageSeriesNewAlias'))
+        };
+    };
+
+    assert.deepEqual(await shown({ canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] }), {
+        buttons: ['×', 'Search', 'Close'],
+        newAlias: false
+    });
+    assert.deepEqual(await shown({}), {
+        buttons: [
+            '×', '×', 'Add', 'Upload Image', 'Fetch from Provider', 'Clear Image', 'Search',
+            'Use This Match', 'Adopt as Canonical', 'Add Aliases',
+            'Refresh from Provider', 'Clear External Metadata', 'Check for Combinable Folders', 'Save', 'Close'
+        ],
+        newAlias: true
+    });
 });

@@ -56,7 +56,7 @@
             navigate('#/jobs');
         }
 
-        /** Fetch a /api/scheduled-jobs endpoint; throws an Error carrying `status` on failure. */
+        /** Fetch a /api/scheduled-jobs endpoint; throws an Error carrying `status` (and the response's `correlationId`) on failure. */
         async function fetchScheduledJobsApi(path, options = {}) {
             const response = await fetch(apiUrl(path), {
                 credentials: 'include',
@@ -77,9 +77,7 @@
                     const body = await response.json();
                     if (body && (body.error || body.message)) message = body.error || body.message;
                 } catch (_) { /* non-JSON error body */ }
-                const error = new Error(message);
-                error.status = response.status;
-                throw error;
+                throw apiResponseError(response, message);
             }
             return response;
         }
@@ -184,6 +182,7 @@
                 case 'series-language-audit': return uiIcon('globe');
                 case 'file-naming-audit': return uiIcon('pencil');
                 case 'missing-issues-check': return uiIcon('puzzle');
+                case 'suwayomi-download-import': return uiIcon('download');
                 case 'library-scan': return uiIcon('folder');
                 case 'metadata-backfill': return uiIcon('tag');
                 case 'database-backup': return uiIcon('hard-drive');
@@ -507,7 +506,7 @@
                 loadScheduledJobs({ statusOnly: true });
             } catch (error) {
                 if (!error.authHandled) {
-                    showMessage(`Failed to save ${name}: ${error.message}`, 'error', { reference: true });
+                    showMessage(`Failed to save ${name}: ${error.message}`, 'error', { reference: error });
                 }
             } finally {
                 if (button) button.disabled = false;
@@ -539,7 +538,7 @@
                 if (scheduledJobRunRequests.get(jobKey) === request) scheduledJobRunRequests.delete(jobKey);
                 updateScheduledJobCard(latestJob());
                 if (!error.authHandled) {
-                    showMessage(`Failed to start ${name}: ${error.message}`, 'error', { reference: true });
+                    showMessage(`Failed to start ${name}: ${error.message}`, 'error', { reference: error });
                 }
             }
         }

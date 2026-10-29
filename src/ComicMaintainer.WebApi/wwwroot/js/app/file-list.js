@@ -99,21 +99,21 @@
                                         ${uiIcon('check-circle')} Mark Read
                                     </button>`
                                 }
-                                <div class="dropdown-divider"></div>
-                                <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                <div class="dropdown-divider" data-requires-write></div>
+                                <button class="dropdown-item" data-requires-write onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     ${uiIcon('play')} Process
                                 </button>
-                                <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                <button class="dropdown-item" data-requires-write onclick="renameSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     ${uiIcon('pencil')} Rename
                                 </button>
-                                <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                <button class="dropdown-item" data-requires-write onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     ${uiIcon('tag')} Normalize
                                 </button>
-                                <button class="dropdown-item" onclick="removeFileMetadata('${escapeJs(file.relative_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
+                                <button class="dropdown-item" data-requires-write onclick="removeFileMetadata('${escapeJs(file.relative_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
                                     ${uiIcon('eraser')} Remove Metadata
                                 </button>
-                                <div class="dropdown-divider"></div>
-                                <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                <div class="dropdown-divider" data-requires-write></div>
+                                <button class="dropdown-item" data-requires-write onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     ${uiIcon('trash')} Delete
                                 </button>
                             </div>
@@ -246,6 +246,10 @@
             // as the cache key makes the comparison exact by construction:
             // there is no hand-maintained list of fields that could drift out
             // of sync with the template.
+
+            // Bring the expand/collapse-all state up to date before its icon
+            // is drawn from it.
+            updateToggleAllButton();
             const headerHtml = `
                 <div class="file-list-header">
                     <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)" title="Select all loaded files">
@@ -340,7 +344,6 @@
 
             updateSelectInfo();
             updateSelectAllCheckbox();
-            updateToggleAllButton();
             ensureScrollObserver();
         }
         
@@ -358,8 +361,13 @@
             const diffMs = now - date;
             const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
             
-            // Show relative time for recent files
-            if (diffDays === 0) {
+            // Show relative time for recent files. A time in the future is
+            // never "N days ago": up to a minute ahead (the server's clock a
+            // little ahead of the browser's) is "Just now", and further ahead
+            // it is shown as a date.
+            if (diffMs < 0) {
+                if (diffMs >= -60 * 1000) return 'Just now';
+            } else if (diffDays === 0) {
                 const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
                 if (diffHours === 0) {
                     const diffMinutes = Math.floor(diffMs / (1000 * 60));
@@ -373,7 +381,7 @@
                 return `${diffDays} days ago`;
             }
             
-            // Show date for older files
+            // Show date for older (or future) files
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');
@@ -528,41 +536,50 @@
             }
         }
 
+        // The search, filter and sort folder contents are listed for, as the
+        // query string of a folder's files request.
+        function folderFilesQuery() {
+            const params = [];
+            if (searchQuery) params.push(`search=${encodeURIComponent(searchQuery)}`);
+            if (filterMode !== 'all') params.push(`filter=${encodeURIComponent(filterMode)}`);
+            if (sortMode !== 'name') params.push(`sort=${encodeURIComponent(sortMode)}`);
+            if (sortDirection !== 'asc') params.push(`direction=${encodeURIComponent(sortDirection)}`);
+            return params.join('&');
+        }
+
         async function ensureFolderLoaded(dir, force = false) {
+            const query = folderFilesQuery();
             const existing = folderFiles.get(dir);
-            if (!force && existing && existing.status === 'loaded') return;
+            // Files listed for another filter, search or sort are stale.
+            const sameQuery = !!existing && existing.query === query;
+            if (!force && sameQuery && existing.status === 'loaded') return;
             // A forced load is for a changed filter, search or sort, so it
             // supersedes a request still in flight instead of joining it.
-            if (!force && existing && existing.status === 'loading') return existing.promise;
+            if (!force && sameQuery && existing.status === 'loading') return existing.promise;
 
             // The root folder's path is empty, and an empty path segment
             // (folders//files) routes nowhere, so the root has its own URL.
             let url = apiUrl(dir
                 ? `/api/files/folders/${encodeFolderPath(dir)}/files`
                 : '/api/files/folders/files');
-            const params = [];
-            if (searchQuery) params.push(`search=${encodeURIComponent(searchQuery)}`);
-            if (filterMode !== 'all') params.push(`filter=${encodeURIComponent(filterMode)}`);
-            if (sortMode !== 'name') params.push(`sort=${encodeURIComponent(sortMode)}`);
-            if (sortDirection !== 'asc') params.push(`direction=${encodeURIComponent(sortDirection)}`);
-            if (params.length) url += '?' + params.join('&');
+            if (query) url += '?' + query;
 
-            const entry = { status: 'loading', files: [], promise: null };
+            const entry = { status: 'loading', files: [], promise: null, query };
             folderFiles.set(dir, entry);
             entry.promise = (async () => {
                 let result;
                 try {
                     const response = await fetch(url, { headers: getAuthHeaders() });
                     if (handleAuthError(response)) {
-                        result = { status: 'error', files: [] };
+                        result = { status: 'error', files: [], query };
                     } else if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     } else {
                         const data = await response.json();
-                        result = { status: 'loaded', files: data.files || [] };
+                        result = { status: 'loaded', files: data.files || [], query };
                     }
                 } catch (err) {
-                    result = { status: 'error', files: [] };
+                    result = { status: 'error', files: [], query };
                 }
                 // A newer request for this folder has taken over: an older
                 // answer must not overwrite the latest one, so wait for it.
@@ -809,6 +826,27 @@
             }
         }
 
+        // Empty the whole selection (files and series) and show it at once:
+        // untick the rendered selection boxes, drop the selected highlights
+        // and reset the selection bar, so its batch actions are disabled. For
+        // code that clears the selection outside a re-render, which may come
+        // late or never (a delete job cancelled before it removes a file, or
+        // the event stream being down). Updates in place, keeping the scroll
+        // position.
+        function clearSelection() {
+            selectedFiles.clear();
+            resetSeriesSelectionState();
+            document.querySelectorAll('#fileList input[type="checkbox"]').forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            document.querySelectorAll('#fileList .series-issue-card--selected').forEach(card => {
+                card.classList.remove('series-issue-card--selected');
+            });
+            updateSeriesSelectionUI();
+            updateSelectInfo();
+            updateSelectAllCheckbox();
+        }
+
         async function toggleDirectory(dir) {
             const wasCollapsed = collapsedDirectories.has(dir);
             if (wasCollapsed) {
@@ -835,35 +873,61 @@
             allFoldersExpanded = true;
             renderFileList();
 
-            // Concurrency-limited loader for unloaded folders.
-            const concurrency = 4;
-            const queue = folderList
+            // Load unloaded folders and folders whose files were listed for
+            // another filter, search or sort.
+            const query = folderFilesQuery();
+            await loadFoldersConcurrently(folderList
                 .map(f => f.path || '')
                 .filter(dir => {
                     const e = folderFiles.get(dir);
-                    return !e || e.status === 'error';
-                });
-            let active = 0;
-            let index = 0;
-            await new Promise(resolve => {
-                const launch = () => {
-                    while (active < concurrency && index < queue.length) {
-                        const dir = queue[index++];
-                        active++;
-                        ensureFolderLoaded(dir).catch(() => {}).finally(() => {
-                            active--;
-                            if (index >= queue.length && active === 0) {
-                                resolve();
-                            } else {
-                                launch();
-                            }
-                        });
-                    }
-                    if (queue.length === 0) resolve();
-                };
-                launch();
-            });
+                    return !e || e.status === 'error' || e.query !== query;
+                }));
             updateToggleAllButton();
+        }
+
+        // Open folders keep their cached files across a reload; fetch them
+        // again, a few at a time, if those were listed for another filter,
+        // search or sort.
+        function reloadStaleOpenFolders(folders) {
+            const query = folderFilesQuery();
+            const stale = folders
+                .map(f => (f && f.path) || '')
+                .filter(dir => {
+                    const entry = dir ? folderFiles.get(dir) : null;
+                    return entry && entry.query !== query && !collapsedDirectories.has(dir);
+                });
+            return loadFoldersConcurrently(stale);
+        }
+
+        // Folder loads queued by loadFoldersConcurrently. The limit is shared
+        // by every caller, so overlapping reloads (e.g. quick successive
+        // filter changes, or several folder pages arriving) can't add up to
+        // a burst of fetches either.
+        const FOLDER_LOAD_CONCURRENCY = 4;
+        const folderLoadQueue = [];
+        let folderLoadsActive = 0;
+
+        function drainFolderLoadQueue() {
+            while (folderLoadsActive < FOLDER_LOAD_CONCURRENCY && folderLoadQueue.length > 0) {
+                const { dir, resolve } = folderLoadQueue.shift();
+                folderLoadsActive++;
+                ensureFolderLoaded(dir)
+                    .catch(() => {})
+                    .finally(() => {
+                        folderLoadsActive--;
+                        resolve();
+                        drainFolderLoadQueue();
+                    });
+            }
+        }
+
+        // Loads the given folders' files with a bounded number of requests in
+        // flight, so many folders don't fire a burst of fetches at once.
+        async function loadFoldersConcurrently(dirs) {
+            await Promise.all(dirs.map(dir => new Promise(resolve => {
+                folderLoadQueue.push({ dir, resolve });
+                drainFolderLoadQueue();
+            })));
         }
 
         function collapseAllFolders() {
@@ -875,8 +939,11 @@
 
         function updateToggleAllButton() {
             // Only folders with a header can be collapsed; the root can't.
-            const totalDirs = folderList.filter(f => f.path).length;
-            if (totalDirs > 0 && collapsedDirectories.size >= totalDirs) {
+            // Folders no longer listed can still be marked collapsed, so only
+            // the listed ones are counted.
+            const dirs = folderList.filter(f => f.path);
+            const collapsedDirs = dirs.filter(f => collapsedDirectories.has(f.path)).length;
+            if (dirs.length > 0 && collapsedDirs >= dirs.length) {
                 allFoldersExpanded = false;
             } else {
                 allFoldersExpanded = true;
@@ -885,7 +952,7 @@
 
         async function toggleDirectorySelection(dir, checked) {
             const entry = folderFiles.get(dir);
-            if (!entry || entry.status !== 'loaded') {
+            if (!entry || entry.status !== 'loaded' || entry.query !== folderFilesQuery()) {
                 await ensureFolderLoaded(dir);
             }
             const refreshed = folderFiles.get(dir);

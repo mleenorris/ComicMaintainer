@@ -13,6 +13,7 @@ const {
     makeFile,
     encodeFolder,
     folderFilesMatcher,
+    folderPages,
     bootFilesView,
     callsTo,
     folderFileCalls
@@ -93,6 +94,51 @@ test('the expand-all control follows the folders opened one by one', async () =>
     assert.equal(isCollapsed(page, 'Batman'), false);
     assert.equal(isCollapsed(page, 'Saga'), false);
     assert.equal(toggleAllLabel(page), '▼');
+});
+
+test('the expand-all icon shows the state left by the folder last closed or reopened', async () => {
+    const page = await bootFilesView(library('Batman', 'Saga'));
+    await clickFolderToggle(page, 'Batman');
+    assert.equal(toggleAllLabel(page), '▼');
+
+    // Closing the only open folder leaves every folder closed...
+    await clickFolderToggle(page, 'Batman');
+    assert.equal(toggleAllLabel(page), '▶');
+
+    // ...and reopening it, its files already loaded, leaves one open.
+    await clickFolderToggle(page, 'Batman');
+    assert.equal(folderFileCalls(page).length, 1);
+    assert.equal(toggleAllLabel(page), '▼');
+
+    // A click does what the icon shows.
+    page.click('#toggleAllBtn');
+    await page.settle();
+    assert.equal(isCollapsed(page, 'Batman'), true);
+    assert.equal(isCollapsed(page, 'Saga'), true);
+    assert.equal(toggleAllLabel(page), '▶');
+});
+
+test('the expand-all control counts only the folders still listed', async () => {
+    const listed = { all: ['Batman', 'Saga'], unmarked: ['Batman', 'Other'] };
+    const page = await bootFilesView({
+        routes: {
+            'GET /api/files/folders': call => folderPages(listed[call.query.filter || 'all'].map(name => makeFolder(name)))(call)
+        }
+    });
+    await clickFolderToggle(page, 'Batman');
+
+    // Saga, which is closed, drops out of the list; Batman stays open.
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    assert.deepEqual(page.$$('#fileList .directory-path').map(element => element.textContent), ['Batman', 'Other']);
+    assert.equal(isCollapsed(page, 'Batman'), false);
+    assert.equal(toggleAllLabel(page), '▼');
+
+    page.click('#toggleAllBtn');
+    await page.settle();
+    assert.equal(isCollapsed(page, 'Batman'), true, 'collapse all closes the open folder');
+    assert.equal(isCollapsed(page, 'Other'), true);
+    assert.equal(toggleAllLabel(page), '▶');
 });
 
 test('expand all opens every folder, loading at most four at a time', async () => {

@@ -195,6 +195,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.LibraryViewMode).HasMaxLength(32);
             entity.Property(e => e.FilterMode).HasMaxLength(64);
             entity.Property(e => e.SortMode).HasMaxLength(64);
+            entity.Property(e => e.SortDirection).HasMaxLength(32);
             entity.HasIndex(e => e.UserId).IsUnique();
         });
 
@@ -304,6 +305,8 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             // Auto-send dedupe looks up "was this file already delivered to this device".
             entity.HasIndex(e => new { e.FilePath, e.DeviceId, e.Status });
             entity.HasIndex(e => e.CreatedAt);
+            // Rate-limit checks look up the most recent sent deliveries before every send.
+            entity.HasIndex(e => new { e.Status, e.SentAt });
         });
 
         // Configure ErrorReportEntity
@@ -534,6 +537,7 @@ public class UserPreferencesEntity
     public string? LibraryViewMode { get; set; }
     public string? FilterMode { get; set; }
     public string? SortMode { get; set; }
+    public string? SortDirection { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -734,7 +738,7 @@ public class ComicEmailDeliveryEntity
     /// <summary><c>original</c> or <c>epub</c>.</summary>
     public string DeliveryFormat { get; set; } = "original";
 
-    /// <summary><c>pending</c>, <c>sent</c> or <c>failed</c>.</summary>
+    /// <summary><c>pending</c>, <c>sent</c>, <c>failed</c> or <c>cancelled</c>.</summary>
     public string Status { get; set; } = "pending";
 
     /// <summary><c>manual</c> for user-initiated sends, <c>auto</c> for series subscriptions.</summary>

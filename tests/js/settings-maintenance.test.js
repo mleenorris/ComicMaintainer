@@ -73,13 +73,13 @@ test('a completed reset is still reported when refreshing the library afterwards
     page.run(`
         window.refreshAttempts = [];
         loadLibraryHealth = async () => { refreshAttempts.push(['health']); throw new Error('counts unavailable'); };
-        loadActiveLibraryView = async (pageNumber, refresh) => { refreshAttempts.push(['view', pageNumber, refresh]); throw new Error('view unavailable'); };
+        loadActiveLibraryView = async (options) => { refreshAttempts.push(['view', options]); throw new Error('view unavailable'); };
     `);
     clearMessages(page);
 
     await page.run('confirmReset()');
 
-    assert.deepEqual(page.evaluate('refreshAttempts'), [['health'], ['view', 1, true]], 'the view is refreshed even after the counts fail');
+    assert.deepEqual(page.evaluate('refreshAttempts'), [['health'], ['view', { refresh: true }]], 'the view is refreshed even after the counts fail');
     assert.deepEqual(messages(page), [
         { type: 'info', text: 'Resetting database... This may take a moment.' },
         { type: 'success', text: 'Database reset completed successfully' }
@@ -94,6 +94,11 @@ test('a failed reset is reported', async () => {
         [respond(500, { success: false, error: 'Error resetting database: disk I/O error' }),
             'Failed to reset database: Error resetting database: disk I/O error'],
         [respond(500, {}), 'Failed to reset database: HTTP error! status: 500'],
+        // A reverse proxy's error page, an empty body, or JSON that is not an object.
+        [respond(502, '<html><head><title>502 Bad Gateway</title></head><body><h1>502 Bad Gateway</h1></body></html>',
+            { 'Content-Type': 'text/html' }), 'Failed to reset database: HTTP error! status: 502'],
+        [504, 'Failed to reset database: HTTP error! status: 504'],
+        [respond(500, null), 'Failed to reset database: HTTP error! status: 500'],
         [{ success: false, error: 'A job is still running' }, 'A job is still running'],
         [{ success: false }, 'Failed to reset database'],
         [networkError, 'Failed to reset database: Failed to fetch']

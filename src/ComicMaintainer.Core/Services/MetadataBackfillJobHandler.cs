@@ -63,7 +63,6 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
                     failed++;
                 }
             }
-
             if (options.MaxBatch <= 0 || batch.Count < options.MaxBatch)
             {
                 break;
@@ -101,6 +100,10 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
 
             await _fileStore.MarkFileBackfilledAsync(file.FilePath, file.MetadataVersion, cancellationToken);
             return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

@@ -15,7 +15,7 @@ namespace ComicMaintainer.Tests.Controllers;
 /// <summary>
 /// Validation paths of <see cref="PreferencesController"/> not covered by
 /// <see cref="PreferencesControllerTests"/>: a missing payload, invalid view and
-/// sort modes, and a blank configured default library view.
+/// sort modes, an invalid sort direction, and a blank configured default library view.
 /// </summary>
 public class PreferencesControllerCoverageTests
 {
@@ -64,6 +64,17 @@ public class PreferencesControllerCoverageTests
         var result = await _controller.SavePreferences(new PreferencesController.PreferencesRequest { SortMode = "rating" });
 
         Assert.Equal("SortMode must be one of: name, date, size.", ErrorOf(result));
+        VerifyNothingSaved();
+    }
+
+    [Theory]
+    [InlineData("sideways")]
+    [InlineData("descending")]
+    public async Task UpdatePreferences_UnknownSortDirectionIsBadRequest(string sortDirection)
+    {
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { SortMode = "date", SortDirection = sortDirection });
+
+        Assert.Equal("SortDirection must be one of: asc, desc.", ErrorOf(result));
         VerifyNothingSaved();
     }
 

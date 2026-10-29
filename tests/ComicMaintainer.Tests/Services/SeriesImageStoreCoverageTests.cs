@@ -209,6 +209,20 @@ public class SeriesImageStoreCoverageTests : IDisposable
         Assert.Equal(0, handler.RequestCount);
     }
 
+    [Fact]
+    public async Task DownloadAsync_CallerCancelledDuringHostCheck_LetsTheCancellationThrough()
+    {
+        var (store, handler) = CreateStore();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Not "Cannot resolve image host": a timed-out request must reach the timeout middleware (504).
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.DownloadAsync("series-a", "http://8.8.8.8/x.png", previousFile: null, cts.Token));
+
+        Assert.Equal(0, handler.RequestCount);
+    }
+
     // ---- HTTP response handling ------------------------------------------
 
     [Fact]

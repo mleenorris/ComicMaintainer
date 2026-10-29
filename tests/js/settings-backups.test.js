@@ -212,11 +212,12 @@ test('a failed backup is reported with its correlation reference', async () => {
     ]);
     assert.equal(page.$('#createBackupBtn').disabled, false);
 
-    page.run('lastApiFailure = null');
+    // Each later failure carries its own reference or none, never corr-409.
     for (const [failure, text] of [
         [respond(500, { message: 'Disk full' }), 'Failed to create backup: Disk full'],
         [respond(500, 'Internal Server Error'), 'Failed to create backup: HTTP error! status: 500'],
-        [networkError, 'Failed to create backup: Failed to fetch']
+        [networkError, 'Failed to create backup: Failed to fetch'],
+        [respond(507, { error: 'Insufficient storage' }, { 'X-Correlation-Id': 'corr-507' }), 'Failed to create backup: Insufficient storage (ref: corr-507)']
     ]) {
         page.route('POST /api/backups', failure);
         await act(page, 'createBackup()');
@@ -228,6 +229,27 @@ test('a failed backup is reported with its correlation reference', async () => {
     page.$('#createBackupBtn').remove();
     await act(page, 'createBackup()');
     assert.deepEqual(messages(page).at(-1), { type: 'success', text: 'Backup no-button.db created.' });
+});
+
+test('a backup failure is not reported with the reference of an earlier one', async () => {
+    const page = await bootBackups({
+        'POST /api/backups': respond(500, { error: 'No space left on device' }, { 'X-Correlation-Id': 'corr-create' })
+    });
+    await act(page, 'createBackup()');
+    assert.deepEqual(messages(page).at(-1), { type: 'error', text: 'Failed to create backup: No space left on device (ref: corr-create)' });
+
+    // Moments later a delete fails offline, behind a proxy whose backend is
+    // down, or on the server with a reference of its own.
+    answerConfirm(page, true);
+    for (const [failure, text] of [
+        [networkError, 'Failed to delete backup: Failed to fetch'],
+        [respond(502, '<html>Bad gateway</html>'), 'Failed to delete backup: HTTP error! status: 502'],
+        [respond(404, { error: 'Backup not found' }, { 'X-Correlation-Id': 'corr-delete' }), 'Failed to delete backup: Backup not found (ref: corr-delete)']
+    ]) {
+        page.route(`DELETE /api/backups/${NAME}`, failure);
+        await act(page, () => clickRendered(page, button(page, `Delete ${NAME}`)));
+        assert.deepEqual(messages(page), [{ type: 'error', text }]);
+    }
 });
 
 test('Download fetches the backup with the session and saves it under its name', async t => {

@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
-const { deferred } = require('./support/app');
+const { deferred, addReadOnlyGate, isDisplayed } = require('./support/app');
 const {
     makeFolder,
     makeFile,
@@ -181,6 +181,34 @@ test('file rows show the processing status, read state, size and age', async () 
     assert.ok(actions(fresh).includes('Mark Read') && !actions(fresh).includes('Mark Unread'));
 });
 
+test('read-only users are offered only the read actions of a file row', async () => {
+    const page = await bootFilesView({
+        user: { canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] },
+        folders: [makeFolder('Mixed')],
+        files: { Mixed: [makeFile('Mixed/new.cbz'), makeFile('Mixed/dupe.cbz', { duplicate: true, read: true })] },
+        beforeScripts: addReadOnlyGate
+    });
+    await expandFolder(page, 'Mixed');
+    assert.ok(page.document.body.classList.contains('user-read-only'));
+
+    // What each row's menu shows once opened (menus.js then moves it to
+    // <body>, out of its row); a divider reads as '—'.
+    const shown = [];
+    for (const row of page.$$('#fileList .file-item')) {
+        page.click(row.querySelector('.dropdown-toggle'));
+        await page.waitFor(() => page.$('body > .dropdown-menu.show'));
+        shown.push([...page.$('body > .dropdown-menu.show').children]
+            .filter(isDisplayed)
+            .map(item => (item.classList.contains('dropdown-divider') ? '—' : item.textContent.trim())));
+        page.run('closeAllDropdowns()');
+        await page.settle();
+    }
+    assert.deepEqual(shown, [
+        ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Read'],
+        ['Info', 'View/Edit', 'Read Comic', 'Review Duplicate', '—', 'Mark Unread']
+    ]);
+});
+
 test('a file\'s age reads as a relative time for the past week, then as a date', async () => {
     const now = new Date(2024, 5, 15, 12, 0, 0).getTime();
     const seconds = ms => Math.floor(ms / 1000);
@@ -205,6 +233,31 @@ test('a file\'s age reads as a relative time for the past week, then as a date',
 
     const shown = page.$$('#fileList .file-item').map(row => row.children[4].textContent);
     assert.deepEqual(shown, ['Just now', '5 min ago', '3h ago', 'Yesterday', '3 days ago', '03-01', '2023-12-25']);
+});
+
+test('a file dated ahead of the browser\'s clock reads Just now for up to a minute, then as a date', async () => {
+    const now = new Date(2024, 5, 15, 12, 0, 0).getTime();
+    const seconds = ms => Math.floor(ms / 1000);
+    const ages = {
+        'Ahead/a-second.cbz': seconds(now) + 1,
+        'Ahead/under-a-minute.cbz': seconds(now) + 59,
+        'Ahead/a-minute.cbz': seconds(now) + 60,
+        'Ahead/minutes.cbz': seconds(now) + 2 * 60,
+        'Ahead/hours.cbz': seconds(now) + 2 * 3600,
+        'Ahead/days.cbz': seconds(now) + 3 * 86400,
+        'Ahead/next-year.cbz': seconds(new Date(2025, 0, 2, 12).getTime())
+    };
+    const files = Object.entries(ages).map(([path, modified]) => makeFile(path, { modified }));
+    const page = await bootFilesView({ folders: [makeFolder('Ahead', { file_count: files.length })], files: { Ahead: files } });
+    page.run(`window.Date = class extends Date {
+        constructor(...args) { if (args.length) super(...args); else super(${now}); }
+        static now() { return ${now}; }
+    }`);
+
+    await expandFolder(page, 'Ahead');
+
+    const shown = page.$$('#fileList .file-item').map(row => row.children[4].textContent);
+    assert.deepEqual(shown, ['Just now', 'Just now', 'Just now', '06-15', '06-15', '06-18', '2025-01-02']);
 });
 
 test('long file names are shortened in the middle, keeping the extension', async () => {
@@ -453,6 +506,20 @@ test('a folder list that cannot be fetched is reported', async () => {
     assert.deepEqual(messages(page).filter(m => m.type === 'error').map(m => m.text), ['Failed to load files: Failed to fetch']);
 });
 
+test('a folder list failure without a reference is not reported with an earlier request\'s', async () => {
+    // The library counts fail with a reference while the library opens, then
+    // the folder list fails on a proxy's error page.
+    const page = await bootFilesView({
+        routes: {
+            'GET /api/files/counts': respond(500, { error: 'boom' }, { 'X-Correlation-Id': 'corr-counts' }),
+            'GET /api/files/folders': respond(502, 'Bad Gateway')
+        }
+    });
+
+    assert.equal(callsTo(page, '/api/files/counts').length, 1);
+    assert.deepEqual(messages(page).filter(m => m.type === 'error').map(m => m.text), ['Failed to load files: HTTP error! status: 502']);
+});
+
 test('an expired session while listing folders goes to the login page', async () => {
     const page = await bootFilesView({ routes: { 'GET /api/files/folders': 401 } });
 
@@ -529,7 +596,7 @@ test('a plain reload keeps open folders; a refresh re-collapses them and reloads
     assert.equal(folderFileCalls(page).length, 1, 'cached folder contents are reused');
     assert.equal(callsTo(page, '/api/files/counts').length, countsBefore);
 
-    await page.run('loadActiveLibraryView(1, true)');
+    await page.run('loadActiveLibraryView({ refresh: true })');
     await page.settle();
     assert.deepEqual(folderCalls(page).at(-1).query, { offset: '0', limit: '100', refresh: 'true' });
     assert.deepEqual(folderSections(page).map(section => section.collapsed), [true, true]);
@@ -537,6 +604,142 @@ test('a plain reload keeps open folders; a refresh re-collapses them and reloads
 
     await expandFolder(page, 'Batman');
     assert.equal(folderFileCalls(page).length, 2);
+});
+
+test('a new filter or sort lists open folders\' files again, and closed ones once reopened', async () => {
+    const page = await bootFilesView({ folders: [makeFolder('Batman'), makeFolder('Saga')] });
+    // Each folder holds one file, named after the filter it was listed for.
+    page.route(folderFilesMatcher, call => ({
+        path: call.folder,
+        files: [makeFile(`${call.folder}/${call.folder} ${call.query.filter || 'all'}.cbz`)]
+    }));
+    const requested = () => folderFileCalls(page).map(call => [call.folder, call.query]);
+    await expandFolder(page, 'Batman');
+    await expandFolder(page, 'Saga');
+    await expandFolder(page, 'Saga');
+    assert.deepEqual(requested(), [['Batman', {}], ['Saga', {}]]);
+
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    assert.deepEqual(folderSections(page).map(section => section.collapsed), [false, true]);
+    assert.deepEqual(rowNames(page), ['Batman unmarked.cbz']);
+    assert.deepEqual(requested().slice(2), [['Batman', { filter: 'unmarked' }]], 'the closed folder is not fetched yet');
+
+    await expandFolder(page, 'Saga');
+    assert.deepEqual(rowNames(page), ['Batman unmarked.cbz', 'Saga unmarked.cbz']);
+    assert.deepEqual(requested().slice(3), [['Saga', { filter: 'unmarked' }]]);
+
+    page.click('#headerSortMenu [data-sort="date"]');
+    await page.settle();
+    assert.deepEqual(requested().slice(4), [
+        ['Batman', { filter: 'unmarked', sort: 'date' }],
+        ['Saga', { filter: 'unmarked', sort: 'date' }]
+    ]);
+
+    // A plain reload for the same query keeps the files listed for it.
+    await page.run('loadActiveLibraryView()');
+    await page.settle();
+    assert.equal(folderFileCalls(page).length, 6);
+});
+
+test('a new filter lists many open folders\' files again a few at a time', async () => {
+    const names = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const page = await bootFilesView({ folders: names.map(name => makeFolder(name)) });
+    let gate = null;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    page.route(folderFilesMatcher, async call => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+            if (gate) await gate.promise;
+            return { path: call.folder, files: [makeFile(`${call.folder}/${call.folder}.cbz`)] };
+        } finally {
+            inFlight--;
+        }
+    });
+    for (const name of names) await expandFolder(page, name);
+    assert.equal(folderFileCalls(page).length, names.length);
+
+    gate = deferred();
+    maxInFlight = 0;
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    assert.equal(folderFileCalls(page).length, names.length + 4, 'no more than 4 folders are fetched at once');
+
+    gate.resolve();
+    await page.settle();
+    assert.equal(maxInFlight, 4);
+    assert.deepEqual(folderFileCalls(page).slice(names.length).map(call => [call.folder, call.query]),
+        names.map(name => [name, { filter: 'unmarked' }]));
+});
+
+test('quick successive filter changes still list open folders\' files a few at a time', async () => {
+    const names = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const page = await bootFilesView({ folders: names.map(name => makeFolder(name)) });
+    let gate = null;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    page.route(folderFilesMatcher, async call => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+            if (gate) await gate.promise;
+            return { path: call.folder, files: [makeFile(`${call.folder}/${call.folder}.cbz`)] };
+        } finally {
+            inFlight--;
+        }
+    });
+    for (const name of names) await expandFolder(page, name);
+    const before = folderFileCalls(page).length;
+
+    gate = deferred();
+    maxInFlight = 0;
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    page.click('#headerFilterMenu [data-filter="marked"]');
+    await page.settle();
+    assert.equal(folderFileCalls(page).length, before + 4, 'the second reload waits for the first one\'s fetches');
+
+    gate.resolve();
+    await page.settle();
+    assert.equal(maxInFlight, 4, 'no more than 4 folders are fetched at once across both reloads');
+    const latest = new Map(folderFileCalls(page).map(call => [call.folder, call.query]));
+    assert.deepEqual(names.map(name => latest.get(name)), names.map(() => ({ filter: 'marked' })));
+    assert.deepEqual(page.errors, []);
+});
+
+test('a folder\'s checkbox and expand all fetch files listed for an earlier filter again', async () => {
+    const page = await bootFilesView({ folders: [makeFolder('Batman'), makeFolder('Saga')] });
+    page.route(folderFilesMatcher, call => ({
+        path: call.folder,
+        files: [makeFile(`${call.folder}/${call.folder} ${call.query.filter || 'all'}.cbz`)]
+    }));
+    const requested = () => folderFileCalls(page).map(call => [call.folder, call.query]);
+    const toggleAll = async () => {
+        page.click('#toggleAllBtn');
+        await page.settle();
+    };
+    await toggleAll();
+    await toggleAll();
+    assert.deepEqual(folderSections(page).map(section => section.collapsed), [true, true]);
+
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
+    await page.settle();
+    assert.equal(folderFileCalls(page).length, 2, 'closed folders are not fetched for the new filter yet');
+
+    const batman = page.$$('#fileList .folder-section')
+        .find(section => section.querySelector('.directory-content').dataset.dir === 'Batman');
+    page.input(batman.querySelector('.directory-checkbox'), true);
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['Batman/Batman unmarked.cbz']);
+
+    await toggleAll();
+    assert.deepEqual(rowNames(page), ['Batman unmarked.cbz', 'Saga unmarked.cbz']);
+    assert.deepEqual(requested().slice(2), [
+        ['Batman', { filter: 'unmarked' }],
+        ['Saga', { filter: 'unmarked' }]
+    ], 'each folder is fetched once for the new filter');
 });
 
 test('loadFolders() still accepts the legacy boolean refresh flag', async () => {

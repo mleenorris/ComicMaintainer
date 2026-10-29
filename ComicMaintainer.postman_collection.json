@@ -772,7 +772,7 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "settings", "issue-number-padding"]
 						},
-						"description": "Update the issue number padding. Default is 4 (e.g., 0001)"
+						"description": "Update the issue number padding, from 0 to 10. Default is 4 (e.g., 0001)"
 					},
 					"response": []
 				},

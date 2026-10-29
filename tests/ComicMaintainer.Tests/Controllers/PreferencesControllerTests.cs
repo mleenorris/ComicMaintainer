@@ -46,7 +46,8 @@ public class PreferencesControllerTests
                     ReadingMode = update.ReadingMode ?? _stored.ReadingMode,
                     LibraryViewMode = update.LibraryViewMode ?? _stored.LibraryViewMode,
                     FilterMode = update.FilterMode ?? _stored.FilterMode,
-                    SortMode = update.SortMode ?? _stored.SortMode
+                    SortMode = update.SortMode ?? _stored.SortMode,
+                    SortDirection = update.SortDirection ?? _stored.SortDirection
                 };
                 return _stored;
             });
@@ -103,6 +104,7 @@ public class PreferencesControllerTests
         Assert.Equal("manga", GetValue(result, "readingMode"));
         Assert.Equal("all", GetValue(result, "filterMode"));
         Assert.Equal("name", GetValue(result, "sortMode"));
+        Assert.Equal("asc", GetValue(result, "sortDirection"));
     }
 
     [Fact]
@@ -116,7 +118,8 @@ public class PreferencesControllerTests
             ReadingMode = "webcomic",
             LibraryViewMode = "series",
             FilterMode = "unmarked",
-            SortMode = "date"
+            SortMode = "date",
+            SortDirection = "desc"
         };
 
         var result = await _controller.GetPreferences();
@@ -127,6 +130,7 @@ public class PreferencesControllerTests
         Assert.Equal("series", GetValue(result, "libraryViewMode"));
         Assert.Equal("unmarked", GetValue(result, "filterMode"));
         Assert.Equal("date", GetValue(result, "sortMode"));
+        Assert.Equal("desc", GetValue(result, "sortDirection"));
     }
 
     [Fact]
@@ -205,6 +209,20 @@ public class PreferencesControllerTests
         var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { Theme = "LIGHT" });
 
         Assert.Equal("light", GetValue(result, "theme"));
+    }
+
+    [Fact]
+    public async Task UpdatePreferences_PersistsSortDirection_AlongsideTheSortField()
+    {
+        await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { SortMode = "date" });
+
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { SortDirection = "DESC" });
+
+        Assert.Equal("date", GetValue(result, "sortMode"));
+        Assert.Equal("desc", GetValue(result, "sortDirection"));
+        _preferencesServiceMock.Verify(
+            x => x.SavePreferencesAsync(It.Is<UserPreferences>(p => p.SortDirection == "desc"), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

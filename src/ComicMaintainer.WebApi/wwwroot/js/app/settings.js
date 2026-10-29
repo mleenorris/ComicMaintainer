@@ -393,6 +393,10 @@
                         : 'Enter a password only if your Suwayomi server requires one.';
                 }
                 if (suwayomiClearPassword) suwayomiClearPassword.checked = false;
+                const suwayomiDownloadsDirectory = document.getElementById('suwayomiDownloadsDirectory');
+                const suwayomiImportDirectory = document.getElementById('suwayomiImportDirectory');
+                if (suwayomiDownloadsDirectory) suwayomiDownloadsDirectory.value = settingsData.suwayomi_downloads_directory || '';
+                if (suwayomiImportDirectory) suwayomiImportDirectory.value = settingsData.suwayomi_import_directory || '';
 
                 // Load default library view
                 const defaultLibraryViewSelect = document.getElementById('defaultLibraryViewSelect');
@@ -434,6 +438,12 @@
                 if (emailFromAddress) emailFromAddress.value = settingsData.email_from_address || '';
                 if (emailFromName) emailFromName.value = settingsData.email_from_name || '';
                 if (emailMaxAttachmentMb) emailMaxAttachmentMb.value = settingsData.email_max_attachment_mb || '';
+                const emailMaxSendsPerHour = document.getElementById('emailMaxSendsPerHour');
+                const emailMaxSendsPerDay = document.getElementById('emailMaxSendsPerDay');
+                const emailMinSecondsBetweenSends = document.getElementById('emailMinSecondsBetweenSends');
+                if (emailMaxSendsPerHour) emailMaxSendsPerHour.value = settingsData.email_max_sends_per_hour ?? 0;
+                if (emailMaxSendsPerDay) emailMaxSendsPerDay.value = settingsData.email_max_sends_per_day ?? 0;
+                if (emailMinSecondsBetweenSends) emailMinSecondsBetweenSends.value = settingsData.email_min_seconds_between_sends ?? 0;
                 loadEmailStatus();
 
                 const errorReportingEnabled = document.getElementById('errorReportingEnabledCheckbox');
@@ -570,8 +580,9 @@
                 if (handleAuthError(response)) return;
                 
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    // A proxy's error page (e.g. a 502/504) or an empty body is not JSON.
+                    const errorData = await response.json().catch(() => null);
+                    throw new Error((errorData && errorData.error) || `HTTP error! status: ${response.status}`);
                 }
                 
                 const result = await response.json();
@@ -591,7 +602,7 @@
                         try { await loadLibraryHealth(); } catch (_e) { /* ignore */ }
                     }
                     if (typeof loadActiveLibraryView === 'function') {
-                        try { await loadActiveLibraryView(1, true); } catch (_e) { /* ignore */ }
+                        try { await loadActiveLibraryView({ refresh: true }); } catch (_e) { /* ignore */ }
                     }
                 } else {
                     showMessage(result.error || 'Failed to reset database', 'error');
@@ -843,7 +854,7 @@
                     return;
                 }
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 lastDiagnostics = await response.json();
                 renderDiagnostics(lastDiagnostics);
@@ -852,7 +863,7 @@
                 // Rendered inline rather than as a toast: the panel is the only
                 // thing on screen the user is looking at. It still carries the
                 // correlation reference so a failed snapshot is itself traceable.
-                renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, true)}</p>`);
+                renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, error)}</p>`);
             }
         }
 
@@ -1231,11 +1242,60 @@
             }
         }
 
+        /**
+         * Save one Save Settings group; throws an Error carrying the server's
+         * reason on failure, flagged `authHandled` after a 401 (already
+         * redirecting to login).
+         */
+        async function saveSettingsGroup(method, path, body) {
+            const response = await fetch(apiUrl(path), {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...getAuthHeaders()
+                },
+                body: JSON.stringify(body)
+            });
+            if (handleAuthError(response)) {
+                const error = new Error('Authentication required');
+                error.authHandled = true;
+                throw error;
+            }
+            // A proxy's error page or an empty body is not JSON.
+            const result = await response.json().catch(() => null);
+            if (!response.ok) {
+                throw new Error((result && (result.error || result.message)) || `HTTP error! status: ${response.status}`);
+            }
+            if (result && result.success === false) {
+                throw new Error(result.error || '');
+            }
+        }
+
+        // Server-side limits checked before Save Settings sends anything; the
+        // matching inputs' max attributes in index.html must agree.
+        const SETTINGS_SERVER_LIMITS = Object.freeze({
+            logMaxSizeMB: 2047,
+            emailMaxAttachmentMB: 200,
+            errorReportingMaxPerDay: 100,
+            errorReportingDedupeHours: 720
+        });
+
+        /**
+         * A whole number from an email rate-limit input. Blank means 0 (no
+         * limit); anything that is not a whole number comes back as NaN.
+         */
+        function parseEmailRateLimitInput(id) {
+            const value = (document.getElementById(id)?.value ?? '').trim();
+            if (!value) return 0;
+            const number = Number(value);
+            return Number.isInteger(number) ? number : NaN;
+        }
+
         async function saveFilenameFormat() {
             if (!settingsLoaded || !userCapabilities.canAdminister) return;
             const format = document.getElementById('filenameFormat').value.trim();
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
-            const issueNumberPadding = parseInt(document.getElementById('issueNumberPadding').value);
+            const issueNumberPadding = document.getElementById('issueNumberPadding').valueAsNumber;
             const dbCleanupInterval = parseInt(document.getElementById('dbCleanupInterval').value);
             const enableExternalSeriesMetadata = document.getElementById('enableExternalSeriesMetadata').checked;
             const comicVineApiKey = document.getElementById('comicVineApiKey').value.trim();
@@ -1260,7 +1320,24 @@
             const emailFromName = document.getElementById('emailFromName').value.trim();
             const emailMaxAttachmentValue = document.getElementById('emailMaxAttachmentMb').value.trim();
             const emailMaxAttachmentMb = emailMaxAttachmentValue ? parseFloat(emailMaxAttachmentValue) : null;
+            // The error reporting section may be missing (its group is then skipped below).
+            const errorReportingMaxPerDay = parseInt(document.getElementById('errorReportingMaxPerDay')?.value, 10) || 0;
+            const errorReportingDedupeHoursValue = parseInt(document.getElementById('errorReportingDedupeHours')?.value, 10);
+            // Only an empty or missing field falls back to the default; 0 must reach validation.
+            const errorReportingDedupeHours = isNaN(errorReportingDedupeHoursValue) ? 24 : errorReportingDedupeHoursValue;
+            // The rate limit is only saved when its controls are on the page.
+            const emailRateLimitShown = !!document.getElementById('emailMaxSendsPerHour');
+            const emailRateLimit = emailRateLimitShown
+                ? {
+                    maxSendsPerHour: parseEmailRateLimitInput('emailMaxSendsPerHour'),
+                    maxSendsPerDay: parseEmailRateLimitInput('emailMaxSendsPerDay'),
+                    minSecondsBetweenSends: parseEmailRateLimitInput('emailMinSecondsBetweenSends')
+                }
+                : null;
             
+            // Check everything the server would reject before sending anything:
+            // the groups are saved one by one, so a rejected group leaves the
+            // ones before it saved.
             if (!format) {
                 showMessage('Filename format cannot be empty', 'error');
                 return;
@@ -1270,9 +1347,15 @@
                 showMessage('Log max size must be a positive number', 'error');
                 return;
             }
+
+            // The server keeps the size in bytes as a 32-bit integer.
+            if (logMaxSize > SETTINGS_SERVER_LIMITS.logMaxSizeMB) {
+                showMessage(`Log max size must be ${SETTINGS_SERVER_LIMITS.logMaxSizeMB} MB or less`, 'error');
+                return;
+            }
             
-            if (isNaN(issueNumberPadding) || issueNumberPadding < 0) {
-                showMessage('Issue number padding must be 0 or greater', 'error');
+            if (!Number.isInteger(issueNumberPadding) || issueNumberPadding < 0 || issueNumberPadding > 10) {
+                showMessage('Issue number padding must be between 0 and 10', 'error');
                 return;
             }
             
@@ -1310,96 +1393,56 @@
                 showMessage('Max email attachment size must be a positive number', 'error');
                 return;
             }
-            
-            try {
-                // Save filename format
-                const formatResponse = await fetch(apiUrl('/api/settings/filename-format'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ format: format })
-                });
-                
-                if (!formatResponse.ok) {
-                    throw new Error(`HTTP error! status: ${formatResponse.status}`);
-                }
-                const formatResult = await formatResponse.json();
-                
-                if (formatResult.success === false) {
-                    showMessage(formatResult.error || 'Failed to save filename format', 'error');
-                    return;
-                }
-                
-                // Save log max size
-                const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ maxMB: logMaxSize })
-                });
-                
-                if (!logResponse.ok) {
-                    throw new Error(`HTTP error! status: ${logResponse.status}`);
-                }
-                const logResult = await logResponse.json();
-                
-                if (logResult.success === false) {
-                    showMessage(logResult.error || 'Failed to save log max size', 'error');
-                    return;
-                }
-                
-                // Save issue number padding
-                const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ padding: issueNumberPadding })
-                });
-                
-                if (!paddingResponse.ok) {
-                    throw new Error(`HTTP error! status: ${paddingResponse.status}`);
-                }
-                const paddingResult = await paddingResponse.json();
-                
-                if (paddingResult.success === false) {
-                    showMessage(paddingResult.error || 'Failed to save issue number padding', 'error');
-                    return;
-                }
-                
-                // Save database cleanup interval
-                const cleanupResponse = await fetch(apiUrl('/api/settings/database-cleanup-interval-hours'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ hours: dbCleanupInterval })
-                });
-                
-                if (!cleanupResponse.ok) {
-                    throw new Error(`HTTP error! status: ${cleanupResponse.status}`);
-                }
-                const cleanupResult = await cleanupResponse.json();
-                
-                if (cleanupResult.success === false) {
-                    showMessage(cleanupResult.error || 'Failed to save database cleanup interval', 'error');
-                    return;
-                }
 
-                // Save external series metadata settings
-                const metadataResponse = await fetch(apiUrl('/api/settings/external-series-metadata'), {
+            if (emailRateLimit) {
+                const limits = [
+                    [emailRateLimit.maxSendsPerHour, 'Max emails per hour', 10000],
+                    [emailRateLimit.maxSendsPerDay, 'Max emails per day', 100000],
+                    [emailRateLimit.minSecondsBetweenSends, 'Minimum seconds between emails', 86400]
+                ];
+                for (const [value, label, max] of limits) {
+                    if (!(value >= 0 && value <= max)) {
+                        showMessage(`${label} must be a whole number from 0 to ${max}`, 'error');
+                        return;
+                    }
+                }
+            }
+            if (emailMaxAttachmentMb > SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB) {
+                showMessage(`Max email attachment size must be ${SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB} MB or less`, 'error');
+                return;
+            }
+
+            if (errorReportingMaxPerDay < 0 || errorReportingMaxPerDay > SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay) {
+                showMessage(`Maximum issues per day must be between 0 and ${SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay}`, 'error');
+                return;
+            }
+
+            if (errorReportingDedupeHours < 1 || errorReportingDedupeHours > SETTINGS_SERVER_LIMITS.errorReportingDedupeHours) {
+                showMessage(`Recurrence comment interval must be between 1 and ${SETTINGS_SERVER_LIMITS.errorReportingDedupeHours} hours`, 'error');
+                return;
+            }
+
+            // Saved in this order; `saved` runs once the server has accepted the group.
+            const groups = [
+                {
+                    name: 'filename format',
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({
+                    path: '/api/settings/filename-format',
+                    body: { format: format },
+                    // The next rename already uses it, even if a later group fails.
+                    saved: () => {
+                        const currentFormat = document.getElementById('currentFormat');
+                        if (currentFormat) currentFormat.textContent = format;
+                    }
+                },
+                { name: 'log max size', method: 'POST', path: '/api/settings/log-max-bytes', body: { maxMB: logMaxSize } },
+                { name: 'issue number padding', method: 'POST', path: '/api/settings/issue-number-padding', body: { padding: issueNumberPadding } },
+                { name: 'database cleanup interval', method: 'POST', path: '/api/settings/database-cleanup-interval-hours', body: { hours: dbCleanupInterval } },
+                {
+                    name: 'external metadata settings',
+                    method: 'POST',
+                    path: '/api/settings/external-series-metadata',
+                    body: {
                         enabled: enableExternalSeriesMetadata,
                         // null keeps the stored key; '' clears it.
                         comicVineApiKey: comicVineClearApiKey ? '' : (comicVineApiKey || null),
@@ -1408,160 +1451,119 @@
                         mangaDexBaseUrl: mangaDexBaseUrl || 'https://api.mangadex.org',
                         enableAniList: enableAniListMetadata,
                         aniListBaseUrl: aniListBaseUrl || 'https://graphql.anilist.co'
-                    })
-                });
-
-                if (!metadataResponse.ok) {
-                    throw new Error(`HTTP error! status: ${metadataResponse.status}`);
-                }
-
-                const metadataResult = await metadataResponse.json();
-                if (metadataResult.success === false) {
-                    showMessage(metadataResult.error || 'Failed to save external metadata settings', 'error');
-                    return;
-                }
-
-                // Save series image limits
-                const seriesImageResponse = await fetch(apiUrl('/api/settings/series-image-limits'), {
+                    }
+                },
+                {
+                    name: 'series image limits',
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({
+                    path: '/api/settings/series-image-limits',
+                    body: {
                         maxMB: seriesImageMaxMB,
                         maxDownloadMB: seriesImageMaxDownloadMB,
                         maxDimension: seriesImageMaxDimension
-                    })
-                });
-
-                if (!seriesImageResponse.ok) {
-                    let errorMsg = `HTTP error! status: ${seriesImageResponse.status}`;
-                    try {
-                        const errBody = await seriesImageResponse.json();
-                        if (errBody && errBody.error) {
-                            errorMsg = errBody.error;
-                        }
-                    } catch (e) { /* ignore parse errors */ }
-                    showMessage('Failed to save series image limits: ' + errorMsg, 'error');
-                    return;
-                }
-
-                const seriesImageResult = await seriesImageResponse.json();
-                if (seriesImageResult.success === false) {
-                    showMessage(seriesImageResult.error || 'Failed to save series image limits', 'error');
-                    return;
-                }
-
-                const emailSettingsBody = {
-                   smtpHost: smtpHost || null,
-                   smtpPort: smtpPort,
-                   smtpUsername: smtpUsername || null,
-                   smtpPassword: smtpClearPassword ? '' : (smtpPasswordInput ? smtpPasswordInput : null),
-                   smtpUseSsl,
-                   smtpAllowInsecure,
-                   emailFromAddress: emailFromAddress || null,
-                   emailFromName: emailFromName || null,
-                   emailMaxAttachmentMb: emailMaxAttachmentMb
-                };
-                const emailSettingsResponse = await fetch(apiUrl('/api/settings/email'), {
-                   method: 'PUT',
-                   headers: {
-                       'Content-Type': 'application/json',
-                       ...getAuthHeaders()
-                   },
-                   body: JSON.stringify(emailSettingsBody)
-                });
-                if (handleAuthError(emailSettingsResponse)) return;
-                if (!emailSettingsResponse.ok) {
-                   let errorMsg = `HTTP error! status: ${emailSettingsResponse.status}`;
-                   try {
-                       const errBody = await emailSettingsResponse.json();
-                       if (errBody && (errBody.error || errBody.message)) {
-                           errorMsg = errBody.error || errBody.message;
-                       }
-                   } catch (e) { /* ignore parse errors */ }
-                   showMessage('Failed to save email settings: ' + errorMsg, 'error');
-                   return;
-                }
-                emailStatusCache = null;
-
-                const suwayomiEnabledEl = document.getElementById('enableSuwayomiCheckbox');
-                if (suwayomiEnabledEl) {
-                    const suwayomiPasswordInput = document.getElementById('suwayomiPassword').value;
-                    const suwayomiClearPasswordChecked = document.getElementById('suwayomiClearPasswordCheckbox').checked;
-                    const suwayomiBody = {
-                        enabled: suwayomiEnabledEl.checked,
-                        baseUrl: document.getElementById('suwayomiBaseUrl').value.trim() || null,
-                        username: document.getElementById('suwayomiUsername').value.trim() || null,
-                        // null keeps the stored password; '' clears it.
-                        password: suwayomiClearPasswordChecked ? '' : (suwayomiPasswordInput || null)
-                    };
-                    const suwayomiResponse = await fetch(apiUrl('/api/settings/suwayomi'), {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            ...getAuthHeaders()
-                        },
-                        body: JSON.stringify(suwayomiBody)
-                    });
-                    if (handleAuthError(suwayomiResponse)) return;
-                    if (!suwayomiResponse.ok) {
-                        let errorMsg = `HTTP error! status: ${suwayomiResponse.status}`;
-                        try {
-                            const errBody = await suwayomiResponse.json();
-                            if (errBody && (errBody.error || errBody.message)) {
-                                errorMsg = errBody.error || errBody.message;
-                            }
-                        } catch (e) { /* ignore parse errors */ }
-                        showMessage('Failed to save Suwayomi settings: ' + errorMsg, 'error');
-                        return;
                     }
-
-                    suwayomiStatusPromise = null;
-                    await refreshSuwayomiAvailability();
+                },
+                {
+                    name: 'email settings',
+                    method: 'PUT',
+                    path: '/api/settings/email',
+                    body: {
+                        smtpHost: smtpHost || null,
+                        smtpPort: smtpPort,
+                        smtpUsername: smtpUsername || null,
+                        smtpPassword: smtpClearPassword ? '' : (smtpPasswordInput ? smtpPasswordInput : null),
+                        smtpUseSsl,
+                        smtpAllowInsecure,
+                        emailFromAddress: emailFromAddress || null,
+                        emailFromName: emailFromName || null,
+                        emailMaxAttachmentMb: emailMaxAttachmentMb
+                    },
+                    saved: () => {
+                        emailStatusCache = null;
+                    }
                 }
+            ];
 
-                const errorReportingEnabledEl = document.getElementById('errorReportingEnabledCheckbox');
-                if (errorReportingEnabledEl) {
-                    const errorReportingTokenInput = document.getElementById('errorReportingToken').value;
-                    const errorReportingClearTokenChecked = document.getElementById('errorReportingClearTokenCheckbox').checked;
-                    const errorReportingBody = {
+            if (emailRateLimit) {
+                groups.push({
+                    name: 'email rate limit',
+                    method: 'PUT',
+                    path: '/api/settings/email-rate-limit',
+                    body: emailRateLimit
+                });
+            }
+
+            const suwayomiEnabledEl = document.getElementById('enableSuwayomiCheckbox');
+            if (suwayomiEnabledEl) {
+                const suwayomiPasswordInput = document.getElementById('suwayomiPassword').value;
+                const suwayomiClearPasswordChecked = document.getElementById('suwayomiClearPasswordCheckbox').checked;
+                const suwayomiDownloadsDirectoryEl = document.getElementById('suwayomiDownloadsDirectory');
+                const suwayomiImportDirectoryEl = document.getElementById('suwayomiImportDirectory');
+                const suwayomiBody = {
+                    enabled: suwayomiEnabledEl.checked,
+                    baseUrl: document.getElementById('suwayomiBaseUrl').value.trim() || null,
+                    username: document.getElementById('suwayomiUsername').value.trim() || null,
+                    // null keeps the stored password; '' clears it.
+                    password: suwayomiClearPasswordChecked ? '' : (suwayomiPasswordInput || null),
+                    // Import folders: '' clears (the downloads folder turns importing off).
+                    downloadsDirectory: suwayomiDownloadsDirectoryEl ? suwayomiDownloadsDirectoryEl.value.trim() : null,
+                    importDirectory: suwayomiImportDirectoryEl ? suwayomiImportDirectoryEl.value.trim() : null
+                };
+                groups.push({
+                    name: 'Suwayomi settings',
+                    method: 'PUT',
+                    path: '/api/settings/suwayomi',
+                    body: suwayomiBody,
+                    saved: async () => {
+                        suwayomiStatusPromise = null;
+                        await refreshSuwayomiAvailability();
+                    }
+                });
+            }
+
+            const errorReportingEnabledEl = document.getElementById('errorReportingEnabledCheckbox');
+            if (errorReportingEnabledEl) {
+                const errorReportingTokenInput = document.getElementById('errorReportingToken').value;
+                const errorReportingClearTokenChecked = document.getElementById('errorReportingClearTokenCheckbox').checked;
+                groups.push({
+                    name: 'error reporting settings',
+                    method: 'PUT',
+                    path: '/api/settings/error-reporting',
+                    body: {
                         enabled: errorReportingEnabledEl.checked,
                         // null keeps the stored token; '' clears it.
                         gitHubToken: errorReportingClearTokenChecked ? '' : (errorReportingTokenInput || null),
                         assignee: document.getElementById('errorReportingAssignee').value.trim() || null,
-                        maxIssuesPerDay: parseInt(document.getElementById('errorReportingMaxPerDay').value, 10) || 0,
-                        dedupeWindowHours: parseInt(document.getElementById('errorReportingDedupeHours').value, 10) || 24,
+                        maxIssuesPerDay: errorReportingMaxPerDay,
+                        dedupeWindowHours: errorReportingDedupeHours,
                         commentOnRecurrence: document.getElementById('errorReportingCommentCheckbox').checked
-                    };
-                    const errorReportingResponse = await fetch(apiUrl('/api/settings/error-reporting'), {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            ...getAuthHeaders()
-                        },
-                        body: JSON.stringify(errorReportingBody)
-                    });
-                    if (handleAuthError(errorReportingResponse)) return;
-                    if (!errorReportingResponse.ok) {
-                        let errorMsg = `HTTP error! status: ${errorReportingResponse.status}`;
-                        try {
-                            const errBody = await errorReportingResponse.json();
-                            if (errBody && (errBody.error || errBody.message)) {
-                                errorMsg = errBody.error || errBody.message;
-                            }
-                        } catch (e) { /* ignore parse errors */ }
-                        showMessage('Failed to save error reporting settings: ' + errorMsg, 'error');
-                        return;
                     }
-                }
-
-                showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
-                loadSettings();
-            } catch (error) {
-                showMessage('Failed to save settings: ' + error.message, 'error');
+                });
             }
+
+            const savedGroups = [];
+            for (const group of groups) {
+                try {
+                    await saveSettingsGroup(group.method, group.path, group.body);
+                } catch (error) {
+                    if (error?.authHandled) return;
+                    // Nothing is rolled back and the form keeps the edits for a
+                    // retry, so say which groups did take effect.
+                    const reason = String(error?.message || '').trim();
+                    let message = reason ? `Failed to save ${group.name}: ${reason}` : `Failed to save ${group.name}`;
+                    if (!/[.!?]$/.test(message)) message += '.';
+                    message += savedGroups.length
+                        ? ` Only these settings were saved: ${savedGroups.join(', ')}.`
+                        : ' No other settings were saved.';
+                    showMessage(message, 'error');
+                    return;
+                }
+                savedGroups.push(group.name);
+                if (group.saved) await group.saved();
+            }
+
+            showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
+            loadSettings();
         }
         
         async function sendErrorReportingTest() {
@@ -1651,7 +1653,7 @@
             });
         }
 
-        /** Fetch a /api/backups endpoint; throws an Error carrying `status` on failure. */
+        /** Fetch a /api/backups endpoint; throws an Error carrying `status` (and the response's `correlationId`) on failure. */
         async function fetchBackupsApi(path, options = {}) {
             const response = await fetch(apiUrl(path), {
                 credentials: 'include',
@@ -1670,9 +1672,7 @@
                     const body = await response.json();
                     if (body && (body.error || body.message)) message = body.error || body.message;
                 } catch (_) { /* non-JSON error body */ }
-                const error = new Error(message);
-                error.status = response.status;
-                throw error;
+                throw apiResponseError(response, message);
             }
             return response;
         }
@@ -1756,7 +1756,7 @@
                 showMessage(`Backup ${backup.name} created.`, 'success');
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to create backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to create backup: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 if (button) button.disabled = false;
@@ -1782,7 +1782,7 @@
                 setTimeout(() => URL.revokeObjectURL(url), 60000);
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to download backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to download backup: ' + error.message, 'error', { reference: error });
                 }
             }
         }
@@ -1794,7 +1794,7 @@
                 showMessage(`Backup ${name} deleted.`, 'success');
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to delete backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to delete backup: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();
@@ -1822,7 +1822,7 @@
                 reportRestoreStaged(await response.json());
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to restore backup: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to restore backup: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();
@@ -1856,7 +1856,7 @@
                 reportRestoreStaged(await response.json());
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to restore from file: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to restore from file: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();
@@ -1869,7 +1869,7 @@
                 showMessage('Pending restore cancelled. The current database will be kept.', 'success');
             } catch (error) {
                 if (!handleBackupsForbidden(error)) {
-                    showMessage('Failed to cancel the pending restore: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to cancel the pending restore: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 loadBackups();

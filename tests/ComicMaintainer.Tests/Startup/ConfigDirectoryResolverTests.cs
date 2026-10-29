@@ -30,6 +30,21 @@ public sealed class ConfigDirectoryResolverTests : IDisposable
     }
 
     [Fact]
+    public void ConfigDirConfigurationValueOverridesTheProcessEnvironment()
+    {
+        _environment.Set("CONFIG_DIR", "/env/config");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["CONFIG_DIR"] = "/test/config",
+                ["AppSettings:ConfigDirectory"] = "/settings/config",
+            })
+            .Build();
+
+        Assert.Equal(Path.GetFullPath("/test/config"), Resolve(configuration));
+    }
+
+    [Fact]
     public void WithoutConfigDir_UsesTheConfiguredDirectory()
     {
         Assert.Equal(Path.GetFullPath("/settings/config"), Resolve(Configuration("/settings/config")));

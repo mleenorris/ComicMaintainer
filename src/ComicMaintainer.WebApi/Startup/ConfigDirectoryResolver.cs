@@ -20,7 +20,8 @@ internal static class ConfigDirectoryResolver
 
     public static string Resolve(IConfiguration configuration)
     {
-        var fromEnvironment = Environment.GetEnvironmentVariable(EnvironmentVariable);
+        var fromEnvironment = configuration[EnvironmentVariable]
+            ?? Environment.GetEnvironmentVariable(EnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(fromEnvironment))
             return Path.GetFullPath(fromEnvironment);
 

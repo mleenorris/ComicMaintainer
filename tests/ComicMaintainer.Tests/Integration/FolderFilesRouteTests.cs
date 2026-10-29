@@ -131,6 +131,7 @@ public sealed class FolderFilesRouteTests : IDisposable
             ["AppSettings:WatchedDirectory"] = WatchedDirectory,
             ["AppSettings:DuplicateDirectory"] = DuplicateDirectory,
             ["AppSettings:ConfigDirectory"] = ConfigDirectory,
+            ["CONFIG_DIR"] = ConfigDirectory,
         };
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>

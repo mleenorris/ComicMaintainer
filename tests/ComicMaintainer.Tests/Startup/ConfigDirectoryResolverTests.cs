@@ -26,19 +26,19 @@ public sealed class ConfigDirectoryResolverTests : IDisposable
     {
         _environment.Set("CONFIG_DIR", "/env/config");
 
-        Assert.Equal("/env/config", Resolve(Configuration("/settings/config")));
+        Assert.Equal(Path.GetFullPath("/env/config"), Resolve(Configuration("/settings/config")));
     }
 
     [Fact]
     public void WithoutConfigDir_UsesTheConfiguredDirectory()
     {
-        Assert.Equal("/settings/config", Resolve(Configuration("/settings/config")));
+        Assert.Equal(Path.GetFullPath("/settings/config"), Resolve(Configuration("/settings/config")));
     }
 
     [Fact]
     public void WithNeither_DefaultsToSlashConfig()
     {
-        Assert.Equal("/Config", Resolve(Configuration(null)));
+        Assert.Equal(Path.GetFullPath("/Config"), Resolve(Configuration(null)));
     }
 
     [Theory]
@@ -61,8 +61,8 @@ public sealed class ConfigDirectoryResolverTests : IDisposable
     {
         _environment.Set("CONFIG_DIR", blank);
 
-        Assert.Equal("/settings/config", Resolve(Configuration("/settings/config")));
-        Assert.Equal("/Config", Resolve(Configuration(blank)));
+        Assert.Equal(Path.GetFullPath("/settings/config"), Resolve(Configuration("/settings/config")));
+        Assert.Equal(Path.GetFullPath("/Config"), Resolve(Configuration(blank)));
     }
 
     private static IConfiguration Configuration(string? configDirectory) =>

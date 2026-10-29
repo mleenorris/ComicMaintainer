@@ -269,13 +269,16 @@
         // meanwhile — so the selection stops counting them and no batch action
         // is sent a path that is gone. Issues arrive in pages, and a path
         // missing from a partial list may be on a page still to come, so this
-        // waits for the last one. A list dropped from the cache meanwhile
-        // (e.g. by a filter change) has been superseded and prunes nothing;
-        // one remapped to a new series id is still cached and prunes as usual.
+        // waits for the last one. A list superseded meanwhile prunes nothing:
+        // one fetched with another filter than the active one, which may only
+        // hide an issue that is still there (setHeaderFilter() switches the
+        // filter at once, but drops the cached list only after saving the new
+        // filter), and one dropped from the cache (e.g. by that filter change).
+        // One remapped to a new series id is still cached and prunes as usual.
         // Returns whether the selection changed.
         function pruneSeriesIssueSelection(entry) {
             if (!entry.unconfirmedPaths || !entry.allLoaded || entry.error) return false;
-            if (![...seriesIssuesCache.values()].includes(entry)) {
+            if (entry.filter !== filterMode || ![...seriesIssuesCache.values()].includes(entry)) {
                 entry.unconfirmedPaths = null;
                 return false;
             }

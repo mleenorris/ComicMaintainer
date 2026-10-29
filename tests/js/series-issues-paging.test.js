@@ -327,6 +327,48 @@ test('a filtered reload landing after a filter switch unselects nothing', async 
     assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });
 
+// A filter switch takes effect at once but drops the cached list only once it
+// has been saved, so a reload under the old filter that lands in between is
+// still cached and must not unselect an issue that filter merely hides now.
+test('a filtered reload landing while a filter switch is being saved unselects nothing', async () => {
+    const series = seriesCard({ issue_count: 2 });
+    const unmarkedReload = deferred();
+    let unmarkedAnswer = () => issuesBody(series, [issue(1), issue(2)], { issue_count: 2 });
+    const page = await bootSeries({
+        series,
+        routes: {
+            [`GET ${ISSUES}`]: call => (call.query.filter === 'unmarked'
+                ? unmarkedAnswer()
+                : issuesBody(series, [issue(1), issue(2)], { issue_count: 2 }))
+        }
+    });
+    page.run("setHeaderFilter('unmarked')");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+
+    unmarkedAnswer = () => unmarkedReload.promise;
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+    // #2 is marked meanwhile; the user switches to All, which still lists it,
+    // and the reload lands before that choice has been saved.
+    const save = deferred();
+    page.route('PUT /api/preferences', () => save.promise);
+    page.run("setHeaderFilter('all')");
+    unmarkedReload.resolve(issuesBody(series, [issue(1)], { issue_count: 1 }));
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+
+    save.resolve({});
+    await page.settle();
+    assert.equal(callsTo(page, ISSUES).at(-1).query.filter, undefined);
+    assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz']);
+    assert.deepEqual(page.$$('.series-issue-card--selected').map(card => card.dataset.filePath), ['/comics/Saga/Saga 002.cbz']);
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+});
+
 test('a deep link to a series outside the loaded library renders from its issues response', async () => {
     const gate = deferred();
     const lost = seriesCard({ id: 'lost', title: 'Lost Series', canonical_title: 'Lost Series', aliases: ['LS'] });

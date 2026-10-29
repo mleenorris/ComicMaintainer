@@ -30,4 +30,7 @@ public class UserPreferences
 
     /// <summary>Active library sort (e.g. <c>name</c>, <c>date</c>, <c>size</c>).</summary>
     public string? SortMode { get; set; }
+
+    /// <summary>Direction of the library sort, either <c>asc</c> or <c>desc</c>.</summary>
+    public string? SortDirection { get; set; }
 }

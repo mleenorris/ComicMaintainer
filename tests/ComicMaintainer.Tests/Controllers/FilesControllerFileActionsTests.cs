@@ -338,6 +338,33 @@ public sealed class FilesControllerFileActionsTests
         AssertStatus(result, 500, "Error updating tags");
     }
 
+    // A body without "files" binds to an empty list. The {"file": ..., "tags": ...}
+    // body docs/API.md used to show answered 200 having updated nothing.
+    [Fact]
+    public async Task UpdateTags_EmptyFileList_ReturnsBadRequestAndUpdatesNothing()
+    {
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Metadata = new ComicMetadata { Series = "Saga" }
+        });
+
+        AssertStatus(result, 400, "No files provided");
+        _processor.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateTags_NullFileList_ReturnsBadRequestAndUpdatesNothing()
+    {
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = null!,
+            Metadata = new ComicMetadata { Series = "Saga" }
+        });
+
+        AssertStatus(result, 400, "No files provided");
+        _processor.VerifyNoOtherCalls();
+    }
+
     // ---------------------------------------------------------------- ScanUnmarked
 
     [Fact]

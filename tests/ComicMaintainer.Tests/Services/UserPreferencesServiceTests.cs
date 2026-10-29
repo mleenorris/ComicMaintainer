@@ -38,6 +38,7 @@ public class UserPreferencesServiceTests
         Assert.Null(prefs.LibraryViewMode);
         Assert.Null(prefs.FilterMode);
         Assert.Null(prefs.SortMode);
+        Assert.Null(prefs.SortDirection);
     }
 
     [Fact]
@@ -51,7 +52,8 @@ public class UserPreferencesServiceTests
             ReadingMode = "webcomic",
             LibraryViewMode = "series",
             FilterMode = "unmarked",
-            SortMode = "date"
+            SortMode = "date",
+            SortDirection = "desc"
         });
 
         var retrieved = await _service.GetPreferencesAsync("user1");
@@ -62,6 +64,7 @@ public class UserPreferencesServiceTests
         Assert.Equal("series", retrieved.LibraryViewMode);
         Assert.Equal("unmarked", retrieved.FilterMode);
         Assert.Equal("date", retrieved.SortMode);
+        Assert.Equal("desc", retrieved.SortDirection);
     }
 
     [Fact]
@@ -84,6 +87,21 @@ public class UserPreferencesServiceTests
         var retrieved = await _service.GetPreferencesAsync("user1");
         Assert.Equal("dark", retrieved.Theme);
         Assert.Equal(50, retrieved.PerPage);
+    }
+
+    [Fact]
+    public async Task SavePreferencesAsync_SortDirection_IsReplacedOnlyWhenSupplied()
+    {
+        await _service.SavePreferencesAsync(new UserPreferences { UserId = "user1", SortMode = "date", SortDirection = "desc" });
+
+        // A save that leaves the direction out keeps the saved one...
+        await _service.SavePreferencesAsync(new UserPreferences { UserId = "user1", FilterMode = "unread" });
+        Assert.Equal("desc", (await _service.GetPreferencesAsync("user1")).SortDirection);
+
+        // ...and one that supplies it replaces it.
+        var result = await _service.SavePreferencesAsync(new UserPreferences { UserId = "user1", SortDirection = "asc" });
+        Assert.Equal("asc", result.SortDirection);
+        Assert.Equal("date", result.SortMode);
     }
 
     [Fact]

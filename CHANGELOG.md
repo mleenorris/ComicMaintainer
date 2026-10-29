@@ -427,6 +427,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **The library keeps its sort direction and filter after a reload.** Only the sort field was
+  saved, so a library sorted "Date ↓" came back as "Date ↑" after a reload or on another
+  device; the direction is now saved too (`sortDirection`, `asc` or `desc`, in
+  `/api/preferences`). A saved filter that was the only non-default preference was shown in the
+  header but not applied, so every series was listed until the filter was picked again. It now
+  applies to the library and to a series page opened directly, such as when coming back from
+  the reader.
+- **Changing the filter on a phone keeps the open series on screen.** On screens up to 768 px
+  wide, every filter change still switched to the Files view, which no longer exists, so
+  screen readers announced "Files view selected." each time. On a series page, choosing a
+  filter or tapping **Clear filter** also closed the series, put the library list in its place
+  while the address still pointed at the series, and saved the library view mode again. Phones
+  now behave like larger screens: the series stays open, its issues are reloaded with the new
+  filter, and nothing is announced.
 - **Process ▸ Clear Processed Status keeps the series page open and updates its badges.** It
   replaced the series page or library grid with the retired folder list (not even refreshed),
   leaving the address unchanged, and never reloaded the series' status badges. The open series
@@ -632,6 +646,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A failed database reset reports the HTTP status when the error is not JSON.** A reverse
   proxy's error page or an empty body (a 502 or 504, say) showed a JSON parse error such as
   "Unexpected token '<'" instead.
+
+- **`POST /api/files/tags` rejects a request without files, and docs/API.md documents the
+  real tags, settings and watcher endpoints.** The docs described a `GET /api/files/tags?file=`
+  route that does not exist and a `{"file", "tags"}` body that the endpoint answered with `200`
+  while updating nothing. A body without `files` now gets `400` (`No files provided`), and the
+  docs cover `GET`/`PUT /api/files/{encodedFilePath}/tags` (base64url path) and
+  `POST /api/files/tags` with `{"files", "metadata"}`. The settings section drops the `default`
+  field that issue-number-padding never returned and documents the `PUT` routes and their
+  `{"message"}` responses; the watcher section replaces the non-existent `/api/watcher/enabled`
+  routes with `GET /api/watcher`.
 
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
@@ -3436,6 +3460,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.393] - 2026-10-29
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.394] - 2026-10-29
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.395] - 2026-10-29
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.396] - 2026-10-29
 
 ### Changed
 - Automatic version bump on merge to master

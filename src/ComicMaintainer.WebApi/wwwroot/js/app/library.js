@@ -170,6 +170,7 @@
                     if (seriesLoadController) {
                         seriesLoadController.abort();
                     }
+                    return new Promise(resolve => seriesReloadWaiters.push(resolve));
                 }
                 return;
             }
@@ -269,9 +270,12 @@
                     // flight. Re-run with the latest selection so the displayed
                     // series match the current filter without a page refresh.
                     seriesReloadPending = false;
+                    const waiters = seriesReloadWaiters;
+                    seriesReloadWaiters = [];
                     const reloadKeepCount = seriesReloadKeepCount;
                     seriesReloadKeepCount = 0;
-                    loadSeriesLibrary({ refresh: false, keepLoaded: reloadKeepCount > 0, keepCount: reloadKeepCount });
+                    const reload = loadSeriesLibrary({ refresh: false, keepLoaded: reloadKeepCount > 0, keepCount: reloadKeepCount });
+                    waiters.forEach(resolve => resolve(reload));
                 }
             }
         }
@@ -458,6 +462,8 @@
         }
         
         let sortMode = 'name'; // 'name', 'date', 'size'
+        // Mirrors the API's accepted sort directions (ValidSortDirections).
+        const VALID_SORT_DIRECTIONS = ['asc', 'desc'];
         let sortDirection = 'asc'; // 'asc', 'desc'
 
         // Syncs the sort dropdown label and active item with the current
@@ -506,12 +512,6 @@
             // Save filter mode to preferences
             await setPreferences({ filterMode: mode });
 
-            // Dashboard cards also use setHeaderFilter(), so switch back to the files view on mobile
-            // to immediately show the filtered list after a user taps a library health card.
-            if (isMobileLibraryViewport()) {
-                setMobileLibraryView('files');
-            }
-
             // If a series detail is open, stay inside the series and re-fetch
             // its issues with the new filter (the filter applies to the issue
             // list too via the /api/files/series/{id}/issues endpoint). The
@@ -552,7 +552,7 @@
             document.getElementById('headerSortMenu').classList.remove('show');
 
             // Persist the chosen sort so it survives a refresh / other devices
-            setPreferences({ sortMode: sortMode });
+            setPreferences({ sortMode: sortMode, sortDirection: sortDirection });
 
             // If a series detail is open, keep the user inside it. Sorting
             // does not apply to issues within a series (issues are ordered by

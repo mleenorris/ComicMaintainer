@@ -17,11 +17,13 @@ public class PreferencesController : ControllerBase
     private const string DefaultReadingMode = "manga";
     private const string DefaultFilterMode = "all";
     private const string DefaultSortMode = "name";
+    private const string DefaultSortDirection = "asc";
 
     private static readonly string[] ValidThemes = { "light", "dark" };
     private static readonly string[] ValidReadingModes = { "manga", "webcomic" };
     private static readonly string[] ValidLibraryViewModes = { "files", "series" };
     private static readonly string[] ValidSortModes = { "name", "date", "size" };
+    private static readonly string[] ValidSortDirections = { "asc", "desc" };
 
     // Mirrors the filter options offered by the library header dropdown.
     private static readonly string[] ValidFilterModes =
@@ -111,6 +113,11 @@ public class PreferencesController : ControllerBase
             return BadRequest(new { error = $"SortMode must be one of: {string.Join(", ", ValidSortModes)}." });
         }
 
+        if (!TryNormalize(preferences.SortDirection, ValidSortDirections, out var sortDirection))
+        {
+            return BadRequest(new { error = $"SortDirection must be one of: {string.Join(", ", ValidSortDirections)}." });
+        }
+
         if (preferences.PerPage is not null && (preferences.PerPage < 1 || preferences.PerPage > 1000))
         {
             return BadRequest(new { error = "PerPage must be between 1 and 1000." });
@@ -124,7 +131,8 @@ public class PreferencesController : ControllerBase
             ReadingMode = readingMode,
             LibraryViewMode = libraryViewMode,
             FilterMode = filterMode,
-            SortMode = sortMode
+            SortMode = sortMode,
+            SortDirection = sortDirection
         }, cancellationToken);
 
         _logger.LogDebug("Preferences persisted for the current user.");
@@ -159,7 +167,8 @@ public class PreferencesController : ControllerBase
             readingMode = stored.ReadingMode ?? DefaultReadingMode,
             libraryViewMode = stored.LibraryViewMode ?? defaultView,
             filterMode = stored.FilterMode ?? DefaultFilterMode,
-            sortMode = stored.SortMode ?? DefaultSortMode
+            sortMode = stored.SortMode ?? DefaultSortMode,
+            sortDirection = stored.SortDirection ?? DefaultSortDirection
         };
     }
 
@@ -196,5 +205,6 @@ public class PreferencesController : ControllerBase
         public string? LibraryViewMode { get; set; } // "files" or "series"
         public string? FilterMode { get; set; }
         public string? SortMode { get; set; }
+        public string? SortDirection { get; set; } // "asc" or "desc"
     }
 }

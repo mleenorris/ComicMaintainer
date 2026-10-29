@@ -25,8 +25,9 @@ PROCESSING_TIMEOUT="${PROCESSING_TIMEOUT:-60}"
 WORKDIR="$(mktemp -d)"
 WATCH_DIR="${WORKDIR}/watch"
 DUP_DIR="${WORKDIR}/duplicates"
-CONFIG_DIR="${WORKDIR}/config"
-mkdir -p "${WATCH_DIR}" "${DUP_DIR}" "${CONFIG_DIR}"
+HOST_CONFIG_DIR="${WORKDIR}/config"
+APP_CONFIG_DIR="/custom-config"
+mkdir -p "${WATCH_DIR}" "${DUP_DIR}" "${HOST_CONFIG_DIR}"
 
 log()  { echo "[smoke] $*"; }
 fail() { echo "[smoke][FAIL] $*" >&2; dump_logs; cleanup; exit 1; }
@@ -39,6 +40,13 @@ dump_logs() {
 
 cleanup() {
     docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+    docker run --rm \
+        --entrypoint /bin/sh \
+        -v "${WATCH_DIR}:/watched_dir" \
+        -v "${DUP_DIR}:/duplicates" \
+        -v "${HOST_CONFIG_DIR}:${APP_CONFIG_DIR}" \
+        "${IMAGE}" \
+        -c "chown -R '$(id -u):$(id -g)' /watched_dir /duplicates '${APP_CONFIG_DIR}'" >/dev/null 2>&1 || true
     rm -rf "${WORKDIR}"
 }
 trap cleanup EXIT
@@ -62,12 +70,20 @@ PY
 # Free the host port if a previous run left something behind
 docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 
+# Exercise a root-owned, private custom volume with the application running as an unprivileged user.
+docker run --rm \
+    --entrypoint /bin/sh \
+    -v "${HOST_CONFIG_DIR}:${APP_CONFIG_DIR}" \
+    "${IMAGE}" \
+    -c "chown root:root '${APP_CONFIG_DIR}' && chmod 700 '${APP_CONFIG_DIR}' && touch '${APP_CONFIG_DIR}/.permission-test' && chmod 600 '${APP_CONFIG_DIR}/.permission-test'"
+
 log "Starting container ${CONTAINER_NAME} from ${IMAGE} on port ${HOST_PORT}"
 docker run -d \
     --name "${CONTAINER_NAME}" \
     -p "${HOST_PORT}:5000" \
-    -e PUID=0 \
-    -e PGID=0 \
+    -e PUID=10001 \
+    -e PGID=10001 \
+    -e CONFIG_DIR="${APP_CONFIG_DIR}" \
     -e JWT_SECRET="smoke-test-secret-key-must-be-at-least-32-characters-long!!" \
     -e ADMIN_USERNAME=admin \
     -e ADMIN_EMAIL=admin@smoke.local \
@@ -76,7 +92,7 @@ docker run -d \
     -e WATCHER_ENABLE_NORMALIZE=false \
     -v "${WATCH_DIR}:/watched_dir" \
     -v "${DUP_DIR}:/duplicates" \
-    -v "${CONFIG_DIR}:/Config" \
+    -v "${HOST_CONFIG_DIR}:${APP_CONFIG_DIR}" \
     "${IMAGE}" >/dev/null
 
 # --- Wait for /api/version ------------------------------------------------
@@ -100,6 +116,14 @@ done
 # Validate response shape
 echo "${body}" | grep -q '".NET"' || fail "/api/version did not return platform=.NET"
 echo "${body}" | grep -q '"version"' || fail "/api/version missing version field"
+
+# Verify the app wrote its database to the custom directory and kept private modes private.
+docker exec --user 10001 "${CONTAINER_NAME}" test -s "${APP_CONFIG_DIR}/comicmaintainer.db" \
+    || fail "Database was not created in custom CONFIG_DIR"
+directory_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' "${APP_CONFIG_DIR}")"
+secret_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' "${APP_CONFIG_DIR}/.permission-test")"
+[ "${directory_mode}" = "700" ] || fail "Custom CONFIG_DIR mode changed to ${directory_mode}, expected 700"
+[ "${secret_mode}" = "600" ] || fail "Private config file mode changed to ${secret_mode}, expected 600"
 
 # --- Verify the watcher sees / processes the fixture file -----------------
 log "Waiting up to ${PROCESSING_TIMEOUT}s for the watcher to react to the fixture..."

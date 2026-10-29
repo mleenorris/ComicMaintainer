@@ -42,6 +42,19 @@ public sealed class ConfigDirectoryResolverTests : IDisposable
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RelativePaths_AreResolvedToAbsolutePaths(bool fromEnvironment)
+    {
+        var relative = Path.Join("relative", "config");
+        _environment.Set("CONFIG_DIR", fromEnvironment ? relative : "");
+
+        Assert.Equal(
+            Path.GetFullPath(relative),
+            Resolve(Configuration(fromEnvironment ? null : relative)));
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("   ")]
     public void BlankValues_AreIgnored(string blank)

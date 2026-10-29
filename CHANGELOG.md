@@ -118,18 +118,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AppSettings:ConfigDirectory`, then `/Config`) and used for all of them, and the container
   makes a custom `CONFIG_DIR` writable by `PUID`. If the directory cannot be created, everything
   falls back to one temporary directory and a warning says so.
-  **Upgrade note:** move any state left in the old place before upgrading, or the app starts
-  with an empty database and asks for setup again:
-  - If `CONFIG_DIR` is not `/Config`, move `comicmaintainer.db` (with any `-wal`/`-shm` files
-    next to it) and `DataProtection-Keys` from `/Config` into it. In Docker they are inside the
-    container: stop it, copy them out with
-    `docker cp <container>:/Config/comicmaintainer.db <config volume>/` (likewise for the
-    others), then recreate it.
-  - Without `CONFIG_DIR`, `AppSettings:ConfigDirectory` now moves the logs and
-    `user-settings.json` too: move `user-settings.json` from `/Config` into it. The Docker image
-    sets `CONFIG_DIR=/Config`, which wins over `AppSettings__ConfigDirectory`. If that variable
-    is all you set, also set `CONFIG_DIR` to the same directory, then move `user-settings.json`
-    and `backups` there from `/Config`.
+  **Upgrade note:** stop the app before upgrading and preserve its existing database and
+  `DataProtection-Keys` directory. The old database/key location is the previous effective
+  `AppSettings:ConfigDirectory` value (from `AppSettings__ConfigDirectory` or `appsettings.json`),
+  not necessarily `/Config`. Copy `comicmaintainer.db` and any SQLite `-wal`, `-shm` or
+  `-journal` sidecar files together, along with `DataProtection-Keys`, into the new `CONFIG_DIR`.
+  If the previous effective `AppSettings:ConfigDirectory` already equals `CONFIG_DIR`, no
+  database/key relocation is needed. Keep the originals until startup confirms the existing
+  accounts and history are present. For Docker, copy the state out of the old container before
+  removing it: its writable layer may contain the only copy. For example, while the old container
+  is stopped, use `docker cp <container>:<old-config-dir>/comicmaintainer.db <host-config-dir>/`
+  and also copy any sidecars and `<old-config-dir>/DataProtection-Keys`.
+  Logs, settings and backups previously followed `CONFIG_DIR` (default `/Config`); if that
+  previous directory differs from the new resolved directory, preserve `user-settings.json` and
+  `backups` from it there as well.
 - **Admin groups set in `AUTHELIA_ADMIN_GROUPS` now restrict administration.** The permission
   check for administration read the Authelia settings without that variable, so when the admin
   groups were set only there (the documented way) every signed-in user who was not ReadOnly,

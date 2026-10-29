@@ -59,7 +59,8 @@ fi
 # Ensure directories exist and have correct permissions
 mkdir -p /watched_dir /duplicates /Config
 chown -R "$PUID:$PGID" /app /Config /watched_dir /duplicates 2>/dev/null || true
-chmod -R 755 /watched_dir /duplicates /Config 2>/dev/null || true
+chmod -R 755 /watched_dir /duplicates 2>/dev/null || true
+chmod -R u+rwX /Config 2>/dev/null || true
 
 # CONFIG_DIR holds the database, DataProtection keys, logs and settings, so a custom one must be
 # writable by PUID too. (/Config is prepared above either way: it is the default temp file location.)
@@ -68,7 +69,7 @@ if [ "$CONFIG_DIR" != "/Config" ]; then
     # Best effort: root may be refused (e.g. NFS root_squash); the app then creates it as PUID.
     mkdir -p "$CONFIG_DIR" || echo "Warning: could not create $CONFIG_DIR as root; leaving it to $USER_NAME"
     chown -R "$PUID:$PGID" "$CONFIG_DIR" 2>/dev/null || true
-    chmod -R 755 "$CONFIG_DIR" 2>/dev/null || true
+    chmod -R u+rwX "$CONFIG_DIR" 2>/dev/null || true
 fi
 
 # Switch to the specified user and run the application

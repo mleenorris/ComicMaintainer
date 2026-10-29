@@ -45,16 +45,7 @@ public sealed class ConfigDirectoryStartupTests : IDisposable
     {
         _environment.Dispose();
         SqliteConnection.ClearAllPools();
-        try
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
+        Directory.Delete(_root, recursive: true);
     }
 
     [Fact]
@@ -91,15 +82,22 @@ public sealed class ConfigDirectoryStartupTests : IDisposable
         var readOnly = Path.Join(_root, "read-only");
         Directory.CreateDirectory(readOnly, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         var probe = Path.Join(readOnly, "probe");
+        var canCreateProbe = false;
         try
         {
             Directory.CreateDirectory(probe);
-            // Root ignores directory permissions, so the fallback can only be exercised as another user.
-            Directory.Delete(probe);
-            return;
+            canCreateProbe = true;
         }
         catch (UnauthorizedAccessException)
         {
+            canCreateProbe = false;
+        }
+
+        // Root ignores directory permissions, so the fallback can only be exercised as another user.
+        if (canCreateProbe)
+        {
+            Directory.Delete(probe);
+            return;
         }
 
         var requested = Path.Join(readOnly, "config");
@@ -123,18 +121,26 @@ public sealed class ConfigDirectoryStartupTests : IDisposable
 
     private WebApplicationFactory<Program> CreateFactory(ILoggerProvider? logs = null)
     {
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new ConfigDirectoryWebApplicationFactory(_root, ConfiguredDirectory, logs);
+    }
+
+    private sealed class ConfigDirectoryWebApplicationFactory(
+        string root,
+        string configuredDirectory,
+        ILoggerProvider? logs) : WebApplicationFactory<Program>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
-            builder.UseSetting("AppSettings:WatchedDirectory", Path.Join(_root, "watched"));
-            builder.UseSetting("AppSettings:DuplicateDirectory", Path.Join(_root, "duplicates"));
-            builder.UseSetting("AppSettings:ConfigDirectory", ConfiguredDirectory);
+            builder.UseSetting("AppSettings:WatchedDirectory", Path.Join(root, "watched"));
+            builder.UseSetting("AppSettings:DuplicateDirectory", Path.Join(root, "duplicates"));
+            builder.UseSetting("AppSettings:ConfigDirectory", configuredDirectory);
             if (logs is not null)
             {
                 builder.ConfigureTestServices(services => services.AddSingleton<ILoggerFactory>(
                     _ => new LoggerFactory([logs], new LoggerFilterOptions { MinLevel = LogLevel.Information })));
             }
-        });
+        }
     }
 
     /// <summary>

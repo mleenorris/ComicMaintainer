@@ -20,9 +20,10 @@ internal static class ConfigDirectoryResolver
     {
         var fromEnvironment = Environment.GetEnvironmentVariable(EnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(fromEnvironment))
-            return fromEnvironment;
+            return Path.GetFullPath(fromEnvironment);
 
         var fromConfiguration = configuration[ConfigurationKey];
-        return string.IsNullOrWhiteSpace(fromConfiguration) ? DefaultDirectory : fromConfiguration;
+        return Path.GetFullPath(
+            string.IsNullOrWhiteSpace(fromConfiguration) ? DefaultDirectory : fromConfiguration);
     }
 }

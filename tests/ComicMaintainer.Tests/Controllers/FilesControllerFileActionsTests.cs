@@ -4,7 +4,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 
@@ -25,6 +25,7 @@ public sealed class FilesControllerFileActionsTests
     private readonly Mock<IProcessingHistoryService> _history = new();
     private readonly Mock<ISeriesLibraryService> _seriesLibrary = new();
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
+    private readonly Mock<ILogger<FilesController>> _logger = new();
     private readonly FilesController _controller;
 
     public FilesControllerFileActionsTests()
@@ -35,7 +36,7 @@ public sealed class FilesControllerFileActionsTests
             _processor.Object,
             _history.Object,
             _seriesLibrary.Object,
-            NullLogger<FilesController>.Instance,
+            _logger.Object,
             _settings.Object);
     }
 
@@ -57,6 +58,16 @@ public sealed class FilesControllerFileActionsTests
         Assert.Equal(expectedValue, objectResult.Value);
     }
 
+    private void VerifyWarned(string fragment) =>
+        _logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString()!.Contains(fragment)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+
     // ---------------------------------------------------------------- MarkFileRead
 
     [Theory]
@@ -77,7 +88,8 @@ public sealed class FilesControllerFileActionsTests
     {
         var result = await _controller.MarkFileRead(Encode(path), new FilesController.ReadStatusRequest { Read = true });
 
-        AssertStatus(result, 400, "Invalid file path");
+        AssertStatus(result, 400, "File path is outside the allowed directory");
+        VerifyWarned("Attempt to mark file read outside watched directory");
         _fileStore.VerifyNoOtherCalls();
     }
 
@@ -439,7 +451,22 @@ public sealed class FilesControllerFileActionsTests
     {
         var result = await _controller.RenameFileByEncodedPath(Encode(OutsidePath));
 
-        AssertStatus(result, 400, "Invalid file path");
+        AssertStatus(result, 400, "File path is outside the allowed directory");
+        VerifyWarned("Attempt to rename file outside watched directory");
+        _processor.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(OutsidePath)]
+    [InlineData("../../etc/passwd")]
+    [InlineData("{root}-private/Saga 001.cbz")]
+    [Obsolete("Covers the deprecated /api/rename-file alias until it is removed in v3.0.")]
+    public async Task RenameSingleFile_PathOutsideWatchedDirectory_ReturnsBadRequest(string path)
+    {
+        var result = await _controller.RenameSingleFile(Expand(path));
+
+        AssertStatus(result, 400, "File path is outside the allowed directory");
+        VerifyWarned("Attempt to rename file outside watched directory");
         _processor.VerifyNoOtherCalls();
     }
 

@@ -146,21 +146,27 @@ List all comic files in the watched directory.
 {
   "files": [
     {
-      "path": "/comics/Batman/Batman #001.cbz",
+      "relative_path": "/comics/Batman/Batman #001.cbz",
+      "name": "Batman #001.cbz",
       "size": 12345678,
-      "modified": 1234567890.0,
-      "is_processed": true,
-      "is_duplicate": false
+      "modified": 1234567890,
+      "processed": true,
+      "renamed": true,
+      "normalized": true,
+      "duplicate": false,
+      "read": false
     }
   ],
-  "pagination": {
-    "page": 1,
-    "per_page": 100,
-    "total_pages": 5,
-    "total_files": 450
-  }
+  "page": 1,
+  "total_pages": 5,
+  "total_files": 450,
+  "unmarked_count": 12
 }
 ```
+
+Despite its name, `relative_path` holds the file's full path. It identifies the file, so use it
+wherever an endpoint takes a file path, such as `{encodedFilePath}` below. `modified` is in Unix
+seconds.
 
 ### GET /api/files/{encodedFilePath}/tags
 

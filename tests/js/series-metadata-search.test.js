@@ -596,7 +596,8 @@ test('a rejected match is reported with the server message when it sends one', a
     const outcomes = [
         [respond(400, { error: 'Candidate canonical title is required' }), 'Candidate canonical title is required'],
         [respond(400, '"Unknown provider"', { 'Content-Type': 'application/json' }), 'Unknown provider'],
-        [respond(500, 'Error applying match'), 'Failed to apply match'],
+        [respond(500, { error: 'Error applying match' }), 'Error applying match'],
+        [respond(502, 'Bad Gateway'), 'Failed to apply match'],
         [offline, 'Failed to apply match']
     ];
 

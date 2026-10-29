@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for suggesting a new feature! Please provide as much detail as possible.
         
-        **Note**: If you're planning to implement this feature yourself, remember that **all new features must include tests**. See [TESTING_POLICY.md](../blob/master/TESTING_POLICY.md) for details.
+        **Note**: If you're planning to implement this feature yourself, remember that **all new features must include tests**. See [TESTING_POLICY.md](https://github.com/mleenorris/ComicMaintainer/blob/dotnet/docs/TESTING_POLICY.md) for details.
   
   - type: textarea
     id: problem
@@ -61,7 +61,7 @@ body:
       options:
         - label: I would like to implement this feature myself
         - label: I understand that new features require unit and integration tests
-        - label: I have read the [TESTING_POLICY.md](../blob/master/TESTING_POLICY.md)
+        - label: I have read the [TESTING_POLICY.md](https://github.com/mleenorris/ComicMaintainer/blob/dotnet/docs/TESTING_POLICY.md)
   
   - type: checkboxes
     id: checklist

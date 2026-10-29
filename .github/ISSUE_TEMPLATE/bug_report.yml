@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for taking the time to report a bug! Please fill out the form below with as much detail as possible.
         
-        **Note**: If you're planning to submit a fix, remember that **all bug fixes must include tests**. See [TESTING_POLICY.md](../blob/master/TESTING_POLICY.md) for details.
+        **Note**: If you're planning to submit a fix, remember that **all bug fixes must include tests**. See [TESTING_POLICY.md](https://github.com/mleenorris/ComicMaintainer/blob/dotnet/docs/TESTING_POLICY.md) for details.
   
   - type: textarea
     id: description
@@ -100,5 +100,5 @@ body:
           required: true
         - label: I have included all relevant information above
           required: true
-        - label: If I plan to submit a fix, I understand that tests are required (see [TESTING_POLICY.md](../blob/master/TESTING_POLICY.md))
+        - label: If I plan to submit a fix, I understand that tests are required (see [TESTING_POLICY.md](https://github.com/mleenorris/ComicMaintainer/blob/dotnet/docs/TESTING_POLICY.md))
           required: false

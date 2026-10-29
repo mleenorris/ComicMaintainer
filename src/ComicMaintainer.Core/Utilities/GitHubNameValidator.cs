@@ -26,7 +26,8 @@ public static class GitHubNameValidator
 
     /// <summary>
     /// Repository names: alphanumerics, hyphen, underscore and dot, max 100
-    /// characters, and never just dots.
+    /// characters. <see cref="IsValidRepository"/> also rejects names made only
+    /// of dots.
     /// </summary>
     private static readonly Regex RepositoryPattern = new(
         @"^[A-Za-z0-9._-]{1,100}$",
@@ -57,7 +58,8 @@ public static class GitHubNameValidator
             return false;
         }
 
-        if (value is "." or "..")
+        // Never just dots: "." and ".." would be read as path segments.
+        if (value.All(c => c == '.'))
         {
             return false;
         }

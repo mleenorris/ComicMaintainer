@@ -21,6 +21,8 @@ public sealed class LibraryPathValidatorTests : IDisposable
         _realOutside = LibraryPathValidator.ResolveRealPath(_outside);
     }
 
+    private static string Native(string path) => path.Replace('/', Path.DirectorySeparatorChar);
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -101,14 +103,99 @@ public sealed class LibraryPathValidatorTests : IDisposable
     }
 
     [Fact]
-    public void IsWithin_NeverTreatsTheFileSystemRootAsAContainer()
+    public void IsWithin_FailsClosedForTheUnixRootButNotForADriveRoot()
     {
         // Allowing "/" would make the containment check meaningless, so it
-        // fails closed rather than matching every path.
+        // fails closed rather than matching every path. A Windows drive root
+        // such as C:\ is a usable library root, so it contains its paths.
+        var fileSystemRoot = Path.GetPathRoot(_library)!;
+        var isDriveRoot = OperatingSystem.IsWindows();
+
+        Assert.Equal(isDriveRoot, LibraryPathValidator.IsWithin(Path.Join(_realLibrary, "Issue 001.cbz"), fileSystemRoot));
+        Assert.Equal(isDriveRoot, LibraryPathValidator.TryResolveWithin(Path.Join(_library, "Issue 001.cbz"), out _, fileSystemRoot));
+    }
+
+    [Theory]
+    [InlineData("/comics", "/comics", true)]
+    [InlineData("/comics", "/comics/", true)]
+    [InlineData("/comics/", "/comics", true)]
+    [InlineData("/comics", "/comics/Saga/Saga 001.cbz", true)]
+    [InlineData("/comics", "/comics2/Saga 001.cbz", false)]
+    [InlineData("/comics", "/comic", false)]
+    [InlineData("/comics", "/elsewhere/comics/Saga 001.cbz", false)]
+    [InlineData("/", "/comics/Saga 001.cbz", false)]
+    [InlineData("//", "/comics/Saga 001.cbz", false)]
+    public void IsSameOrUnder_ContainsOnlyTheDirectoryAndItsChildren(string directory, string fullPath, bool expected)
+    {
+        Assert.Equal(expected, LibraryPathValidator.IsSameOrUnder(Native(fullPath), Native(directory)));
+    }
+
+    [Fact]
+    public void IsSameOrUnder_LetsADriveOrShareRootContainItsPaths()
+    {
+        // A library may live at a drive root (D:\) or a UNC share (\\server\comics); only a
+        // directory made of separators alone, such as "/", fails closed.
+        var sep = Path.DirectorySeparatorChar;
+
+        Assert.True(LibraryPathValidator.IsSameOrUnder($"D:{sep}Saga{sep}Saga 001.cbz", $"D:{sep}"));
+        Assert.False(LibraryPathValidator.IsSameOrUnder($"E:{sep}Saga{sep}Saga 001.cbz", $"D:{sep}"));
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.True(LibraryPathValidator.IsSameOrUnder(@"\\server\comics\Saga\Saga 001.cbz", @"\\server\comics\"));
+            Assert.True(LibraryPathValidator.IsSameOrUnder(@"\\server\comics", @"\\server\comics\"));
+            Assert.False(LibraryPathValidator.IsSameOrUnder(@"\\server\comics2\Saga 001.cbz", @"\\server\comics\"));
+        }
+    }
+
+    [Fact]
+    public void IsSameOrUnder_IgnoresCaseOnlyOnWindows()
+    {
+        Assert.Equal(
+            OperatingSystem.IsWindows(),
+            LibraryPathValidator.IsSameOrUnder(Native("/COMICS/Saga 001.cbz"), Native("/comics")));
+    }
+
+    [Fact]
+    public void IsLexicallyWithin_NormalizesThePathButNotTheRootsLinks()
+    {
+        // Unlike TryResolveWithin, a link is judged by where it is, not where it leads.
+        var linkedRoot = Path.Join(_outside, "library-link");
+        Directory.CreateSymbolicLink(linkedRoot, _library);
+        var escape = Path.Join(_library, "escape");
+        Directory.CreateSymbolicLink(escape, _outside);
+
+        Assert.True(LibraryPathValidator.IsLexicallyWithin(Path.Join(escape, "secret.cbz"), _library));
+        Assert.False(LibraryPathValidator.IsLexicallyWithin(Path.Join(_library, "Issue 001.cbz"), linkedRoot));
+        Assert.True(LibraryPathValidator.IsLexicallyWithin(Path.Join(_library, "Series", "..", "Issue 001.cbz"), _library));
+        Assert.False(LibraryPathValidator.IsLexicallyWithin(Path.Join(_library, "..", "outside", "x.cbz"), _library));
+    }
+
+    [Fact]
+    public void IsLexicallyWithin_ChecksEveryConfiguredRootAndSkipsBlankOnes()
+    {
+        var path = Path.Join(_library, "Issue 001.cbz");
+
+        Assert.True(LibraryPathValidator.IsLexicallyWithin(path, null, string.Empty, "   ", _outside, _library));
+        Assert.False(LibraryPathValidator.IsLexicallyWithin(path, null, string.Empty, _outside));
+        Assert.False(LibraryPathValidator.IsLexicallyWithin(path));
+    }
+
+    [Fact]
+    public void IsLexicallyWithin_FailsClosedForTheUnixRootButNotForADriveRoot()
+    {
+        // The same rule as IsWithin: "/" contains nothing, a drive root such as C:\ its paths.
         var fileSystemRoot = Path.GetPathRoot(_library)!;
 
-        Assert.False(LibraryPathValidator.IsWithin(Path.Combine(_realLibrary, "Issue 001.cbz"), fileSystemRoot));
-        Assert.False(LibraryPathValidator.TryResolveWithin(Path.Combine(_library, "Issue 001.cbz"), out _, fileSystemRoot));
+        Assert.Equal(
+            OperatingSystem.IsWindows(),
+            LibraryPathValidator.IsLexicallyWithin(Path.Join(_library, "Issue 001.cbz"), fileSystemRoot));
+    }
+
+    [Fact]
+    public void IsLexicallyWithin_ThrowsForAPathTheRuntimeCannotParse()
+    {
+        Assert.Throws<ArgumentException>(() => LibraryPathValidator.IsLexicallyWithin(string.Empty, _library));
+        Assert.Throws<ArgumentException>(() => LibraryPathValidator.IsLexicallyWithin(Path.Join(_library, "bad\0name.cbz"), _library));
     }
 
     [Fact]

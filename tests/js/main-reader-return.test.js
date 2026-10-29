@@ -245,7 +245,6 @@ test('readComic falls back to safe values when the library state is not there', 
     const noop = () => {};
     const sandbox = loadScripts(['js/main.js'], {
         onViewportResize: noop,
-        applyMobileLibraryView: noop,
         updateSettingsNavActive: noop,
         initModalAccessibility: noop,
         initDropdownAriaExpandedSync: noop,

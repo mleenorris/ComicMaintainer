@@ -20,7 +20,10 @@ public partial class FilesController
                 return BadRequest("Invalid file path");
 
             if (!IsPathSafe(filePath))
-                return BadRequest("Invalid file path");
+            {
+                _logger.LogWarning("Attempt to mark file read outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
 
             await _fileStore.MarkFileReadAsync(filePath, request.Read, cancellationToken);
             return Ok();

@@ -93,7 +93,6 @@
             enterPage(route.view);
             if (route.view === 'settings' || route.view === 'jobs') {
                 if (currentSeriesDetailId) {
-                    disconnectSeriesIssuesObserver();
                     currentSeriesDetailId = null;
                     currentSeriesDetailTitleKeys = null;
                     currentSeriesDetailSeries = null;
@@ -111,7 +110,6 @@
                 // "Series Updates" / "Newly Added" lists look emptied out on
                 // return from the reader.
                 if (currentSeriesDetailId) {
-                    disconnectSeriesIssuesObserver();
                     currentSeriesDetailId = null;
                     currentSeriesDetailTitleKeys = null;
                     currentSeriesDetailSeries = null;
@@ -122,7 +120,6 @@
             } else {
                 // Library list: ensure we're not stuck in a detail panel.
                 if (currentSeriesDetailId) {
-                    disconnectSeriesIssuesObserver();
                     currentSeriesDetailId = null;
                     currentSeriesDetailTitleKeys = null;
                     currentSeriesDetailSeries = null;

@@ -140,6 +140,32 @@ public class ScheduledJobServiceTests
     }
 
     [Fact]
+    public async Task RowLookups_AcceptAMisCasedKeyLikeTheHandlerLookup()
+    {
+        var (service, _) = BuildService(new FakeHandler("zz-job"));
+        await service.SeedDefaultsAsync();
+        string? changedKey = null;
+        service.JobChanged += (_, e) => changedKey = e.JobKey;
+
+        Assert.NotNull(service.GetHandler("ZZ-JOB"));
+        Assert.Equal("zz-job", (await service.GetAsync("ZZ-JOB"))?.JobKey);
+
+        var updated = await service.UpdateAsync("ZZ-JOB", enabled: true, intervalMinutes: 15, optionsJson: "{\"x\":1}");
+        Assert.Equal("zz-job", updated?.JobKey);
+        Assert.Equal("zz-job", changedKey);
+
+        await service.MarkRunningAsync("ZZ-JOB");
+        Assert.Equal(ScheduledJobStatus.Running, (await service.GetAsync("zz-job"))!.LastStatus);
+
+        await service.RecordCompletionAsync("Zz-Job", ScheduledJobStatus.Success, "done", durationMs: 7);
+        var job = await service.GetAsync("zz-job");
+        Assert.Equal(ScheduledJobStatus.Success, job!.LastStatus);
+        Assert.Equal("done", job.LastMessage);
+        Assert.Equal(15, job.IntervalMinutes);
+        Assert.Equal("{\"x\":1}", job.OptionsJson);
+    }
+
+    [Fact]
     public async Task RecordCompletionAsync_StoresStatusAndComputesNextRun()
     {
         var (service, _) = BuildService(new FakeHandler("alpha"));

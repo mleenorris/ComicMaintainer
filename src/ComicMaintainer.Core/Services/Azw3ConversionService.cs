@@ -91,7 +91,7 @@ public partial class Azw3ConversionService : IAzw3ConversionService
 
             try
             {
-                await Task.Run(() => Convert(epubPath, tempPath, cancellationToken), cancellationToken);
+                await Task.Run(() => Convert(epubPath, tempPath, azw3Path, cancellationToken), cancellationToken);
                 File.Move(tempPath, azw3Path, overwrite: true);
             }
             catch
@@ -114,7 +114,13 @@ public partial class Azw3ConversionService : IAzw3ConversionService
         }
     }
 
-    private static void Convert(string epubPath, string azw3Path, CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads the intermediate EPUB back and writes it as AZW3 to
+    /// <paramref name="writePath"/>. <paramref name="azw3Path"/> is the final
+    /// path the book is moved to, so the error message and fallback title name
+    /// the book the user asked for rather than the temporary file.
+    /// </summary>
+    private static void Convert(string epubPath, string writePath, string azw3Path, CancellationToken cancellationToken)
     {
         using var archive = ZipFile.OpenRead(epubPath);
 
@@ -188,7 +194,7 @@ public partial class Azw3ConversionService : IAzw3ConversionService
             Publisher: metadata?.Element(DcNamespace + "publisher")?.Value,
             Language: metadata?.Element(DcNamespace + "language")?.Value);
 
-        Kf8ComicWriter.Write(book, azw3Path);
+        Kf8ComicWriter.Write(book, writePath);
     }
 
     private static string ReadOpfPath(ZipArchive archive)

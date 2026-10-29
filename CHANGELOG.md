@@ -157,6 +157,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   administrators, and `/api/scheduled-jobs` now requires the `CanAdminister` policy for reads
   as well as changes. The jobs include database backups and library-wide auto-corrections,
   which other accounts could previously change or run.
+- **`/api/metadata` reports errors as `{ "error": "…" }`**, like the rest of the API. Its 400
+  and 500 responses had plain-text bodies, so some series metadata messages fell back to a
+  generic text. API clients that read these bodies as text must parse the JSON instead.
+- **Renaming a file or marking it read with a path outside the library** is answered with
+  "File path is outside the allowed directory" and logged, like the other file endpoints,
+  instead of "Invalid file path".
 
 ### Fixed
 - **`CONFIG_DIR` now holds the database and the DataProtection keys too.** The logs,

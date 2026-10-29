@@ -92,12 +92,6 @@
             // call sites (preferences with `libraryViewMode === 'files'`, etc.)
             // still resolve to a valid state.
             mode = 'series';
-            if (isMobileLibraryViewport()) {
-                if (currentMobileLibraryView !== 'series') {
-                    currentMobileLibraryView = 'series';
-                    applyMobileLibraryView();
-                }
-            }
 
             if (libraryViewMode === mode && !(mode === 'series' && currentSeriesDetailId)) {
                 return;

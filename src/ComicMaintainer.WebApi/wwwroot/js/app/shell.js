@@ -1,4 +1,4 @@
-        // ComicMaintainer SPA — app shell: library health dashboard, mobile view, viewport resize, header search, theme, capabilities, connectivity.
+        // ComicMaintainer SPA — app shell: library health dashboard, viewport resize, header search, theme, capabilities, connectivity.
         //
         // Classic (non-module) script: its top-level declarations are globals
         // shared with the other app scripts and with inline onclick handlers.
@@ -94,101 +94,6 @@
             return window.matchMedia(`(max-width: ${MOBILE_LIBRARY_VIEW_BREAKPOINT}px)`).matches;
         }
 
-        function initializeMobileLibraryViewToggle() {
-            const filesButton = document.getElementById('mobileFilesViewBtn');
-            const seriesButton = document.getElementById('mobileSeriesViewBtn');
-
-            if (!filesButton) {
-                return;
-            }
-
-            if (!filesButton.dataset.bound) {
-                filesButton.addEventListener('click', () => setMobileLibraryView('files'));
-                filesButton.dataset.bound = 'true';
-            }
-
-            if (seriesButton && !seriesButton.dataset.bound) {
-                seriesButton.addEventListener('click', () => setMobileLibraryView('series'));
-                seriesButton.dataset.bound = 'true';
-            }
-        }
-
-        function applyMobileLibraryView() {
-            const toggle = document.getElementById('mobileLibraryViewToggle');
-            const filesView = document.getElementById('libraryFilesView');
-            const filesButton = document.getElementById('mobileFilesViewBtn');
-            const seriesButton = document.getElementById('mobileSeriesViewBtn');
-
-            if (!toggle || !filesView || !filesButton) {
-                // The mobile library view toggle was removed when the dedicated
-                // Files view was retired; the underlying library list is still
-                // rendered, so there is nothing more to do here.
-                return;
-            }
-
-            // 'overview' is no longer a separate view; the overview dashboard
-            // is now an expand/collapse panel rendered above the file list and
-            // controlled independently via toggleLibraryHealthDashboard().
-            if (currentMobileLibraryView === 'overview') {
-                currentMobileLibraryView = 'files';
-            }
-
-            const isMobile = isMobileLibraryViewport();
-            const showingFiles = currentMobileLibraryView === 'files';
-            const showingSeries = currentMobileLibraryView === 'series';
-
-            toggle.hidden = !isMobile;
-            // The file/series list is always rendered now; the overview lives
-            // in its own collapsible section above it.
-            filesView.hidden = false;
-
-            filesButton.classList.toggle('active', showingFiles);
-            filesButton.setAttribute('aria-pressed', showingFiles ? 'true' : 'false');
-
-            if (seriesButton) {
-                seriesButton.classList.toggle('active', showingSeries);
-                seriesButton.setAttribute('aria-pressed', showingSeries ? 'true' : 'false');
-            }
-
-            // Expose the active mobile view on <body> so CSS can react.
-            if (document.body) {
-                document.body.dataset.mobileView = isMobile ? currentMobileLibraryView : '';
-            }
-        }
-
-        function setMobileLibraryView(view) {
-            if (view !== 'files' && view !== 'series') {
-                return;
-            }
-
-            const previous = currentMobileLibraryView;
-            currentMobileLibraryView = view;
-            applyMobileLibraryView();
-
-            // When the user picks Files or Series on mobile, also switch the
-            // underlying library view mode so the list actually reflects the
-            // choice. Avoid triggering a redundant reload if nothing changed.
-            if (view === 'files' && libraryViewMode !== 'files') {
-                setLibraryViewMode('files');
-            } else if (view === 'series' && libraryViewMode !== 'series') {
-                setLibraryViewMode('series');
-            }
-
-            const status = document.getElementById('mobileLibraryViewStatus');
-            if (status) {
-                status.textContent = view === 'series'
-                    ? 'Series view selected.'
-                    : 'Files view selected.';
-            }
-
-            // Restore scroll position when navigating between views so users
-            // don't lose their place. Save the outgoing view's scroll first.
-            if (previous && previous !== view) {
-                saveMobileViewScroll(previous);
-                restoreMobileViewScroll(view);
-            }
-        }
-
         // Expand/collapse the Library Health overview panel. Replaces the old
         // 3-way Overview/Files/Series mobile tab — the overview is no longer a
         // separate "page" but an inline section that can be hidden when not
@@ -224,20 +129,6 @@
                 ? stored === '1'
                 : isMobileLibraryViewport();
             setLibraryHealthCollapsed(collapsed);
-        }
-
-        // Per-view scroll memory so the back-trip from Files → Overview → Files
-        // (or Series → Overview → Series) preserves the user's place.
-        const mobileViewScrollPositions = {};
-        function saveMobileViewScroll(view) {
-            mobileViewScrollPositions[view] = window.scrollY || window.pageYOffset || 0;
-        }
-        function restoreMobileViewScroll(view) {
-            const y = mobileViewScrollPositions[view];
-            if (typeof y === 'number') {
-                // Defer to next frame so the layout swap completes first.
-                requestAnimationFrame(() => window.scrollTo(0, y));
-            }
         }
 
         // Viewport resize handling

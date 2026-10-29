@@ -8,14 +8,11 @@
         // when the app was a single main.js. readComic(), the hand-off to
         // reader.html, sits with the reader-return-state restore it pairs with.
 
-        onViewportResize(applyMobileLibraryView);
         onViewportResize(updateSettingsNavActive);
 
         async function initializeApp() {
             // Initialize non-async operations immediately
             initTheme();
-            initializeMobileLibraryViewToggle();
-            applyMobileLibraryView();
             initializeLibraryHealthToggle();
             
             // Check authentication FIRST before doing anything else

@@ -263,22 +263,6 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
         => (left ?? Array.Empty<string>()).SequenceEqual(right ?? Array.Empty<string>(), StringComparer.Ordinal);
 
     /// <summary>
-    /// Backward-compatible thin wrapper around
-    /// <see cref="ResolveExpectedSeriesWithExplanationAsync"/> that discards the
-    /// explanation. Retained because external callers (and tests) reference
-    /// this signature; new code should prefer the version that also returns
-    /// the explanation so it can be surfaced to the user.
-    /// </summary>
-    private async Task<string?> ResolveExpectedSeriesAsync(
-        string filePath,
-        string? globalPreferredLanguage,
-        CancellationToken cancellationToken)
-    {
-        var (expected, _) = await ResolveExpectedSeriesWithExplanationAsync(filePath, metadata: null, globalPreferredLanguage, cancellationToken);
-        return expected;
-    }
-
-    /// <summary>
     /// Compute the expected series name for an audited file along with a
     /// short explanation of which resolution step produced it. Prefers the
     /// shared <see cref="ISeriesNameResolver"/> when available so the audit

@@ -16,7 +16,10 @@ public partial class FilesController
                 return BadRequest("Invalid file path");
 
             if (!IsPathSafe(filePath))
-                return BadRequest("Invalid file path");
+            {
+                _logger.LogWarning("Attempt to rename file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
 
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
@@ -43,7 +46,10 @@ public partial class FilesController
         try
         {
             if (!IsPathSafe(filePath))
-                return BadRequest("Invalid file path");
+            {
+                _logger.LogWarning("Attempt to rename file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
+                return BadRequest("File path is outside the allowed directory");
+            }
 
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);

@@ -19,6 +19,8 @@ const {
 } = require('./support/library-helpers');
 
 const activeItems = (page, menu) => page.$$(`${menu} .header-dropdown-item.active`).map(item => item.dataset.filter || item.dataset.sort);
+// What the page's live regions currently announce to screen readers.
+const announcements = page => page.$$('[aria-live]').map(region => region.textContent).join(' ');
 
 test('choosing a filter saves it, relabels the menu and reloads the series with it', async () => {
     const page = await bootLibrary({ series: makeSeriesList(2) });
@@ -217,7 +219,7 @@ test('on a phone the filter applies to the series list, which stays in series mo
     assert.equal(seriesCalls(page).at(-1).query.filter, 'missing');
     // Only the filter is saved, and no view change is announced.
     assert.deepEqual(savedPreferences(page), [{ filterMode: 'missing' }]);
-    assert.equal(page.$('#mobileLibraryViewStatus').textContent, '');
+    assert.doesNotMatch(announcements(page), /view selected/i);
     assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
 });
 
@@ -289,7 +291,7 @@ test('on a phone a filter change, or "Clear filter", on a series page also keeps
     assert.equal(page.evaluate('currentSeriesDetailId'), 'series-1');
     // Only the filter is saved, and no view change is announced.
     assert.deepEqual(savedPreferences(page), [{ filterMode: 'unread' }, { filterMode: 'all' }]);
-    assert.equal(page.$('#mobileLibraryViewStatus').textContent, '');
+    assert.doesNotMatch(announcements(page), /view selected/i);
 });
 
 test('a search on a series page re-fetches its issues and refreshes the library behind it', async () => {

@@ -1,25 +1,23 @@
 using System.Text;
-using System.Xml;
 using System.Xml.Serialization;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Zip;
 using SharpCompress.Archives.Rar;
-using SharpCompress.Common;
-using SharpCompress.Writers;
-using SharpCompress.Writers.Zip;
 
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Handles reading and writing comic archives (CBZ/CBR)
-/// This is the C# equivalent of Python's comicapi.comicarchive.ComicArchive
+/// Reads the ComicInfo.xml tags of a comic archive (CBZ/CBR).
+/// This is the C# equivalent of the reading half of Python's comicapi.comicarchive.ComicArchive.
+/// Tags are written by <see cref="ComicProcessorService"/>, which streams the archive's
+/// entries into the rewritten file instead of buffering them in memory.
 /// </summary>
 public class ComicArchive : IDisposable
 {
     private readonly string _filePath;
-    private IArchive? _archive;
+    private readonly IArchive _archive;
     private bool _disposed;
 
     public ComicArchive(string filePath)
@@ -61,11 +59,6 @@ public class ComicArchive : IDisposable
     /// <param name="format">Format hint ('cr' for ComicRack/ComicInfo.xml)</param>
     public ComicInfo? ReadTags(string format = "cr")
     {
-        if (_archive == null)
-        {
-            throw new InvalidOperationException("Archive not opened");
-        }
-
         try
         {
             // Look for ComicInfo.xml in the archive
@@ -96,134 +89,11 @@ public class ComicArchive : IDisposable
         }
     }
 
-    /// <summary>
-    /// Write tags to the comic archive
-    /// Compatible with Python ComicTagger's write_tags method
-    /// </summary>
-    /// <param name="tags">ComicInfo tags to write</param>
-    /// <param name="format">Format hint ('cr' for ComicRack/ComicInfo.xml)</param>
-    public void WriteTags(ComicInfo tags, string format = "cr")
-    {
-        if (_archive == null)
-        {
-            throw new InvalidOperationException("Archive not opened");
-        }
-
-        // Only support CBZ for writing (ZIP format)
-        if (!ComicFileExtensions.IsWritableArchive(_filePath))
-        {
-            throw new NotSupportedException("Writing tags is only supported for CBZ files");
-        }
-
-        try
-        {
-            // Serialize tags to XML
-            var serializer = new XmlSerializer(typeof(ComicInfo));
-            var xmlContent = SerializeToXml(tags);
-
-            // Create a temporary file for the new archive
-            var tempFile = Path.GetTempFileName();
-
-            try
-            {
-                // Create new archive with updated ComicInfo.xml
-                using (var newArchive = ZipArchive.CreateArchive())
-                {
-                    // Add ComicInfo.xml
-                    var comicInfoBytes = Encoding.UTF8.GetBytes(xmlContent);
-                    var comicInfoStream = new MemoryStream(comicInfoBytes);
-                    newArchive.AddEntry("ComicInfo.xml", comicInfoStream, false, comicInfoBytes.Length, DateTime.Now);
-
-                    // Copy all other entries from original archive
-                    var entryStreams = new List<MemoryStream>();
-                    foreach (var entry in _archive.Entries.Where(e => !e.IsDirectory))
-                    {
-                        // Skip existing ComicInfo.xml
-                        if (entry.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true)
-                        {
-                            continue;
-                        }
-
-                        using var entryStream = entry.OpenEntryStream();
-                        var memStream = new MemoryStream();
-                        entryStream.CopyTo(memStream);
-                        memStream.Position = 0;
-                        entryStreams.Add(memStream);
-                        
-                        newArchive.AddEntry(entry.Key ?? "unknown", memStream, false, memStream.Length, entry.LastModifiedTime ?? DateTime.Now);
-                    }
-
-                    // Save to temp file
-                    using var fileStream = File.OpenWrite(tempFile);
-                    newArchive.SaveTo(fileStream, new ZipWriterOptions(CompressionType.Deflate)
-                    {
-                        LeaveStreamOpen = false
-                    });
-                    
-                    // Clean up streams
-                    comicInfoStream.Dispose();
-                    foreach (var stream in entryStreams)
-                    {
-                        stream.Dispose();
-                    }
-                }
-
-                // Close current archive
-                _archive?.Dispose();
-                _archive = null;
-
-                // Replace original file with new one
-                File.Delete(_filePath);
-                File.Move(tempFile, _filePath);
-
-                // Reopen archive
-                _archive = ZipArchive.OpenArchive(_filePath);
-            }
-            finally
-            {
-                // Clean up temp file if it still exists
-                if (File.Exists(tempFile))
-                {
-                    try 
-                    { 
-                        File.Delete(tempFile); 
-                    } 
-                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-                    { 
-                        // Log but don't throw - cleanup failure shouldn't fail the operation
-                        System.Diagnostics.Debug.WriteLine($"Failed to delete temp file {tempFile}: {ex.Message}");
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Failed to write tags to archive: {ex.Message}", ex);
-        }
-    }
-
-    private static string SerializeToXml(ComicInfo tags)
-    {
-        var serializer = new XmlSerializer(typeof(ComicInfo));
-        var settings = new XmlWriterSettings
-        {
-            Indent = true,
-            IndentChars = "  ",
-            Encoding = Encoding.UTF8,
-            OmitXmlDeclaration = false
-        };
-
-        using var stringWriter = new StringWriter();
-        using var xmlWriter = XmlWriter.Create(stringWriter, settings);
-        serializer.Serialize(xmlWriter, tags);
-        return stringWriter.ToString();
-    }
-
     public void Dispose()
     {
         if (!_disposed)
         {
-            _archive?.Dispose();
+            _archive.Dispose();
             _disposed = true;
         }
     }

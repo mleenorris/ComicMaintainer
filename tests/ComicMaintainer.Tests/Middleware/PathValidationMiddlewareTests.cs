@@ -395,6 +395,28 @@ public class PathValidationMiddlewareTests
         _mockNext.Verify(x => x(It.IsAny<HttpContext>()), allowed ? Times.Once() : Times.Never());
     }
 
+    [Theory]
+    [InlineData("/watched_dir/comics/test.cbz", true)]
+    [InlineData("/etc/passwd", false)]
+    public async Task InvokeAsync_RootAsAnAllowedDirectory_ContainsNothingExceptADriveRootOnWindows(string path, bool allowedOffWindows)
+    {
+        // The middleware shares LibraryPathValidator's containment rule, so a "/" root fails
+        // closed like it does for file access instead of allowing every path. On Windows "/"
+        // names the current drive's root (C:\), a usable library root that contains its paths.
+        var settings = new AppSettings
+        {
+            WatchedDirectory = "/watched_dir",
+            DuplicateDirectory = "/",
+            ConfigDirectory = "/Config",
+        };
+
+        var context = await InvokeWithFilePathAsync(path, settings);
+
+        var allowed = allowedOffWindows || OperatingSystem.IsWindows();
+        Assert.Equal(allowed ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        _mockNext.Verify(x => x(It.IsAny<HttpContext>()), allowed ? Times.Once() : Times.Never());
+    }
+
     private async Task<HttpContext> InvokeWithFilePathAsync(string filePath, AppSettings? settings = null)
     {
         var middleware = new PathValidationMiddleware(

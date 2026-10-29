@@ -339,8 +339,8 @@ test('Refresh All and Match All Unmatched report server and network errors', asy
     const page = await bootSeries({
         hash: '#/library',
         routes: {
-            'POST /api/metadata/refresh-all': respond(500, 'Error queuing metadata refresh'),
-            'POST /api/metadata/match-unmatched': respond(500, 'Error queuing metadata match')
+            'POST /api/metadata/refresh-all': respond(500, { error: 'Error queuing metadata refresh' }),
+            'POST /api/metadata/match-unmatched': respond(500, { error: 'Error queuing metadata match' })
         }
     });
 
@@ -348,6 +348,23 @@ test('Refresh All and Match All Unmatched report server and network errors', asy
     assert.deepEqual(lastMessage(page), { text: 'Failed to queue metadata refresh: Error queuing metadata refresh', type: 'error' });
     await choose(page, 'Match All Unmatched Series');
     assert.deepEqual(lastMessage(page), { text: 'Failed to queue match-unmatched: Error queuing metadata match', type: 'error' });
+
+    // A body without an error field (e.g. a proxy's plain-text page) falls
+    // back to the generic message rather than echoing the raw body.
+    page.route('POST /api/metadata/refresh-all', respond(502, 'Bad Gateway'));
+    page.route('POST /api/metadata/match-unmatched', respond(500, {}));
+    await choose(page, 'Refresh All External Metadata');
+    assert.deepEqual(lastMessage(page), { text: 'Failed to queue metadata refresh', type: 'error' });
+    await choose(page, 'Match All Unmatched Series');
+    assert.deepEqual(lastMessage(page), { text: 'Failed to queue match-unmatched', type: 'error' });
+
+    // A bare JSON string body is surfaced as the server's message.
+    page.route('POST /api/metadata/refresh-all', respond(400, JSON.stringify('Unknown provider')));
+    page.route('POST /api/metadata/match-unmatched', respond(400, JSON.stringify('Matching disabled')));
+    await choose(page, 'Refresh All External Metadata');
+    assert.deepEqual(lastMessage(page), { text: 'Failed to queue metadata refresh: Unknown provider', type: 'error' });
+    await choose(page, 'Match All Unmatched Series');
+    assert.deepEqual(lastMessage(page), { text: 'Failed to queue match-unmatched: Matching disabled', type: 'error' });
 
     const offline = () => { throw new TypeError('Failed to fetch'); };
     page.route('POST /api/metadata/refresh-all', offline);

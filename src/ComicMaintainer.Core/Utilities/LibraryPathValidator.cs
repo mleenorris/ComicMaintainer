@@ -1,11 +1,14 @@
 namespace ComicMaintainer.Core.Utilities;
 
 /// <summary>
-/// Link-aware containment checks for library paths. Symlinks and junctions are
+/// Containment checks for library paths. Every check applies the same rule
+/// (<see cref="IsSameOrUnder"/>) to the set of allowed roots its caller passes in.
+/// <see cref="TryResolveWithin"/> is link-aware: symlinks and junctions are
 /// resolved first — on the path itself, on every ancestor directory and inside
 /// link targets — so a link inside an allowed root cannot smuggle in an external target.
-/// Callers should use the resolved path returned by <see cref="TryResolveWithin"/>
-/// for the file system operations that follow the check.
+/// Callers should use the resolved path it returns for the file system operations
+/// that follow the check. <see cref="IsLexicallyWithin"/> only normalizes the path,
+/// for callers that track or route paths rather than open them.
 /// </summary>
 public static class LibraryPathValidator
 {
@@ -97,17 +100,64 @@ public static class LibraryPathValidator
     /// differently cased request on a case-insensitive volume still matches, while a distinct
     /// "LIBRARY" next to "library" in a case-sensitive directory does not.
     /// </remarks>
-    public static bool IsWithin(string fullPath, string? directory)
-    {
-        if (string.IsNullOrWhiteSpace(directory))
-            return false;
+    public static bool IsWithin(string fullPath, string? directory) =>
+        !string.IsNullOrWhiteSpace(directory)
+        && IsSameOrUnder(fullPath, ResolveRealPath(Path.GetFullPath(directory)), StringComparison.Ordinal);
 
-        var root = ResolveRealPath(Path.GetFullPath(directory)).TrimEnd(Path.DirectorySeparatorChar);
+    /// <summary>
+    /// Lexical counterpart of <see cref="TryResolveWithin"/>: normalizes
+    /// <paramref name="path"/> and each of <paramref name="allowedDirectories"/> with
+    /// <see cref="Path.GetFullPath(string)"/>, which collapses "." and ".." segments,
+    /// without resolving links, and returns true when the path is inside one of them.
+    /// Blank directories are not configured and contain nothing.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="path"/> is empty, or it or a configured directory cannot be
+    /// parsed, so callers can tell an unusable path from one that is merely outside.
+    /// </exception>
+    public static bool IsLexicallyWithin(string path, params string?[] allowedDirectories)
+    {
+        var fullPath = Path.GetFullPath(path);
+
+        foreach (var allowedDirectory in allowedDirectories)
+        {
+            if (!string.IsNullOrWhiteSpace(allowedDirectory)
+                && IsSameOrUnder(fullPath, Path.GetFullPath(allowedDirectory)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The containment rule shared by every check: true when the normalized
+    /// <paramref name="fullPath"/> is the normalized <paramref name="directory"/>
+    /// itself or lives beneath it. Trailing separators are ignored, and a sibling that
+    /// merely shares the directory's name as a prefix (<c>/comics2</c> next to
+    /// <c>/comics</c>) is outside. A directory made only of separators, such as the
+    /// Unix root <c>/</c>, contains nothing: allowing it would make the check
+    /// meaningless, so it fails closed. A Windows drive root such as <c>D:\</c> or a
+    /// UNC share such as <c>\\server\comics</c> is a usable library root and contains
+    /// its paths.
+    /// </summary>
+    /// <remarks>
+    /// These paths are compared with <see cref="PathComparison"/>, since they need not be
+    /// spelled as the file system stores them. <see cref="IsWithin"/> applies the same rule
+    /// to resolved paths, which it compares exactly.
+    /// </remarks>
+    public static bool IsSameOrUnder(string fullPath, string directory) =>
+        IsSameOrUnder(fullPath, directory, PathComparison);
+
+    private static bool IsSameOrUnder(string fullPath, string directory, StringComparison comparison)
+    {
+        var root = directory.TrimEnd(Separators);
         if (root.Length == 0)
             return false;
 
-        return string.Equals(fullPath.TrimEnd(Path.DirectorySeparatorChar), root, StringComparison.Ordinal)
-            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+        return string.Equals(fullPath.TrimEnd(Separators), root, comparison)
+            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, comparison);
     }
 
     /// <summary>

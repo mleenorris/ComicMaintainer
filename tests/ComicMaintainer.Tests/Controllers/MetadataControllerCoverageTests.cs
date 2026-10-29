@@ -58,15 +58,18 @@ public sealed class MetadataControllerCoverageTests : IDisposable
 
     private static JObject Json(object? value) => JObject.FromObject(value!);
 
+    // Error bodies are { error = "…" } objects so the UI can read the message.
+    private static string? ErrorOf(ObjectResult result) => (string?)Json(result.Value)["error"];
+
     private static void Assert500(object? result, string message)
     {
         var obj = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status500InternalServerError, obj.StatusCode);
-        Assert.Equal(message, obj.Value);
+        Assert.Equal(message, ErrorOf(obj));
     }
 
     private static void AssertBadRequest(object? result, string message) =>
-        Assert.Equal(message, Assert.IsType<BadRequestObjectResult>(result).Value);
+        Assert.Equal(message, ErrorOf(Assert.IsType<BadRequestObjectResult>(result)));
 
     private void SetupLibrary(params SeriesLibraryDto[] series) =>
         _library.Setup(l => l.GetSeriesAsync(

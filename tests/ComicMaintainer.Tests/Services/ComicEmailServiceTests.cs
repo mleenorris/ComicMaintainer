@@ -713,6 +713,20 @@ public class ComicEmailServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task PlanCondensedDeliveryAsync_PadsIssueZeroAndKeepsTheFraction()
+    {
+        var files = new[]
+        {
+            CreateComic("Series #0.cbz"),
+            CreateComic("Series #0012.5.cbz")
+        };
+
+        var plan = await _service.PlanCondensedDeliveryAsync(files, EmailCondenseMode.All, null);
+
+        Assert.EndsWith(" 000-012.5", Assert.Single(plan.Books).DisplayName);
+    }
+
+    [Fact]
     public async Task QueueCondensedFilesAsync_NeverMixesTwoSeriesInOneBook()
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);

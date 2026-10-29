@@ -332,10 +332,12 @@ public class SeriesImageStore : ISeriesImageStore
         int maxBytes,
         CancellationToken cancellationToken)
     {
-        // Read into a buffer one byte larger than the cap so we can detect
-        // payloads that exceed it without trusting Content-Length.
-        var capacity = Math.Max(64 * 1024, Math.Min(maxBytes + 1, maxBytes + 1));
-        using var ms = new MemoryStream();
+        // Count the bytes actually read and fail as soon as the running total
+        // passes the cap, so oversized payloads are detected without trusting
+        // Content-Length.
+        // Start with a small bounded capacity so typical uploads avoid repeated
+        // regrowth without pre-allocating the whole cap.
+        using var ms = new MemoryStream(Math.Min(64 * 1024, Math.Max(0, maxBytes)));
         var buffer = new byte[81920];
         var total = 0;
         int read;

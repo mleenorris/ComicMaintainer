@@ -74,7 +74,7 @@ public class MetadataController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh-all"));
-            return StatusCode(500, "Error queuing metadata refresh");
+            return StatusCode(500, new { error = "Error queuing metadata refresh" });
         }
     }
 
@@ -113,7 +113,7 @@ public class MetadataController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata match-unmatched"));
-            return StatusCode(500, "Error queuing metadata match");
+            return StatusCode(500, new { error = "Error queuing metadata match" });
         }
     }
 
@@ -123,7 +123,7 @@ public class MetadataController : ControllerBase
     {
         if (request?.Series == null || request.Series.Count == 0)
         {
-            return BadRequest("No series specified");
+            return BadRequest(new { error = "No series specified" });
         }
 
         try
@@ -134,7 +134,7 @@ public class MetadataController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh-selected"));
-            return StatusCode(500, "Error queuing metadata refresh");
+            return StatusCode(500, new { error = "Error queuing metadata refresh" });
         }
     }
 
@@ -153,7 +153,7 @@ public class MetadataController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
-            return BadRequest("Series title is required");
+            return BadRequest(new { error = "Series title is required" });
         }
 
         try
@@ -170,7 +170,7 @@ public class MetadataController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error refreshing metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, "Error refreshing metadata");
+            return StatusCode(500, new { error = "Error refreshing metadata" });
         }
     }
 
@@ -187,7 +187,7 @@ public class MetadataController : ControllerBase
     {
         if (request is null || (string.IsNullOrWhiteSpace(request.SeriesId) && (request.Titles is null || request.Titles.Count == 0)))
         {
-            return BadRequest("Series id or titles required");
+            return BadRequest(new { error = "Series id or titles required" });
         }
 
         try
@@ -221,7 +221,7 @@ public class MetadataController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh for folder"));
-            return StatusCode(500, "Error queuing metadata refresh");
+            return StatusCode(500, new { error = "Error queuing metadata refresh" });
         }
     }
 
@@ -258,7 +258,7 @@ public class MetadataController : ControllerBase
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error retrieving provider health"));
-            return StatusCode(500, "Error retrieving provider health");
+            return StatusCode(500, new { error = "Error retrieving provider health" });
         }
     }
 
@@ -350,7 +350,7 @@ public class MetadataController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return BadRequest("Query parameter is required");
+            return BadRequest(new { error = "Query parameter is required" });
         }
 
         try
@@ -394,7 +394,7 @@ public class MetadataController : ControllerBase
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error searching external metadata for {Query}"), LoggingHelper.SanitizeForLog(query));
-            return StatusCode(500, "Error searching external metadata");
+            return StatusCode(500, new { error = "Error searching external metadata" });
         }
     }
 
@@ -404,7 +404,7 @@ public class MetadataController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
-            return BadRequest("Series title is required");
+            return BadRequest(new { error = "Series title is required" });
         }
 
         var key = _cache.NormalizeKey(seriesTitle);
@@ -429,7 +429,7 @@ public class MetadataController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
-            return BadRequest("Series title is required");
+            return BadRequest(new { error = "Series title is required" });
         }
 
         try
@@ -443,7 +443,7 @@ public class MetadataController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error updating aliases for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, "Error updating aliases");
+            return StatusCode(500, new { error = "Error updating aliases" });
         }
     }
 
@@ -456,7 +456,7 @@ public class MetadataController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(seriesTitle) || string.IsNullOrWhiteSpace(alias))
         {
-            return BadRequest("Series title and alias are required");
+            return BadRequest(new { error = "Series title and alias are required" });
         }
 
         // Resolve the owning record by title first: after a manual match the
@@ -485,11 +485,11 @@ public class MetadataController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
-            return BadRequest("Series title is required");
+            return BadRequest(new { error = "Series title is required" });
         }
         if (request is null || string.IsNullOrWhiteSpace(request.CanonicalTitle))
         {
-            return BadRequest("Candidate canonical title is required");
+            return BadRequest(new { error = "Candidate canonical title is required" });
         }
 
         try
@@ -543,12 +543,12 @@ public class MetadataController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error applying match for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, "Error applying match");
+            return StatusCode(500, new { error = "Error applying match" });
         }
     }
 
@@ -565,7 +565,7 @@ public class MetadataController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
-            return BadRequest("Series title is required");
+            return BadRequest(new { error = "Series title is required" });
         }
 
         try
@@ -584,7 +584,7 @@ public class MetadataController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error clearing external metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, "Error clearing external metadata");
+            return StatusCode(500, new { error = "Error clearing external metadata" });
         }
     }
 
@@ -601,7 +601,7 @@ public class MetadataController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
-            return BadRequest("Series title is required");
+            return BadRequest(new { error = "Series title is required" });
         }
 
         try
@@ -640,12 +640,12 @@ public class MetadataController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting preferred language for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, "Error setting preferred language");
+            return StatusCode(500, new { error = "Error setting preferred language" });
         }
     }
 
@@ -680,7 +680,7 @@ public class MetadataController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
-            return BadRequest("Series title is required");
+            return BadRequest(new { error = "Series title is required" });
         }
 
         try
@@ -732,12 +732,12 @@ public class MetadataController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting series name for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, "Error setting series name");
+            return StatusCode(500, new { error = "Error setting series name" });
         }
     }
 

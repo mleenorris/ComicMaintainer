@@ -178,7 +178,9 @@ public partial class FilesController
 
             if (_scheduledJobsHostedService is not null)
             {
-                _ = _scheduledJobsHostedService.RunNowAsync(MetadataBackfillJobHandler.Key, CancellationToken.None);
+                // A backfill that is already running read its batch before this
+                // edit, so ask for one more run after it instead of being dropped.
+                _ = _scheduledJobsHostedService.RunNowOrAfterCurrentRunAsync(MetadataBackfillJobHandler.Key, CancellationToken.None);
             }
 
             var updated = await _fileStore.GetFileAsync(filePath, ct);

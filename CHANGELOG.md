@@ -603,6 +603,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and every declared resource present and non-empty), and email delivery additionally rejects
   an empty attachment, so a bad conversion is recorded as a failed delivery rather than mailed
   to the device.
+- **Metadata edits saved while a metadata backfill is running are written to the archive.**
+  Saving an edit starts a metadata backfill that writes it to the file's ComicInfo.xml. If one
+  was already running, the request was dropped, and the running backfill had already chosen
+  its files, so the edit was not written until the next backfill; with the schedule off (the
+  default) that took another edit or a manual run. The backfill now runs again as soon as the
+  current run finishes.
 - **Error messages no longer show another request's support reference.** The `(ref: …)` added
   to an error was the correlation id of whichever API call had last failed with one in the
   previous 15 seconds, so a request that never reached the server (offline, network error) or

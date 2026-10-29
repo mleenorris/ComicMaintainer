@@ -20,7 +20,9 @@ namespace ComicMaintainer.WebApi.Services;
 /// without a process restart. Single-flight execution per job is enforced via
 /// a <see cref="SemaphoreSlim"/> dictionary; an external <see cref="RunNowAsync"/>
 /// invocation also flows through the same gate and reports whether it got
-/// through.
+/// through. <see cref="RunNowOrAfterCurrentRunAsync"/> uses the same gate, but
+/// when a run is in progress it makes the job run once more after that run
+/// instead of dropping the request.
 /// </summary>
 public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
 {
@@ -102,7 +104,22 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
     /// job is unknown or a run is already in progress for that key. Once
     /// started, the run is not tied to <paramref name="cancellationToken"/>.
     /// </summary>
-    public Task<bool> RunNowAsync(string jobKey, CancellationToken cancellationToken = default)
+    public Task<bool> RunNowAsync(string jobKey, CancellationToken cancellationToken = default) =>
+        RequestRunAsync(jobKey, runAgainIfInProgress: false, cancellationToken);
+
+    /// <summary>
+    /// Like <see cref="RunNowAsync"/>, but a request that finds a run already in
+    /// progress is not dropped: the job runs again as soon as that run finishes,
+    /// so work added after the current run read its input is still picked up.
+    /// All requests made during one run share a single follow-up run, and no
+    /// follow-up starts once the host is stopping. Returns true when this
+    /// request started a run, false when the job is unknown or the request was
+    /// left to the follow-up run.
+    /// </summary>
+    public Task<bool> RunNowOrAfterCurrentRunAsync(string jobKey, CancellationToken cancellationToken = default) =>
+        RequestRunAsync(jobKey, runAgainIfInProgress: true, cancellationToken);
+
+    private Task<bool> RequestRunAsync(string jobKey, bool runAgainIfInProgress, CancellationToken cancellationToken)
     {
         var handler = _service.GetHandler(jobKey);
         if (handler is null)
@@ -114,13 +131,31 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             return Task.FromCanceled<bool>(cancellationToken);
         }
 
+        // Key the slot by the handler's canonical key so every spelling that
+        // resolves to this handler shares one single-flight slot.
+        var slot = _slots.GetOrAdd(handler.JobKey, _ => new JobSlot());
+        if (runAgainIfInProgress)
+        {
+            // Raised before trying the slot: either this request starts a run
+            // itself, or the run holding the slot sees the flag once it ends.
+            slot.RequestRun();
+        }
+
         // Claim the single-flight slot here so the caller learns whether its
         // request actually started a run.
-        var slot = _slots.GetOrAdd(jobKey, _ => new JobSlot());
         if (!slot.SingleFlight.Wait(0))
         {
-            _logger.LogInformation(
-                "Skipping {JobKey} run because previous run still in progress", LoggingHelper.SanitizeForLog(jobKey));
+            if (runAgainIfInProgress)
+            {
+                _logger.LogInformation(
+                    "{JobKey} run requested while a run is in progress; it will run again when that run finishes",
+                    LoggingHelper.SanitizeForLog(jobKey));
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Skipping {JobKey} run because previous run still in progress", LoggingHelper.SanitizeForLog(jobKey));
+            }
             return Task.FromResult(false);
         }
 
@@ -201,7 +236,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         {
             return;
         }
-        var slot = _slots.GetOrAdd(jobKey, _ => new JobSlot());
+        var slot = _slots.GetOrAdd(handler.JobKey, _ => new JobSlot());
 
         // Single-flight: skip overlapping runs rather than queue them up. The
         // run in progress keeps its status and records its own result, so the
@@ -220,9 +255,45 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
 
     /// <summary>
     /// Runs the job whose single-flight slot the caller has already claimed and
-    /// releases the slot when done.
+    /// releases the slot when done. If <see cref="RunNowOrAfterCurrentRunAsync"/>
+    /// asked for another run meanwhile, the job then runs again, even when this
+    /// run could not record its outcome, unless the host is stopping or another
+    /// run claims the slot first (that run then serves the request).
     /// </summary>
     private async Task RunClaimedJobAsync(IScheduledJobHandler handler, string jobKey, JobSlot slot)
+    {
+        do
+        {
+            // Cleared before the run reads its work, so this run serves every
+            // request made so far and only later ones need another run.
+            slot.ClearRunRequest();
+            try
+            {
+                await RunOnceAsync(handler, jobKey);
+            }
+            catch (Exception ex)
+            {
+                // RunOnceAsync records a failed run itself, so what gets here is a
+                // failure to record the outcome. Logged, not rethrown: nothing
+                // observes this task, and a rethrow would skip the check below and
+                // drop the requests made during the run.
+                _logger.LogError(ex, "Scheduled job {JobKey} could not record its outcome",
+                    LoggingHelper.SanitizeForLog(jobKey));
+            }
+            finally
+            {
+                slot.SingleFlight.Release();
+            }
+        }
+        // Checked after the release so a request that arrives while the run is
+        // finishing is not missed: it raised the flag before finding the slot
+        // taken.
+        while (slot.IsRunRequested
+               && _shutdownCts?.IsCancellationRequested != true
+               && slot.SingleFlight.Wait(0));
+    }
+
+    private async Task RunOnceAsync(IScheduledJobHandler handler, string jobKey)
     {
         // jobKey has been validated against the registry, but it originates
         // from user input via the controller, so we still scrub it before
@@ -261,15 +332,23 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
                 jobKey, ScheduledJobStatus.Failed, ex.Message, stopwatch.ElapsedMilliseconds);
             _logger.LogError(ex, "Scheduled job {JobKey} failed", safeKey);
         }
-        finally
-        {
-            slot.SingleFlight.Release();
-        }
     }
 
     private sealed class JobSlot
     {
         public Timer? Timer;
         public readonly SemaphoreSlim SingleFlight = new(1, 1);
+        private int _runRequested;
+
+        // Interlocked operations are full fences, which a plain volatile access
+        // is not. Without them the flag and the slot could each be read before
+        // the other side's write: a request could find the slot taken while the
+        // run, having just released it, still sees no request, and the request
+        // would be lost.
+        public bool IsRunRequested => Interlocked.CompareExchange(ref _runRequested, 0, 0) == 1;
+
+        public void RequestRun() => Interlocked.Exchange(ref _runRequested, 1);
+
+        public void ClearRunRequest() => Interlocked.Exchange(ref _runRequested, 0);
     }
 }

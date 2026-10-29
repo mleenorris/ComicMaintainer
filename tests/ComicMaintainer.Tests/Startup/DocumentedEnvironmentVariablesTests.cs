@@ -133,7 +133,7 @@ public sealed class DocumentedEnvironmentVariablesTests
             var current = AppContext.BaseDirectory;
             for (var i = 0; i < 10 && current != null; i++)
             {
-                if (File.Exists(Path.Combine(current, "Dockerfile.dotnet")))
+                if (File.Exists(Path.Join(current, "Dockerfile.dotnet")))
                 {
                     return current;
                 }
@@ -150,14 +150,14 @@ public sealed class DocumentedEnvironmentVariablesTests
     private static IEnumerable<string> DocumentationFiles()
     {
         var root = RepositoryRoot;
-        var archive = Path.Combine(root, "docs", "archive") + Path.DirectorySeparatorChar;
+        var archive = Path.Join(root, "docs", "archive") + Path.DirectorySeparatorChar;
         return Directory.EnumerateFiles(root, "*.md")
             .Where(file => Path.GetFileName(file) != "CHANGELOG.md")
-            .Concat(DeploymentFiles.Select(file => Path.Combine(root, file)))
-            .Concat(Directory.EnumerateFiles(Path.Combine(root, "docs"), "*", SearchOption.AllDirectories)
+            .Concat(DeploymentFiles.Select(file => Path.Join(root, file)))
+            .Concat(Directory.EnumerateFiles(Path.Join(root, "docs"), "*", SearchOption.AllDirectories)
                 .Where(file => !file.StartsWith(archive, StringComparison.Ordinal))
                 .Where(file => DocumentationExtensions.Contains(Path.GetExtension(file))))
-            .Concat(Directory.EnumerateFiles(Path.Combine(root, ".github", "workflows"), "*.yml"));
+            .Concat(Directory.EnumerateFiles(Path.Join(root, ".github", "workflows"), "*.yml"));
     }
 
     /// <summary>
@@ -173,7 +173,7 @@ public sealed class DocumentedEnvironmentVariablesTests
             _ => new Regex(@"^\s*#?\s*(\w+)="),
         };
 
-        return File.ReadLines(Path.Combine(RepositoryRoot, file))
+        return File.ReadLines(Path.Join(RepositoryRoot, file))
             .Select(line => assignment.Match(line))
             .Where(match => match.Success)
             .Select(match => match.Groups[1].Value)
@@ -183,7 +183,7 @@ public sealed class DocumentedEnvironmentVariablesTests
     /// <summary>The Setting and Environment Variable columns of README.md's "Configuration Options" table.</summary>
     private static List<(string Setting, string Variable)> ReadmeConfigurationOptions()
     {
-        var lines = File.ReadAllLines(Path.Combine(RepositoryRoot, "README.md"));
+        var lines = File.ReadAllLines(Path.Join(RepositoryRoot, "README.md"));
         var heading = Array.FindIndex(lines, line => line.Trim() == "### Configuration Options");
         Assert.True(heading >= 0, "README.md has no \"### Configuration Options\" section");
 
@@ -206,7 +206,7 @@ public sealed class DocumentedEnvironmentVariablesTests
     {
         if (ReadElsewhere.TryGetValue(variable, out var reader))
         {
-            return Regex.IsMatch(File.ReadAllText(Path.Combine(RepositoryRoot, reader)), $@"\b{Regex.Escape(variable)}\b");
+            return Regex.IsMatch(File.ReadAllText(Path.Join(RepositoryRoot, reader)), $@"\b{Regex.Escape(variable)}\b");
         }
 
         if (FrameworkVariables.Contains(variable))

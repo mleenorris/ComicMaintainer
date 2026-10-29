@@ -200,7 +200,7 @@ For Windows users who prefer to run without Docker:
 
 4. Run `ComicMaintainer.WebApi.exe` from the same PowerShell window
 
-5. Access the web interface at `http://localhost:5000`
+5. Access the web interface at `http://localhost:8080` (or `http://localhost:5000` if you omitted the optional `ASPNETCORE_URLS` override)
 
 **Running as a Windows Service:**
 Use [NSSM](https://nssm.cc/) to run ComicMaintainer as a Windows service that starts automatically:

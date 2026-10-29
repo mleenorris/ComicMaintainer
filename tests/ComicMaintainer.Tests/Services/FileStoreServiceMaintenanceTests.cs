@@ -17,7 +17,7 @@ namespace ComicMaintainer.Tests.Services;
 /// </summary>
 public sealed class FileStoreServiceMaintenanceTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), $"fss_maint_{Guid.NewGuid():N}");
+    private readonly string _root = Path.Join(Path.GetTempPath(), $"fss_maint_{Guid.NewGuid():N}");
     private readonly string _library;
     private readonly ServiceProvider _provider;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _db;
@@ -26,7 +26,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
 
     public FileStoreServiceMaintenanceTests()
     {
-        _library = Directory.CreateDirectory(Path.Combine(_root, "library")).FullName;
+        _library = Directory.CreateDirectory(Path.Join(_root, "library")).FullName;
 
         var dbName = $"fss_maint_{Guid.NewGuid()}";
         var services = new ServiceCollection();
@@ -52,7 +52,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     [Fact]
     public async Task InitializeFromDatabaseAsync_DatabaseUnavailable_LogsErrorAndStartsEmpty()
     {
-        await SeedAsync(Row(Path.Combine(_library, "Saga 001.cbz")));
+        await SeedAsync(Row(Path.Join(_library, "Saga 001.cbz")));
         var service = CreateService();
         _factory.FailAll();
 
@@ -70,7 +70,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
         var service = CreateService();
         var before = service.ChangeVersion;
 
-        await service.MarkFileBackfilledAsync(Path.Combine(_library, "Missing.cbz"), 3);
+        await service.MarkFileBackfilledAsync(Path.Join(_library, "Missing.cbz"), 3);
 
         Assert.Equal(before, service.ChangeVersion);
         Assert.Empty(await service.GetAllFilesAsync());
@@ -79,7 +79,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     [Fact]
     public async Task MarkFileBackfilledAsync_LookupSourcedRow_StampsWrittenVersionAndMarksScanned()
     {
-        var path = Path.Combine(_library, "Saga 002.cbz");
+        var path = Path.Join(_library, "Saga 002.cbz");
         await SeedAsync(Row(path, e =>
         {
             e.MetadataVersion = 4;
@@ -105,7 +105,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     [Fact]
     public async Task MarkFileBackfilledAsync_UserEditedRow_KeepsUserEditSource()
     {
-        var path = Path.Combine(_library, "Saga 003.cbz");
+        var path = Path.Join(_library, "Saga 003.cbz");
         await SeedAsync(Row(path, e =>
         {
             e.MetadataVersion = 2;
@@ -139,7 +139,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
         var service = CreateService();
         _factory.FailAll();
 
-        var marked = await service.MarkFilesNeedingBackfillAsync(new[] { Path.Combine(_library, "Saga 004.cbz") });
+        var marked = await service.MarkFilesNeedingBackfillAsync(new[] { Path.Join(_library, "Saga 004.cbz") });
 
         Assert.Equal(0, marked);
         Assert.True(_logger.Contains(LogLevel.Warning, "Failed to mark 1 file(s) as needing metadata backfill"));
@@ -150,7 +150,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     [Fact]
     public async Task CleanupStaleEntriesAsync_AlreadyCancelled_RemovesNothing()
     {
-        var stale = Path.Combine(_library, "Gone.cbz");
+        var stale = Path.Join(_library, "Gone.cbz");
         await SeedAsync(Row(stale));
         var service = CreateService();
 
@@ -164,8 +164,8 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     [Fact]
     public async Task CleanupStaleEntriesAsync_CancelledMidScan_LeavesUnvisitedEntriesAlone()
     {
-        var first = Path.Combine(_library, "Gone 1.cbz");
-        var second = Path.Combine(_library, "Gone 2.cbz");
+        var first = Path.Join(_library, "Gone 1.cbz");
+        var second = Path.Join(_library, "Gone 2.cbz");
         await SeedAsync(Row(first), Row(second));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
@@ -206,7 +206,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     public async Task RefreshFileStatsAsync_NothingOnDisk_ReturnsZeroWithoutQuerying()
     {
         var service = CreateService();
-        var missing = Path.Combine(_library, "Missing.cbz");
+        var missing = Path.Join(_library, "Missing.cbz");
 
         Assert.Equal(0, await service.RefreshFileStatsAsync(null!));
         Assert.Equal(0, await service.RefreshFileStatsAsync(new[] { "", "  ", missing, missing }));
@@ -218,14 +218,14 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     {
         var service = CreateService();
 
-        Assert.Equal(0, await service.RefreshFileStatsAsync(new[] { Path.Combine(_library, "Bad\0Name.cbz") }));
+        Assert.Equal(0, await service.RefreshFileStatsAsync(new[] { Path.Join(_library, "Bad\0Name.cbz") }));
         Assert.True(_logger.Contains(LogLevel.Debug, "RefreshFileStats: stat failed"));
     }
 
     [Fact]
     public async Task RefreshFileStatsAsync_PersistFails_StillRefreshesTheSnapshot()
     {
-        var path = Path.Combine(_library, "Saga 005.cbz");
+        var path = Path.Join(_library, "Saga 005.cbz");
         File.WriteAllText(path, "comic");
         var service = CreateService();
         await service.AddFileAsync(path);

@@ -244,9 +244,11 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         }
 
         var trimmed = configured?.Trim();
+        // An absolute setting is used as it is (and must still lie inside the watched directory);
+        // a relative one is taken relative to the watched directory.
         var candidate = string.IsNullOrEmpty(trimmed)
             ? settings.WatchedDirectory
-            : Path.Combine(settings.WatchedDirectory, trimmed);
+            : Path.IsPathRooted(trimmed) ? trimmed : Path.Join(settings.WatchedDirectory, trimmed);
 
         if (!LibraryPathValidator.TryResolveWithin(candidate, out var resolved, settings.WatchedDirectory))
         {
@@ -397,7 +399,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             target = FindLibraryFolder(run, key);
         }
 
-        target ??= Path.Combine(run.ImportRoot, seriesFolderName);
+        target ??= Path.Join(run.ImportRoot, seriesFolderName);
 
         string? confined = null;
         if (TryConfineToLibrary(target, run.Settings, out var resolved))
@@ -418,7 +420,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
     private static string? FindImportFolder(ImportRun run, string seriesFolderName, string key)
     {
-        var exact = Path.Combine(run.ImportRoot, seriesFolderName);
+        var exact = Path.Join(run.ImportRoot, seriesFolderName);
         if (Directory.Exists(exact))
         {
             return exact;
@@ -569,7 +571,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         // half-written; the rename to the real name below stays within one
         // folder and is atomic. The move is journaled first so a restart
         // between the two steps does not strand the chapter.
-        var stagingPath = Path.Combine(targetFolder, StagingPrefix + Guid.NewGuid().ToString("N") + StagingExtension);
+        var stagingPath = Path.Join(targetFolder, StagingPrefix + Guid.NewGuid().ToString("N") + StagingExtension);
         var pending = new PendingMove(stagingPath, sourcePath);
         run.PendingMoves.Add(pending);
         if (!TrySavePendingMoves(run, out var journalError))
@@ -673,7 +675,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         var outcome = MoveOutcome.Failed;
         for (var attempt = 1; attempt <= MaxNameAttempts; attempt++)
         {
-            var candidate = Path.Combine(targetFolder, attempt == 1 ? fileName : $"{baseName} ({attempt}){extension}");
+            var candidate = Path.Join(targetFolder, attempt == 1 ? fileName : $"{baseName} ({attempt}){extension}");
             if (File.Exists(candidate) || Directory.Exists(candidate))
             {
                 continue;
@@ -782,7 +784,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     /// file's unique name, so recovery can find one left by a stopped process.
     /// </summary>
     private static string RestorePathFor(string stagingPath, string sourcePath)
-        => Path.Combine(
+        => Path.Join(
             Path.GetDirectoryName(sourcePath) ?? string.Empty,
             Path.GetFileNameWithoutExtension(stagingPath) + RestoreExtension);
 
@@ -831,7 +833,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 continue;
             }
 
-            var stagingPath = Path.Combine(confinedFolder, stagingName);
+            var stagingPath = Path.Join(confinedFolder, stagingName);
 
             // The download only goes back where this run imports from.
             string? sourcePath = TryResolvePath(move.SourcePath, out var resolvedSource)
@@ -1005,13 +1007,9 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         }
 
         // A download whose staged copy is still pending is left to recovery.
-        foreach (var move in run.PendingMoves)
-        {
-            if (TryResolvePath(move.SourcePath, out var heldSource))
-            {
-                run.HeldSources.Add(heldSource);
-            }
-        }
+        run.HeldSources.UnionWith(run.PendingMoves
+            .Select(move => TryResolvePath(move.SourcePath, out var heldSource) ? heldSource : null)
+            .OfType<string>());
 
         error = null;
         return true;
@@ -1331,7 +1329,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
             WatchedRoot = watchedRoot;
             Now = now;
             SettleTime = TimeSpan.FromSeconds(Math.Max(MinimumSettleTime.TotalSeconds, settings.WatcherFileStabilityDelaySeconds));
-            PendingMovesPath = Path.GetFullPath(Path.Combine(settings.ConfigDirectory ?? string.Empty, PendingMovesFileName));
+            PendingMovesPath = Path.GetFullPath(Path.Join(settings.ConfigDirectory ?? string.Empty, PendingMovesFileName));
         }
 
         public AppSettings Settings { get; }

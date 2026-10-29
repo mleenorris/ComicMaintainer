@@ -19,6 +19,11 @@ public class WatcherControllerTests
         _controller = new WatcherController(_mockWatcher.Object, _mockLogger.Object);
     }
 
+    // Inspects recorded invocations rather than Verify(w => w.SetEnabled(...)): that lambda would
+    // itself call the obsolete member outside any [Obsolete] context.
+    private void AssertSetEnabledNeverCalled() =>
+        Assert.DoesNotContain(_mockWatcher.Invocations, invocation => invocation.Method.Name == nameof(IFileWatcherService.SetEnabled));
+
     [Fact]
     public void GetStatus_WatcherRunning_ReturnsOkWithEnabledTrue()
     {
@@ -56,33 +61,31 @@ public class WatcherControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated POST /api/watcher/enable endpoint until it is removed in v3.0.")]
     public void EnableWatcher_WithTrue_IsDeprecatedAndReturnsOk()
     {
         // Arrange - no SetEnabled should be called since it's deprecated
 
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.EnableWatcher(true);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert - Should return Ok but not call SetEnabled
         Assert.IsType<OkResult>(result);
-        _mockWatcher.Verify(w => w.SetEnabled(It.IsAny<bool>()), Times.Never);
+        AssertSetEnabledNeverCalled();
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated POST /api/watcher/enable endpoint until it is removed in v3.0.")]
     public void EnableWatcher_WithFalse_IsDeprecatedAndReturnsOk()
     {
         // Arrange - no SetEnabled should be called since it's deprecated
 
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.EnableWatcher(false);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert - Should return Ok but not call SetEnabled
         Assert.IsType<OkResult>(result);
-        _mockWatcher.Verify(w => w.SetEnabled(It.IsAny<bool>()), Times.Never);
+        AssertSetEnabledNeverCalled();
     }
 
     [Fact]
@@ -100,15 +103,14 @@ public class WatcherControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated POST /api/watcher/enable endpoint until it is removed in v3.0.")]
     public void EnableWatcher_IsDeprecatedAndDoesNotThrow()
     {
         // Arrange - deprecated endpoint should not throw even with exception
         // No need to setup exception since SetEnabled is never called
 
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.EnableWatcher(true);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert - Should return Ok and not throw
         Assert.IsType<OkResult>(result);
@@ -153,6 +155,7 @@ public class WatcherControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated PUT /api/watcher endpoint until it is removed in v3.0.")]
     public void UpdateWatcher_IsDeprecatedAndReturnsCurrentState()
     {
         // Arrange
@@ -160,9 +163,7 @@ public class WatcherControllerTests
         _mockWatcher.Setup(w => w.IsRunning).Returns(false); // Watcher is not running
 
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.UpdateWatcher(request);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert - Should return current state, not requested state
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -170,10 +171,11 @@ public class WatcherControllerTests
         var enabledProperty = okResult.Value.GetType().GetProperty("enabled");
         Assert.NotNull(enabledProperty);
         Assert.False((bool)enabledProperty.GetValue(okResult.Value)!); // Returns false (current state) not true (requested state)
-        _mockWatcher.Verify(w => w.SetEnabled(It.IsAny<bool>()), Times.Never); // Should never call SetEnabled
+        AssertSetEnabledNeverCalled();
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated PUT /api/watcher endpoint until it is removed in v3.0.")]
     public void UpdateWatcher_WithRunningWatcher_ReturnsRunningState()
     {
         // Arrange
@@ -181,9 +183,7 @@ public class WatcherControllerTests
         _mockWatcher.Setup(w => w.IsRunning).Returns(true); // Watcher is running
 
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.UpdateWatcher(request);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert - Should return current state (running), not requested state (disabled)
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -191,10 +191,11 @@ public class WatcherControllerTests
         var enabledProperty = okResult.Value.GetType().GetProperty("enabled");
         Assert.NotNull(enabledProperty);
         Assert.True((bool)enabledProperty.GetValue(okResult.Value)!); // Returns true (current state) not false (requested state)
-        _mockWatcher.Verify(w => w.SetEnabled(It.IsAny<bool>()), Times.Never); // Should never call SetEnabled
+        AssertSetEnabledNeverCalled();
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated PUT /api/watcher endpoint until it is removed in v3.0.")]
     public void UpdateWatcher_WhenIsRunningThrows_ReturnsInternalServerError()
     {
         // Arrange
@@ -202,9 +203,7 @@ public class WatcherControllerTests
         _mockWatcher.Setup(w => w.IsRunning).Throws(new InvalidOperationException("Test error"));
 
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.UpdateWatcher(request);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result);
@@ -226,26 +225,14 @@ public class WatcherControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated POST /api/watcher/enable endpoint until it is removed in v3.0.")]
     public void EnableWatcher_WhenExceptionThrown_ReturnsInternalServerError()
     {
-        // Arrange
-        // Force an exception by making IsRunning throw (though the method shouldn't call it, test resilience)
-        // Actually, EnableWatcher doesn't access IsRunning, so we'd need to make it throw another way
-        // For coverage, test that it handles unexpected exceptions
-        var mockController = new Mock<WatcherController>(_mockWatcher.Object, _mockLogger.Object) { CallBase = true };
-        
-        // Create a failing watcher
-        var mockFailingWatcher = new Mock<IFileWatcherService>();
-        // The EnableWatcher method catches all exceptions, so we'd need something that throws during construction
-        // However, the method doesn't really use the watcher, so this tests the catch block
-        
-        // Actually, let me make a simpler test - EnableWatcher logs but doesn't throw
-        // It's already tested that it doesn't throw. Let me verify the deprecated warning is logged
-        
+        // Arrange - EnableWatcher is a no-op that never touches the watcher, so there is no
+        // failure to inject; verify the deprecation warning is logged instead.
+
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.EnableWatcher(true);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert - Should return OK and log warning
         Assert.IsType<OkResult>(result);
@@ -260,6 +247,7 @@ public class WatcherControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated PUT /api/watcher endpoint until it is removed in v3.0.")]
     public void UpdateWatcher_LogsDeprecationWarning()
     {
         // Arrange
@@ -267,9 +255,7 @@ public class WatcherControllerTests
         _mockWatcher.Setup(w => w.IsRunning).Returns(true);
 
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
-        var result = _controller.UpdateWatcher(request);
-        #pragma warning restore CS0618 // Type or member is obsolete
+        _controller.UpdateWatcher(request);
 
         // Assert - Should log deprecation warning
         _mockLogger.Verify(

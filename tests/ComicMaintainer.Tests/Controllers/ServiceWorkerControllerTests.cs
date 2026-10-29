@@ -20,7 +20,7 @@ public class ServiceWorkerControllerTests : IDisposable
 
     public ServiceWorkerControllerTests()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "sw_test_" + Guid.NewGuid().ToString());
+        _tempDirectory = Path.Join(Path.GetTempPath(), "sw_test_" + Guid.NewGuid());
         Directory.CreateDirectory(_tempDirectory);
 
         _mockEnvironment = new Mock<IWebHostEnvironment>();
@@ -54,7 +54,7 @@ public class ServiceWorkerControllerTests : IDisposable
     public void Dispose_DeletesTheTempDirectory()
     {
         // Regression test for #876: every test used to leave its directory behind.
-        File.WriteAllText(Path.Combine(_tempDirectory, "sw.js"), "// Service Worker");
+        File.WriteAllText(Path.Join(_tempDirectory, "sw.js"), "// Service Worker");
 
         // xUnit only disposes test classes that implement IDisposable.
         Assert.IsAssignableFrom<IDisposable>(this);
@@ -68,7 +68,7 @@ public class ServiceWorkerControllerTests : IDisposable
     {
         // Arrange
         var swContent = "// Service Worker for Comic Maintainer PWA\nconsole.log('Service worker loaded');";
-        var swPath = Path.Combine(_tempDirectory, "sw.js");
+        var swPath = Path.Join(_tempDirectory, "sw.js");
         File.WriteAllText(swPath, swContent);
 
         // Act
@@ -84,14 +84,14 @@ public class ServiceWorkerControllerTests : IDisposable
         Assert.Contains(swContent, contentResult.Content);
         
         // Verify cache control headers were set
-        Assert.True(_controller.Response.Headers.ContainsKey("Cache-Control"));
-        Assert.Equal("no-cache, no-store, must-revalidate", _controller.Response.Headers["Cache-Control"].ToString());
+        Assert.True(_controller.Response.Headers.TryGetValue("Cache-Control", out var cacheControl));
+        Assert.Equal("no-cache, no-store, must-revalidate", cacheControl.ToString());
         
         // Verify CORS headers were set
-        Assert.True(_controller.Response.Headers.ContainsKey("Access-Control-Allow-Origin"));
-        Assert.Equal("*", _controller.Response.Headers["Access-Control-Allow-Origin"].ToString());
-        Assert.True(_controller.Response.Headers.ContainsKey("Access-Control-Allow-Methods"));
-        Assert.Equal("GET, OPTIONS", _controller.Response.Headers["Access-Control-Allow-Methods"].ToString());
+        Assert.True(_controller.Response.Headers.TryGetValue("Access-Control-Allow-Origin", out var allowOrigin));
+        Assert.Equal("*", allowOrigin.ToString());
+        Assert.True(_controller.Response.Headers.TryGetValue("Access-Control-Allow-Methods", out var allowMethods));
+        Assert.Equal("GET, OPTIONS", allowMethods.ToString());
         
         // Cleanup
         File.Delete(swPath);
@@ -111,7 +111,7 @@ public class ServiceWorkerControllerTests : IDisposable
     public void GetServiceWorker_WhenExceptionOccurs_ReturnsServerError()
     {
         // Arrange - Set WebRootPath to null to cause an exception
-        _mockEnvironment.Setup(e => e.WebRootPath).Returns((string)null!);
+        _mockEnvironment.Setup(e => e.WebRootPath).Returns(default(string)!);
 
         var controller = new ServiceWorkerController(
             _mockEnvironment.Object,
@@ -149,7 +149,7 @@ public class ServiceWorkerControllerTests : IDisposable
     {
         // Arrange
         var manifestContent = "{\"name\": \"Comic Maintainer\", \"short_name\": \"ComicMaintainer\"}";
-        var manifestPath = Path.Combine(_tempDirectory, "manifest.json");
+        var manifestPath = Path.Join(_tempDirectory, "manifest.json");
         File.WriteAllText(manifestPath, manifestContent);
 
         // Act
@@ -161,14 +161,14 @@ public class ServiceWorkerControllerTests : IDisposable
         Assert.Equal(manifestContent, contentResult.Content);
         
         // Verify cache control headers were set
-        Assert.True(_controller.Response.Headers.ContainsKey("Cache-Control"));
-        Assert.Equal("public, max-age=3600", _controller.Response.Headers["Cache-Control"].ToString());
+        Assert.True(_controller.Response.Headers.TryGetValue("Cache-Control", out var cacheControl));
+        Assert.Equal("public, max-age=3600", cacheControl.ToString());
         
         // Verify CORS headers were set
-        Assert.True(_controller.Response.Headers.ContainsKey("Access-Control-Allow-Origin"));
-        Assert.Equal("*", _controller.Response.Headers["Access-Control-Allow-Origin"].ToString());
-        Assert.True(_controller.Response.Headers.ContainsKey("Access-Control-Allow-Methods"));
-        Assert.Equal("GET, OPTIONS", _controller.Response.Headers["Access-Control-Allow-Methods"].ToString());
+        Assert.True(_controller.Response.Headers.TryGetValue("Access-Control-Allow-Origin", out var allowOrigin));
+        Assert.Equal("*", allowOrigin.ToString());
+        Assert.True(_controller.Response.Headers.TryGetValue("Access-Control-Allow-Methods", out var allowMethods));
+        Assert.Equal("GET, OPTIONS", allowMethods.ToString());
         
         // Cleanup
         File.Delete(manifestPath);
@@ -216,7 +216,7 @@ public class ServiceWorkerControllerTests : IDisposable
     public void GetManifest_WhenExceptionOccurs_ReturnsServerError()
     {
         // Arrange - Set WebRootPath to null to cause an exception
-        _mockEnvironment.Setup(e => e.WebRootPath).Returns((string)null!);
+        _mockEnvironment.Setup(e => e.WebRootPath).Returns(default(string)!);
 
         var controller = new ServiceWorkerController(
             _mockEnvironment.Object,

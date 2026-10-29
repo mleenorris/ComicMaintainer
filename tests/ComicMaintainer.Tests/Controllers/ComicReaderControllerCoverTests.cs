@@ -20,9 +20,9 @@ public class ComicReaderControllerCoverTests : IDisposable
 
     public ComicReaderControllerCoverTests()
     {
-        _watchDir = Path.Combine(Path.GetTempPath(), "cover_ctrl_" + Guid.NewGuid());
+        _watchDir = Path.Join(Path.GetTempPath(), "cover_ctrl_" + Guid.NewGuid());
         Directory.CreateDirectory(_watchDir);
-        _file = Path.Combine(_watchDir, "a.cbz");
+        _file = Path.Join(_watchDir, "a.cbz");
         File.WriteAllBytes(_file, new byte[] { 1, 2, 3 });
         _settings = new AppSettings { WatchedDirectory = _watchDir };
         SetupEntry("webp-w480-q80");
@@ -30,7 +30,7 @@ public class ComicReaderControllerCoverTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_watchDir, recursive: true); } catch { /* ignore */ }
+        try { Directory.Delete(_watchDir, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 
     private void SetupEntry(string variant)

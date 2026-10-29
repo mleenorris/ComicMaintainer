@@ -38,7 +38,7 @@ public class OverviewController : ControllerBase
             var result = await _overview.GetOverviewAsync(userId, cancellationToken);
             return Ok(result);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error building overview page");
             return StatusCode(500, new { error = "Error building overview" });

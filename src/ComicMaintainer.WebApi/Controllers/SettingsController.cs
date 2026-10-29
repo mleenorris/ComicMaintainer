@@ -142,7 +142,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateFilenameFormatAsync(request.Format, cancellationToken);
             return Ok(new { message = "Filename format updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update filename format");
             return StatusCode(500, new { error = "Failed to update filename format" });
@@ -176,7 +176,7 @@ public class SettingsController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update issue number padding");
             return StatusCode(500, new { error = "Failed to update issue number padding" });
@@ -217,7 +217,7 @@ public class SettingsController : ControllerBase
             _logger.LogWarning("Log max bytes updated to {MaxMB} MB ({MaxBytes} bytes). Restart the application for the change to take effect.", request.MaxMB, maxBytes);
             return Ok(new { message = "Log max bytes updated successfully. Restart required for changes to take effect." });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update log max bytes");
             return StatusCode(500, new { error = "Failed to update log max bytes" });
@@ -246,7 +246,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateWatcherEnableRenameAsync(request.Enabled, cancellationToken);
             return Ok(new { message = "Watcher enable rename updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update watcher enable rename");
             return StatusCode(500, new { error = "Failed to update watcher enable rename" });
@@ -274,7 +274,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateWatcherEnableNormalizeAsync(request.Enabled, cancellationToken);
             return Ok(new { message = "Watcher enable normalize updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update watcher enable normalize");
             return StatusCode(500, new { error = "Failed to update watcher enable normalize" });
@@ -302,7 +302,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateWriteCoverToFirstArchiveAsync(request.Enabled, cancellationToken);
             return Ok(new { message = "Write cover to first archive updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update write cover to first archive");
             return StatusCode(500, new { error = "Failed to update write cover to first archive" });
@@ -330,7 +330,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateWriteCoverToSeriesFolderAsync(request.Enabled, cancellationToken);
             return Ok(new { message = "Write cover to series folder updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update write cover to series folder");
             return StatusCode(500, new { error = "Failed to update write cover to series folder" });
@@ -358,7 +358,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateDownloadExternalSeriesImagesAsync(request.Enabled, cancellationToken);
             return Ok(new { message = "Download external series images updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update download external series images");
             return StatusCode(500, new { error = "Failed to update download external series images" });
@@ -409,7 +409,7 @@ public class SettingsController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update series image limits");
             return StatusCode(500, new { error = "Failed to update series image limits" });
@@ -437,7 +437,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateDatabaseCleanupIntervalHoursAsync(request.Hours, cancellationToken);
             return Ok(new { message = "Database cleanup interval updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update database cleanup interval");
             return StatusCode(500, new { error = "Failed to update database cleanup interval" });
@@ -476,7 +476,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateDefaultLibraryViewAsync(normalized, cancellationToken);
             return Ok(new { message = "Default library view updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update default library view");
             return StatusCode(500, new { error = "Failed to update default library view" });
@@ -509,7 +509,7 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateAllowRegistrationAsync(request.Enabled, cancellationToken);
             return Ok(new { message = "Self-service registration updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update self-service registration setting");
             return StatusCode(500, new { error = "Failed to update self-service registration setting" });
@@ -556,7 +556,7 @@ public class SettingsController : ControllerBase
                             LoggingHelper.SanitizeForLog(requested));
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex,
                         "Failed to flag files for metadata backfill after global default preferred-language change");
@@ -569,7 +569,7 @@ public class SettingsController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update default preferred language");
             return StatusCode(500, new { error = "Failed to update default preferred language" });
@@ -598,7 +598,7 @@ public class SettingsController : ControllerBase
 
             return Ok(new { message = "External series metadata settings updated successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update external series metadata settings");
             return StatusCode(500, new { error = "Failed to update external series metadata settings" });
@@ -626,7 +626,7 @@ public class SettingsController : ControllerBase
                 {
                     await _eventBroadcaster.BroadcastFileListUpdateAsync();
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex, "Failed to broadcast file list update after manual database cleanup");
                 }
@@ -634,7 +634,7 @@ public class SettingsController : ControllerBase
 
             return Ok(new { success = true, message = $"Database cleanup completed. Removed {removedCount} stale entries.", removedCount = removedCount });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error during manual database cleanup");
             return StatusCode(500, new { success = false, error = "Error during database cleanup: " + ex.Message });
@@ -686,7 +686,7 @@ public class SettingsController : ControllerBase
                 {
                     await _eventBroadcaster.BroadcastFileListUpdateAsync();
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex, "Failed to broadcast file list update after database reset");
                 }
@@ -694,7 +694,7 @@ public class SettingsController : ControllerBase
 
             return Ok(new { success = true, message = "Database reset completed successfully" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error resetting database");
             return StatusCode(500, new { success = false, error = "Error resetting database: " + ex.Message });
@@ -727,7 +727,7 @@ public class SettingsController : ControllerBase
                 message = "Application restart initiated. The application will shut down gracefully and restart if running in a container or with a process manager." 
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error initiating application restart");
             return StatusCode(500, new { success = false, error = "Error initiating restart: " + ex.Message });
@@ -840,7 +840,7 @@ public class SettingsController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update email settings");
             return StatusCode(500, new { error = "Failed to update email settings" });
@@ -948,7 +948,7 @@ public class SettingsController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update Suwayomi settings");
             return StatusCode(500, new { error = "Failed to update Suwayomi settings" });
@@ -1012,7 +1012,7 @@ public class SettingsController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Failed to update error reporting settings");
             return StatusCode(500, new { error = "Failed to update error reporting settings" });

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Hosting;
@@ -50,9 +51,11 @@ public sealed class FolderFilesRouteTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 
@@ -134,7 +137,7 @@ public sealed class FolderFilesRouteTests : IDisposable
             ["CONFIG_DIR"] = ConfigDirectory,
         };
 
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new TestWebApplicationFactory(builder =>
         {
             builder.UseEnvironment("Development");
             // As in ProgramTests: UseSetting is seen while Program registers its

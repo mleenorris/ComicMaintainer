@@ -52,11 +52,11 @@ public class SettingsService : ISettingsService
         catch (UnauthorizedAccessException)
         {
             _logger.LogWarning("Unable to create config directory at {ConfigDir}, falling back to temp", configDir);
-            configDir = Path.Combine(Path.GetTempPath(), "ComicMaintainer");
+            configDir = Path.Join(Path.GetTempPath(), "ComicMaintainer");
             Directory.CreateDirectory(configDir);
         }
         
-        _settingsFilePath = Path.Combine(configDir, "user-settings.json");
+        _settingsFilePath = Path.Join(configDir, "user-settings.json");
         _logger.LogInformation("Settings will be persisted to: {SettingsPath}", _settingsFilePath);
     }
 

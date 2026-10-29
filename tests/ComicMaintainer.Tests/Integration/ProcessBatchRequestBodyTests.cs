@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Hosting;
@@ -33,9 +34,11 @@ public sealed class ProcessBatchRequestBodyTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 
@@ -66,8 +69,11 @@ public sealed class ProcessBatchRequestBodyTests : IDisposable
         Assert.True(json.RootElement.GetProperty("jobId").TryGetGuid(out _));
     }
 
-    private static Task<HttpResponseMessage> PostAsync(HttpClient client, string body) =>
-        client.PostAsync("/api/files/process-batch", new StringContent(body, Encoding.UTF8, "application/json"));
+    private static async Task<HttpResponseMessage> PostAsync(HttpClient client, string body)
+    {
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        return await client.PostAsync("/api/files/process-batch", content);
+    }
 
     private WebApplicationFactory<Program> CreateFactory()
     {
@@ -83,7 +89,7 @@ public sealed class ProcessBatchRequestBodyTests : IDisposable
             Directory.CreateDirectory(directory!);
         }
 
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new TestWebApplicationFactory(builder =>
         {
             builder.UseEnvironment("Development");
             foreach (var (key, value) in overrides)

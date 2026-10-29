@@ -119,7 +119,7 @@ public class ProcessingHistoryService : IProcessingHistoryService
             // Log cancellation but don't treat as error - operation was intentionally cancelled
             _logger.LogWarning(ex, "History entry addition was cancelled");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Log other errors but don't throw - history logging should not break processing
             _logger.LogError(ex, "Error adding processing history entry");

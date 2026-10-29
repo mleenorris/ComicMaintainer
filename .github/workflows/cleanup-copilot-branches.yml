@@ -13,8 +13,10 @@ jobs:
     steps:
       - name: Check if branch is a copilot branch
         id: check-branch
+        env:
+          # Passed through the environment so the branch name is never interpolated into the script.
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
         run: |
-          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
           echo "Branch name: $BRANCH_NAME"
           
           if [[ "$BRANCH_NAME" == "copilot/"* ]]; then
@@ -29,8 +31,8 @@ jobs:
         if: steps.check-branch.outputs.is_copilot_branch == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
         run: |
-          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
           echo "Deleting copilot branch: $BRANCH_NAME"
           
           # Delete the branch using GitHub CLI

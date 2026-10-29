@@ -26,7 +26,7 @@ namespace ComicMaintainer.Tests.Services;
 /// Covers metadata, processing, rename, normalize and series-resolution paths of
 /// <see cref="ComicProcessorService"/> against real CBZ fixtures.
 /// </summary>
-public class ComicProcessorServiceCoverageTests : IDisposable
+public partial class ComicProcessorServiceCoverageTests : IDisposable
 {
     private const string RenamingTemplate = "Renaming file from {OldPath} to {NewPath}";
     private const string ChapterAppendedTemplate =
@@ -47,15 +47,15 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
     public ComicProcessorServiceCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "cps-cov-" + Guid.NewGuid().ToString("N"));
-        _library = Path.Combine(_root, "library");
+        _root = Path.Join(Path.GetTempPath(), "cps-cov-" + Guid.NewGuid().ToString("N"));
+        _library = Path.Join(_root, "library");
         Directory.CreateDirectory(_library);
 
         _settings = new AppSettings
         {
             WatchedDirectory = _library,
-            DuplicateDirectory = Path.Combine(_root, "duplicates"),
-            TempFileDirectory = Path.Combine(_root, "temp"),
+            DuplicateDirectory = Path.Join(_root, "duplicates"),
+            TempFileDirectory = Path.Join(_root, "temp"),
             FilenameFormat = "{series} - Chapter {issue}",
             IssueNumberPadding = 4,
         };
@@ -95,9 +95,11 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 
@@ -139,11 +141,11 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         }
 
         var service = CreateService();
-        var outsideDir = Path.Combine(_root, "outside");
-        WriteCbzAt(Path.Combine(outsideDir, "real.cbz"), Xml("Outside", "1", "Chapter 1"));
-        Directory.CreateSymbolicLink(Path.Combine(_library, "linked"), outsideDir);
+        var outsideDir = Path.Join(_root, "outside");
+        WriteCbzAt(Path.Join(outsideDir, "real.cbz"), Xml("Outside", "1", "Chapter 1"));
+        Directory.CreateSymbolicLink(Path.Join(_library, "linked"), outsideDir);
 
-        var result = await service.GetMetadataAsync(Path.Combine(_library, "linked", "real.cbz"));
+        var result = await service.GetMetadataAsync(Path.Join(_library, "linked", "real.cbz"));
 
         Assert.Null(result);
     }
@@ -210,10 +212,10 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     public async Task GetSeriesMetadataAsync_MissingOrNonArchiveFile_ReturnsNull()
     {
         var service = CreateService();
-        var textFile = Path.Combine(_library, "notes.txt");
+        var textFile = Path.Join(_library, "notes.txt");
         await File.WriteAllTextAsync(textFile, "not a comic");
 
-        Assert.Null(await service.GetSeriesMetadataAsync(Path.Combine(_library, "missing.cbz")));
+        Assert.Null(await service.GetSeriesMetadataAsync(Path.Join(_library, "missing.cbz")));
         Assert.Null(await service.GetSeriesMetadataAsync(textFile));
     }
 
@@ -295,7 +297,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     public async Task GetSeriesMetadataAsync_FileOutsideAllowedDirectories_ReturnsNullLikeGetMetadataAsync()
     {
         var service = CreateService();
-        var outside = WriteCbzAt(Path.Combine(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var outside = WriteCbzAt(Path.Join(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
 
         Assert.Null(await service.GetMetadataAsync(outside));
         Assert.Null(await service.GetSeriesMetadataAsync(outside));
@@ -310,11 +312,11 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         }
 
         var service = CreateService();
-        var outsideDir = Path.Combine(_root, "outside");
-        WriteCbzAt(Path.Combine(outsideDir, "real.cbz"), Xml("Outside", "1", "Chapter 1"));
-        Directory.CreateSymbolicLink(Path.Combine(_library, "linked"), outsideDir);
+        var outsideDir = Path.Join(_root, "outside");
+        WriteCbzAt(Path.Join(outsideDir, "real.cbz"), Xml("Outside", "1", "Chapter 1"));
+        Directory.CreateSymbolicLink(Path.Join(_library, "linked"), outsideDir);
 
-        var result = await service.GetSeriesMetadataAsync(Path.Combine(_library, "linked", "real.cbz"));
+        var result = await service.GetSeriesMetadataAsync(Path.Join(_library, "linked", "real.cbz"));
 
         Assert.Null(result);
     }
@@ -329,10 +331,10 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         var service = CreateService();
         WriteCbz("Series/book.cbz", Xml("Main", "4", "Chapter 4", ("SeriesGroup", "Group")));
-        var alias = Path.Combine(_library, "alias");
-        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Series"));
+        var alias = Path.Join(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Join(_library, "Series"));
 
-        var result = await service.GetSeriesMetadataAsync(Path.Combine(alias, "book.cbz"));
+        var result = await service.GetSeriesMetadataAsync(Path.Join(alias, "book.cbz"));
 
         Assert.NotNull(result);
         Assert.Equal("Main", result!.Series);
@@ -345,7 +347,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     {
         var service = CreateService();
 
-        var result = await service.UpdateMetadataAsync(Path.Combine(_library, "missing.cbz"), new ComicMetadata());
+        var result = await service.UpdateMetadataAsync(Path.Join(_library, "missing.cbz"), new ComicMetadata());
 
         Assert.False(result);
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot update metadata: file does not exist: {FilePath}"));
@@ -355,7 +357,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     public async Task UpdateMetadataAsync_NonArchiveFile_ReturnsFalseWithWarning()
     {
         var service = CreateService();
-        var textFile = Path.Combine(_library, "notes.txt");
+        var textFile = Path.Join(_library, "notes.txt");
         await File.WriteAllTextAsync(textFile, "plain text");
 
         var result = await service.UpdateMetadataAsync(textFile, new ComicMetadata { Series = "X" });
@@ -369,7 +371,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     public async Task UpdateMetadataAsync_FileOutsideAllowedDirectories_IsRejectedAndLeftUntouched()
     {
         var service = CreateService();
-        var outside = WriteCbzAt(Path.Combine(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var outside = WriteCbzAt(Path.Join(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
         var before = await File.ReadAllBytesAsync(outside);
 
         var result = await service.UpdateMetadataAsync(outside, new ComicMetadata { Series = "Hijacked" });
@@ -388,9 +390,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         }
 
         var service = CreateService();
-        var outside = WriteCbzAt(Path.Combine(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var outside = WriteCbzAt(Path.Join(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
         var before = await File.ReadAllBytesAsync(outside);
-        var link = Path.Combine(_library, "Series", "link.cbz");
+        var link = Path.Join(_library, "Series", "link.cbz");
         Directory.CreateDirectory(Path.GetDirectoryName(link)!);
         File.CreateSymbolicLink(link, outside);
 
@@ -584,7 +586,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     public async Task RemoveMetadataAsync_FileOutsideAllowedDirectories_IsRejectedAndLeftUntouched()
     {
         var service = CreateService();
-        var outside = WriteCbzAt(Path.Combine(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var outside = WriteCbzAt(Path.Join(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
         var before = await File.ReadAllBytesAsync(outside);
 
         var result = await service.RemoveMetadataAsync(outside);
@@ -606,12 +608,12 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         }
 
         var service = CreateService();
-        var outsideDir = Path.Combine(_root, "outside");
-        var outside = WriteCbzAt(Path.Combine(outsideDir, "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var outsideDir = Path.Join(_root, "outside");
+        var outside = WriteCbzAt(Path.Join(outsideDir, "book.cbz"), Xml("Outside", "1", "Chapter 1"));
         var before = await File.ReadAllBytesAsync(outside);
-        Directory.CreateSymbolicLink(Path.Combine(_library, "linked"), outsideDir);
+        Directory.CreateSymbolicLink(Path.Join(_library, "linked"), outsideDir);
 
-        var result = await service.RemoveMetadataAsync(Path.Combine(_library, "linked", "book.cbz"));
+        var result = await service.RemoveMetadataAsync(Path.Join(_library, "linked", "book.cbz"));
 
         Assert.False(result);
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot remove metadata: file is outside the allowed directories: {FilePath}"));
@@ -628,10 +630,10 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         var service = CreateService();
         var physical = WriteCbz("Series/book.cbz", Xml("Old", "1", "Chapter 1"));
-        var alias = Path.Combine(_library, "alias");
-        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Series"));
+        var alias = Path.Join(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Join(_library, "Series"));
 
-        var result = await service.RemoveMetadataAsync(Path.Combine(alias, "book.cbz"));
+        var result = await service.RemoveMetadataAsync(Path.Join(alias, "book.cbz"));
 
         Assert.True(result);
         Assert.Null(ReadComicInfo(physical));
@@ -685,7 +687,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         listener.Start();
 
         var service = CreateService(metrics: metrics);
-        var outside = WriteCbzAt(Path.Combine(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var outside = WriteCbzAt(Path.Join(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
 
         var result = await service.ProcessFileAsync(outside);
 
@@ -731,7 +733,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         _settings.WatcherEnableNormalize = false;
         var service = CreateService();
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
-        var expected = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var expected = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
 
         await service.ProcessFileAsync(path);
 
@@ -810,7 +812,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         _settings.WatcherEnableNormalize = false;
         var service = CreateService();
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
-        var target = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var target = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
         _logger.On(RenamingTemplate, _ => File.WriteAllText(target, "someone else's file"));
 
         await service.ProcessFileAsync(path);
@@ -863,11 +865,11 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         _settings.WatcherEnableNormalize = false;
         var service = CreateService();
         var physical = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
-        var outsideDir = Path.Combine(_root, "outside");
-        var outside = WriteCbzAt(Path.Combine(outsideDir, "orig.cbz"), Xml("Outside", "1", "Chapter 1"));
-        var alias = Path.Combine(_library, "alias");
-        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Series"));
-        var path = Path.Combine(alias, "orig.cbz");
+        var outsideDir = Path.Join(_root, "outside");
+        var outside = WriteCbzAt(Path.Join(outsideDir, "orig.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var alias = Path.Join(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Join(_library, "Series"));
+        var path = Path.Join(alias, "orig.cbz");
         _logger.On(RenamingTemplate, _ =>
         {
             Directory.Delete(alias);
@@ -877,11 +879,11 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         await service.ProcessFileAsync(path);
 
         Assert.False(File.Exists(physical));
-        Assert.True(File.Exists(Path.Combine(_library, "Series", "Series - Chapter 0005.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "Series", "Series - Chapter 0005.cbz")));
         Assert.True(File.Exists(outside));
-        Assert.False(File.Exists(Path.Combine(outsideDir, "Series - Chapter 0005.cbz")));
+        Assert.False(File.Exists(Path.Join(outsideDir, "Series - Chapter 0005.cbz")));
         _fileStore.Verify(
-            f => f.UpdateFilePathAsync(path, Path.Combine(_library, "Series", "Series - Chapter 0005.cbz"), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            f => f.UpdateFilePathAsync(path, Path.Join(_library, "Series", "Series - Chapter 0005.cbz"), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
             Times.Once);
     }
 
@@ -897,21 +899,21 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var service = CreateService();
         WriteCbz("SeriesA/orig.cbz", Xml("Series A", "5", "Chapter 5"));
         WriteCbz("SeriesB/orig.cbz", Xml("Series B", "9", "Chapter 9"));
-        var alias = Path.Combine(_library, "alias");
-        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "SeriesA"));
-        var path = Path.Combine(alias, "orig.cbz");
+        var alias = Path.Join(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Join(_library, "SeriesA"));
+        var path = Path.Join(alias, "orig.cbz");
         _logger.On("ProcessFileAsync: Extracting metadata from archive: {FilePath}", _ =>
         {
             Directory.Delete(alias);
-            Directory.CreateSymbolicLink(alias, Path.Combine(_library, "SeriesB"));
+            Directory.CreateSymbolicLink(alias, Path.Join(_library, "SeriesB"));
         });
 
         await service.ProcessFileAsync(path);
 
-        var renamed = Path.Combine(_library, "SeriesA", "Series A - Chapter 0005.cbz");
+        var renamed = Path.Join(_library, "SeriesA", "Series A - Chapter 0005.cbz");
         Assert.True(File.Exists(renamed));
-        Assert.True(File.Exists(Path.Combine(_library, "SeriesB", "orig.cbz")));
-        Assert.False(File.Exists(Path.Combine(_library, "SeriesB", "Series B - Chapter 0009.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "SeriesB", "orig.cbz")));
+        Assert.False(File.Exists(Path.Join(_library, "SeriesB", "Series B - Chapter 0009.cbz")));
         _fileStore.Verify(
             f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
             Times.Once);
@@ -928,13 +930,13 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         _settings.WatcherEnableNormalize = false;
         var service = CreateService();
         WriteCbz("Physical Series/Chapter 0005.cbz", comicInfoXml: null);
-        var alias = Path.Combine(_library, "Caller Series");
-        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Physical Series"));
-        var path = Path.Combine(alias, "Chapter 0005.cbz");
+        var alias = Path.Join(_library, "Caller Series");
+        Directory.CreateSymbolicLink(alias, Path.Join(_library, "Physical Series"));
+        var path = Path.Join(alias, "Chapter 0005.cbz");
 
         await service.ProcessFileAsync(path);
 
-        var renamed = Path.Combine(_library, "Physical Series", "Caller Series - Chapter 0005.cbz");
+        var renamed = Path.Join(_library, "Physical Series", "Caller Series - Chapter 0005.cbz");
         Assert.True(File.Exists(renamed));
         _fileStore.Verify(
             f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
@@ -952,7 +954,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         _settings.WatcherEnableNormalize = false;
         var service = CreateService();
         var target = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
-        var link = Path.Combine(_library, "alias.cbz");
+        var link = Path.Join(_library, "alias.cbz");
         File.CreateSymbolicLink(link, target);
 
         var result = await service.ProcessFileAsync(link);
@@ -978,9 +980,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var service = CreateService();
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
         var folder = Path.GetDirectoryName(path)!;
-        var movedFolder = Path.Combine(_library, "Series-moved");
-        var outsideDir = Path.Combine(_root, "outside");
-        var outside = WriteCbzAt(Path.Combine(outsideDir, "orig.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var movedFolder = Path.Join(_library, "Series-moved");
+        var outsideDir = Path.Join(_root, "outside");
+        var outside = WriteCbzAt(Path.Join(outsideDir, "orig.cbz"), Xml("Outside", "1", "Chapter 1"));
         _logger.On("ProcessFileAsync: Rename path validated: {FilePath}", _ =>
         {
             Directory.Move(folder, movedFolder);
@@ -989,10 +991,10 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         await service.ProcessFileAsync(path);
 
-        var renamed = Path.Combine(movedFolder, "Series - Chapter 0005.cbz");
+        var renamed = Path.Join(movedFolder, "Series - Chapter 0005.cbz");
         Assert.True(File.Exists(renamed));
         Assert.True(File.Exists(outside));
-        Assert.False(File.Exists(Path.Combine(outsideDir, "Series - Chapter 0005.cbz")));
+        Assert.False(File.Exists(Path.Join(outsideDir, "Series - Chapter 0005.cbz")));
         _fileStore.Verify(
             f => f.UpdateFilePathAsync(path, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()),
             Times.Once);
@@ -1010,9 +1012,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var service = CreateService();
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
         var folder = Path.GetDirectoryName(path)!;
-        var movedFolder = Path.Combine(_library, "Series-moved");
-        var outsideDir = Path.Combine(_root, "outside");
-        var outside = WriteCbzAt(Path.Combine(outsideDir, "orig.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var movedFolder = Path.Join(_library, "Series-moved");
+        var outsideDir = Path.Join(_root, "outside");
+        var outside = WriteCbzAt(Path.Join(outsideDir, "orig.cbz"), Xml("Outside", "1", "Chapter 1"));
         _logger.On("ProcessFileAsync: Attempting to rename file: {FilePath}", _ =>
         {
             Directory.Move(folder, movedFolder);
@@ -1022,8 +1024,8 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         await service.ProcessFileAsync(path);
 
         Assert.True(File.Exists(outside));
-        Assert.False(File.Exists(Path.Combine(outsideDir, "Series - Chapter 0005.cbz")));
-        Assert.True(File.Exists(Path.Combine(movedFolder, "orig.cbz")));
+        Assert.False(File.Exists(Path.Join(outsideDir, "Series - Chapter 0005.cbz")));
+        Assert.True(File.Exists(Path.Join(movedFolder, "orig.cbz")));
         Assert.True(_logger.Has(LogLevel.Warning, "ProcessFileAsync: File path changed during processing, not renaming: {FilePath}"));
         _fileStore.Verify(f => f.MarkFileRenamedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(
@@ -1382,7 +1384,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         _settings.WatcherEnableNormalize = false;
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
-        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
         var service = CreateUnsupportedRenameAt2Service(() =>
             File.WriteAllText(renamed, "replacement destination"), linkError);
 
@@ -1407,7 +1409,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         _settings.WatcherEnableNormalize = false;
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
-        var renamed = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
         var service = CreateUnsupportedRenameAt2Service(linkError: linkError);
         _logger.On("ProcessFileAsync: Rename path validated: {FilePath}", _ =>
             File.WriteAllText(renamed, "pre-existing target"));
@@ -1509,7 +1511,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
             .ReturnsAsync(new SeriesNameResolution { ResolvedSeries = resolvedSeries });
         var service = CreateService(resolver: resolver.Object);
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "1", "Chapter 1"));
-        var expected = Path.Combine(_library, "Series", $"{expectedSeries} - Chapter 0001.cbz");
+        var expected = Path.Join(_library, "Series", $"{expectedSeries} - Chapter 0001.cbz");
 
         await service.ProcessFileAsync(path);
 
@@ -1536,9 +1538,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     public async Task RenameFilesAsync_MissingOrNonArchiveFiles_FailWithHistory()
     {
         var service = CreateService();
-        var textFile = Path.Combine(_library, "notes.txt");
+        var textFile = Path.Join(_library, "notes.txt");
         await File.WriteAllTextAsync(textFile, "text");
-        var missing = Path.Combine(_library, "missing.cbz");
+        var missing = Path.Join(_library, "missing.cbz");
 
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { missing, textFile }));
 
@@ -1676,7 +1678,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.ProcessedFiles);
-        Assert.True(File.Exists(Path.Combine(_library, series, expectedName)), $"expected {expectedName}");
+        Assert.True(File.Exists(Path.Join(_library, series, expectedName)), $"expected {expectedName}");
         Assert.True(_logger.Has(LogLevel.Warning, ChapterAppendedTemplate));
     }
 
@@ -1702,7 +1704,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(1, job.ProcessedFiles);
         Assert.Equal(0, job.FailedFiles);
         Assert.False(_logger.Has(LogLevel.Error, "Error generating filename"));
-        var renamed = Assert.Single(Directory.GetFiles(Path.Combine(_library, "S")));
+        var renamed = Assert.Single(Directory.GetFiles(Path.Join(_library, "S")));
         Assert.Equal(expectedName, Path.GetFileName(renamed));
     }
 
@@ -1759,7 +1761,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     [Fact]
     public async Task RenameFilesAsync_RecoveredChapterCannotBeWritten_WarnsAndStillRenames()
     {
-        var tempAsFile = Path.Combine(_root, "temp-is-a-file");
+        var tempAsFile = Path.Join(_root, "temp-is-a-file");
         await File.WriteAllTextAsync(tempAsFile, "blocking");
         _settings.TempFileDirectory = tempAsFile;
         var service = CreateService();
@@ -1769,7 +1771,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         Assert.Equal(1, job.ProcessedFiles);
         Assert.True(_logger.Has(LogLevel.Warning, "Failed to write recovered chapter number '{Chapter}' to metadata for {FilePath}."));
-        Assert.True(File.Exists(Path.Combine(_library, "Series", "Series - Chapter 0005.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "Series", "Series - Chapter 0005.cbz")));
     }
 
     // --------------------------------------------------------------- normalize
@@ -1792,9 +1794,9 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     public async Task NormalizeFilesAsync_MissingOrNonArchiveFiles_MarkedNotNormalized()
     {
         var service = CreateService();
-        var textFile = Path.Combine(_library, "notes.txt");
+        var textFile = Path.Join(_library, "notes.txt");
         await File.WriteAllTextAsync(textFile, "text");
-        var missing = Path.Combine(_library, "missing.cbz");
+        var missing = Path.Join(_library, "missing.cbz");
 
         var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { missing, textFile }));
 
@@ -1835,7 +1837,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     [Fact]
     public async Task NormalizeFilesAsync_MetadataWriteFails_ReportsFailure()
     {
-        var tempAsFile = Path.Combine(_root, "temp-is-a-file");
+        var tempAsFile = Path.Join(_root, "temp-is-a-file");
         await File.WriteAllTextAsync(tempAsFile, "blocking");
         _settings.TempFileDirectory = tempAsFile;
         var service = CreateService();
@@ -1943,7 +1945,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.ProcessedFiles);
-        Assert.True(File.Exists(Path.Combine(_library, "Folder Name", $"{expectedSeries} - Chapter 0001.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "Folder Name", $"{expectedSeries} - Chapter 0001.cbz")));
         if (userSelectedRecord)
         {
             cache.Verify(c => c.SetUserAliasesAsync(It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -1978,7 +1980,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         Assert.Equal(1, job.ProcessedFiles);
         Assert.True(_logger.Has(LogLevel.Warning, "Failed to persist external lookup for series {SeriesName}"));
-        Assert.True(File.Exists(Path.Combine(_library, "Series", "Gaibu Title - Chapter 0001.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "Series", "Gaibu Title - Chapter 0001.cbz")));
         cache.Verify(c => c.SetUserAliasesAsync(
             "External Title",
             It.Is<IEnumerable<string>>(a => a.SequenceEqual(new[] { "Series" })),
@@ -2000,7 +2002,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.ProcessedFiles);
-        Assert.True(File.Exists(Path.Combine(_library, "Series", "Unknown Series - Chapter 0001.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "Series", "Unknown Series - Chapter 0001.cbz")));
     }
 
     [Theory]
@@ -2040,7 +2042,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.ProcessedFiles);
-        Assert.True(File.Exists(Path.Combine(_library, "Folder Name", "Canonical - Chapter 0001.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "Folder Name", "Canonical - Chapter 0001.cbz")));
         if (expectedAliases is null)
         {
             cache.Verify(c => c.SetUserAliasesAsync(It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -2072,7 +2074,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.ProcessedFiles);
-        Assert.True(File.Exists(Path.Combine(_library, "Series", "External Title - Chapter 0001.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "Series", "External Title - Chapter 0001.cbz")));
         cache.Verify(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         cache.Verify(c => c.SetUserAliasesAsync(It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -2091,7 +2093,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
         Assert.Equal(1, job.ProcessedFiles);
         Assert.True(_logger.Has(LogLevel.Warning, "Failed to resolve external metadata for series {SeriesName}"));
-        Assert.True(File.Exists(Path.Combine(_library, "Folder Name", "Meta Series - Chapter 0001.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "Folder Name", "Meta Series - Chapter 0001.cbz")));
     }
 
     [Fact]
@@ -2130,7 +2132,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.ProcessedFiles);
-        Assert.True(File.Exists(Path.Combine(_library, "Series", "Series - Chapter 0001.cbz")));
+        Assert.True(File.Exists(Path.Join(_library, "Series", "Series - Chapter 0001.cbz")));
         external.Verify(e => e.LookupSeriesAsync("Series", It.IsAny<CancellationToken>()), Times.Exactly(expectedLookups));
     }
 
@@ -2202,7 +2204,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     private string WriteCbz(string relativePath, string? comicInfoXml) =>
-        WriteCbzAt(Path.Combine(_library, relativePath), comicInfoXml);
+        WriteCbzAt(Path.Join(_library, relativePath), comicInfoXml);
 
     private static string WriteCbzAt(string path, string? comicInfoXml)
     {
@@ -2230,7 +2232,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     /// </summary>
     private string WriteCbzWithLargeEntry(string relativePath)
     {
-        var path = Path.Combine(_library, relativePath);
+        var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
         {
@@ -2249,7 +2251,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     /// </summary>
     private string WriteCbzWithUnreadableEntry(string relativePath)
     {
-        var path = Path.Combine(_library, relativePath);
+        var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
         {
@@ -2287,7 +2289,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     /// </summary>
     private string WriteCbzWithCorruptDeflateEntry(string relativePath)
     {
-        var path = Path.Combine(_library, relativePath);
+        var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
         {
@@ -2321,7 +2323,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     /// </summary>
     private string WriteNamelessGzipCbz(string relativePath)
     {
-        var path = Path.Combine(_library, relativePath);
+        var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using (var file = File.Create(path))
         using (var gzip = new GZipStream(file, CompressionLevel.Fastest))
@@ -2343,7 +2345,7 @@ public class ComicProcessorServiceCoverageTests : IDisposable
 
     private string WriteCorrupt(string relativePath)
     {
-        var path = Path.Combine(_library, relativePath);
+        var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, "this is not a comic archive");
         return path;
@@ -2410,19 +2412,21 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         return status.GroupId;
     }
 
-    [DllImport("libc", EntryPoint = "getegid")]
-    private static extern uint GetLinuxEffectiveGroupId();
+    // getegid cannot fail; SetLastError only makes the generator emit a managed stub rather than
+    // an extern forwarder.
+    [LibraryImport("libc", EntryPoint = "getegid", SetLastError = true)]
+    private static partial uint GetLinuxEffectiveGroupId();
 
-    [DllImport("libc", EntryPoint = "chown", SetLastError = true)]
-    private static extern int SetLinuxFileGroup(
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+    [LibraryImport("libc", EntryPoint = "chown", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int SetLinuxFileGroup(
+        string path,
         uint owner,
         uint group);
 
-    [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
-    private static extern int StatLinuxFile(
+    [LibraryImport("libc", EntryPoint = "statx", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int StatLinuxFile(
         int directory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        string path,
         int flags,
         uint mask,
         out TestLinuxFileStatus status);

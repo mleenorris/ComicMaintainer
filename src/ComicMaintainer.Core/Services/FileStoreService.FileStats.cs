@@ -11,16 +11,17 @@ public partial class FileStoreService
     public async Task<int> RefreshFileStatsAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
         var stats = new Dictionary<string, (long Size, DateTime LastWrite)>(StringComparer.Ordinal);
-        foreach (var path in filePaths ?? Enumerable.Empty<string>())
+        var pending = (filePaths ?? Enumerable.Empty<string>())
+            .Where(path => !string.IsNullOrWhiteSpace(path) && !stats.ContainsKey(path));
+        foreach (var path in pending)
         {
-            if (string.IsNullOrWhiteSpace(path) || stats.ContainsKey(path)) continue;
             try
             {
                 var info = new FileInfo(path);
                 if (!info.Exists) continue;
                 stats[path] = (info.Length, info.LastWriteTime);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
             {
                 _logger.LogDebug(ex, "RefreshFileStats: stat failed for {FilePath}", SanitizeForLogging(path));
             }
@@ -53,7 +54,7 @@ public partial class FileStoreService
                 MarkChanged();
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "RefreshFileStats: failed to persist file stats for {Count} file(s)", stats.Count);
         }

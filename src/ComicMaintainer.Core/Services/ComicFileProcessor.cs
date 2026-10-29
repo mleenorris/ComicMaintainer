@@ -203,7 +203,7 @@ public class ComicFileProcessor
                 issueNoPad = issueNumber;
             }
         }
-        catch
+        catch (Exception ex) when (ex is FormatException or OverflowException)
         {
             issueFormatted = issueNumber;
             issueNoPad = issueNumber;

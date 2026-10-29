@@ -20,16 +20,16 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
 
     public DatabaseBackupServiceCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "cm-backup-coverage-" + Guid.NewGuid().ToString("N"));
+        _root = Path.Join(Path.GetTempPath(), "cm-backup-coverage-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_root);
-        _dbPath = Path.Combine(_root, "comicmaintainer.db");
+        _dbPath = Path.Join(_root, "comicmaintainer.db");
         _settings = new AppSettings { ConfigDirectory = _root, DatabaseBackupRetention = 3 };
     }
 
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_root, recursive: true); } catch { /* best effort */ }
+        try { Directory.Delete(_root, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
         var middle = await service.CreateBackupAsync();
         _time.Advance(TimeSpan.FromDays(1));
         var newest = await service.CreateBackupAsync();
-        var oldestPath = Path.Combine(service.BackupDirectory, oldest.Name);
+        var oldestPath = Path.Join(service.BackupDirectory, oldest.Name);
 
         // PruneBackups reads the settings once for the retention and once to list the
         // backups; the next read happens while deleting. Replacing the oldest backup with
@@ -105,8 +105,8 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
         var deleted = service.PruneBackups();
 
         Assert.Equal(1, deleted);
-        Assert.False(File.Exists(Path.Combine(service.BackupDirectory, middle.Name)));
-        Assert.True(File.Exists(Path.Combine(service.BackupDirectory, newest.Name)));
+        Assert.False(File.Exists(Path.Join(service.BackupDirectory, middle.Name)));
+        Assert.True(File.Exists(Path.Join(service.BackupDirectory, newest.Name)));
         Assert.True(Directory.Exists(oldestPath));
         var warning = Assert.Single(logger.Entries, e => e.Level == LogLevel.Warning);
         Assert.Contains(oldest.Name, warning.Message);
@@ -131,7 +131,7 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
         var service = CreateService();
         var regular = await service.CreateBackupAsync();
         const string oddName = "comicmaintainer-20261399-999999.db";
-        var oddPath = Path.Combine(service.BackupDirectory, oddName);
+        var oddPath = Path.Join(service.BackupDirectory, oddName);
         File.WriteAllText(oddPath, "x");
         var lastWrite = new DateTime(2030, 1, 2, 3, 4, 5, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(oddPath, lastWrite);
@@ -148,12 +148,12 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
     public async Task NameBasedOperations_WorkWhenTheConfiguredDirectoryEndsWithASeparator()
     {
         CreateDatabase(_dbPath);
-        _settings.DatabaseBackupDirectory = Path.Combine(_root, "custom") + Path.DirectorySeparatorChar;
+        _settings.DatabaseBackupDirectory = Path.Join(_root, "custom") + Path.DirectorySeparatorChar;
         var service = CreateService();
 
         var backup = await service.CreateBackupAsync();
 
-        Assert.True(File.Exists(Path.Combine(_root, "custom", backup.Name)));
+        Assert.True(File.Exists(Path.Join(_root, "custom", backup.Name)));
         using (var stream = service.OpenBackup(backup.Name))
         {
             Assert.NotNull(stream);
@@ -186,7 +186,7 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
     public async Task StageRestoreFromStreamAsync_RejectsADatabaseThatFailsTheIntegrityCheck()
     {
         CreateDatabase(_dbPath);
-        var upload = Path.Combine(_root, "inconsistent.db");
+        var upload = Path.Join(_root, "inconsistent.db");
         CreateDatabase(upload, wal: false);
         // Claim five freelist pages in the header while the database has none.
         using (var stream = new FileStream(upload, FileMode.Open, FileAccess.ReadWrite))

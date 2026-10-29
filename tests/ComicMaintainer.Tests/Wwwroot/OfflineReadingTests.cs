@@ -17,7 +17,7 @@ public class OfflineReadingTests
             var current = AppContext.BaseDirectory;
             for (var i = 0; i < 10 && current != null; i++)
             {
-                var candidate = Path.Combine(current, "src", "ComicMaintainer.WebApi", "wwwroot");
+                var candidate = Path.Join(current, "src", "ComicMaintainer.WebApi", "wwwroot");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -30,7 +30,7 @@ public class OfflineReadingTests
 
     private static string ReadAsset(params string[] segments)
     {
-        var path = Path.Combine(new[] { WwwRoot }.Concat(segments).ToArray());
+        var path = Path.Join(new[] { WwwRoot }.Concat(segments).ToArray());
         Assert.True(File.Exists(path), $"Expected {path} to exist");
         return File.ReadAllText(path);
     }

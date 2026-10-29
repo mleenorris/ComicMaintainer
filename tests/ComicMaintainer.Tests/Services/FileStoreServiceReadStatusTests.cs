@@ -21,7 +21,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
 {
     private static readonly DateTime T0 = new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    private readonly string _library = Path.Combine(Path.GetTempPath(), $"fss_read_{Guid.NewGuid():N}");
+    private readonly string _library = Path.Join(Path.GetTempPath(), $"fss_read_{Guid.NewGuid():N}");
     private readonly ServiceProvider _provider;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _db;
     private readonly FlakyDbContextFactory _factory;
@@ -47,7 +47,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     [Fact]
     public async Task GetAllFilesAsync_SecondCallWithoutChanges_ServesReadPathsFromCache()
     {
-        var path = Path.Combine(_library, "Saga 001.cbz");
+        var path = Path.Join(_library, "Saga 001.cbz");
         await SeedAsync(db =>
         {
             db.ComicFiles.Add(FileRow(path));
@@ -66,8 +66,8 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_DestinationHasUserRows_DestinationWinsAndProgressIsMerged()
     {
-        var oldPath = Path.Combine(_library, "Chapter 7.cbz");
-        var newPath = Path.Combine(_library, "Saga - Chapter 007.cbz");
+        var oldPath = Path.Join(_library, "Chapter 7.cbz");
+        var newPath = Path.Join(_library, "Saga - Chapter 007.cbz");
         await SeedAsync(db =>
         {
             db.ComicFiles.Add(FileRow(oldPath));
@@ -135,7 +135,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_SamePath_LeavesEveryUsersReadStatusInPlace()
     {
-        var path = Path.Combine(_library, "Saga 001.cbz");
+        var path = Path.Join(_library, "Saga 001.cbz");
         await SeedAsync(db =>
         {
             db.ComicFiles.Add(FileRow(path));
@@ -164,7 +164,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     {
         var service = CreateService(userId: null);
 
-        await service.MarkFilesReadAsync(new[] { Path.Combine(_library, "Saga 001.cbz") }, read: true);
+        await service.MarkFilesReadAsync(new[] { Path.Join(_library, "Saga 001.cbz") }, read: true);
 
         Assert.Equal(0, _factory.Created);
         Assert.Empty(await AllStatusesAsync());
@@ -173,8 +173,8 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     [Fact]
     public async Task MarkFilesReadAsync_ExistingRows_UpdatesInPlaceAndOnlyStampsLastReadWhenMarkingRead()
     {
-        var unread = Path.Combine(_library, "Saga 001.cbz");
-        var read = Path.Combine(_library, "Saga 002.cbz");
+        var unread = Path.Join(_library, "Saga 001.cbz");
+        var read = Path.Join(_library, "Saga 002.cbz");
         await SeedAsync(db => db.UserFileReadStatuses.AddRange(
             Status("alice", unread, isRead: false, lastRead: T0),
             Status("alice", read, isRead: true, lastRead: T0)));
@@ -194,8 +194,8 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     [Fact]
     public async Task MarkFilesReadAsync_LazySequenceMarkedUnread_CreatesRowsWithoutLastReadDate()
     {
-        var first = Path.Combine(_library, "Saga 003.cbz");
-        var second = Path.Combine(_library, "Saga 004.cbz");
+        var first = Path.Join(_library, "Saga 003.cbz");
+        var second = Path.Join(_library, "Saga 004.cbz");
         var service = CreateService("alice");
 
         await service.MarkFilesReadAsync(Lazily(first, second), read: false);
@@ -213,7 +213,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     [Fact]
     public async Task MarkFilesReadAsync_ExactlyOneFullChunk_MarksEveryFile()
     {
-        var paths = Enumerable.Range(0, 500).Select(i => Path.Combine(_library, $"Issue {i:000}.cbz")).ToList();
+        var paths = Enumerable.Range(0, 500).Select(i => Path.Join(_library, $"Issue {i:000}.cbz")).ToList();
         var service = CreateService("alice");
 
         await service.MarkFilesReadAsync(paths, read: true);
@@ -226,8 +226,8 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     [Fact]
     public async Task MarkFilesReadAsync_BulkUpdateFails_FallsBackToPerFileUpdates()
     {
-        var first = Path.Combine(_library, "Saga 005.cbz");
-        var second = Path.Combine(_library, "Saga 006.cbz");
+        var first = Path.Join(_library, "Saga 005.cbz");
+        var second = Path.Join(_library, "Saga 006.cbz");
         var service = CreateService("alice");
         _factory.FailNth(1);
 
@@ -244,7 +244,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     {
         var service = CreateService("alice");
 
-        await service.SaveReadingProgressAsync(Path.Combine(_library, "Saga 001.cbz"), 0);
+        await service.SaveReadingProgressAsync(Path.Join(_library, "Saga 001.cbz"), 0);
 
         Assert.True(_logger.Contains(LogLevel.Warning, "Invalid page number 0"));
         Assert.Equal(0, _factory.Created);
@@ -255,7 +255,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     {
         var service = CreateService(userId: null);
 
-        await service.SaveReadingProgressAsync(Path.Combine(_library, "Saga 001.cbz"), 4);
+        await service.SaveReadingProgressAsync(Path.Join(_library, "Saga 001.cbz"), 4);
 
         Assert.Equal(0, _factory.Created);
         Assert.Empty(await AllStatusesAsync());
@@ -267,7 +267,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
         var service = CreateService("alice");
         _factory.FailAll();
 
-        await service.SaveReadingProgressAsync(Path.Combine(_library, "Saga 001.cbz"), 4);
+        await service.SaveReadingProgressAsync(Path.Join(_library, "Saga 001.cbz"), 4);
 
         Assert.True(_logger.Contains(LogLevel.Error, "Error saving reading progress"));
     }
@@ -277,14 +277,14 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     {
         var service = CreateService(userId: null);
 
-        Assert.Equal(1, await service.GetReadingProgressAsync(Path.Combine(_library, "Saga 001.cbz")));
+        Assert.Equal(1, await service.GetReadingProgressAsync(Path.Join(_library, "Saga 001.cbz")));
         Assert.Equal(0, _factory.Created);
     }
 
     [Fact]
     public async Task GetReadingProgressAsync_DatabaseUnavailable_ReturnsFirstPage()
     {
-        var path = Path.Combine(_library, "Saga 001.cbz");
+        var path = Path.Join(_library, "Saga 001.cbz");
         await SeedAsync(db => db.UserFileReadStatuses.Add(Status("alice", path, isRead: false, page: 9)));
         var service = CreateService("alice");
         _factory.FailAll();

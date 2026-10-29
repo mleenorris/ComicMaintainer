@@ -19,13 +19,13 @@ catch (UnauthorizedAccessException)
 {
     // Fallback to temp directory if we don't have permission
     unwritableConfigDir = configDir;
-    configDir = Path.Combine(Path.GetTempPath(), "ComicMaintainer");
+    configDir = Path.Join(Path.GetTempPath(), "ComicMaintainer");
     Directory.CreateDirectory(configDir);
 }
 
 // Ensure user-settings.json exists and is in the new shape (object root under "AppSettings")
 // so that the configuration provider can register it as a reload-on-change source from startup.
-var userSettingsPath = Path.Combine(configDir, "user-settings.json");
+var userSettingsPath = Path.Join(configDir, "user-settings.json");
 UserSettingsBootstrap.EnsureUserSettingsFileMigrated(userSettingsPath);
 
 // Load user settings to get LogMaxBytes

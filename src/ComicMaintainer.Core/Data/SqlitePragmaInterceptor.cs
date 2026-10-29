@@ -81,7 +81,7 @@ public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
 
             Execute(connection, ConnectionPragmas);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger?.LogWarning(ex, "Failed to apply SQLite PRAGMAs");
         }

@@ -65,7 +65,7 @@ public class ProcessingHistoryController : ControllerBase
             _logger.LogWarning(ex, "Invalid request parameters for processing history");
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error retrieving processing history");
             return StatusCode(500, "Error retrieving processing history");

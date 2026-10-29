@@ -19,7 +19,7 @@ public class SeriesArchiveCoverWriterTests : IDisposable
 
     public SeriesArchiveCoverWriterTests()
     {
-        _testDirectory = Path.Combine(Path.GetTempPath(), $"archive_cover_test_{Guid.NewGuid()}");
+        _testDirectory = Path.Join(Path.GetTempPath(), $"archive_cover_test_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
         _settings.Setup(s => s.CurrentValue).Returns(() => _appSettings);
     }
@@ -39,20 +39,21 @@ public class SeriesArchiveCoverWriterTests : IDisposable
 
     private string CreateCbz(string name, params string[] pageNames)
     {
-        var path = Path.Combine(_testDirectory, name);
+        var path = Path.Join(_testDirectory, name);
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
         foreach (var page in pageNames)
         {
-            var entry = zip.CreateEntry(page);
-            using var stream = entry.Open();
-            stream.Write(new byte[] { 1, 2, 3, 4 });
+            using (var stream = zip.CreateEntry(page).Open())
+            {
+                stream.Write(new byte[] { 1, 2, 3, 4 });
+            }
         }
         return path;
     }
 
     private string CreateCoverImage(byte[] bytes)
     {
-        var path = Path.Combine(_testDirectory, $"cover_src_{Guid.NewGuid()}.jpg");
+        var path = Path.Join(_testDirectory, $"cover_src_{Guid.NewGuid()}.jpg");
         File.WriteAllBytes(path, bytes);
         return path;
     }
@@ -266,6 +267,6 @@ public class SeriesArchiveCoverWriterTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_testDirectory, true); } catch { /* ignore */ }
+        try { Directory.Delete(_testDirectory, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 }

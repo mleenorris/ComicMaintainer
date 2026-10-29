@@ -19,7 +19,7 @@ public class ServiceWorkerCachingTests
             var current = AppContext.BaseDirectory;
             for (var i = 0; i < 10 && current != null; i++)
             {
-                var candidate = Path.Combine(current, "src", "ComicMaintainer.WebApi", "wwwroot");
+                var candidate = Path.Join(current, "src", "ComicMaintainer.WebApi", "wwwroot");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -32,7 +32,7 @@ public class ServiceWorkerCachingTests
 
     private static string ReadServiceWorker()
     {
-        var path = Path.Combine(WwwRoot, "sw.js");
+        var path = Path.Join(WwwRoot, "sw.js");
         Assert.True(File.Exists(path), $"Expected {path} to exist");
         return File.ReadAllText(path);
     }
@@ -44,7 +44,7 @@ public class ServiceWorkerCachingTests
 
         Assert.Contains("'/offline.html'", contents);
         Assert.True(
-            File.Exists(Path.Combine(WwwRoot, "offline.html")),
+            File.Exists(Path.Join(WwwRoot, "offline.html")),
             "sw.js precaches /offline.html, so wwwroot/offline.html must exist or installation will fail " +
             "(cache.addAll rejects when any entry 404s, which would disable the service worker entirely).");
     }

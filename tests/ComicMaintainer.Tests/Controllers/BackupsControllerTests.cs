@@ -98,7 +98,8 @@ public class BackupsControllerTests
     [Fact]
     public void Download_StreamsBackup()
     {
-        _backups.Setup(b => b.OpenBackup(ValidName)).Returns(new MemoryStream(Encoding.ASCII.GetBytes("SQLite format 3\0")));
+        using var backup = new MemoryStream(Encoding.ASCII.GetBytes("SQLite format 3\0"));
+        _backups.Setup(b => b.OpenBackup(ValidName)).Returns(backup);
 
         var file = Assert.IsType<FileStreamResult>(_controller.Download(ValidName));
 
@@ -109,7 +110,7 @@ public class BackupsControllerTests
     [Fact]
     public void Download_MissingIsNotFound()
     {
-        _backups.Setup(b => b.OpenBackup(ValidName)).Returns((Stream?)null);
+        _backups.Setup(b => b.OpenBackup(ValidName)).Returns(default(Stream?));
 
         Assert.IsType<NotFoundObjectResult>(_controller.Download(ValidName));
     }
@@ -153,7 +154,8 @@ public class BackupsControllerTests
     {
         Assert.IsType<BadRequestObjectResult>((await _controller.UploadRestore(null, CancellationToken.None)).Result);
 
-        var empty = new FormFile(new MemoryStream(), 0, 0, "file", "empty.db");
+        using var stream = new MemoryStream();
+        var empty = new FormFile(stream, 0, 0, "file", "empty.db");
         Assert.IsType<BadRequestObjectResult>((await _controller.UploadRestore(empty, CancellationToken.None)).Result);
     }
 
@@ -161,7 +163,8 @@ public class BackupsControllerTests
     public async Task UploadRestore_StagesValidFileAndRejectsInvalid()
     {
         var bytes = Encoding.ASCII.GetBytes("SQLite format 3\0payload");
-        var file = new FormFile(new MemoryStream(bytes), 0, bytes.Length, "file", "backup.db");
+        using var stream = new MemoryStream(bytes);
+        var file = new FormFile(stream, 0, bytes.Length, "file", "backup.db");
 
         _backups.Setup(b => b.StageRestoreFromStreamAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RestoreResult("upload"));

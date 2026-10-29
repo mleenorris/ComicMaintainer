@@ -149,7 +149,7 @@ public partial class FileStoreService
                 stale.AddRange(rows);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to query stale series-metadata-version files (current={Version})", currentVersion);
         }
@@ -169,7 +169,7 @@ public partial class FileStoreService
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
             return entity is null ? null : ToComicFile(entity);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to load file row for {FilePath}", SanitizeForLogging(filePath));
             return _files.TryGetValue(filePath, out var cached) ? cached : null;

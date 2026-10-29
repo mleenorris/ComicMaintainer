@@ -28,7 +28,7 @@ public partial class FilesController
             await _fileStore.MarkFileReadAsync(filePath, request.Read, cancellationToken);
             return Ok();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
             _logger.LogError(ex, "Error marking file read status for encoded path {EncodedPath}", sanitizedEncodedPath);
@@ -61,7 +61,7 @@ public partial class FilesController
             await _fileStore.MarkFilesReadAsync(request.Files, request.Read, cancellationToken);
             return Ok();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error marking files read status");
             return StatusCode(500, "Error updating read status");

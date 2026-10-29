@@ -120,11 +120,11 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
                 catch
                 {
                     try { if (File.Exists(tempPath)) File.Delete(tempPath); }
-                    catch { /* best-effort */ }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort */ }
                     throw;
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogWarning(ex,
                     "Failed to write series cover to folder {Folder} for {Key}",
@@ -157,7 +157,7 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
                 }
                 RemoveExistingCovers(folder, except: null);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogDebug(ex,
                     "Failed to remove series cover from folder {Folder} for {Key}",
@@ -182,7 +182,7 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
                 .Where(d => !string.IsNullOrWhiteSpace(d))
                 .ToList();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex,
                 "Failed to resolve folders for series cover write/remove for {Key}",
@@ -206,7 +206,7 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
             {
                 File.Delete(path);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Best-effort: caller logs the outer failure when relevant.
             }
@@ -226,7 +226,7 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
         {
             var fullFolder = Path.GetFullPath(folder);
             var fileName = "cover" + extension;
-            var candidate = Path.GetFullPath(Path.Combine(fullFolder, fileName));
+            var candidate = Path.GetFullPath(Path.Join(fullFolder, fileName));
             var withSep = fullFolder.EndsWith(Path.DirectorySeparatorChar)
                 ? fullFolder
                 : fullFolder + Path.DirectorySeparatorChar;
@@ -236,7 +236,7 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
             }
             return candidate;
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             return null;
         }

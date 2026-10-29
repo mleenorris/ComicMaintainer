@@ -71,7 +71,7 @@ public class EventBroadcasterServiceTests
 
         // Assert
         memoryStream.Position = 0;
-        var reader = new StreamReader(memoryStream);
+        using var reader = new StreamReader(memoryStream);
         var content = await reader.ReadToEndAsync();
         
         Assert.Contains("data:", content);
@@ -99,7 +99,7 @@ public class EventBroadcasterServiceTests
 
         // Assert
         memoryStream.Position = 0;
-        var reader = new StreamReader(memoryStream);
+        using var reader = new StreamReader(memoryStream);
         var content = await reader.ReadToEndAsync();
         
         Assert.Contains("file_processed", content);
@@ -128,7 +128,7 @@ public class EventBroadcasterServiceTests
 
         // Assert
         memoryStream.Position = 0;
-        var reader = new StreamReader(memoryStream);
+        using var reader = new StreamReader(memoryStream);
         var content = await reader.ReadToEndAsync();
         
         Assert.Contains("file_processed", content);
@@ -157,7 +157,7 @@ public class EventBroadcasterServiceTests
 
         // Assert
         memoryStream.Position = 0;
-        var reader = new StreamReader(memoryStream);
+        using var reader = new StreamReader(memoryStream);
         var content = await reader.ReadToEndAsync();
         
         Assert.Contains("watcher_status", content);
@@ -187,8 +187,8 @@ public class EventBroadcasterServiceTests
         // Assert
         stream1.Position = 0;
         stream2.Position = 0;
-        var reader1 = new StreamReader(stream1);
-        var reader2 = new StreamReader(stream2);
+        using var reader1 = new StreamReader(stream1);
+        using var reader2 = new StreamReader(stream2);
         var content1 = await reader1.ReadToEndAsync();
         var content2 = await reader2.ReadToEndAsync();
         

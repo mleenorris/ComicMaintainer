@@ -86,7 +86,7 @@ public class SuwayomiServiceTests
                 mangas = new
                 {
                     nodes = library.Select(series => new { id = series.Id, title = series.Title, inLibrary = true }),
-                    pageInfo = new { hasNextPage = false, endCursor = (string?)null }
+                    pageInfo = new { hasNextPage = false, endCursor = default(string?) }
                 }
             }
         });

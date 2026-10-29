@@ -111,8 +111,14 @@ public class SeriesImagesController : ControllerBase
         FileStream stream;
         try
         {
-            stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
-                bufferSize: 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            stream = System.IO.File.Open(path, new FileStreamOptions
+            {
+                Mode = FileMode.Open,
+                Access = FileAccess.Read,
+                Share = FileShare.ReadWrite | FileShare.Delete,
+                BufferSize = 4096,
+                Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+            });
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -221,7 +227,7 @@ public class SeriesImagesController : ControllerBase
             // a clean 400 to the UI rather than a 500.
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error uploading series image for {SeriesTitle}"),
                 LoggingHelper.SanitizeForLog(seriesTitle));
@@ -366,7 +372,7 @@ public class SeriesImagesController : ControllerBase
                 consideredTitles.Count,
                 cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error re-applying cached series images for all series"));
             return StatusCode(500, "Error updating series covers");
@@ -409,7 +415,7 @@ public class SeriesImagesController : ControllerBase
                 titles.Count,
                 cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error re-applying cached series images for selected series"));
             return StatusCode(500, "Error updating series covers");
@@ -492,7 +498,7 @@ public class SeriesImagesController : ControllerBase
             var record = await _cache.ClearImageAsync(normalizedKey, cancellationToken);
             return record is null ? NotFound() : Ok(record);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error clearing series image for {Key}"),
                 LoggingHelper.SanitizeForLog(normalizedKey));

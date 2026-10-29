@@ -21,15 +21,15 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
 
     public SeriesFolderCoverWriterCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "cm-folder-cover-cov-" + Guid.NewGuid().ToString("N"));
+        _root = Path.Join(Path.GetTempPath(), "cm-folder-cover-cov-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_root);
-        _source = Path.Combine(_root, "source-cover.jpg");
+        _source = Path.Join(_root, "source-cover.jpg");
         File.WriteAllBytes(_source, CoverBytes);
     }
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch { /* ignore */ }
+        try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 
     // ---- WriteAsync guards ---------------------------------------------------
@@ -43,7 +43,7 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
 
         await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
 
-        Assert.False(File.Exists(Path.Combine(folder, "cover.jpg")));
+        Assert.False(File.Exists(Path.Join(folder, "cover.jpg")));
         _library.Verify(
             l => l.GetFoldersForNormalizedKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -67,7 +67,7 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
     [InlineData("missing-cover.jpg")]
     public async Task WriteAsync_BlankOrMissingSource_DoesNothing(string source)
     {
-        var path = source.Length > 1 ? Path.Combine(_root, source) : source;
+        var path = source.Length > 1 ? Path.Join(_root, source) : source;
 
         await CreateWriter().WriteAsync(Key, path, "image/jpeg");
 
@@ -139,35 +139,35 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
     [Fact]
     public async Task WriteAsync_MixedFolders_SkipsMissingAndReplacesOtherCoverFormats()
     {
-        var missing = Path.Combine(_root, "Gone");
+        var missing = Path.Join(_root, "Gone");
         var withOldCover = CreateFolder("Saga Vol 1");
-        File.WriteAllBytes(Path.Combine(withOldCover, "cover.png"), [1]);
-        File.WriteAllText(Path.Combine(withOldCover, "notes.txt"), "keep");
+        File.WriteAllBytes(Path.Join(withOldCover, "cover.png"), [1]);
+        File.WriteAllText(Path.Join(withOldCover, "notes.txt"), "keep");
         var trailingSeparator = CreateFolder("Saga Vol 2") + Path.DirectorySeparatorChar;
         SetupFolders(missing, withOldCover, trailingSeparator);
 
         await CreateWriter().WriteAsync(Key, _source, "  IMAGE/JPEG ");
 
         Assert.False(Directory.Exists(missing));
-        Assert.Equal(CoverBytes, File.ReadAllBytes(Path.Combine(withOldCover, "cover.jpg")));
-        Assert.False(File.Exists(Path.Combine(withOldCover, "cover.png")));
-        Assert.True(File.Exists(Path.Combine(withOldCover, "notes.txt")));
-        Assert.Equal(CoverBytes, File.ReadAllBytes(Path.Combine(trailingSeparator, "cover.jpg")));
+        Assert.Equal(CoverBytes, File.ReadAllBytes(Path.Join(withOldCover, "cover.jpg")));
+        Assert.False(File.Exists(Path.Join(withOldCover, "cover.png")));
+        Assert.True(File.Exists(Path.Join(withOldCover, "notes.txt")));
+        Assert.Equal(CoverBytes, File.ReadAllBytes(Path.Join(trailingSeparator, "cover.jpg")));
     }
 
     [Fact]
     public async Task WriteAsync_DestinationBlocked_LogsCleansTempAndContinues()
     {
         var blocked = CreateFolder("Blocked");
-        Directory.CreateDirectory(Path.Combine(blocked, "cover.webp"));
+        Directory.CreateDirectory(Path.Join(blocked, "cover.webp"));
         var healthy = CreateFolder("Healthy");
         SetupFolders(blocked, healthy);
 
         await CreateWriter().WriteAsync(Key, _source, "image/webp");
 
-        Assert.True(Directory.Exists(Path.Combine(blocked, "cover.webp")));
-        Assert.False(File.Exists(Path.Combine(blocked, "cover.webp.tmp")));
-        Assert.Equal(CoverBytes, File.ReadAllBytes(Path.Combine(healthy, "cover.webp")));
+        Assert.True(Directory.Exists(Path.Join(blocked, "cover.webp")));
+        Assert.False(File.Exists(Path.Join(blocked, "cover.webp.tmp")));
+        Assert.Equal(CoverBytes, File.ReadAllBytes(Path.Join(healthy, "cover.webp")));
     }
 
     [Fact]
@@ -214,14 +214,14 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
     public async Task RemoveAsync_RemovesEveryManagedCoverAndSkipsMissingFolders()
     {
         var first = CreateFolder("Saga Vol 1");
-        File.WriteAllBytes(Path.Combine(first, "cover.jpg"), [1]);
-        File.WriteAllBytes(Path.Combine(first, "cover.png"), [2]);
-        File.WriteAllBytes(Path.Combine(first, "cover.webp"), [3]);
-        File.WriteAllBytes(Path.Combine(first, "cover.gif"), [4]);
-        File.WriteAllBytes(Path.Combine(first, "issue-1.cbz"), [5]);
+        File.WriteAllBytes(Path.Join(first, "cover.jpg"), [1]);
+        File.WriteAllBytes(Path.Join(first, "cover.png"), [2]);
+        File.WriteAllBytes(Path.Join(first, "cover.webp"), [3]);
+        File.WriteAllBytes(Path.Join(first, "cover.gif"), [4]);
+        File.WriteAllBytes(Path.Join(first, "issue-1.cbz"), [5]);
         var second = CreateFolder("Saga Vol 2");
-        File.WriteAllBytes(Path.Combine(second, "cover.png"), [6]);
-        SetupFolders(Path.Combine(_root, "Gone"), first, second);
+        File.WriteAllBytes(Path.Join(second, "cover.png"), [6]);
+        SetupFolders(Path.Join(_root, "Gone"), first, second);
 
         await CreateWriter().RemoveAsync(Key);
 
@@ -235,7 +235,7 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
     public async Task RemoveAsync_CanceledToken_Throws()
     {
         var folder = CreateFolder("Saga");
-        File.WriteAllBytes(Path.Combine(folder, "cover.jpg"), [1]);
+        File.WriteAllBytes(Path.Join(folder, "cover.jpg"), [1]);
         SetupFolders(folder);
         using var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -243,7 +243,7 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             CreateWriter().RemoveAsync(Key, cts.Token));
 
-        Assert.True(File.Exists(Path.Combine(folder, "cover.jpg")));
+        Assert.True(File.Exists(Path.Join(folder, "cover.jpg")));
     }
 
     // ---- helpers -----------------------------------------------------------------
@@ -272,7 +272,7 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
 
     private string CreateFolder(string name)
     {
-        var path = Path.Combine(_root, name);
+        var path = Path.Join(_root, name);
         Directory.CreateDirectory(path);
         return path;
     }

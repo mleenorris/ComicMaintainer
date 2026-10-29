@@ -267,6 +267,7 @@ public class ClientErrorsControllerTests
         }
         catch (OperationCanceledException)
         {
+            // Expected: the cancellation ends the read loop.
         }
 
         return reports;

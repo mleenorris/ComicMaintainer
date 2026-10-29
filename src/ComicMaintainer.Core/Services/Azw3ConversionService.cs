@@ -74,7 +74,7 @@ public partial class Azw3ConversionService : IAzw3ConversionService
         // The intermediate EPUB is an implementation detail: it is built inside
         // the output directory (so it shares its lifetime and permissions) and
         // removed again as soon as the AZW3 has been written.
-        var stagingDirectory = Path.Combine(outputDirectory, ".azw3-" + Guid.NewGuid().ToString("N"));
+        var stagingDirectory = Path.Join(outputDirectory, ".azw3-" + Guid.NewGuid().ToString("N"));
 
         try
         {
@@ -84,7 +84,7 @@ public partial class Azw3ConversionService : IAzw3ConversionService
                 options,
                 cancellationToken);
 
-            var azw3Path = Path.Combine(
+            var azw3Path = Path.Join(
                 outputDirectory,
                 Path.GetFileNameWithoutExtension(epubPath) + ".azw3");
             var tempPath = azw3Path + ".tmp";

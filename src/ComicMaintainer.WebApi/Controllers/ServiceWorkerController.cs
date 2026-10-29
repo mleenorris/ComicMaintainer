@@ -42,7 +42,7 @@ public class ServiceWorkerController : ControllerBase
     {
         try
         {
-            var swPath = Path.Combine(_environment.WebRootPath, "sw.js");
+            var swPath = GetWebRootFilePath("sw.js");
             
             if (!System.IO.File.Exists(swPath))
             {
@@ -78,7 +78,7 @@ public class ServiceWorkerController : ControllerBase
             
             return Content(swContent, "application/javascript; charset=utf-8");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error serving service worker");
             return StatusCode(500);
@@ -99,7 +99,7 @@ public class ServiceWorkerController : ControllerBase
     {
         try
         {
-            var manifestPath = Path.Combine(_environment.WebRootPath, "manifest.json");
+            var manifestPath = GetWebRootFilePath("manifest.json");
             
             if (!System.IO.File.Exists(manifestPath))
             {
@@ -121,10 +121,20 @@ public class ServiceWorkerController : ControllerBase
             
             return Content(manifestContent, "application/manifest+json; charset=utf-8");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error serving manifest");
             return StatusCode(500);
         }
     }
+
+    /// <summary>
+    /// The path of <paramref name="fileName"/> in the web root. Throws when no web root is
+    /// configured (Path.Join, unlike Path.Combine, would accept the null root and return a
+    /// path relative to the working directory); the actions report that as a server error.
+    /// </summary>
+    private string GetWebRootFilePath(string fileName) =>
+        Path.Join(
+            _environment.WebRootPath ?? throw new InvalidOperationException("The web root path is not configured."),
+            fileName);
 }

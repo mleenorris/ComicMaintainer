@@ -52,7 +52,7 @@ public class ReaderControllerTests
     [Fact]
     public async Task GetProgress_NoProgress_ReturnsNotFound()
     {
-        _progressMock.Setup(s => s.GetProgressAsync(TestUserId, "c1", default)).ReturnsAsync((ReadingProgress?)null);
+        _progressMock.Setup(s => s.GetProgressAsync(TestUserId, "c1", default)).ReturnsAsync(default(ReadingProgress?));
 
         var result = await _controller.GetProgress("c1");
 
@@ -64,7 +64,7 @@ public class ReaderControllerTests
     [Fact]
     public async Task PutProgress_ValidRequest_ReturnsNoContent()
     {
-        _progressMock.Setup(s => s.GetProgressAsync(TestUserId, "c1", default)).ReturnsAsync((ReadingProgress?)null);
+        _progressMock.Setup(s => s.GetProgressAsync(TestUserId, "c1", default)).ReturnsAsync(default(ReadingProgress?));
         _progressMock.Setup(s => s.SaveProgressAsync(It.IsAny<ReadingProgress>(), default)).Returns(Task.CompletedTask);
 
         var request = new ReaderController.PutProgressRequest { CurrentPage = 3, TotalPages = 10 };
@@ -195,7 +195,7 @@ public class ReaderControllerTests
     public async Task EndSession_UnknownSession_ReturnsNotFound()
     {
         var sessionId = Guid.NewGuid();
-        _sessionMock.Setup(s => s.EndSessionAsync(sessionId, It.IsAny<int>(), default)).ReturnsAsync((ReadingSession?)null);
+        _sessionMock.Setup(s => s.EndSessionAsync(sessionId, It.IsAny<int>(), default)).ReturnsAsync(default(ReadingSession?));
 
         var request = new ReaderController.EndSessionRequest { SessionId = sessionId, EndPage = 5 };
         var result = await _controller.EndSession(request);

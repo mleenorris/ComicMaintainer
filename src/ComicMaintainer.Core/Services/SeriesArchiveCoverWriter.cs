@@ -111,7 +111,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         {
             coverBytes = await File.ReadAllBytesAsync(sourceFilePath, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex,
                 "Failed to read source cover image for first-archive embed for {Key}",
@@ -130,7 +130,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
                 onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
                 onAfterReplace: () => SuppressWatcherProcessing(archivePath));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex,
                 "Failed to embed series cover into first archive {Path} for {Key}",
@@ -169,7 +169,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
                 onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
                 onAfterReplace: () => SuppressWatcherProcessing(archivePath));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex,
                 "Failed to remove embedded series cover from first archive {Path} for {Key}",
@@ -190,7 +190,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
             var library = scope.ServiceProvider.GetRequiredService<ISeriesLibraryService>();
             return await library.GetFirstIssueFilePathForNormalizedKeyAsync(normalizedKey, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex,
                 "Failed to resolve first archive for series cover embed/remove for {Key}",
@@ -217,7 +217,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
             var watcher = scope.ServiceProvider.GetService<IFileWatcherService>();
             watcher?.SuppressProcessing(archivePath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex,
                 "Failed to suppress watcher processing for first-archive cover write {Path}",
@@ -309,7 +309,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         catch
         {
             try { if (File.Exists(tempFile)) File.Delete(tempFile); }
-            catch { /* best-effort */ }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort */ }
             throw;
         }
     }
@@ -353,7 +353,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
             stream.CopyTo(memStream);
             return memStream.ToArray().AsSpan().SequenceEqual(expected);
         }
-        catch
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return false;
         }

@@ -74,7 +74,7 @@ public class DatabaseCleanupHostedServiceCoverageTests
     public async Task StopAsync_AfterDispose_IgnoresTheDisposedCancellationSource()
     {
         var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings { DatabaseCleanupIntervalHours = 0 });
-        var service = new DatabaseCleanupHostedService(_fileStore.Object, monitor, _logger.Object);
+        using var service = new DatabaseCleanupHostedService(_fileStore.Object, monitor, _logger.Object);
         await service.StartAsync(CancellationToken.None);
 
         service.Dispose();

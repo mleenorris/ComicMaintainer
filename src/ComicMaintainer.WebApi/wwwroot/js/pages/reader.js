@@ -205,7 +205,7 @@
 
                 // Check if URL hash indicates we should go to last page
                 const urlHash = window.location.hash;
-                let initialPage = 1;
+                let initialPage;
 
                 if (urlHash === '#lastpage') {
                     // Navigate to last page (for previous comic navigation)

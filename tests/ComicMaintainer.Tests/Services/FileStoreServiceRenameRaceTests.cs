@@ -26,7 +26,7 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
     private readonly string _testDirectory =
-        Path.Combine(Path.GetTempPath(), $"filestore_rename_race_{Guid.NewGuid()}");
+        Path.Join(Path.GetTempPath(), $"filestore_rename_race_{Guid.NewGuid()}");
     private readonly BeforeSaveInterceptor _interceptor = new();
     private readonly Mock<ILogger<FileStoreService>> _logger = new();
 
@@ -34,8 +34,8 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
     private IDbContextFactory<ComicMaintainerDbContext> _factory = null!;
     private FileStoreService _service = null!;
 
-    private string OldPath => Path.Combine(_testDirectory, "Chapter 100.cbz");
-    private string NewPath => Path.Combine(_testDirectory, "Monarch - Chapter 0100.cbz");
+    private string OldPath => Path.Join(_testDirectory, "Chapter 100.cbz");
+    private string NewPath => Path.Join(_testDirectory, "Monarch - Chapter 0100.cbz");
 
     public async Task InitializeAsync()
     {

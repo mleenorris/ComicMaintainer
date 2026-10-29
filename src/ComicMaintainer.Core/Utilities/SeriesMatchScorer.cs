@@ -38,11 +38,9 @@ public static class SeriesMatchScorer
 
         if (aliases != null)
         {
-            foreach (var alias in aliases)
+            foreach (var alias in aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)))
             {
-                if (string.IsNullOrWhiteSpace(alias)) continue;
-                var s = ScorePair(queryNorm, Normalize(alias), canonicalMatchBonus: false);
-                if (s > best) best = s;
+                best = Math.Max(best, ScorePair(queryNorm, Normalize(alias), canonicalMatchBonus: false));
             }
         }
 

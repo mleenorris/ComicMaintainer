@@ -117,7 +117,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 }
 
                 job.CurrentSeries = title;
-                string outcomeStatus = "error";
+                string outcomeStatus;
                 string? outcomeSource = null;
                 try
                 {
@@ -152,17 +152,11 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     }
                     if (record.Aliases is { Count: > 0 })
                     {
-                        foreach (var alias in record.Aliases)
-                        {
-                            if (!string.IsNullOrWhiteSpace(alias)) titlesToRetag.Add(alias);
-                        }
+                        titlesToRetag.UnionWith(record.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
                     }
                     if (record.UserAliases is { Count: > 0 })
                     {
-                        foreach (var alias in record.UserAliases)
-                        {
-                            if (!string.IsNullOrWhiteSpace(alias)) titlesToRetag.Add(alias);
-                        }
+                        titlesToRetag.UnionWith(record.UserAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
                     }
                 }
                 catch (OperationCanceledException)
@@ -170,7 +164,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     job.Status = JobStatus.Cancelled;
                     break;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex, "Metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(title));
                     job.Failures++;
@@ -201,7 +195,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 job.Status = JobStatus.Completed;
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Metadata refresh job {JobId} failed", job.JobId);
             job.Status = JobStatus.Failed;
@@ -232,7 +226,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     removed, job.JobId);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex,
                 "Failed to clean up stale series-metadata cache records after refresh job {JobId}",
@@ -253,7 +247,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
             {
                 await QueueFileRetagAsync(job.JobId, titlesToRetag, cancellationToken);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogWarning(ex,
                     "Failed to queue per-file retag after metadata refresh job {JobId}",
@@ -316,7 +310,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 job.Successes,
                 job.Failures);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex, "Failed to broadcast metadata refresh job update {JobId}", job.JobId);
         }

@@ -198,7 +198,7 @@ public class SeriesImageStore : ISeriesImageStore
 
         var dir = ResolveCacheDirectory();
         var fullDir = Path.GetFullPath(dir);
-        var candidate = Path.GetFullPath(Path.Combine(fullDir, fileName));
+        var candidate = Path.GetFullPath(Path.Join(fullDir, fileName));
         // Defense in depth: ensure final path stays inside the cache directory.
         if (!candidate.StartsWith(EnsureTrailingSeparator(fullDir), StringComparison.Ordinal))
         {
@@ -216,7 +216,7 @@ public class SeriesImageStore : ISeriesImageStore
         {
             File.Delete(path);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.LogDebug(ex, "Failed to delete cached series image {File}",
                 LoggingHelper.SanitizeForLog(fileName));
@@ -243,7 +243,7 @@ public class SeriesImageStore : ISeriesImageStore
         var safeKey = SanitizeKey(normalizedKey);
         var ext = AllowedContentTypes[contentType];
         var fileName = $"{safeKey}-{hash}{ext}";
-        var fullPath = Path.Combine(dir, fileName);
+        var fullPath = Path.Join(dir, fileName);
 
         // Atomic write: write to a temp file in the same directory then move.
         var tempPath = fullPath + ".tmp";
@@ -254,7 +254,7 @@ public class SeriesImageStore : ISeriesImageStore
         }
         catch
         {
-            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* ignore */ }
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
             throw;
         }
 
@@ -277,7 +277,7 @@ public class SeriesImageStore : ISeriesImageStore
             return configured;
         }
         var configDir = settings.ConfigDirectory ?? "/Config";
-        return Path.Combine(configDir, "series-images");
+        return Path.Join(configDir, "series-images");
     }
 
     private static string EnsureTrailingSeparator(string path)
@@ -386,7 +386,7 @@ public class SeriesImageStore : ISeriesImageStore
             // The request was cancelled or timed out; the host isn't unresolvable.
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             throw new InvalidOperationException($"Cannot resolve image host: {ex.Message}", ex);
         }

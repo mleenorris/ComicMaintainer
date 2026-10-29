@@ -71,7 +71,7 @@ public class MetadataController : ControllerBase
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata refresh-all queued for {Count} series (job {JobId})"), titles.Count, jobId);
             return Ok(new { jobId, totalSeries = titles.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh-all"));
             return StatusCode(500, new { error = "Error queuing metadata refresh" });
@@ -103,14 +103,14 @@ public class MetadataController : ControllerBase
             if (titles.Count == 0)
             {
                 _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata match-unmatched requested but no unmatched series were found"));
-                return Ok(new { jobId = (Guid?)null, totalSeries = 0 });
+                return Ok(new { jobId = default(Guid?), totalSeries = 0 });
             }
 
             var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata match-unmatched queued for {Count} series (job {JobId})"), titles.Count, jobId);
             return Ok(new { jobId, totalSeries = titles.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata match-unmatched"));
             return StatusCode(500, new { error = "Error queuing metadata match" });
@@ -131,7 +131,7 @@ public class MetadataController : ControllerBase
             var jobId = await _refreshJobs.StartAsync(request.Series, RefreshJobCancellationToken);
             return Ok(new { jobId, totalSeries = request.Series.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh-selected"));
             return StatusCode(500, new { error = "Error queuing metadata refresh" });
@@ -167,7 +167,7 @@ public class MetadataController : ControllerBase
             var record = await _cache.RefreshAsync(seriesTitle, cancellationToken);
             return Ok(record);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error refreshing metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, new { error = "Error refreshing metadata" });
@@ -200,14 +200,10 @@ public class MetadataController : ControllerBase
             }
             if (request.Titles is { Count: > 0 })
             {
-                foreach (var title in request.Titles)
-                {
-                    if (!string.IsNullOrWhiteSpace(title)
-                        && !titles.Contains(title, StringComparer.OrdinalIgnoreCase))
-                    {
-                        titles.Add(title);
-                    }
-                }
+                titles = titles
+                    .Concat(request.Titles.Where(title => !string.IsNullOrWhiteSpace(title)))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
             }
 
             if (titles.Count == 0)
@@ -218,7 +214,7 @@ public class MetadataController : ControllerBase
             var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
             return Accepted(new { jobId, totalSeries = titles.Count, titles });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh for folder"));
             return StatusCode(500, new { error = "Error queuing metadata refresh" });
@@ -440,7 +436,7 @@ public class MetadataController : ControllerBase
                 cancellationToken);
             return Ok(record);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error updating aliases for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, new { error = "Error updating aliases" });
@@ -533,7 +529,7 @@ public class MetadataController : ControllerBase
             {
                 await QueueSeriesNormalizeJobAsync(seriesTitle, record, cancellationToken);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogWarning(ex, LoggingHelper.WithWebsitePrefix("Failed to queue normalize job after applying match for {SeriesTitle}"),
                     LoggingHelper.SanitizeForLog(seriesTitle));
@@ -545,7 +541,7 @@ public class MetadataController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error applying match for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, new { error = "Error applying match" });
@@ -581,7 +577,7 @@ public class MetadataController : ControllerBase
             var record = await _cache.ClearExternalMetadataAsync(resolved.NormalizedKey, cancellationToken);
             return record is null ? NotFound() : Ok(record);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error clearing external metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, new { error = "Error clearing external metadata" });
@@ -628,7 +624,7 @@ public class MetadataController : ControllerBase
                             flaggedCount, LoggingHelper.SanitizeForLog(seriesTitle));
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex,
                         LoggingHelper.WithWebsitePrefix("Failed to flag files for metadata backfill after preferred-language change for {SeriesTitle}"),
@@ -642,7 +638,7 @@ public class MetadataController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting preferred language for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, new { error = "Error setting preferred language" });
@@ -720,7 +716,7 @@ public class MetadataController : ControllerBase
                             flaggedCount, LoggingHelper.SanitizeForLog(seriesTitle));
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex,
                         LoggingHelper.WithWebsitePrefix("Failed to flag files for metadata backfill after series-name change for {SeriesTitle}"),
@@ -734,7 +730,7 @@ public class MetadataController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting series name for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, new { error = "Error setting series name" });

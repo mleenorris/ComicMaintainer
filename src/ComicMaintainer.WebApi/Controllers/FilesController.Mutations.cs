@@ -29,7 +29,7 @@ public partial class FilesController
             
             return Ok(new { message = "Rename job started", jobId });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming file with encoded path {EncodedPath}"), sanitizedEncodedPath);
@@ -59,7 +59,7 @@ public partial class FilesController
             
             return Ok(new { jobId });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming file {FilePath}"), sanitizedPath);
@@ -99,7 +99,7 @@ public partial class FilesController
             }
             return NotFound();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
             _logger.LogError(ex, "Error deleting file with encoded path {EncodedPath}", sanitizedEncodedPath);
@@ -141,7 +141,7 @@ public partial class FilesController
             }
             return NotFound();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error deleting file");
             
@@ -174,7 +174,7 @@ public partial class FilesController
         {
             return StatusCode(499, new { error = "Cleanup operation was cancelled" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error during stale entry cleanup");
             return StatusCode(500, new { error = "Failed to cleanup stale entries" });

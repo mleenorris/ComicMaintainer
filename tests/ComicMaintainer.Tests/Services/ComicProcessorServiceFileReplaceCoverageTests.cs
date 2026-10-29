@@ -50,15 +50,15 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
 
     public ComicProcessorServiceFileReplaceCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "cps-replace-cov-" + Guid.NewGuid().ToString("N"));
-        _library = Path.Combine(_root, "library");
-        _tempDir = Path.Combine(_root, "temp");
+        _root = Path.Join(Path.GetTempPath(), "cps-replace-cov-" + Guid.NewGuid().ToString("N"));
+        _library = Path.Join(_root, "library");
+        _tempDir = Path.Join(_root, "temp");
         Directory.CreateDirectory(_library);
 
         _settings = new AppSettings
         {
             WatchedDirectory = _library,
-            DuplicateDirectory = Path.Combine(_root, "duplicates"),
+            DuplicateDirectory = Path.Join(_root, "duplicates"),
             TempFileDirectory = _tempDir,
             FilenameFormat = "{series} - Chapter {issue}",
             IssueNumberPadding = 4,
@@ -81,9 +81,11 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 
@@ -416,8 +418,8 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
     /// <summary>A genuine "file already exists" error raised by the OS.</summary>
     private IOException FileExistsError()
     {
-        var source = Path.Combine(_root, "exists-source");
-        var target = Path.Combine(_root, "exists-target");
+        var source = Path.Join(_root, "exists-source");
+        var target = Path.Join(_root, "exists-target");
         File.WriteAllText(source, "source");
         File.WriteAllText(target, "target");
         return Assert.Throws<IOException>(() => File.Copy(source, target));
@@ -436,7 +438,7 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
 
     private string WriteBook(string relativePath)
     {
-        var path = Path.Combine(_library, relativePath);
+        var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
         {

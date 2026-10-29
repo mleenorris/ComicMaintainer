@@ -174,10 +174,11 @@ public partial class SeriesLibraryService
             // through the file-side loop, where a file's grouping title points
             // (via aliasIndex) at a specific record — that's the user-intent
             // path.
-            foreach (var title in EnumerateAllRecordTitles(record))
+            var titleKeys = EnumerateAllRecordTitles(record)
+                .Where(title => !string.IsNullOrWhiteSpace(title))
+                .Select(NormalizeKey);
+            foreach (var titleKey in titleKeys)
             {
-                if (string.IsNullOrWhiteSpace(title)) continue;
-                var titleKey = NormalizeKey(title);
                 unionFind.Add(titleKey);
                 // Only union when the alias index agrees that this title belongs
                 // to this record. If another record has a stronger claim on the
@@ -295,12 +296,11 @@ public partial class SeriesLibraryService
                 accumulator.TryAddAlias(groupingTitle);
             }
 
-            foreach (var alias in entry.MetadataAliases)
+            var metadataAliases = entry.MetadataAliases
+                .Where(alias => !string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase));
+            foreach (var alias in metadataAliases)
             {
-                if (!string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase))
-                {
-                    accumulator.TryAddAlias(alias);
-                }
+                accumulator.TryAddAlias(alias);
             }
 
             accumulator.TotalSize += file.FileSize;
@@ -437,13 +437,8 @@ public partial class SeriesLibraryService
                 var survivorPaths = new HashSet<string>(
                     survivor.Issues.Select(existing => existing.FilePath ?? string.Empty),
                     StringComparer.OrdinalIgnoreCase);
-                foreach (var issue in other.Issues)
-                {
-                    if (string.IsNullOrEmpty(issue.FilePath) || survivorPaths.Add(issue.FilePath))
-                    {
-                        survivor.Issues.Add(issue);
-                    }
-                }
+                survivor.Issues.AddRange(other.Issues.Where(
+                    issue => string.IsNullOrEmpty(issue.FilePath) || survivorPaths.Add(issue.FilePath)));
 
                 survivor.TotalSize += other.TotalSize;
                 if (survivor.LatestModified < other.LatestModified)
@@ -494,15 +489,9 @@ public partial class SeriesLibraryService
             return groups;
         }
 
-        var collapsed = new Dictionary<string, SeriesAccumulator>(StringComparer.OrdinalIgnoreCase);
-        foreach (var kvp in groups)
-        {
-            if (!dropped.Contains(kvp.Value))
-            {
-                collapsed[kvp.Key] = kvp.Value;
-            }
-        }
-        return collapsed;
+        return groups
+            .Where(kvp => !dropped.Contains(kvp.Value))
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

@@ -1506,7 +1506,6 @@
             // job can be started meanwhile (canStartJob).
             progressModalStartGeneration = beginJobStart();
             const modal = document.getElementById('progressModal');
-            const indicator = document.getElementById('progressIndicator');
             document.getElementById('progressTitle').textContent = title;
             document.getElementById('progressBarFill').style.width = '0%';
             document.getElementById('progressText').textContent = '0 / 0 files';

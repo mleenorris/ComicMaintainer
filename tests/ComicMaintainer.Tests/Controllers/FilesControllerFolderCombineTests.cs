@@ -26,7 +26,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
     private static readonly DateTime T2 = new(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime T3 = new(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    private readonly string _root = Path.Combine(AppContext.BaseDirectory, "fc-n2a-tests", Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(AppContext.BaseDirectory, "fc-n2a-tests", Guid.NewGuid().ToString("N"));
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<IProcessingHistoryService> _history = new();
@@ -104,11 +104,11 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
             metadataCache: _metadataCache.Object,
             memoryCache: memoryCache);
 
-    private string Dir(string name) => Path.Combine(_root, name);
+    private string Dir(string name) => Path.Join(_root, name);
 
     private static ComicFile MakeFile(string directory, string fileName, string? series, DateTime modified, string? volume = null) => new()
     {
-        FilePath = Path.Combine(directory, fileName),
+        FilePath = Path.Join(directory, fileName),
         FileName = fileName,
         Directory = directory,
         Metadata = series is null && volume is null ? null : new ComicMetadata { Series = series, Volume = volume },
@@ -529,7 +529,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         {
             GroupKey = "foo",
             DestinationDirectory = Dir("Foo A"),
-            SourceDirectories = new List<string> { Path.Combine(_root, "..", "..", "escaped") }
+            SourceDirectories = new List<string> { Path.Join(_root, "..", "..", "escaped") }
         });
 
         AssertBadRequest(result.Result, "One or more source directories are outside the allowed directory.");
@@ -599,8 +599,8 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         Assert.Equal(Dir("Foo A"), Prop(ok.Value, "destination"));
         Assert.Equal(new[] { Dir("Foo B") }, Assert.IsType<List<string>>(Prop(ok.Value, "sources")));
         var move = Assert.Single(Items(Prop(ok.Value, "moves")));
-        Assert.Equal(Path.Combine(Dir("Foo B"), "Foo 002.cbz"), Prop(move, "sourcePath"));
-        Assert.Equal(Path.Combine(Dir("Foo A"), "Foo 002.cbz"), Prop(move, "destinationPath"));
+        Assert.Equal(Path.Join(Dir("Foo B"), "Foo 002.cbz"), Prop(move, "sourcePath"));
+        Assert.Equal(Path.Join(Dir("Foo A"), "Foo 002.cbz"), Prop(move, "destinationPath"));
         Assert.False((bool)Prop(move, "conflict")!);
         Assert.False((bool)Prop(move, "skipped")!);
         Assert.Null(Prop(move, "reason"));
@@ -614,15 +614,15 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         var result = await CreateController().PreviewCombineFolders(new FilesController.CombineFoldersRequest
         {
             DestinationDirectory = Dir("Foo B"),
-            SourceDirectories = new List<string> { Path.Combine(_root, "Foo B", "..", "Foo A") }
+            SourceDirectories = new List<string> { Path.Join(_root, "Foo B", "..", "Foo A") }
         });
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(Dir("Foo B"), Prop(ok.Value, "destination"));
         Assert.Equal(new[] { Dir("Foo A") }, Assert.IsType<List<string>>(Prop(ok.Value, "sources")));
         var move = Assert.Single(Items(Prop(ok.Value, "moves")));
-        Assert.Equal(Path.Combine(Dir("Foo A"), "Foo 001.cbz"), Prop(move, "sourcePath"));
-        Assert.Equal(Path.Combine(Dir("Foo B"), "Foo 001.cbz"), Prop(move, "destinationPath"));
+        Assert.Equal(Path.Join(Dir("Foo A"), "Foo 001.cbz"), Prop(move, "sourcePath"));
+        Assert.Equal(Path.Join(Dir("Foo B"), "Foo 001.cbz"), Prop(move, "destinationPath"));
     }
 
     [Fact]
@@ -649,7 +649,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         // A stale index entry: bucketed under "Foo A" but the file already lives in "Foo B".
         var alreadyInPlace = new ComicFile
         {
-            FilePath = Path.Combine(Dir("Foo B"), "x.cbz"),
+            FilePath = Path.Join(Dir("Foo B"), "x.cbz"),
             FileName = "x.cbz",
             Directory = Dir("Foo A"),
             Metadata = new ComicMetadata { Series = "Foo" },
@@ -799,7 +799,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         Assert.Equal(new[] { dirA }, Assert.IsType<List<string>>(Prop(ok.Value, "sources")));
         var move = Assert.Single(Items(Prop(ok.Value, "moves")));
         Assert.Equal(unbucketed.FilePath, Prop(move, "sourcePath"));
-        Assert.Equal(Path.Combine(dirB, "Alpha 001.cbz"), Prop(move, "destinationPath"));
+        Assert.Equal(Path.Join(dirB, "Alpha 001.cbz"), Prop(move, "destinationPath"));
     }
 
     // ------------------------------------------------ combine + alias persistence
@@ -840,7 +840,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
     {
         var files = ArrangeSeriesCombineOnDisk();
         SetupFiles(files);
-        var movedPath = Path.Combine(Dir("Foo"), "Foo Legacy 002.cbz");
+        var movedPath = Path.Join(Dir("Foo"), "Foo Legacy 002.cbz");
 
         var accepted = await CombineSeriesFoldersAsync();
 
@@ -862,14 +862,14 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
     {
         var files = ArrangeSeriesCombineOnDisk();
         SetupFiles(files);
-        var staging = Path.Combine(Dir("Foo (Old)"), ".tmp_0123456789abcdef.suwayomi-import");
+        var staging = Path.Join(Dir("Foo (Old)"), ".tmp_0123456789abcdef.suwayomi-import");
         File.WriteAllText(staging, "pending import");
 
         await CombineSeriesFoldersAsync();
 
         Assert.True(Directory.Exists(Dir("Foo (Old)")));
         Assert.True(File.Exists(staging));
-        Assert.True(File.Exists(Path.Combine(Dir("Foo"), "Foo Legacy 002.cbz")));
+        Assert.True(File.Exists(Path.Join(Dir("Foo"), "Foo Legacy 002.cbz")));
     }
 
     [Theory]
@@ -925,7 +925,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         var accepted = await CombineSeriesFoldersAsync();
 
         Assert.Equal(1, Prop(accepted.Value, "totalItems"));
-        Assert.Contains(Path.Combine(Dir("Foo"), "Foo Legacy 002.cbz"), _normalizedPaths);
+        Assert.Contains(Path.Join(Dir("Foo"), "Foo Legacy 002.cbz"), _normalizedPaths);
         Assert.Contains(files[0].FilePath, _normalizedPaths);
     }
 
@@ -970,7 +970,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         var sequence = _fileStore.SetupSequence(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(files);
         sequence = scenario switch
         {
-            "null" => sequence.ReturnsAsync((IEnumerable<ComicFile>)null!),
+            "null" => sequence.ReturnsAsync(default(IEnumerable<ComicFile>)!),
             "throws" => sequence.ThrowsAsync(new IOException("store busy")),
             _ => sequence.ReturnsAsync(files)
         };

@@ -841,7 +841,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         Assert.Equal("https://img.example/aot.jpg", _appliedMatch.ImageUrl);
         Assert.Null(_appliedMatch.ThumbnailUrl);
         Assert.Equal(
-            new[] { ("進撃の巨人", (string?)"ja"), ("Attack on Titan", null), ("L'Attaque des Titans", null) },
+            new (string, string?)[] { ("進撃の巨人", "ja"), ("Attack on Titan", null), ("L'Attaque des Titans", null) },
             _appliedMatch.LocalizedTitles.Select(t => (t.Title, t.Language)));
     }
 

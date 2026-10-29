@@ -30,13 +30,13 @@ public class SeriesImageStoreTests : IDisposable
 
     public SeriesImageStoreTests()
     {
-        _cacheDir = Path.Combine(Path.GetTempPath(), "cm-image-store-tests-" + Guid.NewGuid());
+        _cacheDir = Path.Join(Path.GetTempPath(), "cm-image-store-tests-" + Guid.NewGuid());
         Directory.CreateDirectory(_cacheDir);
     }
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_cacheDir)) Directory.Delete(_cacheDir, recursive: true); } catch { /* ignore */ }
+        try { if (Directory.Exists(_cacheDir)) Directory.Delete(_cacheDir, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 
     [Fact]

@@ -16,7 +16,7 @@ public class LogsControllerTests : IDisposable
 
     public LogsControllerTests()
     {
-        _testLogDir = Path.Combine(Path.GetTempPath(), $"logs_test_{Guid.NewGuid()}");
+        _testLogDir = Path.Join(Path.GetTempPath(), $"logs_test_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testLogDir);
 
         var settings = new AppSettings
@@ -47,7 +47,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithDebugLogFile_ReturnsContent()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         File.WriteAllLines(logFile, new[]
         {
             "Line 1",
@@ -70,7 +70,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithLinesParameter_ReturnsLimitedLines()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         var allLines = Enumerable.Range(1, 100).Select(i => $"Line {i}").ToArray();
         File.WriteAllLines(logFile, allLines);
 
@@ -88,7 +88,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithAppType_SearchesForAppLogs()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "app.log");
+        var logFile = Path.Join(_testLogDir, "app.log");
         File.WriteAllLines(logFile, new[] { "App log line 1", "App log line 2" });
 
         // Act
@@ -105,7 +105,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithWatcherType_SearchesForWatcherLogs()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "watcher.log");
+        var logFile = Path.Join(_testLogDir, "watcher.log");
         File.WriteAllLines(logFile, new[] { "Watcher log line 1", "Watcher log line 2" });
 
         // Act
@@ -122,7 +122,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithZeroLines_UsesMaxLimit()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         var allLines = Enumerable.Range(1, 10000).Select(i => $"Line {i}").ToArray();
         File.WriteAllLines(logFile, allLines);
 
@@ -141,8 +141,8 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithMultipleLogFiles_ReturnsNewest()
     {
         // Arrange
-        var oldLogFile = Path.Combine(_testLogDir, "debug20241101.log");
-        var newLogFile = Path.Combine(_testLogDir, "debug20241102.log");
+        var oldLogFile = Path.Join(_testLogDir, "debug20241101.log");
+        var newLogFile = Path.Join(_testLogDir, "debug20241102.log");
         File.WriteAllLines(oldLogFile, new[] { "Old log" });
         Thread.Sleep(10); // Ensure different timestamps
         File.WriteAllLines(newLogFile, new[] { "New log" });
@@ -180,7 +180,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithDefaultParameters_ReturnsLast500Lines()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         var allLines = Enumerable.Range(1, 1000).Select(i => $"Line {i}").ToArray();
         File.WriteAllLines(logFile, allLines);
 
@@ -204,9 +204,9 @@ public class LogsControllerTests : IDisposable
     public void GetLogFiles_WithDebugType_ReturnsAllDebugLogFiles()
     {
         // Arrange
-        var log1 = Path.Combine(_testLogDir, "debug20241101.log");
-        var log2 = Path.Combine(_testLogDir, "debug20241102.log");
-        var log3 = Path.Combine(_testLogDir, "debug.log");
+        var log1 = Path.Join(_testLogDir, "debug20241101.log");
+        var log2 = Path.Join(_testLogDir, "debug20241102.log");
+        var log3 = Path.Join(_testLogDir, "debug.log");
         File.WriteAllText(log1, "Old log 1");
         Thread.Sleep(10);
         File.WriteAllText(log2, "Old log 2");
@@ -227,8 +227,8 @@ public class LogsControllerTests : IDisposable
     public void GetLogFiles_WithAppType_ReturnsOnlyAppLogFiles()
     {
         // Arrange
-        var appLog = Path.Combine(_testLogDir, "app.log");
-        var debugLog = Path.Combine(_testLogDir, "debug.log");
+        var appLog = Path.Join(_testLogDir, "app.log");
+        var debugLog = Path.Join(_testLogDir, "debug.log");
         File.WriteAllText(appLog, "App log");
         File.WriteAllText(debugLog, "Debug log");
 
@@ -259,8 +259,8 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithSpecificFilename_ReturnsContentFromThatFile()
     {
         // Arrange
-        var oldLog = Path.Combine(_testLogDir, "debug20241101.log");
-        var newLog = Path.Combine(_testLogDir, "debug20241102.log");
+        var oldLog = Path.Join(_testLogDir, "debug20241101.log");
+        var newLog = Path.Join(_testLogDir, "debug20241102.log");
         File.WriteAllLines(oldLog, new[] { "Old log line 1", "Old log line 2" });
         Thread.Sleep(10);
         File.WriteAllLines(newLog, new[] { "New log line 1", "New log line 2" });
@@ -280,7 +280,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithInvalidFilename_ReturnsNotFoundMessage()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         File.WriteAllText(logFile, "Some content");
 
         // Act - a name matching the requested log type, but with no file on disk
@@ -297,7 +297,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithMissingFilenameNotMatchingType_ReturnsErrorMessage()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         File.WriteAllText(logFile, "Some content");
 
         // Act - the type check runs before the directory lookup, so a missing
@@ -315,7 +315,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithFilenameNotMatchingType_ReturnsErrorMessage()
     {
         // Arrange
-        var appLog = Path.Combine(_testLogDir, "app.log");
+        var appLog = Path.Join(_testLogDir, "app.log");
         File.WriteAllText(appLog, "App content");
 
         // Act - Try to access app log with debug type
@@ -332,7 +332,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithFilenameContainingPathTraversal_IsSanitized()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         File.WriteAllText(logFile, "Safe content");
 
         // Act - Try directory traversal attack
@@ -341,7 +341,7 @@ public class LogsControllerTests : IDisposable
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.NotNull(okResult.Value);
-        var content = okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value) as string;
+        var content = Assert.IsType<string>(okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value));
         // Should be sanitized to just "passwd" which won't exist or won't match pattern
         Assert.True(content.Contains("not found") || content.Contains("does not match"));
     }
@@ -350,7 +350,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_ReturnsFilename()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         File.WriteAllLines(logFile, new[] { "Line 1", "Line 2" });
 
         // Act
@@ -370,7 +370,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithInvalidType_DefaultsToDebug(string invalidType)
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         File.WriteAllLines(logFile, new[] { "Debug log content" });
 
         // Act
@@ -390,8 +390,8 @@ public class LogsControllerTests : IDisposable
     public void GetLogFiles_WithInvalidType_DefaultsToDebug(string invalidType)
     {
         // Arrange
-        var debugLog = Path.Combine(_testLogDir, "debug.log");
-        var appLog = Path.Combine(_testLogDir, "app.log");
+        var debugLog = Path.Join(_testLogDir, "debug.log");
+        var appLog = Path.Join(_testLogDir, "app.log");
         File.WriteAllText(debugLog, "Debug log");
         File.WriteAllText(appLog, "App log");
 
@@ -428,8 +428,8 @@ public class LogsControllerTests : IDisposable
     public void GetLogFiles_WithWatcherType_ReturnsOnlyWatcherLogFiles()
     {
         // Arrange
-        var watcherLog = Path.Combine(_testLogDir, "watcher.log");
-        var debugLog = Path.Combine(_testLogDir, "debug.log");
+        var watcherLog = Path.Join(_testLogDir, "watcher.log");
+        var debugLog = Path.Join(_testLogDir, "debug.log");
         File.WriteAllText(watcherLog, "Watcher log");
         File.WriteAllText(debugLog, "Debug log");
 
@@ -447,9 +447,9 @@ public class LogsControllerTests : IDisposable
     public void GetLogFiles_OrdersByLastWriteTimeDescending()
     {
         // Arrange
-        var log1 = Path.Combine(_testLogDir, "debug1.log");
-        var log2 = Path.Combine(_testLogDir, "debug2.log");
-        var log3 = Path.Combine(_testLogDir, "debug3.log");
+        var log1 = Path.Join(_testLogDir, "debug1.log");
+        var log2 = Path.Join(_testLogDir, "debug2.log");
+        var log3 = Path.Join(_testLogDir, "debug3.log");
         
         File.WriteAllText(log1, "Old log");
         Thread.Sleep(10);
@@ -480,7 +480,7 @@ public class LogsControllerTests : IDisposable
     public void GetLogs_WithExceedingMaxLines_LimitsTo10000()
     {
         // Arrange
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         var allLines = Enumerable.Range(1, 15000).Select(i => $"Line {i}").ToArray();
         File.WriteAllLines(logFile, allLines);
 
@@ -519,7 +519,7 @@ public class LogsControllerTests : IDisposable
     {
         // Arrange - use the real Serilog file output template format so the
         // controller can detect entry boundaries.
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         File.WriteAllLines(logFile, new[]
         {
             "[2025-05-22 10:00:00.000] [INF] First entry",
@@ -547,7 +547,7 @@ public class LogsControllerTests : IDisposable
     {
         // Arrange - exception stack trace lines do not start with a timestamp
         // and must travel with the preceding log entry when the order is reversed.
-        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var logFile = Path.Join(_testLogDir, "debug.log");
         File.WriteAllLines(logFile, new[]
         {
             "[2025-05-22 10:00:00.000] [INF] Older entry",
@@ -593,7 +593,7 @@ public class LogsControllerTests : IDisposable
                     Directory.Delete(_testLogDir, true);
                 }
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Ignore cleanup errors to prevent test failures
             }

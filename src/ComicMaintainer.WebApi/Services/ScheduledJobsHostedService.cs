@@ -188,7 +188,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
                 }
                 ArmTimer(view);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogError(ex, "Failed to re-arm timer for {JobKey}", LoggingHelper.SanitizeForLog(e.JobKey));
             }
@@ -271,7 +271,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             {
                 await RunOnceAsync(handler, jobKey);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 // RunOnceAsync records a failed run itself, so what gets here is a
                 // failure to record the outcome. Logged, not rethrown: nothing
@@ -324,7 +324,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
                 jobKey, ScheduledJobStatus.Cancelled, "Run cancelled.", stopwatch.ElapsedMilliseconds);
             _logger.LogInformation("Scheduled job {JobKey} was cancelled", safeKey);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             stopwatch.Stop();
             _metrics?.RecordScheduledJobRun(handler.JobKey, "failed", stopwatch.Elapsed);

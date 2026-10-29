@@ -64,9 +64,11 @@ public sealed class RateLimitingIntegrationTests : IAsyncLifetime
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 

@@ -17,7 +17,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
 
     public FileStoreServiceIntegrationTests()
     {
-        _testDirectory = Path.Combine(Path.GetTempPath(), $"filestore_integration_tests_{Guid.NewGuid()}");
+        _testDirectory = Path.Join(Path.GetTempPath(), $"filestore_integration_tests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
         _testDirectories.Add(_testDirectory);
     }
@@ -30,7 +30,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
             {
                 Directory.Delete(dir, true);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Best effort cleanup
             }
@@ -83,7 +83,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
         var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
 
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
 
         // Add file to in-memory store
@@ -132,7 +132,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
         var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
 
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
 
         // Add file to in-memory store
@@ -156,6 +156,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated MarkFileProcessedAsync no-op until it is removed.")]
     public async Task MarkFileProcessedAsync_HandlesNonExistentFileGracefully()
     {
         // Arrange
@@ -178,12 +179,10 @@ public class FileStoreServiceIntegrationTests : IDisposable
         var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
 
-        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
         // Act - Mark non-existent file as processed (should not throw - it's now a no-op)
-        #pragma warning disable CS0618 // Type or member is obsolete
         await fileStoreService.MarkFileProcessedAsync(filePath, true);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert - Verify nothing was added to database (MarkFileProcessedAsync is now a no-op)
         using (var scope = serviceProvider.CreateScope())
@@ -212,12 +211,12 @@ public class FileStoreServiceIntegrationTests : IDisposable
         var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
 
-        var trackedPath = Path.Combine(_testDirectory, "tracked.cbz");
-        var duplicatePath = Path.Combine(_testDirectory, "dupe.cbz");
+        var trackedPath = Path.Join(_testDirectory, "tracked.cbz");
+        var duplicatePath = Path.Join(_testDirectory, "dupe.cbz");
         File.WriteAllText(trackedPath, "content");
         File.WriteAllText(duplicatePath, "content");
         await AddFileToDatabase(serviceProvider, trackedPath, "tracked.cbz", _testDirectory);
-        var dupeEntity = await AddFileToDatabase(serviceProvider, duplicatePath, "dupe.cbz", _testDirectory);
+        await AddFileToDatabase(serviceProvider, duplicatePath, "dupe.cbz", _testDirectory);
         using (var scope = serviceProvider.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();

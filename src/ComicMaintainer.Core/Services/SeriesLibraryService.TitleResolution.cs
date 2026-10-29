@@ -70,13 +70,25 @@ public partial class SeriesLibraryService
 
     private static void AddAliasIfNew(SeriesAccumulator accumulator, IEnumerable<string> aliases, string canonicalTitle)
     {
-        foreach (var alias in aliases)
+        var newAliases = NonBlank(aliases)
+            .Where(alias => !string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase));
+        foreach (var alias in newAliases)
         {
-            if (string.IsNullOrWhiteSpace(alias)) continue;
-            if (string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase)) continue;
             accumulator.TryAddAlias(alias);
         }
     }
+
+    private static IEnumerable<string> NonBlank(IEnumerable<string>? values) =>
+        values?.Where(value => !string.IsNullOrWhiteSpace(value)) ?? Enumerable.Empty<string>();
+
+    /// <summary>
+    /// Normalized keys of the non-blank <paramref name="aliases"/>, skipping
+    /// degenerate keys that could bridge unrelated records.
+    /// </summary>
+    private static IEnumerable<string> UsableAliasKeys(IEnumerable<string>? aliases) =>
+        NonBlank(aliases)
+            .Select(NormalizeKey)
+            .Where(aliasKey => !IsAmbiguousNormalizedKey(aliasKey));
 
     /// <summary>
     /// Maps every alias (canonical + user aliases + provider aliases) of every
@@ -116,11 +128,8 @@ public partial class SeriesLibraryService
         // Pass 2: user aliases (TryAdd — never overwrite a canonical claim from pass 1).
         foreach (var record in records)
         {
-            foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
+            foreach (var aliasKey in UsableAliasKeys(record.UserAliases))
             {
-                if (string.IsNullOrWhiteSpace(alias)) continue;
-                var aliasKey = NormalizeKey(alias);
-                if (IsAmbiguousNormalizedKey(aliasKey)) continue;
                 index.TryAdd(aliasKey, record.NormalizedKey);
             }
         }
@@ -128,11 +137,8 @@ public partial class SeriesLibraryService
         // Pass 3: provider aliases (TryAdd — weakest signal, must not overwrite anything).
         foreach (var record in records)
         {
-            foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
+            foreach (var aliasKey in UsableAliasKeys(record.Aliases))
             {
-                if (string.IsNullOrWhiteSpace(alias)) continue;
-                var aliasKey = NormalizeKey(alias);
-                if (IsAmbiguousNormalizedKey(aliasKey)) continue;
                 index.TryAdd(aliasKey, record.NormalizedKey);
             }
         }
@@ -146,13 +152,9 @@ public partial class SeriesLibraryService
         // with TryAdd-based BuildAliasIndex, this preserves intent priority anywhere
         // we iterate titles in declaration order.
         if (!string.IsNullOrWhiteSpace(record.CanonicalTitle)) yield return record.CanonicalTitle;
-        foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
+        foreach (var alias in NonBlank(record.UserAliases).Concat(NonBlank(record.Aliases)))
         {
-            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
-        }
-        foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
-        {
-            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
+            yield return alias;
         }
     }
 
@@ -319,17 +321,15 @@ public partial class SeriesLibraryService
         yield return record.NormalizedKey;
         if (!string.IsNullOrWhiteSpace(record.CanonicalTitle)) yield return record.CanonicalTitle;
         if (!string.IsNullOrWhiteSpace(record.SeriesName)) yield return record.SeriesName!;
-        foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
+        var localizedTitles = (record.LocalizedTitles ?? Enumerable.Empty<LocalizedTitle>())
+            .Where(localized => localized is not null)
+            .Select(localized => localized.Title);
+        var titles = NonBlank(record.UserAliases)
+            .Concat(NonBlank(record.Aliases))
+            .Concat(NonBlank(localizedTitles));
+        foreach (var title in titles)
         {
-            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
-        }
-        foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
-        {
-            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
-        }
-        foreach (var localized in record.LocalizedTitles ?? Enumerable.Empty<LocalizedTitle>())
-        {
-            if (localized is not null && !string.IsNullOrWhiteSpace(localized.Title)) yield return localized.Title;
+            yield return title;
         }
     }
 

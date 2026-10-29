@@ -218,7 +218,7 @@ public partial class FileStoreService
                 "Updated read status for {FilePath} to {Status} for user {UserId}",
                 SanitizeForLogging(filePath), read, SanitizeForLogging(userId));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating read status in database for {FilePath}", SanitizeForLogging(filePath));
         }
@@ -283,13 +283,13 @@ public partial class FileStoreService
                 }
             }
 
-            await SyncReadingProgressAsync(dbContext, userId, (IReadOnlyCollection<string>)paths.ToList(), read, now, cancellationToken);
+            await SyncReadingProgressAsync(dbContext, userId, paths.ToList(), read, now, cancellationToken);
 
             await dbContext.SaveChangesAsync(cancellationToken);
             InvalidateUserReadPaths(userId);
             _logger.LogDebug("Bulk-updated read status for {Total} files for user {UserId}", paths.Count, SanitizeForLogging(userId));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error bulk-updating read status; falling back to per-file updates");
             foreach (var filePath in paths)
@@ -328,7 +328,7 @@ public partial class FileStoreService
             }, cancellationToken);
             _logger.LogDebug("Updated reading progress for {FilePath} to page {Page}", SanitizeForLogging(filePath), currentPage);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error saving reading progress for {FilePath}", SanitizeForLogging(filePath));
         }
@@ -354,7 +354,7 @@ public partial class FileStoreService
 
             return currentPage is > 0 ? currentPage.Value : 1;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting reading progress for {FilePath}", SanitizeForLogging(filePath));
             return 1; // Default to page 1 on error

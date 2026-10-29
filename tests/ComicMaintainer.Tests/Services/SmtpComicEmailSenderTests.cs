@@ -30,7 +30,7 @@ public class SmtpComicEmailSenderTests : IDisposable
 
     public SmtpComicEmailSenderTests()
     {
-        _workDir = Path.Combine(Path.GetTempPath(), $"smtp-sender-tests-{Guid.NewGuid():N}");
+        _workDir = Path.Join(Path.GetTempPath(), $"smtp-sender-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
 
         _settings = new AppSettings
@@ -90,7 +90,7 @@ public class SmtpComicEmailSenderTests : IDisposable
         _settings.SmtpPassword = null;
         _settings.EmailFromName = null!;
 
-        var attachment = Path.Combine(_workDir, "Series 001.cbz");
+        var attachment = Path.Join(_workDir, "Series 001.cbz");
         var content = Enumerable.Range(0, 300).Select(i => (byte)i).ToArray();
         await File.WriteAllBytesAsync(attachment, content);
 
@@ -131,7 +131,7 @@ public class SmtpComicEmailSenderTests : IDisposable
         _settings.SmtpPassword = "s3cret";
         _settings.EmailFromName = "My Library";
 
-        var attachment = Path.Combine(_workDir, "work-file.tmp");
+        var attachment = Path.Join(_workDir, "work-file.tmp");
         await File.WriteAllTextAsync(attachment, "epub payload");
 
         await _sender.SendAsync(
@@ -212,7 +212,7 @@ public class SmtpComicEmailSenderTests : IDisposable
     [Fact]
     public async Task SendAsync_WhenTheServerIsUnreachable_Throws()
     {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var closedPort = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();

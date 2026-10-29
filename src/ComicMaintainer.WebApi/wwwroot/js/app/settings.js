@@ -6,6 +6,9 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
+        // Shared state declared in state.js and reassigned here.
+        /* global historyTotal: true */
+
         // Update theme from settings modal
         async function updateThemeFromSettings() {
             const selectedTheme = document.getElementById('themeSelect').value;
@@ -692,7 +695,6 @@
             // Determine status styling
             const statusIcon = item.success ? '✅' : '❌';
             const statusText = item.success ? 'Success' : 'Failed';
-            const statusColor = item.success ? '#10b981' : '#ef4444';
             const borderColor = item.success ? 'var(--border-secondary)' : '#ef4444';
             
             let html = `

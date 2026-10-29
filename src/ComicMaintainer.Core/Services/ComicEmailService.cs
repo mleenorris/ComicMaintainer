@@ -515,7 +515,7 @@ public class ComicEmailService : IComicEmailService
         }
 
         var book = plan.Books[bookIndex];
-        var workDirectory = Path.Combine(GetTempDirectory(), "email-download", Guid.NewGuid().ToString("N"));
+        var workDirectory = Path.Join(GetTempDirectory(), "email-download", Guid.NewGuid().ToString("N"));
 
         // A download has no mail size budget, so the pages keep their original
         // quality however large the condensed book turns out to be.
@@ -1071,7 +1071,7 @@ public class ComicEmailService : IComicEmailService
                 isAzw3 ||
                 string.Equals(delivery.DeliveryFormat, EmailDeliveryFormat.Epub, StringComparison.OrdinalIgnoreCase))
             {
-                var workDirectory = Path.Combine(GetTempDirectory(), "email", Guid.NewGuid().ToString("N"));
+                var workDirectory = Path.Join(GetTempDirectory(), "email", Guid.NewGuid().ToString("N"));
                 // Hand the converter the mail size budget so an oversized book is
                 // recompressed rather than rejected below.
                 var options = await BuildEpubOptionsAsync(resolved[0], maxBytes, preparationToken);
@@ -1080,18 +1080,13 @@ public class ComicEmailService : IComicEmailService
                     options = options with { Title = delivery.DisplayName, OutputFileName = delivery.DisplayName };
                 }
 
-                if (isAzw3)
-                {
-                    attachmentPath = resolved.Count == 1
+                attachmentPath = isAzw3
+                    ? resolved.Count == 1
                         ? await _azw3Converter.ConvertToAzw3Async(resolved[0], workDirectory, options, preparationToken)
-                        : await _azw3Converter.ConvertToAzw3Async(resolved, workDirectory, options, preparationToken);
-                }
-                else
-                {
-                    attachmentPath = resolved.Count == 1
+                        : await _azw3Converter.ConvertToAzw3Async(resolved, workDirectory, options, preparationToken)
+                    : resolved.Count == 1
                         ? await _epubConverter.ConvertToEpubAsync(resolved[0], workDirectory, options, preparationToken)
                         : await _epubConverter.ConvertToEpubAsync(resolved, workDirectory, options, preparationToken);
-                }
 
                 temporaryAttachment = attachmentPath;
             }
@@ -1163,7 +1158,7 @@ public class ComicEmailService : IComicEmailService
             // Shutdown: leave the delivery pending.
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             delivery.Status = EmailDeliveryStatus.Failed;
             delivery.ErrorMessage = Truncate(ex.Message, 1024);
@@ -1722,23 +1717,16 @@ public class ComicEmailService : IComicEmailService
             return null;
         }
 
-        foreach (var extension in SeriesFolderCoverExtensions)
-        {
-            var candidate = Path.Combine(folder, "cover" + extension);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
+        return SeriesFolderCoverExtensions
+            .Select(extension => Path.Join(folder, "cover" + extension))
+            .FirstOrDefault(File.Exists);
     }
 
     private string GetTempDirectory()
     {
         var configured = _settings.CurrentValue.TempFileDirectory;
         return string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(Path.GetTempPath(), "ComicMaintainer")
+            ? Path.Join(Path.GetTempPath(), "ComicMaintainer")
             : configured;
     }
 

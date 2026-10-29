@@ -10,7 +10,7 @@ namespace ComicMaintainer.Core.Utilities;
 /// and macOS that path is spelled as the file system stores it, whatever case was used to
 /// open it, which is what makes ordinal path comparisons reliable there.
 /// </summary>
-internal static class NativeFileSystem
+internal static partial class NativeFileSystem
 {
     internal const uint FILE_LIST_DIRECTORY = 0x1;
     internal const uint FILE_READ_ATTRIBUTES = 0x80;
@@ -51,6 +51,7 @@ internal static class NativeFileSystem
         }
         catch (IOException)
         {
+            // The directory vanished or could not be opened, so its spelling is unknown.
         }
 
         return null;
@@ -139,8 +140,8 @@ internal static class NativeFileSystem
         public uint ForkAttributes;
     }
 
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern SafeFileHandle CreateWindowsFile(
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial SafeFileHandle CreateWindowsFile(
         string fileName,
         uint desiredAccess,
         uint shareMode,
@@ -149,18 +150,18 @@ internal static class NativeFileSystem
         uint flagsAndAttributes,
         IntPtr templateFile);
 
-    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint GetWindowsFinalPathName(
+    [LibraryImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial uint GetWindowsFinalPathName(
         SafeFileHandle file,
         [Out] char[] filePath,
         uint filePathLength,
         uint flags);
 
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    internal static extern int OpenUnixDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+    [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int OpenUnixDirectory(string path, int flags);
 
-    [DllImport("libc", EntryPoint = "fgetattrlist", SetLastError = true)]
-    private static extern int GetMacAttributes(
+    [LibraryImport("libc", EntryPoint = "fgetattrlist", SetLastError = true)]
+    private static partial int GetMacAttributes(
         int descriptor,
         ref MacAttributeList attributes,
         [Out] byte[] buffer,

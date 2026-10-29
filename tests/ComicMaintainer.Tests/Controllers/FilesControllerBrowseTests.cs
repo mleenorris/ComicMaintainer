@@ -16,7 +16,7 @@ namespace ComicMaintainer.Tests.Controllers;
 /// </summary>
 public sealed class FilesControllerBrowseTests
 {
-    private readonly string _root = Path.Combine(AppContext.BaseDirectory, "fc-n2a-tests", Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(AppContext.BaseDirectory, "fc-n2a-tests", Guid.NewGuid().ToString("N"));
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<IProcessingHistoryService> _history = new();
@@ -49,9 +49,9 @@ public sealed class FilesControllerBrowseTests
 
     private ComicFile File(string folder, string fileName, string series, DateTime modified) => new()
     {
-        FilePath = Path.Combine(_root, folder, fileName),
+        FilePath = Path.Join(_root, folder, fileName),
         FileName = fileName,
-        Directory = Path.Combine(_root, folder),
+        Directory = Path.Join(_root, folder),
         LastModified = modified,
         Metadata = new ComicMetadata { Series = series }
     };
@@ -234,7 +234,7 @@ public sealed class FilesControllerBrowseTests
     {
         _seriesLibrary
             .Setup(s => s.GetFoldersForSeriesIdAsync("missing", null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SeriesFoldersResult?)null);
+            .ReturnsAsync(default(SeriesFoldersResult?));
 
         var result = await _controller.GetSeriesFolders("missing");
 
@@ -270,8 +270,8 @@ public sealed class FilesControllerBrowseTests
             Title = "Saga",
             Folders = new List<SeriesFolderDto>
             {
-                new() { Directory = Path.Combine(_root, "Saga A"), FileCount = 1 },
-                new() { Directory = Path.Combine(_root, "Saga B"), FileCount = 1 }
+                new() { Directory = Path.Join(_root, "Saga A"), FileCount = 1 },
+                new() { Directory = Path.Join(_root, "Saga B"), FileCount = 1 }
             }
         };
         _seriesLibrary.Setup(s => s.GetFoldersForSeriesIdAsync("saga", null, It.IsAny<CancellationToken>())).ReturnsAsync(folders);
@@ -283,7 +283,7 @@ public sealed class FilesControllerBrowseTests
         Assert.Equal("Saga", Prop(ok.Value, "title"));
         Assert.Same(folders.Folders, Prop(ok.Value, "folders"));
         Assert.Equal("saga", Prop(ok.Value, "combine_group_key"));
-        Assert.Equal(Path.Combine(_root, "Saga B"), Prop(ok.Value, "suggested_destination_directory"));
+        Assert.Equal(Path.Join(_root, "Saga B"), Prop(ok.Value, "suggested_destination_directory"));
     }
 
     [Fact]
@@ -296,8 +296,8 @@ public sealed class FilesControllerBrowseTests
             Title = "Saga",
             Folders = new List<SeriesFolderDto>
             {
-                new() { Directory = Path.Combine(_root, "Saga A"), FileCount = 1 },
-                new() { Directory = Path.Combine(_root, "Saga B"), FileCount = 1 }
+                new() { Directory = Path.Join(_root, "Saga A"), FileCount = 1 },
+                new() { Directory = Path.Join(_root, "Saga B"), FileCount = 1 }
             }
         });
 

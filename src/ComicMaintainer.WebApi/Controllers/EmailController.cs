@@ -145,7 +145,7 @@ public class EmailController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Test email to device {DeviceId} failed", deviceId);
             return StatusCode(502, new { error = $"Failed to send test email: {ex.Message}" });
@@ -401,13 +401,14 @@ public class EmailController : ControllerBase
         // The generated book only exists for this response: delete it (and the
         // work directory it lives in) as soon as it has been streamed.
         var workDirectory = Path.GetDirectoryName(book.FilePath);
-        var stream = new FileStream(
-            book.FilePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 64 * 1024,
-            FileOptions.Asynchronous | FileOptions.DeleteOnClose);
+        var stream = System.IO.File.Open(book.FilePath, new FileStreamOptions
+        {
+            Mode = FileMode.Open,
+            Access = FileAccess.Read,
+            Share = FileShare.Read,
+            BufferSize = 64 * 1024,
+            Options = FileOptions.Asynchronous | FileOptions.DeleteOnClose
+        });
 
         Response.OnCompleted(() =>
         {
@@ -526,13 +527,14 @@ public class EmailController : ControllerBase
 
         // The file is kept until the build expires or is discarded so an
         // interrupted download can simply be retried.
-        var stream = new FileStream(
-            file.FilePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 64 * 1024,
-            FileOptions.Asynchronous);
+        var stream = System.IO.File.Open(file.FilePath, new FileStreamOptions
+        {
+            Mode = FileMode.Open,
+            Access = FileAccess.Read,
+            Share = FileShare.Read,
+            BufferSize = 64 * 1024,
+            Options = FileOptions.Asynchronous
+        });
 
         return File(stream, GetBookContentType(file.FileName), file.FileName);
     }

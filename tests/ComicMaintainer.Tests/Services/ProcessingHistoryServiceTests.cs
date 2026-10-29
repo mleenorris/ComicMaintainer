@@ -74,7 +74,7 @@ public class ProcessingHistoryServiceTests
             Success = true
         };
         
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel(); // Cancel immediately
 
         // Act & Assert - Should not throw

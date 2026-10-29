@@ -29,15 +29,12 @@ public class PathValidationMiddleware
         if (context.Request.Query.TryGetValue("filePath", out var filePathValues))
         {
             var filePath = filePathValues.FirstOrDefault();
-            if (!string.IsNullOrEmpty(filePath))
+            if (!string.IsNullOrEmpty(filePath) && !IsValidPath(filePath))
             {
-                if (!IsValidPath(filePath))
-                {
-                    _logger.LogWarning("Invalid file path detected: {SanitizedPath}", SanitizePath(filePath));
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    await context.Response.WriteAsJsonAsync(new { error = "Invalid file path" });
-                    return;
-                }
+                _logger.LogWarning("Invalid file path detected: {SanitizedPath}", SanitizePath(filePath));
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsJsonAsync(new { error = "Invalid file path" });
+                return;
             }
         }
 
@@ -61,7 +58,7 @@ public class PathValidationMiddleware
             return LibraryPathValidator.IsLexicallyWithin(
                 filePath, settings.WatchedDirectory, settings.DuplicateDirectory, settings.ConfigDirectory);
         }
-        catch
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return false;
         }

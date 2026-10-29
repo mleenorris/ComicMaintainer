@@ -24,7 +24,7 @@ public class HttpUserContextAccessorTests
     {
         // DefaultHttpContext never hands out a null User, but other HttpContext implementations may.
         var context = new Mock<HttpContext>();
-        context.SetupGet(c => c.User).Returns((ClaimsPrincipal)null!);
+        context.SetupGet(c => c.User).Returns(default(ClaimsPrincipal)!);
 
         Assert.Null(Create(context.Object).UserId);
     }

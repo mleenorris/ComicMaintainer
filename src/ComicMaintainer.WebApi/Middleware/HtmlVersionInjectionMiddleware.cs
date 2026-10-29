@@ -88,7 +88,7 @@ public class HtmlVersionInjectionMiddleware
 
         try
         {
-            var candidate = Path.GetFullPath(Path.Combine(webRoot, relative));
+            var candidate = Path.GetFullPath(Path.Join(webRoot, relative));
             var rootFull = Path.GetFullPath(webRoot);
 
             // Ensure the resolved path is inside the web root.
@@ -105,7 +105,7 @@ public class HtmlVersionInjectionMiddleware
 
             return candidate;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             _logger.LogWarning(ex, "Failed to resolve HTML path: {Relative}", relative);
             return null;

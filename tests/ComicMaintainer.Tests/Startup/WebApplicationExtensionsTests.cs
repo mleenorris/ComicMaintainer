@@ -43,7 +43,7 @@ public sealed class WebApplicationExtensionsTests : IDisposable
         .GetMethod("AddComicMaintainerAuth", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
 
-    private readonly string _configDirectory = Path.Combine(Path.GetTempPath(), "cm-dbinit-" + Guid.NewGuid().ToString("N"));
+    private readonly string _configDirectory = Path.Join(Path.GetTempPath(), "cm-dbinit-" + Guid.NewGuid().ToString("N"));
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
         new("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "ADMIN_EMAIL", "JWT_SECRET", "JWT_SECRET_FILE", "AUTHELIA_ENABLED", "EFCORE_QUERY_LOGGING");
@@ -62,9 +62,11 @@ public sealed class WebApplicationExtensionsTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 

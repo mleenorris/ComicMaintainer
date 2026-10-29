@@ -138,7 +138,7 @@ public class SeriesMetadataCacheServiceTests
     public async Task RefreshAsync_RecordsNotFoundStatusWhenProviderReturnsNull()
     {
         _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
 
         var record = await _service.RefreshAsync("Unknown Title");
 
@@ -850,7 +850,7 @@ public class SeriesMetadataCacheServiceTests
         // Provider can't find the match on this refresh — must not clobber
         // the user's manual selection.
         _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
 
         var refreshed = await _service.RefreshAsync("Batman");
 

@@ -6,6 +6,9 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
+        // Shared state declared in state.js and reassigned here.
+        /* global seriesTotal: true, folderTotal: true */
+
         async function loadActiveLibraryView({ refresh = false, keepLoaded = false } = {}) {
             if (libraryViewMode === 'series') {
                 return loadSeriesLibrary({ refresh, keepLoaded });
@@ -993,7 +996,9 @@
                 selectedSeriesPathLoads.set(seriesId, pathLoad);
                 updateSeriesSelectionUI();
                 const paths = await pathLoad;
-                if (selectedSeriesPathLoads.get(seriesId) !== pathLoad) return;
+                // A newer selection of this series replaces its pending load, and a
+                // deselect removes it: only the load still registered may apply.
+                if (!Object.is(selectedSeriesPathLoads.get(seriesId), pathLoad)) return;
                 selectedSeriesPathLoads.delete(seriesId);
                 // The user may have deselected while the request was in flight.
                 if (!selectedSeries.has(seriesId)) return;

@@ -112,7 +112,7 @@ public class FileNamingAuditJobHandler : IScheduledJobHandler
                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                    ?? new FileNamingAuditOptions();
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
             return new FileNamingAuditOptions();
         }

@@ -32,10 +32,10 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
 
     public ComicReaderControllerCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "reader_ctrl_cov_" + Guid.NewGuid().ToString("N"));
-        _watchDir = Path.Combine(_root, "comics");
-        Directory.CreateDirectory(Path.Combine(_watchDir, "Saga"));
-        _file = Path.Combine(_watchDir, "Saga", "Saga 001.cbz");
+        _root = Path.Join(Path.GetTempPath(), "reader_ctrl_cov_" + Guid.NewGuid().ToString("N"));
+        _watchDir = Path.Join(_root, "comics");
+        Directory.CreateDirectory(Path.Join(_watchDir, "Saga"));
+        _file = Path.Join(_watchDir, "Saga", "Saga 001.cbz");
         File.WriteAllBytes(_file, new byte[] { 0x50, 0x4B, 0x05, 0x06 });
         _settings = new AppSettings { WatchedDirectory = _watchDir };
     }
@@ -43,7 +43,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     public void Dispose()
     {
         _cts.Dispose();
-        try { Directory.Delete(_root, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        try { Directory.Delete(_root, recursive: true); } catch (IOException) { /* best-effort cleanup */ } catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
     }
 
     private ComicReaderController CreateController(ClaimsPrincipal? user = null)
@@ -96,7 +96,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [Fact]
     public async Task GetComicInfo_PathWithNulCharacter_IsRejectedAsUnsafe()
     {
-        var result = await CreateController().GetComicInfo(Path.Combine(_watchDir, "Saga\0.cbz"));
+        var result = await CreateController().GetComicInfo(Path.Join(_watchDir, "Saga\0.cbz"));
 
         AssertError<BadRequestObjectResult>(result.Result, OutsideError);
         _reader.Verify(r => r.GetPageCountAsync(It.IsAny<string>()), Times.Never);
@@ -116,10 +116,10 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [Fact]
     public async Task GetComicInfo_DotDotTraversalOutOfWatchedDirectory_IsRejected()
     {
-        var outside = Path.Combine(_root, "private");
+        var outside = Path.Join(_root, "private");
         Directory.CreateDirectory(outside);
-        File.WriteAllBytes(Path.Combine(outside, "secret.cbz"), new byte[] { 1 });
-        var traversal = Path.Combine(_watchDir, "..", "private", "secret.cbz");
+        File.WriteAllBytes(Path.Join(outside, "secret.cbz"), new byte[] { 1 });
+        var traversal = Path.Join(_watchDir, "..", "private", "secret.cbz");
 
         var result = await CreateController().GetComicInfo(traversal);
 
@@ -142,16 +142,16 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
 
     public static TheoryData<string, string> UnsafePathCases()
     {
+        // A differently-cased directory is only a distinct directory on a case-sensitive file system.
+        var kinds = new[] { "sibling-prefix", "other-case", "file-link", "directory-link" }
+            .Where(kind => kind != "other-case" || OperatingSystem.IsLinux())
+            .ToArray();
         var data = new TheoryData<string, string>();
         foreach (var endpoint in PathEndpoints)
         {
-            foreach (var kind in new[] { "sibling-prefix", "other-case", "file-link", "directory-link" })
+            foreach (var kind in kinds)
             {
-                // A differently-cased directory is only a distinct directory on a case-sensitive file system.
-                if (kind != "other-case" || OperatingSystem.IsLinux())
-                {
-                    data.Add(endpoint, kind);
-                }
+                data.Add(endpoint, kind);
             }
         }
         return data;
@@ -178,21 +178,21 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     // the watched directory (<root>/comics) without being inside it.
     private string CreateUnsafePath(string kind)
     {
-        var privateDir = Path.Combine(_root, kind == "other-case" ? "COMICS" : "comics-private");
+        var privateDir = Path.Join(_root, kind == "other-case" ? "COMICS" : "comics-private");
         Directory.CreateDirectory(privateDir);
-        var secret = Path.Combine(privateDir, "secret.cbz");
+        var secret = Path.Join(privateDir, "secret.cbz");
         File.WriteAllBytes(secret, new byte[] { 0x50, 0x4B, 0x05, 0x06 });
 
         switch (kind)
         {
             case "file-link":
-                var fileLink = Path.Combine(_watchDir, "Saga", "leak.cbz");
+                var fileLink = Path.Join(_watchDir, "Saga", "leak.cbz");
                 File.CreateSymbolicLink(fileLink, secret);
                 return fileLink;
             case "directory-link":
-                var directoryLink = Path.Combine(_watchDir, "linked");
+                var directoryLink = Path.Join(_watchDir, "linked");
                 Directory.CreateSymbolicLink(directoryLink, privateDir);
-                return Path.Combine(directoryLink, "secret.cbz");
+                return Path.Join(directoryLink, "secret.cbz");
             default:
                 return secret;
         }
@@ -230,7 +230,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [MemberData(nameof(Endpoints))]
     public async Task PathEndpoints_AcceptNestedPathsInsideTheWatchedDirectory(string endpoint)
     {
-        var nested = Path.Combine(_watchDir, "Image", "Saga (2012)", "Saga 002.cbz");
+        var nested = Path.Join(_watchDir, "Image", "Saga (2012)", "Saga 002.cbz");
         Directory.CreateDirectory(Path.GetDirectoryName(nested)!);
         File.WriteAllBytes(nested, new byte[] { 0x50, 0x4B, 0x05, 0x06 });
         SetupServicesFor(LibraryPathValidator.ResolveRealPath(nested), nested);
@@ -246,7 +246,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         // A link that stays inside the watched directory is allowed; archive
         // access goes to the validated physical file, while library records
         // keep using the path the client asked for.
-        var alias = Path.Combine(_watchDir, "alias.cbz");
+        var alias = Path.Join(_watchDir, "alias.cbz");
         File.CreateSymbolicLink(alias, _file);
         var physical = LibraryPathValidator.ResolveRealPath(_file);
         SetupServicesFor(physical, alias);
@@ -362,7 +362,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [Fact]
     public async Task GetCover_PathOutsideWatchedDirectory_ReturnsBadRequest()
     {
-        var outside = Path.Combine(_root, "elsewhere.cbz");
+        var outside = Path.Join(_root, "elsewhere.cbz");
         File.WriteAllBytes(outside, new byte[] { 1 });
 
         var result = await CreateController().GetCover(outside);
@@ -374,7 +374,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [Fact]
     public async Task GetCover_MissingFile_ReturnsNotFound()
     {
-        var result = await CreateController().GetCover(Path.Combine(_watchDir, "Saga", "missing.cbz"));
+        var result = await CreateController().GetCover(Path.Join(_watchDir, "Saga", "missing.cbz"));
 
         AssertError<NotFoundObjectResult>(result, "File not found");
         _coverCache.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -384,7 +384,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     public async Task GetCover_NoExtractableCover_ReturnsNotFound()
     {
         _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((FileCoverCacheEntry?)null);
+            .ReturnsAsync(default(FileCoverCacheEntry?));
 
         var result = await CreateController().GetCover(_file);
 
@@ -507,7 +507,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     public async Task MarkAsRead_UserWithoutProgress_CreatesCompletedProgressRecord()
     {
         _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(20);
-        _progress.Setup(p => p.GetProgressAsync("user-1", _file, _cts.Token)).ReturnsAsync((ReadingProgress?)null);
+        _progress.Setup(p => p.GetProgressAsync("user-1", _file, _cts.Token)).ReturnsAsync(default(ReadingProgress?));
         var saved = TrackSavedProgress();
         var before = DateTime.UtcNow;
 
@@ -585,7 +585,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     public async Task SaveProgress_User_RecordsPageClampedToArchiveLength(int page, int totalPages, int expectedPage, bool completed)
     {
         _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(totalPages);
-        _progress.Setup(p => p.GetProgressAsync("user-2", _file, _cts.Token)).ReturnsAsync((ReadingProgress?)null);
+        _progress.Setup(p => p.GetProgressAsync("user-2", _file, _cts.Token)).ReturnsAsync(default(ReadingProgress?));
         var saved = TrackSavedProgress();
 
         var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, page, _cts.Token);

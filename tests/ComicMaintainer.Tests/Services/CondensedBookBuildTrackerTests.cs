@@ -23,7 +23,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
 
     public CondensedBookBuildTrackerTests()
     {
-        _workDir = Path.Combine(Path.GetTempPath(), $"condense-build-tests-{Guid.NewGuid():N}");
+        _workDir = Path.Join(Path.GetTempPath(), $"condense-build-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
 
         _email
@@ -438,9 +438,9 @@ public class CondensedBookBuildTrackerTests : IDisposable
 
     private string CreateBook(string name, string extension = "epub")
     {
-        var directory = Path.Combine(_workDir, Guid.NewGuid().ToString("N"));
+        var directory = Path.Join(_workDir, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, $"{name}.{extension}");
+        var path = Path.Join(directory, $"{name}.{extension}");
         File.WriteAllText(path, $"{extension} bytes");
         return path;
     }

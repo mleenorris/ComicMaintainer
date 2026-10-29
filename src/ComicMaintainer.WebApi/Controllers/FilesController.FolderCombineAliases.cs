@@ -29,7 +29,7 @@ public partial class FilesController
         {
             seriesFolders = await _seriesLibrary.GetFoldersForSeriesIdAsync(seriesId, filter: null, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex, "Failed to resolve series-scoped folders for {SeriesId}",
                 LoggingHelper.SanitizeForLog(seriesId));
@@ -155,7 +155,7 @@ public partial class FilesController
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogDebug(ex, "Failed to consult existing canonical title for destination {Destination}",
                     LoggingHelper.SanitizePathForLog(plan.Destination));
@@ -165,26 +165,17 @@ public partial class FilesController
             //   1. Each source folder's folder-name-derived series.
             //   2. Any distinct Series values captured from the in-memory
             //      metadata of files that were just moved.
-            var candidates = new List<string>();
-            foreach (var sourceDir in plan.SourceDirectories ?? new List<string>())
-            {
-                if (string.IsNullOrWhiteSpace(sourceDir)) continue;
-                var folderName = Path.GetFileName(sourceDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                if (string.IsNullOrWhiteSpace(folderName)) continue;
-                var derived = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
-                if (!string.IsNullOrWhiteSpace(derived))
-                {
-                    candidates.Add(derived);
-                }
-            }
+            var candidates = (plan.SourceDirectories ?? new List<string>())
+                .Where(sourceDir => !string.IsNullOrWhiteSpace(sourceDir))
+                .Select(sourceDir => Path.GetFileName(sourceDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)))
+                .Where(folderName => !string.IsNullOrWhiteSpace(folderName))
+                .Select(folderName => ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false))
+                .Where(derived => !string.IsNullOrWhiteSpace(derived))
+                .ToList();
 
-            foreach (var series in preMoveSeriesBySourcePath.Values)
-            {
-                if (!string.IsNullOrWhiteSpace(series))
-                {
-                    candidates.Add(series.Trim());
-                }
-            }
+            candidates.AddRange(preMoveSeriesBySourcePath.Values
+                .Where(series => !string.IsNullOrWhiteSpace(series))
+                .Select(series => series.Trim()));
 
             // De-duplicate (case-insensitive) and drop anything equal to the
             // canonical-title override itself. Also include the destination
@@ -213,18 +204,14 @@ public partial class FilesController
                     if (existingRecord?.UserAliases is { Count: > 0 } existingAliases)
                     {
                         var merged = new HashSet<string>(filtered, StringComparer.OrdinalIgnoreCase);
-                        foreach (var existing in existingAliases)
-                        {
-                            if (!string.IsNullOrWhiteSpace(existing)
+                        merged.UnionWith(existingAliases
+                            .Where(existing => !string.IsNullOrWhiteSpace(existing)
                                 && !string.Equals(existing, canonicalOverride, StringComparison.OrdinalIgnoreCase))
-                            {
-                                merged.Add(existing.Trim());
-                            }
-                        }
+                            .Select(existing => existing.Trim()));
                         filtered = merged.ToList();
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogDebug(ex, "Failed to merge existing user aliases for series {Series}",
                         LoggingHelper.SanitizeForLog(canonicalOverride));
@@ -241,7 +228,7 @@ public partial class FilesController
                 filtered.Count,
                 LoggingHelper.SanitizeForLog(canonicalOverride));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to persist folder-combine aliases for destination {Destination}",
                 LoggingHelper.SanitizePathForLog(plan.Destination));
@@ -279,15 +266,12 @@ public partial class FilesController
         // labelled consistently.
         if (aliasIndex is not null)
         {
-            foreach (var candidate in EnumerateSeriesNameCandidates(file))
+            var displayTitle = EnumerateSeriesNameCandidates(file)
+                .Select(candidate => FindAliasEntry(aliasIndex, NormalizeFolderCombineKey(candidate))?.DisplayTitle)
+                .FirstOrDefault(title => !string.IsNullOrWhiteSpace(title));
+            if (displayTitle is not null)
             {
-                var key = NormalizeFolderCombineKey(candidate);
-                if (key is not null
-                    && aliasIndex.TryGetValue(key, out var entry)
-                    && !string.IsNullOrWhiteSpace(entry.DisplayTitle))
-                {
-                    return entry.DisplayTitle;
-                }
+                return displayTitle;
             }
         }
 
@@ -343,21 +327,17 @@ public partial class FilesController
         // folders whose names map to the same series via aliases share a key.
         if (aliasIndex is not null)
         {
-            foreach (var candidate in EnumerateSeriesNameCandidates(file))
+            // Skip degenerate keys (e.g. CJK-only titles that collapse to a
+            // bare number) so we don't accidentally cross-resolve to an
+            // unrelated record whose canonical key happens to share that digit.
+            var aliasEntry = EnumerateSeriesNameCandidates(file)
+                .Select(NormalizeFolderCombineKey)
+                .Where(key => key is not null && !IsAmbiguousNormalizedKey(key))
+                .Select(key => FindAliasEntry(aliasIndex, key))
+                .FirstOrDefault(entry => entry is not null);
+            if (aliasEntry is not null)
             {
-                var key = NormalizeFolderCombineKey(candidate);
-                // Skip degenerate keys (e.g. CJK-only titles that collapse to a
-                // bare number) so we don't accidentally cross-resolve to an
-                // unrelated record whose canonical key happens to share that digit.
-                if (key is null || IsAmbiguousNormalizedKey(key))
-                {
-                    continue;
-                }
-                if (aliasIndex.TryGetValue(key, out var entry))
-                {
-                    normalizedSeries = entry.CanonicalKey;
-                    break;
-                }
+                normalizedSeries = aliasEntry.CanonicalKey;
             }
         }
 
@@ -366,6 +346,11 @@ public partial class FilesController
             ? normalizedSeries
             : $"{normalizedSeries}|{volume.ToLowerInvariant()}";
     }
+
+    private static FolderCombineAliasEntry? FindAliasEntry(
+        IReadOnlyDictionary<string, FolderCombineAliasEntry> aliasIndex,
+        string? key) =>
+        key is not null && aliasIndex.TryGetValue(key, out var entry) ? entry : null;
 
     private static string? NormalizeFolderCombineKey(string? value)
     {
@@ -546,13 +531,12 @@ public partial class FilesController
     private static IEnumerable<string> EnumerateRecordTitles(SeriesMetadataCacheRecord record)
     {
         if (!string.IsNullOrWhiteSpace(record.CanonicalTitle)) yield return record.CanonicalTitle!;
-        foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
+        var aliases = (record.Aliases ?? Enumerable.Empty<string>())
+            .Concat(record.UserAliases ?? Enumerable.Empty<string>())
+            .Where(alias => !string.IsNullOrWhiteSpace(alias));
+        foreach (var alias in aliases)
         {
-            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
-        }
-        foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
-        {
-            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
+            yield return alias;
         }
     }
 

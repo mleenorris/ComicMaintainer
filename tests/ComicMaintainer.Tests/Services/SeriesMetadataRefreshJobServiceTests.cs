@@ -150,9 +150,9 @@ public class SeriesMetadataRefreshJobServiceTests
         Assert.NotNull(job.EndTime);
         Assert.True(job.EndTime >= job.StartTime);
         Assert.Equal(
-            new[]
+            new (string, string, string?)[]
             {
-                ("Alpha", "success", (string?)"AniList"),
+                ("Alpha", "success", "AniList"),
                 ("Beta", "manual_match", "ComicVine"),
                 ("Gamma", "not_found", null),
                 ("Delta", "error", "MangaDex"),
@@ -176,8 +176,8 @@ public class SeriesMetadataRefreshJobServiceTests
         Assert.Equal(2, job.ProcessedSeries);
         Assert.Equal(1, job.Failures);
         Assert.Equal(1, job.Successes);
-        Assert.Equal(("Broken", "error", (string?)null), (job.RecentResults[0].SeriesTitle, job.RecentResults[0].Status, job.RecentResults[0].Source));
-        Assert.Equal(("Healthy", "success", (string?)"AniList"), (job.RecentResults[1].SeriesTitle, job.RecentResults[1].Status, job.RecentResults[1].Source));
+        Assert.Equal(("Broken", "error", default(string?)), (job.RecentResults[0].SeriesTitle, job.RecentResults[0].Status, job.RecentResults[0].Source));
+        Assert.Equal(("Healthy", "success", "AniList"), (job.RecentResults[1].SeriesTitle, job.RecentResults[1].Status, job.RecentResults[1].Source));
         Assert.Contains(_logger.Entries, e => e.Level == LogLevel.Warning
             && e.Message.Contains("Metadata refresh failed for Broken")
             && e.Exception is InvalidOperationException);

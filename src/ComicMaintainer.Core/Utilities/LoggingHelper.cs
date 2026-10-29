@@ -38,7 +38,7 @@ public static class LoggingHelper
             var filename = Path.GetFileName(filePath) ?? string.Empty;
             return SanitizeForLog(filename);
         }
-        catch
+        catch (Exception ex) when (ex is ArgumentException)
         {
             return "invalid_path";
         }

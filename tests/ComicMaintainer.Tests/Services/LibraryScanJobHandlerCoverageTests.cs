@@ -28,7 +28,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
     public LibraryScanJobHandlerCoverageTests()
     {
         // A unique scratch library inside the test output folder, removed in Dispose.
-        _watchDir = Path.Combine(AppContext.BaseDirectory, "lib-scan-cov-" + Guid.NewGuid().ToString("N"));
+        _watchDir = Path.Join(AppContext.BaseDirectory, "lib-scan-cov-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_watchDir);
         _settings = new AppSettings { WatchedDirectory = _watchDir };
         _cache.Setup(c => c.NormalizeKey(It.IsAny<string?>()))
@@ -60,9 +60,9 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
 
     private string WriteComic(string folder, string name)
     {
-        var dir = Path.Combine(_watchDir, folder);
+        var dir = Path.Join(_watchDir, folder);
         Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, name);
+        var path = Path.Join(dir, name);
         File.WriteAllBytes(path, new byte[] { 0x50, 0x4B, 0x03, 0x04 });
         return path;
     }
@@ -126,7 +126,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_WatchedDirectoryMissing_ReportsItIsUnavailable()
     {
-        var missing = Path.Combine(_watchDir, "does-not-exist");
+        var missing = Path.Join(_watchDir, "does-not-exist");
         _settings.WatchedDirectory = missing;
 
         var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
@@ -158,8 +158,8 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_RemovingOneGhostFails_KeepsItTrackedForTheStalePass()
     {
-        var stuck = Path.Combine(_watchDir, "Ghosts", "c001.cbz");
-        var removable = Path.Combine(_watchDir, "Ghosts", "c002.cbz");
+        var stuck = Path.Join(_watchDir, "Ghosts", "c001.cbz");
+        var removable = Path.Join(_watchDir, "Ghosts", "c002.cbz");
         SetupTracked(Tracked(stuck), Tracked(removable));
         _fileStore.Setup(f => f.RemoveFileAsync(stuck, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("database is locked"));
@@ -433,7 +433,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
             """{"scanForNew":true,"reconcileDeletions":true,"retagStale":true,"reprocessModified":true}""";
         var modified = WriteComic("Series", "c001.cbz");
         WriteComic("Series", "c002.cbz");
-        SetupTracked(Tracked(modified, size: 999), Tracked(Path.Combine(_watchDir, "Ghosts", "gone.cbz")));
+        SetupTracked(Tracked(modified, size: 999), Tracked(Path.Join(_watchDir, "Ghosts", "gone.cbz")));
         using var cts = new CancellationTokenSource();
         var cancelled = new OperationCanceledException(cts.Token);
         switch (pass)
@@ -507,7 +507,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
     [InlineData("   ")]
     public async Task ExecuteAsync_UnparseableOrNullOptions_FallBackToTheDefaults(string optionsJson)
     {
-        var ghost = Path.Combine(_watchDir, "Ghosts", "gone.cbz");
+        var ghost = Path.Join(_watchDir, "Ghosts", "gone.cbz");
         var modified = WriteComic("Series", "c001.cbz");
         var fresh = WriteComic("Series", "c002.cbz");
         SetupTracked(Tracked(ghost), Tracked(modified, size: 999));
@@ -527,7 +527,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_OnlyStaleRetagEnabled_DoesNotWalkTheDirectory()
     {
-        var ghost = Path.Combine(_watchDir, "Ghosts", "gone.cbz");
+        var ghost = Path.Join(_watchDir, "Ghosts", "gone.cbz");
         WriteComic("Series", "c001.cbz");
         SetupTracked(Tracked(ghost));
 
@@ -544,7 +544,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_OnlyReprocessModifiedEnabled_WalksTheDiskWithoutAddingOrRemoving()
     {
-        var ghost = Path.Combine(_watchDir, "Ghosts", "gone.cbz");
+        var ghost = Path.Join(_watchDir, "Ghosts", "gone.cbz");
         var modified = WriteComic("Series", "c001.cbz");
         WriteComic("Series", "c002.cbz");
         SetupTracked(Tracked(ghost), Tracked(modified, size: 999));

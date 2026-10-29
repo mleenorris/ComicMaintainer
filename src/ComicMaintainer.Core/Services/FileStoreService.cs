@@ -113,7 +113,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
             var settings = _settings.CurrentValue;
             return LibraryPathValidator.IsLexicallyWithin(filePath, settings.WatchedDirectory, settings.DuplicateDirectory);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Error validating path: {FilePath}", SanitizeForLogging(filePath));
             return false;
@@ -174,7 +174,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
         {
             await _eventBroadcaster.BroadcastFileListUpdateAsync();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to broadcast file list update");
         }
@@ -263,7 +263,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
             // Fallback: file lives outside watched dir, use directory portion.
             return fileDir.Replace('\\', '/');
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             return string.Empty;
         }
@@ -303,7 +303,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
 
             return directory.Replace('\\', '/');
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             return string.Empty;
         }

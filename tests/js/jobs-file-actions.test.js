@@ -227,7 +227,7 @@ test('deleting a ticked issue from its menu unselects it for good', async (t) =>
     const page = await h.bootSeriesDetail(t, {
         routes: {
             'GET /api/files/series/s1/issues': () => h.seriesIssues(issues),
-            [`DELETE /api/files/${b64(ISSUE_A)}`]: call => answerDelete(call),
+            [`DELETE /api/files/${b64(ISSUE_A)}`]: () => answerDelete(),
             'POST /api/jobs/process-selected': { job_id: h.JOB_ID, total_items: 1 },
             [`GET /api/jobs/${h.JOB_ID}`]: h.jobStatus({ total_items: 1 })
         }

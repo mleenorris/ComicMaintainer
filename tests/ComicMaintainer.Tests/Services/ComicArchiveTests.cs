@@ -10,7 +10,7 @@ public class ComicArchiveTests : IDisposable
 
     public ComicArchiveTests()
     {
-        _testDirectory = Path.Combine(Path.GetTempPath(), $"comic_archive_test_{Guid.NewGuid()}");
+        _testDirectory = Path.Join(Path.GetTempPath(), $"comic_archive_test_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
     }
 
@@ -18,7 +18,7 @@ public class ComicArchiveTests : IDisposable
     public void Constructor_WithNonExistentFile_ThrowsFileNotFoundException()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
         // Act & Assert
         Assert.Throws<FileNotFoundException>(() => new ComicArchive(filePath));
@@ -28,7 +28,7 @@ public class ComicArchiveTests : IDisposable
     public void Constructor_WithUnsupportedExtension_ThrowsNotSupportedException()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.txt");
+        var filePath = Path.Join(_testDirectory, "test.txt");
         File.WriteAllText(filePath, "test content");
         _createdFiles.Add(filePath);
 
@@ -126,7 +126,7 @@ public class ComicArchiveTests : IDisposable
     public void ReadTags_WithCaseInsensitiveComicInfo_FindsComicInfo()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test_case.cbz");
+        var filePath = Path.Join(_testDirectory, "test_case.cbz");
         using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
         {
             // Create ComicInfo with different casing
@@ -156,7 +156,7 @@ public class ComicArchiveTests : IDisposable
     public void Constructor_WithCbzExtensionVariants_OpensSuccessfully()
     {
         // Arrange - Create test files with different case extensions
-        var filePath = Path.Combine(_testDirectory, "test.CBZ");
+        var filePath = Path.Join(_testDirectory, "test.CBZ");
         using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
         {
             var entry = archive.CreateEntry("page001.jpg");
@@ -174,7 +174,7 @@ public class ComicArchiveTests : IDisposable
 
     private string CreateTestCbzArchive(string fileName)
     {
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
         using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
         {
             var entry = archive.CreateEntry("page001.jpg");
@@ -187,7 +187,7 @@ public class ComicArchiveTests : IDisposable
 
     private string CreateTestCbzArchiveWithComicInfo(string fileName, string series, string issue, int year)
     {
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
         var comicInfoXml = $@"<?xml version=""1.0""?>
 <ComicInfo>
     <Series>{series}</Series>
@@ -215,7 +215,7 @@ public class ComicArchiveTests : IDisposable
 
     private string CreateTestCbzArchiveWithInvalidXml(string fileName)
     {
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
         using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
         {
             var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
@@ -231,7 +231,7 @@ public class ComicArchiveTests : IDisposable
     private string CreateTestCbrArchive(string fileName)
     {
         // For testing purposes, create a .cbr file (it won't be a valid RAR, but we're testing the extension check)
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
         // Create a dummy file with .cbr extension
         using (var archive = ZipFile.Open(filePath + ".tmp", ZipArchiveMode.Create))
         {
@@ -253,7 +253,7 @@ public class ComicArchiveTests : IDisposable
                 if (File.Exists(file))
                     File.Delete(file);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Ignore cleanup errors
             }
@@ -265,7 +265,7 @@ public class ComicArchiveTests : IDisposable
             {
                 Directory.Delete(_testDirectory, true);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Ignore cleanup errors
             }

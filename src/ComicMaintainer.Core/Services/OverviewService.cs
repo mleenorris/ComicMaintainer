@@ -72,16 +72,10 @@ public class OverviewService : IOverviewService
         }
 
         // ContentId follows the reader's convention of using the file path.
-        var progressByPath = new Dictionary<string, ReadingProgressEntity>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in activity)
-        {
-            // Keep the most recently read record per file path.
-            if (!progressByPath.TryGetValue(p.ContentId, out var existing)
-                || p.LastReadAt > existing.LastReadAt)
-            {
-                progressByPath[p.ContentId] = p;
-            }
-        }
+        // Keep the most recently read record per file path.
+        var progressByPath = activity
+            .GroupBy(p => p.ContentId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.MaxBy(p => p.LastReadAt)!, StringComparer.OrdinalIgnoreCase);
 
         var cards = new List<(OverviewSeriesCard Card, DateTime LastReadAt)>();
         foreach (var entry in entries)
@@ -92,15 +86,10 @@ public class OverviewService : IOverviewService
 
             // The most recently read issue (in-progress or completed) anchors the
             // user's place in the series.
-            ReadingProgressEntity? anchor = null;
-            foreach (var path in entry.FilePaths)
-            {
-                if (progressByPath.TryGetValue(path, out var match)
-                    && (anchor is null || match.LastReadAt > anchor.LastReadAt))
-                {
-                    anchor = match;
-                }
-            }
+            var anchor = entry.FilePaths
+                .Select(path => progressByPath.GetValueOrDefault(path))
+                .OfType<ReadingProgressEntity>()
+                .MaxBy(p => p.LastReadAt);
 
             if (anchor is null)
             {

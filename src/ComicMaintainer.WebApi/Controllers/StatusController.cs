@@ -110,7 +110,7 @@ public class StatusController : ControllerBase
         {
             normalizedFolder = Path.GetFullPath(request.Folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             _logger.LogWarning(ex, "ClearFolder: invalid folder path supplied");
             return BadRequest(new { error = "Invalid folder path" });

@@ -43,7 +43,7 @@ public class ProcessController : ControllerBase
             
             return Ok(new { jobId, streaming = stream, totalFiles = filePaths.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error processing all files"));
             return StatusCode(500, "Error processing files");
@@ -58,7 +58,7 @@ public class ProcessController : ControllerBase
             var jobId = await _processor.ProcessFilesAsync(request.Files, cancellationToken);
             return Ok(new { jobId, streaming = stream });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error processing selected files"));
             return StatusCode(500, "Error processing files");
@@ -89,7 +89,7 @@ public class ProcessController : ControllerBase
             
             return Ok(new { jobId, streaming = stream, totalFiles = filePaths.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming all files"));
             return StatusCode(500, "Error renaming files");
@@ -113,7 +113,7 @@ public class ProcessController : ControllerBase
             
             return Ok(new { jobId, streaming = stream, totalFiles = request.Files.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming selected files"));
             return StatusCode(500, "Error renaming files");
@@ -145,7 +145,7 @@ public class ProcessController : ControllerBase
             
             return Ok(new { jobId, streaming = stream, totalFiles = filePaths.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error normalizing all files"));
             return StatusCode(500, "Error normalizing files");
@@ -169,7 +169,7 @@ public class ProcessController : ControllerBase
             
             return Ok(new { jobId, streaming = stream, totalFiles = request.Files.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error normalizing selected files"));
             return StatusCode(500, "Error normalizing files");

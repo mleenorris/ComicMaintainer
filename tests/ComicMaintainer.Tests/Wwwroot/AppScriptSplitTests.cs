@@ -43,7 +43,7 @@ public class AppScriptSplitTests
     [Fact]
     public void EveryScriptUnderJs_IsAnAppScriptOrAPageScript()
     {
-        var jsRoot = Path.Combine(WwwrootFiles.WwwRoot, "js");
+        var jsRoot = Path.Join(WwwrootFiles.WwwRoot, "js");
         var onDisk = Directory.EnumerateFiles(jsRoot, "*.js", SearchOption.AllDirectories)
             .Select(path => "js/" + Path.GetRelativePath(jsRoot, path).Replace(Path.DirectorySeparatorChar, '/'))
             .OrderBy(path => path, StringComparer.Ordinal)

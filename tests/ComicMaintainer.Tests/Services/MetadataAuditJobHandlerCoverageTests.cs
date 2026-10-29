@@ -582,7 +582,7 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
         var normalizeJobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(normalizeJobId);
-        _processor.Setup(p => p.GetJob(normalizeJobId)).Returns((ProcessingJob?)null);
+        _processor.Setup(p => p.GetJob(normalizeJobId)).Returns(default(ProcessingJob?));
 
         var summary = await CreateHandler().ExecuteAsync(AutoCorrectOn, CancellationToken.None);
 

@@ -20,7 +20,7 @@ public class Azw3ConversionServiceTests : IDisposable
 
     public Azw3ConversionServiceTests()
     {
-        _workDir = Path.Combine(Path.GetTempPath(), $"azw3-tests-{Guid.NewGuid():N}");
+        _workDir = Path.Join(Path.GetTempPath(), $"azw3-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
 
         var epub = new EpubConversionService(new Mock<ILogger<EpubConversionService>>().Object);
@@ -31,7 +31,7 @@ public class Azw3ConversionServiceTests : IDisposable
     public async Task ConvertToAzw3Async_ProducesAKindleFormat8Book()
     {
         var cbz = CreateCbz("Series Name - Chapter 0001.cbz", pageCount: 3);
-        var outputDir = Path.Combine(_workDir, "out");
+        var outputDir = Path.Join(_workDir, "out");
 
         var path = await _service.ConvertToAzw3Async(cbz, outputDir);
 
@@ -55,9 +55,8 @@ public class Azw3ConversionServiceTests : IDisposable
 
         // Every page image is stored in its own resource record.
         Assert.Equal(3, book.Resources.Count);
-        foreach (var resource in book.Resources)
+        foreach (var info in book.Resources.Select(resource => new MagickImageInfo(resource)))
         {
-            var info = new MagickImageInfo(resource);
             Assert.Equal(20u, info.Width);
             Assert.Equal(30u, info.Height);
         }
@@ -96,7 +95,7 @@ public class Azw3ConversionServiceTests : IDisposable
     {
         const int pageCount = 3500;
         var cbz = CreateCbz("Series Name - Chapter 0001.cbz", pageCount);
-        var path = await _service.ConvertToAzw3Async(cbz, Path.Combine(_workDir, "large"));
+        var path = await _service.ConvertToAzw3Async(cbz, Path.Join(_workDir, "large"));
 
         var book = Azw3Reader.Read(path);
 
@@ -111,7 +110,7 @@ public class Azw3ConversionServiceTests : IDisposable
     {
         var first = CreateCbz("Series Name - Chapter 0001.cbz", pageCount: 2);
         var second = CreateCbz("Series Name - Chapter 0002.cbz", pageCount: 1, number: "2");
-        var outputDir = Path.Combine(_workDir, "condensed");
+        var outputDir = Path.Join(_workDir, "condensed");
 
         var path = await _service.ConvertToAzw3Async(
             new[] { first, second },
@@ -130,12 +129,12 @@ public class Azw3ConversionServiceTests : IDisposable
     public async Task ConvertToAzw3Async_EmbedsTheSeriesCoverAsTheFirstPage()
     {
         var cbz = CreateCbz("Series Name - Chapter 0001.cbz", pageCount: 1);
-        var coverPath = Path.Combine(_workDir, "series-cover.jpg");
+        var coverPath = Path.Join(_workDir, "series-cover.jpg");
         File.WriteAllBytes(coverPath, CreateJpeg(40, 60));
 
         var path = await _service.ConvertToAzw3Async(
             cbz,
-            Path.Combine(_workDir, "cover"),
+            Path.Join(_workDir, "cover"),
             new EpubConversionOptions(SeriesImagePath: coverPath, SeriesTitle: "Series Name"));
 
         var book = Azw3Reader.Read(path);
@@ -150,19 +149,19 @@ public class Azw3ConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToAzw3Async_RejectsUnsupportedSources()
     {
-        var text = Path.Combine(_workDir, "notes.txt");
+        var text = Path.Join(_workDir, "notes.txt");
         File.WriteAllText(text, "not a comic");
 
         await Assert.ThrowsAsync<NotSupportedException>(
-            () => _service.ConvertToAzw3Async(text, Path.Combine(_workDir, "bad")));
+            () => _service.ConvertToAzw3Async(text, Path.Join(_workDir, "bad")));
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => _service.ConvertToAzw3Async(Array.Empty<string>(), Path.Combine(_workDir, "bad")));
+            () => _service.ConvertToAzw3Async(Array.Empty<string>(), Path.Join(_workDir, "bad")));
     }
 
     private string CreateCbz(string fileName, int pageCount, string number = "1")
     {
-        var path = Path.Combine(_workDir, fileName);
+        var path = Path.Join(_workDir, fileName);
         using var stream = new FileStream(path, FileMode.Create);
         using var zip = new ZipArchive(stream, ZipArchiveMode.Create);
 

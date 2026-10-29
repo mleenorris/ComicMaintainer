@@ -329,3 +329,19 @@ test('messages without data or of an unknown type are ignored', async () => {
     assert.deepEqual(port.messages, []);
     assert.deepEqual(sw.network.calls, []);
 });
+
+test('messages from another origin are ignored', async () => {
+    const sw = await installedWorker();
+    await sw.caches.seed(IMAGE_CACHE, { '/api/comicreader/cover?filePath=a.cbz': image('cover') });
+    const port = { messages: [], postMessage(message) { this.messages.push(message); } };
+
+    for (const origin of ['https://attacker.example', 'null', '']) {
+        for (const type of ['SKIP_WAITING', 'CLEAR_IMAGE_CACHE', 'LIST_OFFLINE_COMICS']) {
+            await sw.message({ type }, { ports: [port], origin });
+        }
+    }
+
+    assert.equal(sw.skipWaitingCalls, 0);
+    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE, STATE_CACHE, IMAGE_CACHE]);
+    assert.deepEqual(port.messages, []);
+});

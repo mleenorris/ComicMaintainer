@@ -20,12 +20,12 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
 
     public FileCoverCacheServiceCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "cm-file-cover-cov-" + Guid.NewGuid().ToString("N"));
-        _cacheDir = Path.Combine(_root, "cache");
+        _root = Path.Join(Path.GetTempPath(), "cm-file-cover-cov-" + Guid.NewGuid().ToString("N"));
+        _cacheDir = Path.Join(_root, "cache");
         Directory.CreateDirectory(_root);
         _settings = new AppSettings
         {
-            ConfigDirectory = Path.Combine(_root, "config"),
+            ConfigDirectory = Path.Join(_root, "config"),
             FileCoverCacheDirectory = _cacheDir,
             FileCoverCacheEnabled = true,
             FileCoverCacheMaxMegabytes = 512,
@@ -34,12 +34,12 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
         };
         _reader
             .Setup(r => r.GetPageAsync(It.IsAny<string>(), 1))
-            .ReturnsAsync(() => ((byte[], string)?)(new byte[PageSize], "image/jpeg"));
+            .ReturnsAsync(() => (new byte[PageSize], "image/jpeg"));
     }
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch { /* ignore */ }
+        try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 
     [Theory]
@@ -58,7 +58,7 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
     {
         var service = CreateService();
 
-        Assert.Null(await service.GetOrCreateAsync(Path.Combine(_root, "bad\0name.cbz")));
+        Assert.Null(await service.GetOrCreateAsync(Path.Join(_root, "bad\0name.cbz")));
         _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
     }
 
@@ -82,7 +82,7 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
     {
         var service = CreateService();
 
-        await service.InvalidateAsync(Path.Combine(_root, "bad\0name.cbz"));
+        await service.InvalidateAsync(Path.Join(_root, "bad\0name.cbz"));
 
         Assert.False(Directory.Exists(_cacheDir));
     }
@@ -96,7 +96,7 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
 
         // Nothing exists under the default root for this path, so this is a
         // no-op that must not throw.
-        await service.InvalidateAsync(Path.Combine(_root, $"missing-{Guid.NewGuid():N}.cbz"));
+        await service.InvalidateAsync(Path.Join(_root, $"missing-{Guid.NewGuid():N}.cbz"));
     }
 
     [Theory]
@@ -112,16 +112,16 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
         var entry = await service.GetOrCreateAsync(file);
 
         Assert.NotNull(entry);
-        var expectedDir = Path.Combine(_settings.ConfigDirectory, "file-covers");
-        Assert.True(File.Exists(Path.Combine(expectedDir, KeyFor(file) + ".img")));
-        Assert.True(File.Exists(Path.Combine(expectedDir, KeyFor(file) + ".meta")));
+        var expectedDir = Path.Join(_settings.ConfigDirectory, "file-covers");
+        Assert.True(File.Exists(Path.Join(expectedDir, KeyFor(file) + ".img")));
+        Assert.True(File.Exists(Path.Join(expectedDir, KeyFor(file) + ".meta")));
         Assert.False(Directory.Exists(_cacheDir));
     }
 
     [Fact]
     public async Task GetOrCreateAsync_CacheDirectoryIsAFile_ServesGeneratedEntryWithoutCaching()
     {
-        var blocker = Path.Combine(_root, "not-a-directory");
+        var blocker = Path.Join(_root, "not-a-directory");
         File.WriteAllText(blocker, "x");
         _settings.FileCoverCacheDirectory = blocker;
         var service = CreateService();
@@ -143,7 +143,7 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
     {
         var file = CreateSource("a.cbz");
         var key = KeyFor(file);
-        var blobPath = Path.Combine(_cacheDir, key + ".img");
+        var blobPath = Path.Join(_cacheDir, key + ".img");
         Directory.CreateDirectory(blobPath);
         var service = CreateService();
 
@@ -152,7 +152,7 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
         Assert.NotNull(entry);
         Assert.Equal(PageSize, entry!.Value.Data.Length);
         Assert.False(File.Exists(blobPath + ".tmp"));
-        Assert.False(File.Exists(Path.Combine(_cacheDir, key + ".meta")));
+        Assert.False(File.Exists(Path.Join(_cacheDir, key + ".meta")));
         Assert.True(Directory.Exists(blobPath));
     }
 
@@ -162,7 +162,7 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
         var service = CreateService();
         var file = CreateSource("a.cbz");
         Assert.NotNull(await service.GetOrCreateAsync(file));
-        var metaPath = Path.Combine(_cacheDir, KeyFor(file) + ".meta");
+        var metaPath = Path.Join(_cacheDir, KeyFor(file) + ".meta");
         File.WriteAllText(metaPath, "{ this is not json");
 
         var regenerated = await service.GetOrCreateAsync(file);
@@ -207,7 +207,7 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
         _settings.FileCoverCacheMaxMegabytes = 1;
         _reader
             .Setup(r => r.GetPageAsync(It.IsAny<string>(), 1))
-            .ReturnsAsync(() => ((byte[], string)?)(new byte[oversizedPage], "image/jpeg"));
+            .ReturnsAsync(() => (new byte[oversizedPage], "image/jpeg"));
         var service = CreateService();
 
         for (var i = 0; i < 31; i++)
@@ -252,7 +252,7 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
 
     private string CreateSource(string name)
     {
-        var path = Path.Combine(_root, name);
+        var path = Path.Join(_root, name);
         File.WriteAllBytes(path, [1, 2, 3, 4]);
         return path;
     }

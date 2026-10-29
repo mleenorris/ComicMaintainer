@@ -10,7 +10,7 @@ namespace ComicMaintainer.Tests.HealthChecks;
 public class DatabaseHealthCheckTests : IDisposable
 {
     private readonly Mock<ILogger<DatabaseHealthCheck>> _logger = new();
-    private readonly string _missingDirectory = Path.Combine(Path.GetTempPath(), "dbhealth_" + Guid.NewGuid().ToString("N"));
+    private readonly string _missingDirectory = Path.Join(Path.GetTempPath(), "dbhealth_" + Guid.NewGuid().ToString("N"));
 
     public void Dispose()
     {
@@ -48,7 +48,7 @@ public class DatabaseHealthCheckTests : IDisposable
     public async Task UnreachableDatabase_IsUnhealthyWithoutException()
     {
         var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseSqlite($"Data Source={Path.Combine(_missingDirectory, "missing.db")}")
+            .UseSqlite($"Data Source={Path.Join(_missingDirectory, "missing.db")}")
             .Options;
 
         var result = await CheckAsync(new Factory(() => new ComicMaintainerDbContext(options)));
@@ -56,7 +56,7 @@ public class DatabaseHealthCheckTests : IDisposable
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
         Assert.Equal("Database is not reachable.", result.Description);
         Assert.Null(result.Exception);
-        Assert.False(File.Exists(Path.Combine(_missingDirectory, "missing.db")));
+        Assert.False(File.Exists(Path.Join(_missingDirectory, "missing.db")));
     }
 
     [Fact]

@@ -31,6 +31,7 @@ public class ComicEmailQueue : IComicEmailQueue
     // on that run alone to know the earlier ones are done.
     private Task _allConsumersDone = Task.CompletedTask;
 
+    /// <summary>Initializes a new instance of the <see cref="ComicEmailQueue"/> class.</summary>
     /// <param name="serviceFactory">
     /// Resolves the delivery service lazily; the service itself enqueues work,
     /// so constructor injection would form a dependency cycle.
@@ -100,7 +101,7 @@ public class ComicEmailQueue : IComicEmailQueue
         // already queued.
         channel.Writer.TryComplete();
 
-        try
+        using (stoppingCts)
         {
             // If the shutdown deadline fires before the queue drained, cancel the
             // consumer; the remaining rows stay 'pending' in the database.
@@ -108,10 +109,6 @@ public class ComicEmailQueue : IComicEmailQueue
             {
                 await consumer;
             }
-        }
-        finally
-        {
-            stoppingCts.Dispose();
         }
     }
 
@@ -140,7 +137,7 @@ public class ComicEmailQueue : IComicEmailQueue
                 {
                     throw;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogError(ex, "Unhandled error while processing comic email delivery {DeliveryId}", deliveryId);
                 }

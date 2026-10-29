@@ -166,7 +166,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     await StartAsync();
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error reconfiguring watcher after settings change"));
             }
@@ -197,7 +197,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     _watcher.EnableRaisingEvents = false;
                     _watcher.Dispose();
                 }
-                catch
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     // Best-effort disposal
                 }
@@ -356,7 +356,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                         newFileCount++;
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error adding file during incremental scan: {File}"), file);
                 }
@@ -364,7 +364,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Incremental scan completed. Added {Count} new files"), newFileCount);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error during incremental directory scan"));
         }
@@ -405,7 +405,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     // blocking on its own stability delay.
                     ScheduleProcessing(file);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error processing file from new directory: {File}"), file);
                 }
@@ -413,7 +413,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Directory scan completed: {Directory}"), directoryPath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error scanning directory: {Directory}"), directoryPath);
         }
@@ -480,7 +480,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         {
             await _eventBroadcaster.BroadcastWatcherStatusAsync(running, _enabled);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to broadcast watcher status change");
         }
@@ -541,7 +541,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 {
                     await _fileStore.AddFileAsync(e.FullPath);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error adding created file to store: {Path}"), e.FullPath);
                 }
@@ -596,7 +596,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     // that were renamed by the processor itself.
                     await _fileStore.UpdateFilePathAsync(e.OldFullPath, e.FullPath);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error updating renamed file path: {Path}"), e.FullPath);
                 }
@@ -899,7 +899,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     await _fileStore.AddFileAsync(file);
                     ScheduleProcessing(file);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
                         "Error re-queuing file during recovery rescan: {File}"), file);
@@ -909,7 +909,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
                 "Recovery rescan completed: {Directory}"), directory);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
                 "Error during recovery rescan of directory: {Directory}"), directory);
@@ -961,7 +961,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 existing.Cancel();
                 existing.Dispose();
             }
-            catch
+            catch (Exception ex) when (ex is ObjectDisposedException or AggregateException)
             {
                 // Best-effort cancellation of the superseded debounce.
             }
@@ -1012,7 +1012,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 await _processor.ProcessFileAsync(filePath);
                 MarkSelfInducedChange(filePath);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error processing file: {File}"), filePath);
             }
@@ -1035,7 +1035,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 cts.Cancel();
                 cts.Dispose();
             }
-            catch
+            catch (Exception ex) when (ex is ObjectDisposedException or AggregateException)
             {
                 // Best-effort cancellation.
             }
@@ -1084,12 +1084,9 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         var windowSeconds = Math.Max(_settings.WatcherFileStabilityDelaySeconds, 5);
         window = TimeSpan.FromSeconds(windowSeconds);
         var cutoff = DateTime.UtcNow - window;
-        foreach (var kvp in _recentlyProcessed)
+        foreach (var kvp in _recentlyProcessed.Where(entry => entry.Value < cutoff))
         {
-            if (kvp.Value < cutoff)
-            {
-                _recentlyProcessed.TryRemove(kvp.Key, out _);
-            }
+            _recentlyProcessed.TryRemove(kvp.Key, out _);
         }
     }
 
@@ -1172,7 +1169,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Both rename and normalize are disabled, skipping: {File}"), filePath);
             return false;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error checking if file should be processed: {File}"), filePath);
             return false;

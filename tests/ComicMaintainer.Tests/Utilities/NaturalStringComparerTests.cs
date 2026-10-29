@@ -18,7 +18,9 @@ public class NaturalStringComparerTests
     public void Compare_WithNullValues_HandlesCorrectly()
     {
         // Arrange & Act
-        var result1 = _comparer.Compare(null, null);
+        string? first = null;
+        string? second = null;
+        var result1 = _comparer.Compare(first, second);
         var result2 = _comparer.Compare("a", null);
         var result3 = _comparer.Compare(null, "a");
 

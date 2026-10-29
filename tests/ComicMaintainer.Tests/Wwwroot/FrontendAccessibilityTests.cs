@@ -18,7 +18,7 @@ public class FrontendAccessibilityTests
             var current = AppContext.BaseDirectory;
             for (var i = 0; i < 10 && current != null; i++)
             {
-                var candidate = Path.Combine(current, "src", "ComicMaintainer.WebApi", "wwwroot");
+                var candidate = Path.Join(current, "src", "ComicMaintainer.WebApi", "wwwroot");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -31,7 +31,7 @@ public class FrontendAccessibilityTests
 
     private static string Read(params string[] relativeParts)
     {
-        var path = Path.Combine(new[] { WwwRoot }.Concat(relativeParts).ToArray());
+        var path = Path.Join(new[] { WwwRoot }.Concat(relativeParts).ToArray());
         Assert.True(File.Exists(path), $"Expected {path} to exist");
         return File.ReadAllText(path);
     }

@@ -19,17 +19,13 @@ public class TestRunConfigDirectoryTests
     [Fact]
     public async Task Program_WritesItsLogsAndUserSettingsToThePerRunConfigDirectory()
     {
-        var factory = new WebApplicationFactory<Program>();
-        try
+        // Disposing the factory stops the host, which flushes and closes the Serilog file sinks before the
+        // files are inspected.
+        await using (var factory = new WebApplicationFactory<Program>())
         {
             using var client = factory.CreateClient();
             var response = await client.GetAsync("/api/version");
             response.EnsureSuccessStatusCode();
-        }
-        finally
-        {
-            // Stopping the host flushes and closes the Serilog file sinks before the files are inspected.
-            await factory.DisposeAsync();
         }
 
         var configDirectory = TestRunConfigDirectory.DirectoryPath;

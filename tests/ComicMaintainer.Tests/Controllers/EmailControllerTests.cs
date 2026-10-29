@@ -38,7 +38,7 @@ public sealed class EmailControllerTests : IDisposable
         EmailFromAddress = "library@example.test",
         EmailMaxAttachmentMegabytes = 40
     };
-    private readonly string _tempDir = Path.Combine(Path.GetTempPath(), "cm_email_ctrl_" + Guid.NewGuid().ToString("N"));
+    private readonly string _tempDir = Path.Join(Path.GetTempPath(), "cm_email_ctrl_" + Guid.NewGuid().ToString("N"));
     private readonly List<string> _filesOutsideTempDir = new();
     private readonly List<string> _overlongDirectories = new();
 
@@ -51,15 +51,15 @@ public sealed class EmailControllerTests : IDisposable
     {
         foreach (var file in _filesOutsideTempDir)
         {
-            try { File.Delete(file); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            try { File.Delete(file); } catch (IOException) { /* best-effort cleanup */ } catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
 
         foreach (var directory in _overlongDirectories)
         {
-            try { OverlongPath.Release(directory); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            try { OverlongPath.Release(directory); } catch (IOException) { /* best-effort cleanup */ } catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
 
-        try { Directory.Delete(_tempDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        try { Directory.Delete(_tempDir, recursive: true); } catch (IOException) { /* best-effort cleanup */ } catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
     }
 
     // ─── Status and devices ─────────────────────────────────────────────────
@@ -164,7 +164,7 @@ public sealed class EmailControllerTests : IDisposable
     public async Task UpdateDevice_UnknownDeviceIsNotFound()
     {
         _devices.Setup(d => d.UpdateDeviceAsync(77, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((EreaderDeviceDto?)null);
+            .ReturnsAsync(default(EreaderDeviceDto?));
 
         var result = await CreateController().UpdateDevice(77, new EmailController.DeviceRequest { Name = "x" }, CancellationToken.None);
 
@@ -619,11 +619,11 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task DownloadCondensedBook_StreamsTheBookAndRemovesItsWorkDirectoryOnceTheResponseCompletes()
     {
-        var workDirectory = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        var workDirectory = Path.Join(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workDirectory);
-        var bookPath = Path.Combine(workDirectory, "Saga 001-002.epub");
+        var bookPath = Path.Join(workDirectory, "Saga 001-002.epub");
         await File.WriteAllTextAsync(bookPath, "epub-bytes");
-        await File.WriteAllTextAsync(Path.Combine(workDirectory, "scratch.bin"), "intermediate");
+        await File.WriteAllTextAsync(Path.Join(workDirectory, "scratch.bin"), "intermediate");
         var files = new List<string> { "/lib/Saga/Saga 001.cbz", "/lib/Saga/Saga 002.cbz" };
         SetupCreateBook(new CondensedBookFile(bookPath, "Saga 001-002.epub"));
 
@@ -667,9 +667,9 @@ public sealed class EmailControllerTests : IDisposable
     public async Task DownloadCondensedBook_Azw3BookOfASeriesIsServedAsKindleFormat()
     {
         SetupSeries(Series("/lib/Saga/Saga 002.cbz", "/lib/Saga/Saga 001.cbz"));
-        var workDirectory = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        var workDirectory = Path.Join(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workDirectory);
-        var bookPath = Path.Combine(workDirectory, "Saga.AZW3");
+        var bookPath = Path.Join(workDirectory, "Saga.AZW3");
         await File.WriteAllTextAsync(bookPath, "azw3-bytes");
         SetupCreateBook(new CondensedBookFile(bookPath, "Saga.AZW3"));
 
@@ -692,7 +692,7 @@ public sealed class EmailControllerTests : IDisposable
         // A bare file name has an empty directory part; the cleanup must treat
         // that as "nothing to remove", never as the current directory.
         var fileName = $"cm-email-ctrl-{Guid.NewGuid():N}.epub";
-        var fullPath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
+        var fullPath = Path.Join(Directory.GetCurrentDirectory(), fileName);
         _filesOutsideTempDir.Add(fullPath);
         await File.WriteAllTextAsync(fullPath, "book");
         SetupCreateBook(new CondensedBookFile(fileName, fileName));
@@ -717,9 +717,9 @@ public sealed class EmailControllerTests : IDisposable
             return;
         }
 
-        var workDirectory = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        var workDirectory = Path.Join(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workDirectory);
-        var bookPath = Path.Combine(workDirectory, "Saga.epub");
+        var bookPath = Path.Join(workDirectory, "Saga.epub");
         await File.WriteAllTextAsync(bookPath, "epub-bytes");
         _overlongDirectories.Add(OverlongPath.CreateDirectoryHoldingAnUnreachableFile(workDirectory, ".part"));
         SetupCreateBook(new CondensedBookFile(bookPath, "Saga.epub"));
@@ -962,7 +962,7 @@ public sealed class EmailControllerTests : IDisposable
     {
         var buildId = Guid.NewGuid();
         _builds.Setup(b => b.Get(buildId, UserId)).Returns(Build(buildId, CondensedBookBuildStatus.Running));
-        _builds.Setup(b => b.GetCompletedFile(buildId, UserId)).Returns((CondensedBookFile?)null);
+        _builds.Setup(b => b.GetCompletedFile(buildId, UserId)).Returns(default(CondensedBookFile?));
 
         var result = CreateController().DownloadCondenseBuild(buildId);
 
@@ -975,7 +975,7 @@ public sealed class EmailControllerTests : IDisposable
     {
         var buildId = Guid.NewGuid();
         _builds.Setup(b => b.Get(buildId, UserId)).Returns(Build(buildId, CondensedBookBuildStatus.Completed));
-        _builds.Setup(b => b.GetCompletedFile(buildId, UserId)).Returns((CondensedBookFile?)null);
+        _builds.Setup(b => b.GetCompletedFile(buildId, UserId)).Returns(default(CondensedBookFile?));
 
         var result = CreateController().DownloadCondenseBuild(buildId);
 
@@ -989,7 +989,7 @@ public sealed class EmailControllerTests : IDisposable
     public async Task DownloadCondenseBuild_StreamsTheFinishedBookAndKeepsItForRetries(string fileName, string expectedContentType)
     {
         var buildId = Guid.NewGuid();
-        var path = Path.Combine(_tempDir, fileName);
+        var path = Path.Join(_tempDir, fileName);
         await File.WriteAllTextAsync(path, "book-bytes");
         _builds.Setup(b => b.Get(buildId, UserId)).Returns(Build(buildId, CondensedBookBuildStatus.Completed));
         _builds.Setup(b => b.GetCompletedFile(buildId, UserId)).Returns(new CondensedBookFile(path, fileName));
@@ -1087,7 +1087,7 @@ public sealed class EmailControllerTests : IDisposable
         var request = new EmailController.SubscriptionRequest { SeriesTitle = "Saga", DeviceId = 404 };
 
         _devices.Setup(d => d.UpsertSubscriptionAsync("Saga", 404, null, true, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SeriesEmailSubscriptionDto?)null);
+            .ReturnsAsync(default(SeriesEmailSubscriptionDto?));
         Assert.Equal("Device not found", ErrorOf<NotFoundObjectResult>((await controller.UpsertSubscription(request, CancellationToken.None)).Result));
 
         _devices.Setup(d => d.UpsertSubscriptionAsync("Saga", 404, null, true, It.IsAny<CancellationToken>()))
@@ -1367,14 +1367,14 @@ public sealed class EmailControllerTests : IDisposable
             var nested = parent;
             while (Utf8Length(nested) + 1 + LeafName.Length + 1 + Utf8Length(fileName) < PathMax)
             {
-                nested = Path.Combine(nested, NestedName);
+                nested = Path.Join(nested, NestedName);
             }
 
-            var shortLeaf = Path.Combine(nested, ShortLeafName);
+            var shortLeaf = Path.Join(nested, ShortLeafName);
             Directory.CreateDirectory(shortLeaf);
-            File.WriteAllText(Path.Combine(shortLeaf, fileName), "unreachable");
+            File.WriteAllText(Path.Join(shortLeaf, fileName), "unreachable");
 
-            var leaf = Path.Combine(nested, LeafName);
+            var leaf = Path.Join(nested, LeafName);
             Directory.Move(shortLeaf, leaf);
             return leaf;
         }
@@ -1383,7 +1383,7 @@ public sealed class EmailControllerTests : IDisposable
         {
             if (Directory.Exists(leaf))
             {
-                Directory.Move(leaf, Path.Combine(Path.GetDirectoryName(leaf)!, ShortLeafName));
+                Directory.Move(leaf, Path.Join(Path.GetDirectoryName(leaf)!, ShortLeafName));
             }
         }
 

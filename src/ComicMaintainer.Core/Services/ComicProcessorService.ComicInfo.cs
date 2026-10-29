@@ -63,7 +63,7 @@ public partial class ComicProcessorService
                 Tags = root.Elements("Tag").Select(e => e.Value).ToList()
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Malformed ComicInfo.xml comes from the archive, not from us.
             using (_logger.BeginScope(ErrorReportLogProperties.Exclude("malformed ComicInfo.xml in a user file")))
@@ -95,7 +95,7 @@ public partial class ComicProcessorService
                 Year = int.TryParse(root.Element("Year")?.Value, out var year) ? year : null
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error parsing series metadata from ComicInfo.xml");
             return null;

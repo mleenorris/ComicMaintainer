@@ -239,7 +239,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
         };
         _mockOptions.Setup(x => x.CurrentValue).Returns(appSettings);
         
-        var service = new DatabaseCleanupHostedService(
+        using var service = new DatabaseCleanupHostedService(
             _mockFileStore.Object,
             _mockOptions.Object,
             _mockLogger.Object);
@@ -260,8 +260,6 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
-        
-        service.Dispose();
     }
 
     [Fact]

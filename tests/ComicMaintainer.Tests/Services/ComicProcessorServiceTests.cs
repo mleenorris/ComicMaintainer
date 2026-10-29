@@ -28,14 +28,14 @@ public class ComicProcessorServiceTests : IDisposable
         _mockExternalSeriesMetadata = new Mock<IExternalSeriesMetadataService>();
         _mockOptions = new Mock<IOptionsMonitor<AppSettings>>();
         
-        _testDirectory = Path.Combine(Path.GetTempPath(), $"comic_tests_{Guid.NewGuid()}");
+        _testDirectory = Path.Join(Path.GetTempPath(), $"comic_tests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
         
         _settings = new AppSettings
         {
             WatchedDirectory = _testDirectory,
-            DuplicateDirectory = Path.Combine(_testDirectory, "duplicates"),
-            TempFileDirectory = Path.Combine(_testDirectory, "temp"),
+            DuplicateDirectory = Path.Join(_testDirectory, "duplicates"),
+            TempFileDirectory = Path.Join(_testDirectory, "temp"),
             FilenameFormat = "{series} - Chapter {issue}",
             IssueNumberPadding = 4
         };
@@ -70,7 +70,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task ProcessFileAsync_NonExistentFile_ReturnsFalse()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
         // Act
         var result = await _service.ProcessFileAsync(filePath);
@@ -83,7 +83,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task ProcessFileAsync_NonComicFile_ReturnsFalse()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.txt");
+        var filePath = Path.Join(_testDirectory, "test.txt");
         await File.WriteAllTextAsync(filePath, "test content");
 
         // Act
@@ -133,7 +133,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task GetMetadataAsync_NonExistentFile_ReturnsNull()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
         // Act
         var metadata = await _service.GetMetadataAsync(filePath);
@@ -147,10 +147,10 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange - an archive outside the watched directory, reachable through
         // a linked directory inside it.
-        var outsideDir = Path.Combine(Path.GetTempPath(), $"comic_outside_{Guid.NewGuid():N}");
+        var outsideDir = Path.Join(Path.GetTempPath(), $"comic_outside_{Guid.NewGuid():N}");
         Directory.CreateDirectory(outsideDir);
         var outsideFile = CreateTestComicArchive("External Series", "7", directory: outsideDir);
-        var linkedDir = Path.Combine(_testDirectory, "linked");
+        var linkedDir = Path.Join(_testDirectory, "linked");
 
         try
         {
@@ -159,13 +159,13 @@ public class ComicProcessorServiceTests : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
             // The platform/filesystem does not allow creating links here.
-            try { Directory.Delete(outsideDir, true); } catch { }
+            try { Directory.Delete(outsideDir, true); } catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
             return;
         }
 
         try
         {
-            var linkedPath = Path.Combine(linkedDir, Path.GetFileName(outsideFile));
+            var linkedPath = Path.Join(linkedDir, Path.GetFileName(outsideFile));
 
             // Act
             var metadata = await _service.GetMetadataAsync(linkedPath);
@@ -184,8 +184,8 @@ public class ComicProcessorServiceTests : IDisposable
         }
         finally
         {
-            try { Directory.Delete(linkedDir); } catch { }
-            try { Directory.Delete(outsideDir, true); } catch { }
+            try { Directory.Delete(linkedDir); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
+            try { Directory.Delete(outsideDir, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
@@ -248,7 +248,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task RemoveMetadataAsync_NonExistentFile_ReturnsFalse()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "missing.cbz");
+        var filePath = Path.Join(_testDirectory, "missing.cbz");
 
         // Act
         var result = await _service.RemoveMetadataAsync(filePath);
@@ -261,7 +261,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task RemoveMetadataAsync_NonComicFile_ReturnsFalse()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "notes.txt");
+        var filePath = Path.Join(_testDirectory, "notes.txt");
         await File.WriteAllTextAsync(filePath, "hello");
 
         // Act
@@ -296,8 +296,6 @@ public class ComicProcessorServiceTests : IDisposable
         var file2 = CreateTestComicArchive("Series B", "2");
         var filePaths = new List<string> { file1, file2 };
         
-        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
         _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
@@ -355,7 +353,7 @@ public class ComicProcessorServiceTests : IDisposable
         var issue = "1";
         
         // Create first file with the expected target name
-        var file1 = CreateTestComicArchiveWithTargetName(series, issue);
+        CreateTestComicArchiveWithTargetName(series, issue);
         
         // Create second file that will have same target name when renamed
         var file2 = CreateTestComicArchive(series, issue);
@@ -403,7 +401,7 @@ public class ComicProcessorServiceTests : IDisposable
         var issue = "1";
         
         // Create first file with the expected target name
-        var file1 = CreateTestComicArchiveWithTargetName(series, issue);
+        CreateTestComicArchiveWithTargetName(series, issue);
         
         // Create second file that will have same target name when renamed
         var file2 = CreateTestComicArchive(series, issue);
@@ -428,7 +426,7 @@ public class ComicProcessorServiceTests : IDisposable
     private string CreateTestComicArchiveWithTargetName(string series, string issue)
     {
         var targetFileName = $"{series} - Chapter {issue.PadLeft(4, '0')}.cbz";
-        var filePath = Path.Combine(_testDirectory, targetFileName);
+        var filePath = Path.Join(_testDirectory, targetFileName);
         
         using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
         {
@@ -456,7 +454,7 @@ public class ComicProcessorServiceTests : IDisposable
 
     private string CreateTestComicArchiveNoMetadata(string fileName)
     {
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
 
         using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
         {
@@ -498,8 +496,6 @@ public class ComicProcessorServiceTests : IDisposable
         var file1 = CreateTestComicArchive("Test Series", "1");
         var files = new List<string> { file1 };
 
-        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
         _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
@@ -544,8 +540,8 @@ public class ComicProcessorServiceTests : IDisposable
             _mockHistoryService.Object,
             mockEventBroadcaster.Object);
 
-        var fileA = Path.Combine(_testDirectory, "delete-a.cbz");
-        var fileB = Path.Combine(_testDirectory, "delete-b.cbz");
+        var fileA = Path.Join(_testDirectory, "delete-a.cbz");
+        var fileB = Path.Join(_testDirectory, "delete-b.cbz");
         File.WriteAllText(fileA, "x");
         File.WriteAllText(fileB, "x");
 
@@ -673,7 +669,7 @@ public class ComicProcessorServiceTests : IDisposable
     private string CreateTestComicArchive(string series, string issue, int? year = null, string? directory = null)
     {
         var fileName = $"{series} - Chapter {issue}.cbz";
-        var filePath = Path.Combine(directory ?? _testDirectory, fileName);
+        var filePath = Path.Join(directory ?? _testDirectory, fileName);
 
         // Create ComicInfo.xml content
         var comicInfoXml = $@"<?xml version=""1.0""?>
@@ -712,8 +708,6 @@ public class ComicProcessorServiceTests : IDisposable
         // Arrange
         var file = CreateTestComicArchive("Test Series", "1");
         
-        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
         _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
@@ -726,7 +720,7 @@ public class ComicProcessorServiceTests : IDisposable
             h => h.AddHistoryEntryAsync(
                 It.Is<ProcessingHistoryEntry>(e => 
                     e.Action == "Process" && 
-                    e.Success == true &&
+                    e.Success &&
                     e.ErrorMessage == null),
                 It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
@@ -736,7 +730,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task ProcessFileAsync_AddsHistoryEntry_OnFileNotFound()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
         // Act
         var result = await _service.ProcessFileAsync(filePath);
@@ -747,7 +741,7 @@ public class ComicProcessorServiceTests : IDisposable
             h => h.AddHistoryEntryAsync(
                 It.Is<ProcessingHistoryEntry>(e => 
                     e.Action == "Process" && 
-                    e.Success == false &&
+                    !e.Success &&
                     e.ErrorMessage == "File not found"),
                 It.IsAny<CancellationToken>()),
             Times.Once);
@@ -760,8 +754,6 @@ public class ComicProcessorServiceTests : IDisposable
         var file = CreateTestComicArchive("Original Series", "1");
         
         // Change metadata to cause rename
-        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
         _mockFileStore.Setup(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockFileStore.Setup(f => f.AddFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -778,7 +770,7 @@ public class ComicProcessorServiceTests : IDisposable
             h => h.AddHistoryEntryAsync(
                 It.Is<ProcessingHistoryEntry>(e => 
                     e.Action == "Rename" && 
-                    e.Success == true),
+                    e.Success),
                 It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
     }
@@ -850,7 +842,7 @@ public class ComicProcessorServiceTests : IDisposable
         var series = "Batman";
         var issue = "0001";
         var fileName = $"{series} - Chapter {issue}.cbz";
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
         
         // Create ComicInfo.xml with matching metadata
         var comicInfoXml = $@"<?xml version=""1.0""?>
@@ -915,7 +907,7 @@ public class ComicProcessorServiceTests : IDisposable
         var series = "Spider-Man";
         var issue = "0042";
         var fileName = $"{series} - Chapter {issue}.cbz";
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
         
         var comicInfoXml = $@"<?xml version=""1.0""?>
 <ComicInfo>
@@ -955,7 +947,7 @@ public class ComicProcessorServiceTests : IDisposable
         // and a "Chapter <n>" title should be written into ComicInfo.xml.
         var series = "My Series";
         var originalFileName = $"{series} - Chapter 5.cbz";
-        var originalFilePath = Path.Combine(_testDirectory, originalFileName);
+        var originalFilePath = Path.Join(_testDirectory, originalFileName);
 
         var comicInfoXml = $@"<?xml version=""1.0""?>
 <ComicInfo>
@@ -997,7 +989,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.Equal(0, job.FailedFiles);
 
         // Locate the renamed file (filename template applies issue padding=4).
-        var expectedRenamedFile = Path.Combine(_testDirectory, $"{series} - Chapter 0005.cbz");
+        var expectedRenamedFile = Path.Join(_testDirectory, $"{series} - Chapter 0005.cbz");
         Assert.True(File.Exists(expectedRenamedFile),
             $"Expected renamed file '{expectedRenamedFile}' not found. Files present: " +
             string.Join(", ", Directory.GetFiles(_testDirectory).Select(Path.GetFileName)));
@@ -1088,12 +1080,12 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task GetMetadataAsync_FileWithoutComicInfo_ExtractsSeriesFromFolderName()
     {
         // Arrange - Create a folder with "The Infinite Mage" as the name
-        var seriesFolder = Path.Combine(_testDirectory, "The Infinite Mage");
+        var seriesFolder = Path.Join(_testDirectory, "The Infinite Mage");
         Directory.CreateDirectory(seriesFolder);
         
         // Create a file in that folder without ComicInfo.xml
         var fileName = "Chapter 12.cbz";
-        var filePath = Path.Combine(seriesFolder, fileName);
+        var filePath = Path.Join(seriesFolder, fileName);
         
         using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
         {
@@ -1117,12 +1109,12 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task GetMetadataAsync_FileWithoutComicInfo_InFolderWithUnderscores_NormalizesSeriesName()
     {
         // Arrange - Create a folder with underscores
-        var seriesFolder = Path.Combine(_testDirectory, "Batman_The Dark Knight");
+        var seriesFolder = Path.Join(_testDirectory, "Batman_The Dark Knight");
         Directory.CreateDirectory(seriesFolder);
         
         // Create a file in that folder without ComicInfo.xml
         var fileName = "Chapter 5.cbz";
-        var filePath = Path.Combine(seriesFolder, fileName);
+        var filePath = Path.Join(seriesFolder, fileName);
         
         using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
         {
@@ -1147,7 +1139,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task NormalizeFileAsync_PreservesFileSeriesWhenNoExternalMetadata()
     {
         // Arrange - Create a folder with a specific name
-        var seriesFolder = Path.Combine(_testDirectory, "Spider-Man");
+        var seriesFolder = Path.Join(_testDirectory, "Spider-Man");
         Directory.CreateDirectory(seriesFolder);
 
         // Create a file with ComicInfo.xml that has a series name different
@@ -1155,7 +1147,7 @@ public class ComicProcessorServiceTests : IDisposable
         // series, the existing <Series> value in the file should be preserved
         // rather than being overwritten by the folder-derived name.
         var fileName = "Chapter 5.cbz";
-        var filePath = Path.Combine(seriesFolder, fileName);
+        var filePath = Path.Join(seriesFolder, fileName);
 
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
@@ -1206,11 +1198,11 @@ public class ComicProcessorServiceTests : IDisposable
         // title). After normalization the per-file metadata issue field and
         // the title should not be zero padded: <Number> "0012" -> "12" and
         // <Title> -> "Chapter 12".
-        var seriesFolder = Path.Combine(_testDirectory, "Spider-Man");
+        var seriesFolder = Path.Join(_testDirectory, "Spider-Man");
         Directory.CreateDirectory(seriesFolder);
 
         var fileName = "Spider-Man - Chapter 0012.cbz";
-        var filePath = Path.Combine(seriesFolder, fileName);
+        var filePath = Path.Join(seriesFolder, fileName);
 
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
@@ -1260,11 +1252,11 @@ public class ComicProcessorServiceTests : IDisposable
         // contains a chapter number. After normalization the issue number
         // should be populated from the filename and the title should become
         // "Chapter <n>" instead of "Chapter Unknown".
-        var seriesFolder = Path.Combine(_testDirectory, "Spider-Man");
+        var seriesFolder = Path.Join(_testDirectory, "Spider-Man");
         Directory.CreateDirectory(seriesFolder);
 
         var fileName = "Spider-Man - Chapter 7.cbz";
-        var filePath = Path.Combine(seriesFolder, fileName);
+        var filePath = Path.Join(seriesFolder, fileName);
 
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
@@ -1311,12 +1303,12 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task NormalizeFileAsync_WithFolderUnderscores_SetsSeriesNameWithColons()
     {
         // Arrange - Create a folder with underscores
-        var seriesFolder = Path.Combine(_testDirectory, "Batman_The Dark Knight");
+        var seriesFolder = Path.Join(_testDirectory, "Batman_The Dark Knight");
         Directory.CreateDirectory(seriesFolder);
         
         // Create a file without ComicInfo.xml
         var fileName = "Chapter 10.cbz";
-        var filePath = Path.Combine(seriesFolder, fileName);
+        var filePath = Path.Join(seriesFolder, fileName);
         
         using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
         {
@@ -1353,10 +1345,10 @@ public class ComicProcessorServiceTests : IDisposable
     [Fact]
     public async Task NormalizeFileAsync_UsesExternalMetadataCanonicalSeries()
     {
-        var seriesFolder = Path.Combine(_testDirectory, "The Dark Knight");
+        var seriesFolder = Path.Join(_testDirectory, "The Dark Knight");
         Directory.CreateDirectory(seriesFolder);
 
-        var filePath = Path.Combine(seriesFolder, "Chapter 7.cbz");
+        var filePath = Path.Join(seriesFolder, "Chapter 7.cbz");
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
     <Series>The Dark Knight</Series>
@@ -1402,10 +1394,10 @@ public class ComicProcessorServiceTests : IDisposable
     [Fact]
     public async Task NormalizeFileAsync_UserSelectedNameRecord_ShortCircuitsExternalLookup()
     {
-        var seriesFolder = Path.Combine(_testDirectory, "Batman");
+        var seriesFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(seriesFolder);
 
-        var filePath = Path.Combine(seriesFolder, "Chapter 7.cbz");
+        var filePath = Path.Join(seriesFolder, "Chapter 7.cbz");
         // Existing metadata has a stale series name from a previous folder; the
         // file lives under a folder named "Batman" which the user has set as
         // the canonical title via folder-combine.
@@ -1491,10 +1483,10 @@ public class ComicProcessorServiceTests : IDisposable
         // lookup steers us to canonical title "Batman". The folder name
         // should be persisted as a user alias on the Batman cache record so
         // future combines/normalizes "remember" it.
-        var seriesFolder = Path.Combine(_testDirectory, "The Dark Knight");
+        var seriesFolder = Path.Join(_testDirectory, "The Dark Knight");
         Directory.CreateDirectory(seriesFolder);
 
-        var filePath = Path.Combine(seriesFolder, "Chapter 7.cbz");
+        var filePath = Path.Join(seriesFolder, "Chapter 7.cbz");
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
     <Series>The Dark Knight</Series>
@@ -1573,10 +1565,10 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // The folder name is already in the user-alias list - we should
         // not re-call SetUserAliasesAsync.
-        var seriesFolder = Path.Combine(_testDirectory, "The Dark Knight");
+        var seriesFolder = Path.Join(_testDirectory, "The Dark Knight");
         Directory.CreateDirectory(seriesFolder);
 
-        var filePath = Path.Combine(seriesFolder, "Chapter 7.cbz");
+        var filePath = Path.Join(seriesFolder, "Chapter 7.cbz");
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
     <Series>The Dark Knight</Series>
@@ -1647,7 +1639,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task RenameFilesAsync_WhenForceReprocessIsTrue_RenamesAlreadyRenamedFile()
     {
         var filePath = CreateTestComicArchive("Force Series", "3");
-        var expectedPath = Path.Combine(_testDirectory, "Force Series - Chapter 0003.cbz");
+        var expectedPath = Path.Join(_testDirectory, "Force Series - Chapter 0003.cbz");
 
         _mockFileStore
             .Setup(store => store.IsFileRenamedAsync(filePath, It.IsAny<CancellationToken>()))
@@ -1679,10 +1671,10 @@ public class ComicProcessorServiceTests : IDisposable
         // lookup before rendering the filename. Here ComicInfo.xml holds the raw
         // folder-derived series "The Dark Knight" but the external lookup maps it
         // to canonical "Batman", so the renamed file must use "Batman".
-        var seriesFolder = Path.Combine(_testDirectory, "The Dark Knight");
+        var seriesFolder = Path.Join(_testDirectory, "The Dark Knight");
         Directory.CreateDirectory(seriesFolder);
 
-        var filePath = Path.Combine(seriesFolder, "The Dark Knight - Chapter 7.cbz");
+        var filePath = Path.Join(seriesFolder, "The Dark Knight - Chapter 7.cbz");
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
     <Series>The Dark Knight</Series>
@@ -1743,7 +1735,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.Equal(1, job!.ProcessedFiles);
         Assert.Equal(0, job.FailedFiles);
 
-        var expectedRenamedFile = Path.Combine(seriesFolder, "Batman - Chapter 0007.cbz");
+        var expectedRenamedFile = Path.Join(seriesFolder, "Batman - Chapter 0007.cbz");
         Assert.True(File.Exists(expectedRenamedFile),
             $"Expected renamed file '{expectedRenamedFile}' not found. Files present: " +
             string.Join(", ", Directory.GetFiles(seriesFolder).Select(Path.GetFileName)));
@@ -1759,7 +1751,7 @@ public class ComicProcessorServiceTests : IDisposable
             {
                 Directory.Delete(_testDirectory, true);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Ignore cleanup errors
             }
@@ -1779,9 +1771,9 @@ public class ComicProcessorServiceTests : IDisposable
 
     private string CreateLocalizedComicArchive(string folderName, string seriesInMetadata, string issue)
     {
-        var seriesFolder = Path.Combine(_testDirectory, folderName);
+        var seriesFolder = Path.Join(_testDirectory, folderName);
         Directory.CreateDirectory(seriesFolder);
-        var filePath = Path.Combine(seriesFolder, $"Chapter {issue}.cbz");
+        var filePath = Path.Join(seriesFolder, $"Chapter {issue}.cbz");
         var comicInfoXml = $@"<?xml version=""1.0""?>
 <ComicInfo>
     <Series>{seriesInMetadata}</Series>
@@ -1817,14 +1809,10 @@ public class ComicProcessorServiceTests : IDisposable
         {
             (record.CanonicalTitle ?? string.Empty).ToLowerInvariant()
         };
-        foreach (var alias in record.Aliases ?? new List<string>())
-        {
-            if (!string.IsNullOrWhiteSpace(alias)) keys.Add(alias.ToLowerInvariant());
-        }
-        foreach (var alias in record.UserAliases ?? new List<string>())
-        {
-            if (!string.IsNullOrWhiteSpace(alias)) keys.Add(alias.ToLowerInvariant());
-        }
+        keys.UnionWith((record.Aliases ?? new List<string>())
+            .Concat(record.UserAliases ?? new List<string>())
+            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            .Select(alias => alias.ToLowerInvariant()));
 
         mock.Setup(c => c.GetAsync(It.Is<string>(k => keys.Contains(k)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(record);
@@ -2218,12 +2206,12 @@ public class ComicProcessorServiceTests : IDisposable
         var issueNumber = "142.5";
         
         // Create a series directory
-        var seriesDir = Path.Combine(_testDirectory, seriesName);
+        var seriesDir = Path.Join(_testDirectory, seriesName);
         Directory.CreateDirectory(seriesDir);
         
         // Create a comic file with incorrect name
         var originalFileName = $"{seriesName} - Chapter {issueNumber}.cbz";
-        var originalPath = Path.Combine(seriesDir, originalFileName);
+        var originalPath = Path.Join(seriesDir, originalFileName);
         
         // Create ComicInfo.xml with decimal issue
         var comicInfoXml = $@"<?xml version=""1.0""?>
@@ -2259,7 +2247,7 @@ public class ComicProcessorServiceTests : IDisposable
         
         // The expected filename should have padded issue number: 0142.5
         var expectedFileName = $"{seriesName} - Chapter 0{issueNumber}.cbz";
-        var expectedPath = Path.Combine(seriesDir, expectedFileName);
+        var expectedPath = Path.Join(seriesDir, expectedFileName);
         
         // Verify the file was renamed to the correct name
         _mockFileStore.Verify(f => f.UpdateFilePathAsync(originalPath, expectedPath, It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
@@ -2306,7 +2294,7 @@ public class ComicProcessorServiceTests : IDisposable
         // metadata.Issue is null. The original filename clearly contains
         // a "Chapter <n>" token, which must be preserved on rename.
         var fileName = "Batman - Chapter 7.cbz";
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
 
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
@@ -2351,7 +2339,7 @@ public class ComicProcessorServiceTests : IDisposable
         _settings.FilenameFormat = "{series}";
 
         var fileName = "OneShotSeries.cbz";
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
 
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
@@ -2394,7 +2382,7 @@ public class ComicProcessorServiceTests : IDisposable
         // before UpdateFilePathAsync migrates it, which would otherwise drop the
         // normalized flag and force the user to normalize again.
         var fileName = "Spider-Man - Chapter 3.cbz";
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
 
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
@@ -2433,7 +2421,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.NotNull(job);
         Assert.Equal(1, job!.ProcessedFiles);
 
-        var expectedPath = Path.Combine(_testDirectory, "Spider-Man - Chapter 0003.cbz");
+        var expectedPath = Path.Join(_testDirectory, "Spider-Man - Chapter 0003.cbz");
         _mockFileStore.Verify(
             f => f.MarkFileRenamedAsync(expectedPath, true, It.IsAny<CancellationToken>()),
             Times.Once);
@@ -2448,7 +2436,7 @@ public class ComicProcessorServiceTests : IDisposable
         // Counterpart to the re-assert test: a rename of a not-yet-normalized file
         // must not fabricate a normalized flag on the new path.
         var fileName = "Hulk - Chapter 9.cbz";
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Join(_testDirectory, fileName);
 
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
@@ -2485,7 +2473,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.NotNull(job);
         Assert.Equal(1, job!.ProcessedFiles);
 
-        var expectedPath = Path.Combine(_testDirectory, "Hulk - Chapter 0009.cbz");
+        var expectedPath = Path.Join(_testDirectory, "Hulk - Chapter 0009.cbz");
         _mockFileStore.Verify(
             f => f.MarkFileRenamedAsync(expectedPath, true, It.IsAny<CancellationToken>()),
             Times.Once);

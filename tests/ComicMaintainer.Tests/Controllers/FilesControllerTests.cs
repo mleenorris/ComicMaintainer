@@ -258,7 +258,7 @@ public class FilesControllerTests
     public async Task GetSeriesIssues_ReturnsNotFound_WhenServiceReturnsNull()
     {
         _mockSeriesLibrary.Setup(s => s.GetSeriesIssuesAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SeriesIssuesResult?)null);
+            .ReturnsAsync(default(SeriesIssuesResult?));
 
         var result = await _controller.GetSeriesIssues("missing");
 
@@ -984,7 +984,7 @@ public class FilesControllerTests
     public async Task GetMetadata_WithValidPath_ReturnsOkWithMetadata()
     {
         // Arrange
-        var testFilePath = Path.Combine(Path.GetTempPath(), "file.cbz");
+        var testFilePath = Path.Join(Path.GetTempPath(), "file.cbz");
         var metadata = new ComicMetadata { Series = "Batman", Issue = "12" };
         _mockProcessor.Setup(p => p.GetMetadataAsync(testFilePath, It.IsAny<CancellationToken>()))
             .ReturnsAsync(metadata);
@@ -1027,9 +1027,9 @@ public class FilesControllerTests
     public async Task GetMetadata_WhenMetadataNotFound_ReturnsNotFound()
     {
         // Arrange
-        var testFilePath = Path.Combine(Path.GetTempPath(), "file.cbz");
+        var testFilePath = Path.Join(Path.GetTempPath(), "file.cbz");
         _mockProcessor.Setup(p => p.GetMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ComicMetadata?)null);
+            .ReturnsAsync(default(ComicMetadata?));
 
         // Act
         var result = await _controller.GetMetadata(testFilePath);
@@ -1042,7 +1042,7 @@ public class FilesControllerTests
     public async Task UpdateMetadata_WithValidData_ReturnsOk()
     {
         // Arrange
-        var testFilePath = Path.Combine(Path.GetTempPath(), "file.cbz");
+        var testFilePath = Path.Join(Path.GetTempPath(), "file.cbz");
         var metadata = new ComicMetadata { Series = "Superman", Issue = "5" };
         _mockProcessor.Setup(p => p.UpdateMetadataAsync(testFilePath, metadata, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
@@ -1086,7 +1086,7 @@ public class FilesControllerTests
     public async Task ProcessFile_WithValidPath_ReturnsOk()
     {
         // Arrange
-        var testFilePath = Path.Combine(Path.GetTempPath(), "file.cbz");
+        var testFilePath = Path.Join(Path.GetTempPath(), "file.cbz");
         _mockProcessor.Setup(p => p.ProcessFileAsync(testFilePath, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
@@ -1126,7 +1126,7 @@ public class FilesControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        var filePaths = new List<string> { Path.Combine(Path.GetTempPath(), "file1.cbz"), Path.Combine(Path.GetTempPath(), "file2.cbz") };
+        var filePaths = new List<string> { Path.Join(Path.GetTempPath(), "file1.cbz"), Path.Join(Path.GetTempPath(), "file2.cbz") };
         _mockProcessor.Setup(p => p.ProcessFilesAsync(filePaths, It.IsAny<CancellationToken>()))
             .ReturnsAsync(jobId);
 
@@ -1146,7 +1146,7 @@ public class FilesControllerTests
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
         // Act
-        var result = await _controller.ProcessBatch(new List<string> { Path.Combine(Path.GetTempPath(), "file.cbz") });
+        var result = await _controller.ProcessBatch(new List<string> { Path.Join(Path.GetTempPath(), "file.cbz") });
 
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
@@ -1170,7 +1170,7 @@ public class FilesControllerTests
     public async Task GetFileTags_WithValidPath_ReturnsOkWithMetadata()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "file.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "file.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Batman", Issue = "12" };
         _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
@@ -1189,10 +1189,10 @@ public class FilesControllerTests
     public async Task GetFileTags_WhenMetadataNotFound_ReturnsNotFound()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "file.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "file.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ComicMetadata?)null);
+            .ReturnsAsync(default(ComicMetadata?));
 
         // Act
         var result = await _controller.GetFileTags(encodedPath);
@@ -1205,7 +1205,7 @@ public class FilesControllerTests
     public async Task UpdateFileTags_WithValidData_ReturnsOk()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "file.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "file.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Superman", Issue = "5" };
         _mockProcessor.Setup(p => p.UpdateMetadataAsync(filePath, metadata, It.IsAny<CancellationToken>()))
@@ -1222,7 +1222,7 @@ public class FilesControllerTests
     public async Task UpdateFileTags_WhenUpdateFails_ReturnsBadRequest()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "file.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "file.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Superman" };
         _mockProcessor.Setup(p => p.UpdateMetadataAsync(filePath, metadata, It.IsAny<CancellationToken>()))
@@ -1240,7 +1240,7 @@ public class FilesControllerTests
     public async Task GetFileTags_WithPathContainingSlashes_ReturnsOkWithMetadata()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "comics", "Marvel", "Spider-Man", "issue001.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "comics", "Marvel", "Spider-Man", "issue001.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Spider-Man", Issue = "1" };
         _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
@@ -1260,7 +1260,7 @@ public class FilesControllerTests
     public async Task UpdateFileTags_WithPathContainingSlashes_ReturnsOk()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "comics", "DC", "Batman", "issue050.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "comics", "DC", "Batman", "issue050.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Batman", Issue = "50" };
         _mockProcessor.Setup(p => p.UpdateMetadataAsync(filePath, metadata, It.IsAny<CancellationToken>()))
@@ -1275,10 +1275,11 @@ public class FilesControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     public async Task DeleteFile_WithExistingFile_ReturnsOkAndDeletesFile()
     {
         // Arrange
-        var testFilePath = Path.Combine(Path.GetTempPath(), $"test-{Guid.NewGuid()}.cbz");
+        var testFilePath = Path.Join(Path.GetTempPath(), $"test-{Guid.NewGuid()}.cbz");
         
         // Create a temporary test file
         await File.WriteAllTextAsync(testFilePath, "test content");
@@ -1297,10 +1298,11 @@ public class FilesControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     public async Task DeleteFile_WithNonExistentFile_ReturnsNotFound()
     {
         // Arrange - use a path within watched directory that doesn't exist
-        var filePath = Path.Combine(Path.GetTempPath(), "nonexistent", $"test-{Guid.NewGuid()}.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "nonexistent", $"test-{Guid.NewGuid()}.cbz");
 
         // Act
         var result = await _controller.DeleteFile(filePath);
@@ -1311,10 +1313,11 @@ public class FilesControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     public async Task DeleteFile_WhenFileStoreThrowsException_ReturnsInternalServerError()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), $"test-exception-{Guid.NewGuid()}.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), $"test-exception-{Guid.NewGuid()}.cbz");
         
         // Create a temporary test file
         await File.WriteAllTextAsync(filePath, "test content");
@@ -1339,10 +1342,11 @@ public class FilesControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     public async Task DeleteFile_WhenFileDeletionThrowsIOException_ReturnsInternalServerError()
     {
         // Arrange - create a file that we'll make read-only/locked to cause deletion to fail
-        var testFilePath = Path.Combine(Path.GetTempPath(), $"test-locked-{Guid.NewGuid()}.cbz");
+        var testFilePath = Path.Join(Path.GetTempPath(), $"test-locked-{Guid.NewGuid()}.cbz");
         await File.WriteAllTextAsync(testFilePath, "test content");
         
         // Make the file read-only to potentially cause deletion issues
@@ -1375,7 +1379,7 @@ public class FilesControllerTests
     public async Task DeleteFileByEncodedPath_WithExistingFile_ReturnsOkAndDeletesFile()
     {
         // Arrange
-        var testFilePath = Path.Combine(Path.GetTempPath(), $"test-{Guid.NewGuid()}.cbz");
+        var testFilePath = Path.Join(Path.GetTempPath(), $"test-{Guid.NewGuid()}.cbz");
         var encodedPath = EncodeFilePathForUrl(testFilePath);
         
         // Create a temporary test file
@@ -1398,7 +1402,7 @@ public class FilesControllerTests
     public async Task DeleteFileByEncodedPath_WithNonExistentFile_ReturnsNotFound()
     {
         // Arrange - use a path within watched directory that doesn't exist
-        var filePath = Path.Combine(Path.GetTempPath(), "nonexistent", $"test-{Guid.NewGuid()}.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "nonexistent", $"test-{Guid.NewGuid()}.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
 
         // Act
@@ -1427,7 +1431,7 @@ public class FilesControllerTests
     public async Task DeleteFileByEncodedPath_WhenFileStoreThrowsException_ReturnsInternalServerError()
     {
         // Arrange
-        var testFilePath = Path.Combine(Path.GetTempPath(), $"test-exception-{Guid.NewGuid()}.cbz");
+        var testFilePath = Path.Join(Path.GetTempPath(), $"test-exception-{Guid.NewGuid()}.cbz");
         var encodedPath = EncodeFilePathForUrl(testFilePath);
         
         // Create a temporary test file
@@ -1453,6 +1457,7 @@ public class FilesControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     public async Task DeleteFile_WithPathOutsideWatchedDirectory_ReturnsBadRequest()
     {
         // Arrange
@@ -1484,10 +1489,11 @@ public class FilesControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     public async Task DeleteFile_WithPathTraversalAttempt_ReturnsBadRequest()
     {
         // Arrange
-        var traversalPath = Path.Combine(Path.GetTempPath(), "..", "..", "etc", "passwd");
+        var traversalPath = Path.Join(Path.GetTempPath(), "..", "..", "etc", "passwd");
 
         // Act
         var result = await _controller.DeleteFile(traversalPath);
@@ -1502,7 +1508,7 @@ public class FilesControllerTests
     public async Task DeleteFileByEncodedPath_WithPathTraversalAttempt_ReturnsBadRequest()
     {
         // Arrange
-        var traversalPath = Path.Combine(Path.GetTempPath(), "..", "..", "etc", "passwd");
+        var traversalPath = Path.Join(Path.GetTempPath(), "..", "..", "etc", "passwd");
         var encodedPath = EncodeFilePathForUrl(traversalPath);
 
         // Act
@@ -1515,17 +1521,18 @@ public class FilesControllerTests
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     public async Task DeleteFile_WithExternalTargetReachedThroughLinkedDirectory_ReturnsBadRequest()
     {
         // Arrange
-        var root = Path.Combine(Path.GetTempPath(), $"cm-link-{Guid.NewGuid():N}");
-        var watchedDir = Path.Combine(root, "watched");
-        var outsideDir = Path.Combine(root, "outside");
+        var root = Path.Join(Path.GetTempPath(), $"cm-link-{Guid.NewGuid():N}");
+        var watchedDir = Path.Join(root, "watched");
+        var outsideDir = Path.Join(root, "outside");
         System.IO.Directory.CreateDirectory(watchedDir);
         System.IO.Directory.CreateDirectory(outsideDir);
-        var outsideFile = Path.Combine(outsideDir, "book.cbz");
+        var outsideFile = Path.Join(outsideDir, "book.cbz");
         await File.WriteAllTextAsync(outsideFile, "external");
-        var linkedDir = Path.Combine(watchedDir, "linked");
+        var linkedDir = Path.Join(watchedDir, "linked");
 
         try
         {
@@ -1534,7 +1541,7 @@ public class FilesControllerTests
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
             // The platform/filesystem does not allow creating links here.
-            try { System.IO.Directory.Delete(root, true); } catch { }
+            try { System.IO.Directory.Delete(root, true); } catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
             return;
         }
 
@@ -1543,7 +1550,7 @@ public class FilesControllerTests
             _mockSettings.Setup(s => s.CurrentValue).Returns(new AppSettings { WatchedDirectory = watchedDir });
 
             // Act
-            var result = await _controller.DeleteFile(Path.Combine(linkedDir, "book.cbz"));
+            var result = await _controller.DeleteFile(Path.Join(linkedDir, "book.cbz"));
 
             // Assert
             var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -1553,8 +1560,8 @@ public class FilesControllerTests
         }
         finally
         {
-            try { System.IO.Directory.Delete(linkedDir); } catch { }
-            try { System.IO.Directory.Delete(root, true); } catch { }
+            try { System.IO.Directory.Delete(linkedDir); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
+            try { System.IO.Directory.Delete(root, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
@@ -1562,14 +1569,14 @@ public class FilesControllerTests
     public async Task DeleteFileByEncodedPath_WithExternalTargetReachedThroughLinkedDirectory_ReturnsBadRequest()
     {
         // Arrange
-        var root = Path.Combine(Path.GetTempPath(), $"cm-link-{Guid.NewGuid():N}");
-        var watchedDir = Path.Combine(root, "watched");
-        var outsideDir = Path.Combine(root, "outside");
+        var root = Path.Join(Path.GetTempPath(), $"cm-link-{Guid.NewGuid():N}");
+        var watchedDir = Path.Join(root, "watched");
+        var outsideDir = Path.Join(root, "outside");
         System.IO.Directory.CreateDirectory(watchedDir);
         System.IO.Directory.CreateDirectory(outsideDir);
-        var outsideFile = Path.Combine(outsideDir, "book.cbz");
+        var outsideFile = Path.Join(outsideDir, "book.cbz");
         await File.WriteAllTextAsync(outsideFile, "external");
-        var linkedDir = Path.Combine(watchedDir, "linked");
+        var linkedDir = Path.Join(watchedDir, "linked");
 
         try
         {
@@ -1578,14 +1585,14 @@ public class FilesControllerTests
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
             // The platform/filesystem does not allow creating links here.
-            try { System.IO.Directory.Delete(root, true); } catch { }
+            try { System.IO.Directory.Delete(root, true); } catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
             return;
         }
 
         try
         {
             _mockSettings.Setup(s => s.CurrentValue).Returns(new AppSettings { WatchedDirectory = watchedDir });
-            var encodedPath = EncodeFilePathForUrl(Path.Combine(linkedDir, "book.cbz"));
+            var encodedPath = EncodeFilePathForUrl(Path.Join(linkedDir, "book.cbz"));
 
             // Act
             var result = await _controller.DeleteFileByEncodedPath(encodedPath);
@@ -1598,8 +1605,8 @@ public class FilesControllerTests
         }
         finally
         {
-            try { System.IO.Directory.Delete(linkedDir); } catch { }
-            try { System.IO.Directory.Delete(root, true); } catch { }
+            try { System.IO.Directory.Delete(linkedDir); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
+            try { System.IO.Directory.Delete(root, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
@@ -1639,7 +1646,7 @@ public class FilesControllerTests
     public async Task ProcessFileByEncodedPath_WithValidPath_ReturnsOk()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "test.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         _mockProcessor.Setup(p => p.ProcessFileAsync(filePath, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
@@ -1668,7 +1675,7 @@ public class FilesControllerTests
     public async Task RenameFileByEncodedPath_WithValidPath_ReturnsOk()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "test.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var metadata = new ComicMetadata { Series = "Batman", Issue = "1" };
         _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
@@ -1699,7 +1706,7 @@ public class FilesControllerTests
     public async Task RenameFileByEncodedPath_StartsRenameJob()
     {
         // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
+        var filePath = Path.Join(Path.GetTempPath(), "test.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
         var expectedJobId = Guid.NewGuid();
         
@@ -1727,15 +1734,15 @@ public class FilesControllerTests
     [Fact]
     public async Task GetCombinableFolders_ReturnsGroupsWithSuggestedNewestFolder()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
-        var olderDir = Path.Combine(tempDir, "older");
-        var newerDir = Path.Combine(tempDir, "newer");
+        var tempDir = Path.Join(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var olderDir = Path.Join(tempDir, "older");
+        var newerDir = Path.Join(tempDir, "newer");
         System.IO.Directory.CreateDirectory(olderDir);
         System.IO.Directory.CreateDirectory(newerDir);
         try
         {
-            var olderPath = Path.Combine(olderDir, "Batman-001.cbz");
-            var newerPath = Path.Combine(newerDir, "Batman-002.cbz");
+            var olderPath = Path.Join(olderDir, "Batman-001.cbz");
+            var newerPath = Path.Join(newerDir, "Batman-002.cbz");
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
@@ -1817,28 +1824,28 @@ public class FilesControllerTests
         }
         finally
         {
-            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+            try { System.IO.Directory.Delete(tempDir, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
     [Fact]
     public async Task CombineFolders_DeletesSourceFolderWithLeftoverNonComicFiles()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
-        var olderDir = Path.Combine(tempDir, "older");
-        var newerDir = Path.Combine(tempDir, "newer");
+        var tempDir = Path.Join(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var olderDir = Path.Join(tempDir, "older");
+        var newerDir = Path.Join(tempDir, "newer");
         System.IO.Directory.CreateDirectory(olderDir);
         System.IO.Directory.CreateDirectory(newerDir);
         try
         {
-            var olderPath = Path.Combine(olderDir, "Batman-001.cbz");
-            var newerPath = Path.Combine(newerDir, "Batman-002.cbz");
+            var olderPath = Path.Join(olderDir, "Batman-001.cbz");
+            var newerPath = Path.Join(newerDir, "Batman-002.cbz");
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
             // Leftover non-comic files that previously prevented the source
             // directory from being removed because it was not empty.
-            System.IO.File.WriteAllText(Path.Combine(olderDir, "cover.jpg"), "img");
-            System.IO.File.WriteAllText(Path.Combine(olderDir, "ComicInfo.xml"), "<xml/>");
+            System.IO.File.WriteAllText(Path.Join(olderDir, "cover.jpg"), "img");
+            System.IO.File.WriteAllText(Path.Join(olderDir, "ComicInfo.xml"), "<xml/>");
 
             var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -1925,28 +1932,28 @@ public class FilesControllerTests
 
             // The comic was moved and the source folder removed even though it
             // still contained leftover non-comic files.
-            Assert.True(System.IO.File.Exists(Path.Combine(newerDir, "Batman-001.cbz")));
+            Assert.True(System.IO.File.Exists(Path.Join(newerDir, "Batman-001.cbz")));
             Assert.False(System.IO.File.Exists(olderPath));
             Assert.False(System.IO.Directory.Exists(olderDir));
         }
         finally
         {
-            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+            try { System.IO.Directory.Delete(tempDir, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
     [Fact]
     public async Task CombineFolders_MovesSourceFilesIntoDestination()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
-        var olderDir = Path.Combine(tempDir, "older");
-        var newerDir = Path.Combine(tempDir, "newer");
+        var tempDir = Path.Join(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var olderDir = Path.Join(tempDir, "older");
+        var newerDir = Path.Join(tempDir, "newer");
         System.IO.Directory.CreateDirectory(olderDir);
         System.IO.Directory.CreateDirectory(newerDir);
         try
         {
-            var olderPath = Path.Combine(olderDir, "Batman-001.cbz");
-            var newerPath = Path.Combine(newerDir, "Batman-002.cbz");
+            var olderPath = Path.Join(olderDir, "Batman-001.cbz");
+            var newerPath = Path.Join(newerDir, "Batman-002.cbz");
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
@@ -2039,12 +2046,12 @@ public class FilesControllerTests
             Assert.True(doc.RootElement.TryGetProperty("jobId", out _));
             Assert.Equal(1, doc.RootElement.GetProperty("totalItems").GetInt32());
 
-            Assert.True(System.IO.File.Exists(Path.Combine(newerDir, "Batman-001.cbz")));
+            Assert.True(System.IO.File.Exists(Path.Join(newerDir, "Batman-001.cbz")));
             Assert.False(System.IO.File.Exists(olderPath));
             Assert.False(System.IO.Directory.Exists(olderDir));
 
             _mockFileStore.Verify(fs => fs.UpdateFilePathAsync(olderPath,
-                Path.Combine(newerDir, "Batman-001.cbz"), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
+                Path.Join(newerDir, "Batman-001.cbz"), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
 
             // Verify that the metadata cache was updated with the source folder name as a
             // user alias on the destination series.
@@ -2058,22 +2065,22 @@ public class FilesControllerTests
         }
         finally
         {
-            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+            try { System.IO.Directory.Delete(tempDir, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
     [Fact]
     public async Task CombineFolders_PersistsSourceSeriesNamesAsUserAliases()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
-        var olderDir = Path.Combine(tempDir, "Batman (Classic)");
-        var newerDir = Path.Combine(tempDir, "Batman");
+        var tempDir = Path.Join(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var olderDir = Path.Join(tempDir, "Batman (Classic)");
+        var newerDir = Path.Join(tempDir, "Batman");
         System.IO.Directory.CreateDirectory(olderDir);
         System.IO.Directory.CreateDirectory(newerDir);
         try
         {
-            var olderPath = Path.Combine(olderDir, "Batman-001.cbz");
-            var newerPath = Path.Combine(newerDir, "Batman-002.cbz");
+            var olderPath = Path.Join(olderDir, "Batman-001.cbz");
+            var newerPath = Path.Join(newerDir, "Batman-002.cbz");
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
@@ -2178,22 +2185,22 @@ public class FilesControllerTests
         }
         finally
         {
-            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+            try { System.IO.Directory.Delete(tempDir, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
     [Fact]
     public async Task CombineFolders_StillSucceedsWhenMetadataCacheUnavailable()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
-        var olderDir = Path.Combine(tempDir, "older");
-        var newerDir = Path.Combine(tempDir, "newer");
+        var tempDir = Path.Join(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var olderDir = Path.Join(tempDir, "older");
+        var newerDir = Path.Join(tempDir, "newer");
         System.IO.Directory.CreateDirectory(olderDir);
         System.IO.Directory.CreateDirectory(newerDir);
         try
         {
-            var olderPath = Path.Combine(olderDir, "Batman-001.cbz");
-            var newerPath = Path.Combine(newerDir, "Batman-002.cbz");
+            var olderPath = Path.Join(olderDir, "Batman-001.cbz");
+            var newerPath = Path.Join(newerDir, "Batman-002.cbz");
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
@@ -2272,18 +2279,18 @@ public class FilesControllerTests
             using var doc = SerializeAsCamelCase(okResult.Value);
             Assert.True(doc.RootElement.TryGetProperty("jobId", out _));
             Assert.Equal(1, doc.RootElement.GetProperty("totalItems").GetInt32());
-            Assert.True(System.IO.File.Exists(Path.Combine(newerDir, "Batman-001.cbz")));
+            Assert.True(System.IO.File.Exists(Path.Join(newerDir, "Batman-001.cbz")));
         }
         finally
         {
-            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+            try { System.IO.Directory.Delete(tempDir, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
     [Fact]
     public async Task CombineFolders_RejectsDestinationOutsideWatchedDirectory()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var tempDir = Path.Join(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
         System.IO.Directory.CreateDirectory(tempDir);
         try
         {
@@ -2301,11 +2308,11 @@ public class FilesControllerTests
                 _mockLogger.Object,
                 _mockSettings.Object);
 
-            var outside = Path.Combine(Path.GetTempPath(), $"cm-outside-{Guid.NewGuid()}");
+            var outside = Path.Join(Path.GetTempPath(), $"cm-outside-{Guid.NewGuid()}");
             var request = new FilesController.CombineFoldersRequest
             {
                 DestinationDirectory = outside,
-                SourceDirectories = new List<string> { Path.Combine(tempDir, "older") }
+                SourceDirectories = new List<string> { Path.Join(tempDir, "older") }
             };
 
             var result = await controller.CombineFolders(request);
@@ -2314,23 +2321,23 @@ public class FilesControllerTests
         }
         finally
         {
-            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+            try { System.IO.Directory.Delete(tempDir, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
     [Fact]
     public async Task PreviewCombineFolders_ReportsConflictWhenNameAlreadyExists()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
-        var olderDir = Path.Combine(tempDir, "older");
-        var newerDir = Path.Combine(tempDir, "newer");
+        var tempDir = Path.Join(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var olderDir = Path.Join(tempDir, "older");
+        var newerDir = Path.Join(tempDir, "newer");
         System.IO.Directory.CreateDirectory(olderDir);
         System.IO.Directory.CreateDirectory(newerDir);
         try
         {
             // Same filename in both folders to trigger a conflict.
-            var olderPath = Path.Combine(olderDir, "Batman-001.cbz");
-            var newerPath = Path.Combine(newerDir, "Batman-001.cbz");
+            var olderPath = Path.Join(olderDir, "Batman-001.cbz");
+            var newerPath = Path.Join(newerDir, "Batman-001.cbz");
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
@@ -2412,24 +2419,24 @@ public class FilesControllerTests
         }
         finally
         {
-            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+            try { System.IO.Directory.Delete(tempDir, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
     [Fact]
     public async Task CombineFolders_RejectsSourceNotInGroup()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
-        var folderA = Path.Combine(tempDir, "a");
-        var folderB = Path.Combine(tempDir, "b");
-        var unrelated = Path.Combine(tempDir, "unrelated");
+        var tempDir = Path.Join(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var folderA = Path.Join(tempDir, "a");
+        var folderB = Path.Join(tempDir, "b");
+        var unrelated = Path.Join(tempDir, "unrelated");
         System.IO.Directory.CreateDirectory(folderA);
         System.IO.Directory.CreateDirectory(folderB);
         System.IO.Directory.CreateDirectory(unrelated);
         try
         {
-            var pathA = Path.Combine(folderA, "Batman-001.cbz");
-            var pathB = Path.Combine(folderB, "Batman-002.cbz");
+            var pathA = Path.Join(folderA, "Batman-001.cbz");
+            var pathB = Path.Join(folderB, "Batman-002.cbz");
             System.IO.File.WriteAllText(pathA, "x");
             System.IO.File.WriteAllText(pathB, "x");
 
@@ -2471,7 +2478,7 @@ public class FilesControllerTests
         }
         finally
         {
-            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+            try { System.IO.Directory.Delete(tempDir, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
     }
 
@@ -2513,7 +2520,7 @@ public class FilesControllerTests
     public async Task GetFolderFiles_ValidEncodedPath_ReturnsOnlyMatchingFiles()
     {
         var watched = Path.GetTempPath();
-        var batmanFile = Path.Combine(watched, "Batman", "001.cbz");
+        var batmanFile = Path.Join(watched, "Batman", "001.cbz");
 
         _mockFileStore.Setup(fs => fs.GetFolderFilesAsync(
                 "Batman", null, null, "name", "asc", It.IsAny<CancellationToken>()))
@@ -2545,7 +2552,7 @@ public class FilesControllerTests
         var settings = new AppSettings { WatchedDirectory = canonical };
         _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
-        var rootFile = Path.Combine(canonical, "loose.cbz");
+        var rootFile = Path.Join(canonical, "loose.cbz");
 
         _mockFileStore.Setup(fs => fs.GetFolderFilesAsync(
                 string.Empty, null, null, "name", "asc", It.IsAny<CancellationToken>()))
@@ -2906,10 +2913,10 @@ public class FilesControllerTests
         var canonical = Path.GetFullPath(watched);
         _mockSettings.Setup(s => s.CurrentValue).Returns(new AppSettings { WatchedDirectory = canonical });
 
-        var destDir = Path.Combine(canonical, "DestSeries");
-        var srcDir = Path.Combine(canonical, "SrcSeries");
-        var destFile = Path.Combine(destDir, "dest-001.cbz");
-        var srcFile = Path.Combine(srcDir, "src-001.cbz");
+        var destDir = Path.Join(canonical, "DestSeries");
+        var srcDir = Path.Join(canonical, "SrcSeries");
+        var destFile = Path.Join(destDir, "dest-001.cbz");
+        var srcFile = Path.Join(srcDir, "src-001.cbz");
 
         _mockSeriesLibrary.Setup(s => s.GetFoldersForSeriesIdAsync(
                 "synth-id", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
@@ -2969,7 +2976,7 @@ public class FilesControllerTests
         var sourcePath = moveType.GetProperty("sourcePath")!.GetValue(moveList[0]) as string;
         var destinationPath = moveType.GetProperty("destinationPath")!.GetValue(moveList[0]) as string;
         Assert.Equal(srcFile, sourcePath);
-        Assert.Equal(Path.Combine(destDir, "src-001.cbz"), destinationPath);
+        Assert.Equal(Path.Join(destDir, "src-001.cbz"), destinationPath);
     }
 }
 

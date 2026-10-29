@@ -27,7 +27,7 @@ public partial class FilesController
             
             return Ok();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error processing file {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, "Error processing file");
@@ -52,7 +52,7 @@ public partial class FilesController
             var jobId = await _processor.ProcessFilesAsync(filePaths);
             return Ok(new { jobId });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error starting batch processing");
             return StatusCode(500, "Error starting batch processing");
@@ -84,14 +84,11 @@ public partial class FilesController
 
             var attempted = 0;
             var failed = new List<string>();
-            foreach (var file in request.Files)
+            foreach (var file in request.Files.Where(file => !string.IsNullOrWhiteSpace(file)))
             {
-                if (!string.IsNullOrWhiteSpace(file))
-                {
-                    attempted++;
-                    if (!await _processor.UpdateMetadataAsync(file, request.Metadata))
-                        failed.Add(file);
-                }
+                attempted++;
+                if (!await _processor.UpdateMetadataAsync(file, request.Metadata))
+                    failed.Add(file);
             }
 
             // The processor answers false, having logged why, for a file it could not
@@ -102,7 +99,7 @@ public partial class FilesController
                 return BadRequest(new { error = "Failed to update tags", failed });
             return StatusCode(StatusCodes.Status207MultiStatus, new { failed });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating tags");
             return StatusCode(500, "Error updating tags");
@@ -141,7 +138,7 @@ public partial class FilesController
                 marked_count = markedCount
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("ScanUnmarked: Error scanning unmarked files"));
             return StatusCode(500, "Error scanning files");
@@ -173,7 +170,7 @@ public partial class FilesController
             var success = await _processor.ProcessFileAsync(filePath, forceReprocess);
             return success ? Ok() : BadRequest("Failed to process file");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
             _logger.LogError(ex, "Error processing file with encoded path {EncodedPath}", sanitizedEncodedPath);
@@ -199,7 +196,7 @@ public partial class FilesController
             var success = await _processor.ProcessFileAsync(filePath, forceReprocess);
             return success ? Ok() : BadRequest("Failed to process file");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
             _logger.LogError(ex, "Error processing file {FilePath}", sanitizedPath);

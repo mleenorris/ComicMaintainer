@@ -324,15 +324,15 @@ public partial class SeriesLibraryService
     private static bool HasMissingIssues(SeriesAccumulator accumulator)
     {
         var wholeIssues = new HashSet<long>();
-        foreach (var issue in accumulator.Issues)
+
+        // Summary mode never opens archives on disk, so issue.Issue is often
+        // blank for comics that only encode the chapter number in their file
+        // name. Resolve it the same way the badge/ordering/missing-issue grid
+        // do (parsing the file name as a fallback); otherwise gap detection
+        // would see too few whole numbers and wrongly report no missing
+        // issues for the entire library.
+        foreach (var issueNumber in accumulator.Issues.Select(ResolveIssueNumber))
         {
-            // Summary mode never opens archives on disk, so issue.Issue is often
-            // blank for comics that only encode the chapter number in their file
-            // name. Resolve it the same way the badge/ordering/missing-issue grid
-            // do (parsing the file name as a fallback); otherwise gap detection
-            // would see too few whole numbers and wrongly report no missing
-            // issues for the entire library.
-            var issueNumber = ResolveIssueNumber(issue);
             if (string.IsNullOrWhiteSpace(issueNumber))
             {
                 continue;

@@ -44,7 +44,7 @@ public class SmtpComicEmailSender : IComicEmailSender
                 "Email delivery is not configured. Set the SMTP host and the from address in Settings.");
         }
 
-        var mime = new MimeMessage();
+        using var mime = new MimeMessage();
         mime.From.Add(new MailboxAddress(settings.EmailFromName ?? "ComicMaintainer", settings.EmailFromAddress));
         mime.To.Add(MailboxAddress.Parse(message.ToAddress));
         mime.Subject = message.Subject;

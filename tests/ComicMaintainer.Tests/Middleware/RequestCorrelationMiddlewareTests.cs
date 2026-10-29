@@ -174,7 +174,7 @@ public class RequestCorrelationMiddlewareTests
     public async Task GlobalExceptionHandlerIgnoresClientAborts()
     {
         var ctx = CreateContext();
-        var aborted = new CancellationTokenSource();
+        using var aborted = new CancellationTokenSource();
         aborted.Cancel();
         ctx.RequestAborted = aborted.Token;
 

@@ -18,9 +18,9 @@ public sealed class DatabaseBackupServiceTests : IDisposable
 
     public DatabaseBackupServiceTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "cm-backup-tests-" + Guid.NewGuid().ToString("N"));
+        _root = Path.Join(Path.GetTempPath(), "cm-backup-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_root);
-        _dbPath = Path.Combine(_root, "comicmaintainer.db");
+        _dbPath = Path.Join(_root, "comicmaintainer.db");
         CreateDatabase(_dbPath, "live");
         _settings = new AppSettings { ConfigDirectory = _root, DatabaseBackupRetention = 3 };
         _service = new DatabaseBackupService(
@@ -33,7 +33,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_root, recursive: true); } catch { /* best effort */ }
+        try { Directory.Delete(_root, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
     }
 
     private static void CreateDatabase(string path, string marker, bool wal = true)
@@ -66,8 +66,8 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         var backup = await _service.CreateBackupAsync();
 
         Assert.Equal("comicmaintainer-20261020-040000.db", backup.Name);
-        Assert.Equal(Path.Combine(_root, "backups"), _service.BackupDirectory);
-        var path = Path.Combine(_service.BackupDirectory, backup.Name);
+        Assert.Equal(Path.Join(_root, "backups"), _service.BackupDirectory);
+        var path = Path.Join(_service.BackupDirectory, backup.Name);
         Assert.True(File.Exists(path));
         Assert.Equal(new FileInfo(path).Length, backup.SizeBytes);
         Assert.Equal("live", ReadMarker(path));
@@ -77,12 +77,12 @@ public sealed class DatabaseBackupServiceTests : IDisposable
     [Fact]
     public async Task CreateBackupAsync_UsesConfiguredDirectoryAndAvoidsNameCollisions()
     {
-        _settings.DatabaseBackupDirectory = Path.Combine(_root, "custom");
+        _settings.DatabaseBackupDirectory = Path.Join(_root, "custom");
 
         var first = await _service.CreateBackupAsync();
         var second = await _service.CreateBackupAsync();
 
-        Assert.Equal(Path.Combine(_root, "custom"), _service.BackupDirectory);
+        Assert.Equal(Path.Join(_root, "custom"), _service.BackupDirectory);
         Assert.NotEqual(first.Name, second.Name);
         Assert.Equal("comicmaintainer-20261020-040000-2.db", second.Name);
         Assert.Equal(2, _service.ListBackups().Count);
@@ -94,8 +94,8 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         await _service.CreateBackupAsync();
         _time.Advance(TimeSpan.FromHours(1));
         await _service.CreateBackupAsync();
-        File.WriteAllText(Path.Combine(_service.BackupDirectory, "notes.txt"), "x");
-        File.WriteAllText(Path.Combine(_service.BackupDirectory, "comicmaintainer-bad.db"), "x");
+        File.WriteAllText(Path.Join(_service.BackupDirectory, "notes.txt"), "x");
+        File.WriteAllText(Path.Join(_service.BackupDirectory, "comicmaintainer-bad.db"), "x");
 
         var list = _service.ListBackups();
 
@@ -190,7 +190,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         Assert.True(result.RestartRequired);
         Assert.Equal(backup.Name, result.Source);
         Assert.Equal("comicmaintainer-20261020-040500-prerestore.db", result.SafetyBackup.Name);
-        Assert.Equal("changed-after-backup", ReadMarker(Path.Combine(_service.BackupDirectory, result.SafetyBackup.Name)));
+        Assert.Equal("changed-after-backup", ReadMarker(Path.Join(_service.BackupDirectory, result.SafetyBackup.Name)));
         Assert.True(_service.IsRestorePending);
 
         var pending = DatabaseBackupService.GetPendingRestorePath(_dbPath);
@@ -233,7 +233,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
     [Fact]
     public async Task StageRestoreFromStreamAsync_RejectsSqliteDatabaseFromAnotherApplication()
     {
-        var foreign = Path.Combine(_root, "foreign.db");
+        var foreign = Path.Join(_root, "foreign.db");
         using (var connection = new SqliteConnection($"Data Source={foreign};Pooling=False"))
         {
             connection.Open();
@@ -251,7 +251,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
     [Fact]
     public async Task StageRestoreFromStreamAsync_StagesValidUpload()
     {
-        var upload = Path.Combine(_root, "upload-source.db");
+        var upload = Path.Join(_root, "upload-source.db");
         CreateDatabase(upload, "uploaded", wal: false);
 
         await using (var content = File.OpenRead(upload))

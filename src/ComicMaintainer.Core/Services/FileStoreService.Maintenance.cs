@@ -49,7 +49,7 @@ public partial class FileStoreService
             _logger.LogInformation("Loaded {FileCount} files from database ({ProcessedCount} processed, {DuplicateCount} duplicates)",
                 loadedCount, processedCount, duplicateCount);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error initializing file store from database");
         }
@@ -129,7 +129,7 @@ public partial class FileStoreService
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to mark {Count} file(s) as needing metadata backfill", pathList.Count);
         }
@@ -192,7 +192,7 @@ public partial class FileStoreService
             _logger.LogWarning(ex, "Cleanup of stale entries was cancelled");
             return 0;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error during cleanup of stale database entries");
             return 0;

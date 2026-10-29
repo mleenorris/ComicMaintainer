@@ -364,19 +364,8 @@ public static class ClientErrorNormalizer
         return Truncate(builder.ToString(), maxLength);
     }
 
-    private static string StripControlCharacters(string value)
-    {
-        var builder = new StringBuilder(value.Length);
-        foreach (var ch in value)
-        {
-            if (!char.IsControl(ch) || ch == '\t')
-            {
-                builder.Append(ch);
-            }
-        }
-
-        return builder.ToString();
-    }
+    private static string StripControlCharacters(string value) =>
+        new(value.Where(ch => !char.IsControl(ch) || ch == '\t').ToArray());
 
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];

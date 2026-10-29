@@ -180,11 +180,12 @@ public class RequestTimeoutPolicyTests
             .MinimumLevel.Debug()
             .WriteTo.Sink(sink)
             .CreateLogger();
+        using var loggerFactory = new SerilogLoggerFactory(logger);
 
         var context = new DefaultHttpContext
         {
             RequestServices = new ServiceCollection()
-                .AddSingleton<ILoggerFactory>(new SerilogLoggerFactory(logger))
+                .AddSingleton<ILoggerFactory>(loggerFactory)
                 // Registered exactly as Program.cs does, so the reported limit
                 // is resolved from the real policies rather than a stand-in.
                 .AddRequestTimeouts(options =>

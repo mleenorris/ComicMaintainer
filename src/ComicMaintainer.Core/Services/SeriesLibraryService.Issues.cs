@@ -236,7 +236,7 @@ public partial class SeriesLibraryService
                     Read = issue.Read
                 };
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogDebug(ex, "Issue metadata upgrade failed for {FilePath}",
                     LoggingHelper.SanitizePathForLog(issue.FilePath));

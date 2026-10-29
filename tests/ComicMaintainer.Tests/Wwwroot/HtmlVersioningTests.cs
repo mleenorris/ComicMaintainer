@@ -20,7 +20,7 @@ public class HtmlVersioningTests
             var current = AppContext.BaseDirectory;
             for (var i = 0; i < 10 && current != null; i++)
             {
-                var candidate = Path.Combine(current, "src", "ComicMaintainer.WebApi", "wwwroot");
+                var candidate = Path.Join(current, "src", "ComicMaintainer.WebApi", "wwwroot");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -39,7 +39,7 @@ public class HtmlVersioningTests
     [InlineData("offline.html")]
     public void HtmlPage_DoesNotReferenceUnversionedMainCssOrJs(string fileName)
     {
-        var path = Path.Combine(WwwRoot, fileName);
+        var path = Path.Join(WwwRoot, fileName);
         Assert.True(File.Exists(path), $"Expected {path} to exist");
 
         var html = File.ReadAllText(path);
@@ -63,7 +63,7 @@ public class HtmlVersioningTests
     [Fact]
     public void IndexHtml_UsesAppVersionPlaceholderForMainCssAndMainJs()
     {
-        var html = File.ReadAllText(Path.Combine(WwwRoot, "index.html"));
+        var html = File.ReadAllText(Path.Join(WwwRoot, "index.html"));
 
         Assert.Contains("/css/main.css?v=__APP_VERSION__", html);
         Assert.Contains("/js/main.js?v=__APP_VERSION__", html);
@@ -72,7 +72,7 @@ public class HtmlVersioningTests
     [Fact]
     public void ReaderHtml_UsesAppVersionPlaceholderForMainCss()
     {
-        var html = File.ReadAllText(Path.Combine(WwwRoot, "reader.html"));
+        var html = File.ReadAllText(Path.Join(WwwRoot, "reader.html"));
 
         Assert.Contains("/css/main.css?v=__APP_VERSION__", html);
     }

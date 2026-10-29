@@ -20,7 +20,7 @@ public class ComicReaderServiceCoverageTests : IDisposable
     public ComicReaderServiceCoverageTests()
     {
         _service = new ComicReaderService(_logger.Object);
-        _testDir = Path.Combine(Path.GetTempPath(), $"comic-reader-cov-{Guid.NewGuid():N}");
+        _testDir = Path.Join(Path.GetTempPath(), $"comic-reader-cov-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testDir);
     }
 
@@ -72,7 +72,7 @@ public class ComicReaderServiceCoverageTests : IDisposable
     [InlineData("page.webp", "image/webp")]
     public async Task GetPageAsync_WithCbz_ReportsTheContentTypeOfEachImageFormat(string entryName, string expected)
     {
-        var cbz = Path.Combine(_testDir, $"{Guid.NewGuid():N}.cbz");
+        var cbz = Path.Join(_testDir, $"{Guid.NewGuid():N}.cbz");
         using (var archive = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             using var stream = archive.CreateEntry(entryName).Open();
@@ -91,7 +91,7 @@ public class ComicReaderServiceCoverageTests : IDisposable
     [InlineData("broken.cbr")]
     public async Task CorruptArchives_AreReportedAsEmptyInsteadOfThrowing(string fileName)
     {
-        var path = Path.Combine(_testDir, fileName);
+        var path = Path.Join(_testDir, fileName);
         await File.WriteAllBytesAsync(path, Encoding.ASCII.GetBytes("this is not an archive at all"));
 
         var names = await _service.GetPageNamesAsync(path);
@@ -106,7 +106,7 @@ public class ComicReaderServiceCoverageTests : IDisposable
 
     private string CreateCbr()
     {
-        var path = Path.Combine(_testDir, $"{Guid.NewGuid():N}.cbr");
+        var path = Path.Join(_testDir, $"{Guid.NewGuid():N}.cbr");
         StoredRar4.Write(
             path,
             ("extras", null),

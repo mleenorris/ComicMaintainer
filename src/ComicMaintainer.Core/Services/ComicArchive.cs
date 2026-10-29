@@ -80,7 +80,7 @@ public class ComicArchive : IDisposable
             using var stringReader = new StringReader(xmlContent);
             return serializer.Deserialize(stringReader) as ComicInfo;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // If we can't read the tags, return empty
             // This can happen with corrupted files or invalid XML

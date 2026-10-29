@@ -914,14 +914,7 @@ public class SuwayomiService : ISuwayomiService
                 throw new SuwayomiException(UnexpectedResponseMessage);
             }
 
-            foreach (var node in nodes.EnumerateArray())
-            {
-                var entry = ReadSeries(node);
-                if (entry is not null)
-                {
-                    series.Add(entry);
-                }
-            }
+            series.AddRange(nodes.EnumerateArray().Select(ReadSeries).OfType<SuwayomiSeries>());
 
             if (!connection.TryGetProperty("pageInfo", out var pageInfo)
                 || pageInfo.ValueKind != JsonValueKind.Object

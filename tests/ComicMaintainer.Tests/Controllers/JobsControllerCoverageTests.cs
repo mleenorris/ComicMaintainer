@@ -141,8 +141,8 @@ public class JobsControllerCoverageTests
     [Fact]
     public void GetActiveJob_NullJobHistory_ReportsInactive()
     {
-        _processor.Setup(p => p.GetActiveJob()).Returns((ProcessingJob?)null);
-        _processor.Setup(p => p.GetAllJobs()).Returns((IEnumerable<ProcessingJob>)null!);
+        _processor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
+        _processor.Setup(p => p.GetAllJobs()).Returns(default(IEnumerable<ProcessingJob>)!);
 
         var json = OkJson(_controller.GetActiveJob());
 
@@ -152,7 +152,7 @@ public class JobsControllerCoverageTests
     [Fact]
     public void GetActiveJob_OnlyFinishedJobsInHistory_ReportsInactive()
     {
-        _processor.Setup(p => p.GetActiveJob()).Returns((ProcessingJob?)null);
+        _processor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
         _processor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob>
         {
             new() { JobId = Guid.NewGuid(), Status = JobStatus.Completed },

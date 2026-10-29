@@ -49,7 +49,7 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
             {
                 ConfigureTimer(settings.DatabaseCleanupIntervalHours);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogError(ex, "Failed to reconfigure database cleanup timer after settings change");
             }
@@ -147,7 +147,7 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
         {
             _logger.LogInformation("Database cleanup was cancelled");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error during scheduled database cleanup");
         }

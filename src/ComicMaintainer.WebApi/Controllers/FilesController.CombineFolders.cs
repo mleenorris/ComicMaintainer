@@ -32,7 +32,7 @@ public partial class FilesController
                 })
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error building combine-folders preview");
             return StatusCode(500, "Error building combine preview");
@@ -174,7 +174,7 @@ public partial class FilesController
                         {
                             await _eventBroadcaster.BroadcastFileListUpdateAsync();
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is not OutOfMemoryException)
                         {
                             _logger.LogWarning(ex, "Failed to broadcast file list update after folder combine");
                         }
@@ -190,7 +190,7 @@ public partial class FilesController
                         {
                             await PersistFolderCombineAliasesAsync(plan, preMoveSeriesBySourcePath, token);
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is not OutOfMemoryException)
                         {
                             _logger.LogWarning(ex, "Failed to persist folder-combine aliases for {Destination}",
                                 LoggingHelper.SanitizePathForLog(plan.Destination));
@@ -200,15 +200,9 @@ public partial class FilesController
                         try
                         {
                             var existingDestinationFiles = await GetFilesInDirectoryAsync(plan.Destination, token);
-                            foreach (var existingPath in existingDestinationFiles)
-                            {
-                                if (!string.IsNullOrWhiteSpace(existingPath))
-                                {
-                                    pathsToProcess.Add(existingPath);
-                                }
-                            }
+                            pathsToProcess.UnionWith(existingDestinationFiles.Where(path => !string.IsNullOrWhiteSpace(path)));
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is not OutOfMemoryException)
                         {
                             _logger.LogDebug(ex, "Failed to enumerate existing destination files for {Destination}; only moved files will be re-normalized",
                                 LoggingHelper.SanitizePathForLog(plan.Destination));
@@ -218,7 +212,7 @@ public partial class FilesController
                         {
                             await _processor.NormalizeAndRenameFilesAsync(pathsToProcess, token);
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is not OutOfMemoryException)
                         {
                             _logger.LogWarning(ex, "Failed to queue normalize-and-rename job after folder combine");
                         }
@@ -241,7 +235,7 @@ public partial class FilesController
                 skippedResults
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error combining folders");
             return StatusCode(500, "Error combining folders");
@@ -396,7 +390,7 @@ public partial class FilesController
                     }
                 }
                 reservedNames.Add(finalName);
-                var destPath = Path.Combine(destination, finalName);
+                var destPath = Path.Join(destination, finalName);
                 // Use an ordinal (case-sensitive) comparison so we don't
                 // skip moves between two folders that differ only by
                 // capitalization on case-sensitive filesystems.
@@ -465,10 +459,9 @@ public partial class FilesController
                 return result;
             }
 
-            foreach (var file in files)
+            var requestedFiles = files.Where(file => !string.IsNullOrWhiteSpace(file.FilePath) && pathSet.Contains(file.FilePath));
+            foreach (var file in requestedFiles)
             {
-                if (string.IsNullOrWhiteSpace(file.FilePath)) continue;
-                if (!pathSet.Contains(file.FilePath)) continue;
                 var series = file.Metadata?.Series;
                 if (!string.IsNullOrWhiteSpace(series))
                 {
@@ -476,7 +469,7 @@ public partial class FilesController
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex, "Failed to capture pre-move series metadata for folder combine");
         }

@@ -305,7 +305,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             // The caller gave up; the provider didn't fail.
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(lookupQuery));
             status = "error";
@@ -422,7 +422,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
 
             await TryWriteFolderCoverAsync(entity, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogInformation(
                 "Series image download failed for {SeriesKey}: {Message}",
@@ -608,7 +608,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         {
             await _folderCoverWriter.RemoveAsync(entity.NormalizedKey, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex,
                 "Failed to remove on-disk series cover for {Key}",
@@ -724,7 +724,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                     force);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex,
                 "Failed to write on-disk series cover for {Key}",
@@ -989,13 +989,9 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         }
         if (lookup.Aliases is { Count: > 0 })
         {
-            foreach (var alias in lookup.Aliases)
-            {
-                if (!string.IsNullOrWhiteSpace(alias))
-                {
-                    fallback.Add(new LocalizedTitle(alias, null));
-                }
-            }
+            fallback.AddRange(lookup.Aliases
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Select(alias => new LocalizedTitle(alias, null)));
         }
         return fallback;
     }

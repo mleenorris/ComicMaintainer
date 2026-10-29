@@ -118,6 +118,9 @@
         // series list while drilled into a series.
         let currentSeriesDetailSeries = null;
         const seriesIssuesCache = new Map();        // seriesId -> { issues: [], total: n }
+        // seriesId -> { pathsByFilter, titles }: issue paths pending confirmation
+        // across filter reloads or a series-id remap.
+        const seriesIssuePathsHandedOver = new Map();
         const metadataRefreshJobs = new Map();     // jobId -> { seriesIds, label }
         let providerHealthRefreshTimer = null;
         let searchDebounceTimer = null;

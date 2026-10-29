@@ -353,6 +353,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   series image change the list still showed unsaved edits, but Save stored the earlier aliases
   and reported "Series names saved". Adopt as Canonical now saves the adopted aliases before the
   name, and unsaved alias edits survive the modal's other controls until Save stores them.
+- **The series page no longer keeps renamed or deleted issues selected.** When its issues
+  reloaded (after the watcher renamed or moved a file, a job ran in another tab, or a ticked
+  issue was deleted from its own menu), the selection kept the vanished files: the count was too
+  high, the batch buttons stayed enabled with nothing ticked, "Select all" could not clear them,
+  and the next batch action was sent files that no longer exist. Issues the reloaded list no
+  longer has are now unselected once it has fully loaded, and a deleted issue is unselected
+  straight away. When a series can no longer be loaded by its id (its last issue is gone, or it
+  was given a new id), it is looked up by its titles first: issues it still has under a new id
+  stay selected, and the rest are unselected.
 - **Series images are revalidated like comic covers.** `GET /api/series-images/{key}` compared
   `If-None-Match` with its ETag as an exact string, so a client sending a weak tag (`W/"…"`), a
   list of tags or `*` without `If-Modified-Since` downloaded the whole image again instead of

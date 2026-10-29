@@ -373,6 +373,39 @@ test('a filtered reload landing while a filter switch is being saved unselects n
     assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });
 
+test('pending selection checks survive a filter change and series-id remap', async () => {
+    const series = seriesCard({ issue_count: 2 });
+    const oldReload = deferred();
+    const page = await bootSeries({ series });
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+
+    page.route(`GET ${ISSUES}`, call => (call.query.filter === 'unmarked'
+        ? issuesBody(series, [issue(2)], { issue_count: 1 })
+        : oldReload.promise));
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+
+    page.run("setHeaderFilter('unmarked')");
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 001.cbz']);
+
+    // The old all-issues reload and its cache entry are now superseded.
+    oldReload.resolve(issuesBody(series, [issue(2)], { issue_count: 1 }));
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 001.cbz']);
+
+    await reloadLibrary(page, [seriesCard({ id: 'saga-2' })]);
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+
+    // The all-filter confirmation is retained through the remap and removes
+    // the issue that is absent from the replacement series.
+    page.route(`GET ${issuesPath('saga-2')}`, issuesBody(seriesCard({ id: 'saga-2' }), [issue(2)]));
+    page.run("setHeaderFilter('all')");
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), []);
+    assert.equal(text(page.$('#selectInfo')), 'No files selected');
+});
+
 // Regression test for #849: once its last issue is gone, a series' id no
 // longer resolves and its reload 404s.
 test('a reload that finds the series gone unselects its issues', async () => {

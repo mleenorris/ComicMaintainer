@@ -91,12 +91,14 @@
             if (oldCached && !oldCached.error && !oldCached.loadingPages?.size
                 && !seriesIssuesCache.has(remapped.id)) {
                 seriesIssuesCache.set(remapped.id, oldCached);
+                oldCached.seriesId = remapped.id;
             } else if (oldCached) {
                 // The issues the dropped list still had to confirm (e.g. while
                 // its reload or 404 lookup is pending) are confirmed by the
                 // list of the new id instead.
                 handSeriesIssuePathsOver(oldCached, remapped.id);
             }
+            transferSeriesIssuePaths(currentSeriesDetailId, remapped.id);
             seriesIssuesCache.delete(currentSeriesDetailId);
             currentSeriesDetailId = remapped.id;
             return remapped;
@@ -137,14 +139,13 @@
             // Prime the cache entry so concurrent callers don't fan out.
             let entry = existing;
             if (!entry || entry.error) {
-                let unconfirmedPaths = takeSeriesIssuePathsToConfirm(previous, filterMode);
-                // Paths handed over by the list of the id this series had.
-                const handedOver = seriesIssuePathsHandedOver.get(seriesId);
-                seriesIssuePathsHandedOver.delete(seriesId);
-                if (handedOver && handedOver.filter === filterMode) {
+                let unconfirmedPaths = takeSeriesIssuePathsToConfirm(previous, filterMode, seriesId);
+                const handedOver = takeHandedOverSeriesIssuePaths(seriesId, filterMode);
+                if (handedOver && handedOver.paths) {
                     unconfirmedPaths = new Set([...(unconfirmedPaths || []), ...handedOver.paths]);
                 }
                 entry = {
+                    seriesId,
                     issues: [],
                     total: 0,
                     totalPages: 1,
@@ -160,7 +161,7 @@
                     unconfirmedPaths,
                     // The series' titles as last loaded, to look it up by if
                     // its id stops resolving (see confirmIssuesOfMissingSeries).
-                    titles: (previous && previous.titles) || (handedOver ? handedOver.titles : null)
+                    titles: (previous && previous.titles) || (handedOver && handedOver.titles) || null
                 };
                 seriesIssuesCache.set(seriesId, entry);
             }
@@ -269,21 +270,49 @@
             }
         }
 
-        // Hands the issue paths a cached series list stands for over to the
-        // list replacing it: the issues it lists, plus any that an unfinished
-        // reload of it still has to confirm. Taking them leaves the replaced
-        // list nothing to prune, so a stale response landing after the newer
-        // one cannot unselect anything. Nothing is handed over to a list
-        // fetched with another filter, which may only hide an issue that is
-        // still there.
-        function takeSeriesIssuePathsToConfirm(cached, filter) {
+        function rememberSeriesIssuePaths(seriesId, paths, filter, titles) {
+            if (!seriesId || !paths || !paths.size) return;
+            let pending = seriesIssuePathsHandedOver.get(seriesId);
+            if (!pending) {
+                pending = { pathsByFilter: new Map(), titles: null };
+            }
+            const filterPaths = pending.pathsByFilter.get(filter) || new Set();
+            for (const path of paths) {
+                if (typeof path === 'string' && path.length > 0) {
+                    filterPaths.add(path);
+                }
+            }
+            pending.pathsByFilter.set(filter, filterPaths);
+            pending.titles = titles || pending.titles;
+            seriesIssuePathsHandedOver.set(seriesId, pending);
+        }
+
+        function takeHandedOverSeriesIssuePaths(seriesId, filter) {
+            const pending = seriesIssuePathsHandedOver.get(seriesId);
+            if (!pending) return null;
+            const paths = pending.pathsByFilter.get(filter) || null;
+            pending.pathsByFilter.delete(filter);
+            if (!pending.pathsByFilter.size) {
+                seriesIssuePathsHandedOver.delete(seriesId);
+            }
+            return { paths, titles: pending.titles };
+        }
+
+        function transferSeriesIssuePaths(fromSeriesId, toSeriesId) {
+            const pending = seriesIssuePathsHandedOver.get(fromSeriesId);
+            if (!pending) return;
+            for (const [filter, paths] of pending.pathsByFilter) {
+                rememberSeriesIssuePaths(toSeriesId, paths, filter, pending.titles);
+            }
+            seriesIssuePathsHandedOver.delete(fromSeriesId);
+        }
+
+        // Takes paths represented by the list being replaced. If its filter
+        // differs, keep them pending for a reload that can safely confirm them.
+        function takeSeriesIssuePathsToConfirm(cached, filter, seriesId) {
             if (!cached) return null;
             const pending = cached.unconfirmedPaths;
             cached.unconfirmedPaths = null;
-            if (cached.filter !== filter) return null;
-            // Every path is taken, selected or not: the old cards stay
-            // clickable while the reload is pending, so whether a path is
-            // selected is only checked when pruning.
             const paths = new Set();
             for (const path of pending || []) {
                 if (typeof path === 'string' && path.length > 0) {
@@ -296,6 +325,10 @@
                     paths.add(path);
                 }
             }
+            if (cached.filter !== filter) {
+                rememberSeriesIssuePaths(seriesId, paths, cached.filter, cached.titles);
+                return null;
+            }
             return paths.size > 0 ? paths : null;
         }
 
@@ -307,18 +340,13 @@
         function handSeriesIssuePathsOver(cached, seriesId) {
             const paths = cached.unconfirmedPaths;
             cached.unconfirmedPaths = null;
-            if (!paths || cached.filter !== filterMode) return;
+            if (!paths) return;
+            rememberSeriesIssuePaths(seriesId, paths, cached.filter, cached.titles);
             const replacement = seriesIssuesCache.get(seriesId);
-            if (!replacement) {
-                seriesIssuePathsHandedOver.set(seriesId, { paths, titles: cached.titles, filter: cached.filter });
-                return;
+            if (replacement) {
+                // The cached list may predate the change that remapped the series.
+                loadSeriesIssues(seriesId, true);
             }
-            if (replacement.filter !== filterMode) return;
-            // The cached list may predate the change that remapped the series,
-            // so rather than pruning against it, it is reloaded, and the
-            // reload confirms these paths along with its own.
-            replacement.unconfirmedPaths = new Set([...(replacement.unconfirmedPaths || []), ...paths]);
-            loadSeriesIssues(seriesId, true);
         }
 
         // Once a reloaded issue list is complete, unselects the issues of the
@@ -342,6 +370,9 @@
         // prunes as usual. Returns whether the selection changed.
         function unselectSeriesIssuesNotListed(entry, issues) {
             if (entry.filter !== filterMode || ![...seriesIssuesCache.values()].includes(entry)) {
+                if (entry.unconfirmedPaths && seriesIssuesCache.get(entry.seriesId) === entry) {
+                    rememberSeriesIssuePaths(entry.seriesId, entry.unconfirmedPaths, entry.filter, entry.titles);
+                }
                 entry.unconfirmedPaths = null;
                 return false;
             }

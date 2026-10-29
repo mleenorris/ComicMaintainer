@@ -118,9 +118,8 @@
         // series list while drilled into a series.
         let currentSeriesDetailSeries = null;
         const seriesIssuesCache = new Map();        // seriesId -> { issues: [], total: n }
-        // seriesId -> { paths, titles }: the issue paths a series list dropped
-        // by an id remap still had to confirm, for the list loaded under the
-        // new id to take over (see remapCurrentSeriesDetailId).
+        // seriesId -> { pathsByFilter, titles }: issue paths pending confirmation
+        // across filter reloads or a series-id remap.
         const seriesIssuePathsHandedOver = new Map();
         const metadataRefreshJobs = new Map();     // jobId -> { seriesIds, label }
         let providerHealthRefreshTimer = null;

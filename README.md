@@ -247,18 +247,8 @@ Settings are read from these sources; a later source overrides an earlier one:
 | WatchedDirectory | WATCHED_DIR | /watched_dir | Directory to watch for comic files |
 | DuplicateDirectory | DUPLICATE_DIR | /duplicates | Directory for duplicate files |
 | ConfigDirectory | CONFIG_DIR | /Config | Directory for configuration data |
-<<<<<<< HEAD
 | PUID | PUID | 99 | User ID for file permissions (Docker image only) |
 | PGID | PGID | 100 | Group ID for file permissions (Docker image only) |
-=======
-| FilenameFormat | FILENAME_FORMAT | {series} - Chapter {issue} | Template for file naming |
-| IssueNumberPadding | ISSUE_NUMBER_PADDING | 4 | Number of digits for issue numbers (0–10) |
-| MaxWorkers | MAX_WORKERS | 4 | Maximum concurrent processing jobs |
-| WatcherEnabled | WATCHER_ENABLED | true | Enable/disable file watcher |
-| WebPort | WEB_PORT | 5000 | Web server port |
-| PUID | PUID | 99 | User ID for file permissions |
-| PGID | PGID | 100 | Group ID for file permissions |
->>>>>>> origin/dotnet
 | EnableExternalSeriesMetadata | ENABLE_EXTERNAL_SERIES_METADATA | false | Enable ComicVine alias lookups for series grouping |
 | ComicVineApiKey | COMICVINE_API_KEY | _(empty)_ | ComicVine API key used for external series alias enrichment |
 | ComicVineBaseUrl | COMICVINE_BASE_URL | https://comicvine.gamespot.com/api | Override the ComicVine API base URL if needed |

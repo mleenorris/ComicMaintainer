@@ -76,15 +76,9 @@ docker run -d \
 | `CONFIG_DIR` | /Config | Configuration and database directory |
 | `PUID` | 99 | User ID for file operations (dynamically created) |
 | `PGID` | 100 | Group ID for file operations (dynamically created) |
-<<<<<<< HEAD
 | `AppSettings__MaxWorkers` | 4 | Files processed in parallel (read at startup) |
-| `JWT_SECRET` | *required* | JWT signing key (32+ chars) |
-=======
-| `MAX_WORKERS` | 4 | Maximum concurrent workers |
-| `DB_CACHE_SIZE_MB` | 64 | Database cache size |
 | `JWT_SECRET` | *generated* | JWT signing key (32+ chars). When unset or still set to a published placeholder, a random key is generated on first start and kept in `/Config/jwt-secret.key` |
 | `JWT_SECRET_FILE` | | File holding `JWT_SECRET`, such as a Docker secret. Set only one of the two |
->>>>>>> origin/dotnet
 | `ADMIN_USERNAME` | admin | Default admin username |
 | `ADMIN_EMAIL` | admin@local | Default admin email |
 | `ADMIN_PASSWORD` | *required* | Default admin password |

@@ -18,6 +18,10 @@ namespace ComicMaintainer.Tests.Startup;
 public sealed class DocumentedEnvironmentVariablesTests
 {
     private static readonly string[] DeploymentFiles = ["Dockerfile.dotnet", "docker-compose.dotnet.yml", ".env.example"];
+    private static readonly HashSet<string> DocumentationExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".md", ".yml", ".yaml", ".json", ".txt", ".sh",
+    };
 
     /// <summary>Variables read outside AppSettingsEnvironmentPostConfigure, with the file that reads each.</summary>
     private static readonly Dictionary<string, string> ReadElsewhere = new(StringComparer.Ordinal)
@@ -140,7 +144,8 @@ public sealed class DocumentedEnvironmentVariablesTests
             .Where(file => Path.GetFileName(file) != "CHANGELOG.md")
             .Concat(DeploymentFiles.Select(file => Path.Combine(root, file)))
             .Concat(Directory.EnumerateFiles(Path.Combine(root, "docs"), "*", SearchOption.AllDirectories)
-                .Where(file => !file.StartsWith(archive, StringComparison.Ordinal)))
+                .Where(file => !file.StartsWith(archive, StringComparison.Ordinal))
+                .Where(file => DocumentationExtensions.Contains(Path.GetExtension(file))))
             .Concat(Directory.EnumerateFiles(Path.Combine(root, ".github", "workflows"), "*.yml"));
     }
 
@@ -152,7 +157,7 @@ public sealed class DocumentedEnvironmentVariablesTests
     {
         var assignment = file switch
         {
-            "Dockerfile.dotnet" => new Regex(@"^\s*ENV\s+(\w+)[=\s]"),
+            "Dockerfile.dotnet" => new Regex(@"^\s*#?\s*ENV\s+(\w+)[=\s]"),
             "docker-compose.dotnet.yml" => new Regex(@"^\s*#?\s*-\s+(\w+)="),
             _ => new Regex(@"^\s*#?\s*(\w+)="),
         };
@@ -201,9 +206,14 @@ public sealed class DocumentedEnvironmentVariablesTests
         // Section__Key is bound by the configuration system. Only the AppSettings section is checked
         // here; other sections, such as TELEMETRY__ and API__, bind their own options.
         var keys = variable.Split("__");
+        if (keys[0].Equals(nameof(AppSettings), StringComparison.OrdinalIgnoreCase))
+        {
+            return keys.Length == 2 && IsAppSetting(keys[1]);
+        }
+
         if (keys.Length > 1)
         {
-            return !keys[0].Equals(nameof(AppSettings), StringComparison.OrdinalIgnoreCase) || IsAppSetting(keys[1]);
+            return true;
         }
 
         return SettingsChangedBy(variable).Count > 0;

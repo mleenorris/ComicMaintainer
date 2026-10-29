@@ -444,9 +444,8 @@
             // toggles feel like they "kick the user out" of the view.
             if (currentSeriesDetailId) {
                 const detailId = currentSeriesDetailId;
-                seriesIssuesCache.delete(detailId);
-                renderSeriesDetail(detailId); // re-render to show loading state
                 loadSeriesIssues(detailId, true);
+                renderSeriesDetail(detailId); // re-render to show loading state
                 loadActiveLibraryView({ refresh: true });
                 return;
             }
@@ -519,9 +518,8 @@
             // in-place refresh of the issues grid.
             if (currentSeriesDetailId) {
                 const detailId = currentSeriesDetailId;
-                seriesIssuesCache.delete(detailId);
-                renderSeriesDetail(detailId);
                 loadSeriesIssues(detailId, true);
+                renderSeriesDetail(detailId);
                 loadActiveLibraryView({ refresh: true });
                 return;
             }

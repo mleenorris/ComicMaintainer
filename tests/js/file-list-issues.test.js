@@ -2,11 +2,13 @@
 
 // js/app/file-list.js: selecting the issues of an open series page — single
 // issues, Shift-click ranges (which follow the grid's display order and skip
-// missing-issue placeholders), "Select all issues", and how the shared
-// selection status follows along.
+// missing-issue placeholders), "Select all issues", how the shared selection
+// status follows along, and how the selection follows a reload of the page's
+// issues (js/app/series.js loadSeriesIssues).
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { deferred } = require('./support/app');
 const {
     makeSeriesList,
     bootLibrary,
@@ -33,6 +35,17 @@ function makeIssue(n, overrides = {}) {
     };
 }
 
+/** GET /api/files/series/{id}/issues listing `issues` (per_page=-1: one page). */
+function issuesResponse(issues) {
+    return {
+        issues,
+        issue_count: issues.length,
+        page: 1,
+        per_page: -1,
+        total_pages: 1
+    };
+}
+
 /**
  * Open series-1, whose issues #1, #2, #4 and #5 are present (#3 is shown as
  * a missing-issue placeholder between #2 and #4). `server.issues` can be
@@ -44,13 +57,7 @@ async function bootSeriesPage(issues = [1, 2, 4, 5].map(n => makeIssue(n))) {
         hash: '#/series/series-1',
         series: makeSeriesList(2),
         routes: {
-            [`GET ${ISSUES_PATH}`]: () => ({
-                issues: server.issues,
-                issue_count: server.issues.length,
-                page: 1,
-                per_page: -1,
-                total_pages: 1
-            })
+            [`GET ${ISSUES_PATH}`]: () => issuesResponse(server.issues)
         }
     });
     return { page, server };
@@ -79,6 +86,11 @@ function toggleIssue(page, n, { shift = false, keyboard = false } = {}) {
         dispatch(page, box.closest('.series-issue-select'), 'mousedown', { shiftKey: shift });
     }
     page.click(box);
+}
+
+// The watcher reports `filename` processed, which reloads the open series' issues.
+function fileProcessed(page, filename) {
+    page.eventSources.at(-1).emit('message', { type: 'file_processed', data: { filename, success: true } });
 }
 
 test('ticking an issue selects its file and marks its card; unticking releases it', async () => {
@@ -224,4 +236,143 @@ test('"Select all issues" ticks every issue of the series and unticking it clear
     assert.deepEqual(checkedBoxes(page), []);
     assert.deepEqual(selectAllState(page), { checked: false, indeterminate: false });
     assert.equal(page.$('#selectInfo').textContent, 'No files selected');
+});
+
+// Regression tests for #849: when the page's issues reload, the selection
+// keeps only the issues the reloaded list still has.
+test('a reload unselects the ticked issues it no longer lists and keeps the rest', async () => {
+    const { page, server } = await bootSeriesPage();
+    toggleIssue(page, 2);
+    toggleIssue(page, 4);
+    toggleIssue(page, 5);
+    assert.equal(page.$('#selectInfo').textContent, '3 files selected');
+
+    // Elsewhere #2 is renamed and #5 deleted; the processed-file event
+    // reloads the page.
+    const renamed = 'Saga/Saga 002 (2012).cbz';
+    server.issues = [makeIssue(1), makeIssue(2, { file_path: renamed }), makeIssue(4)];
+    fileProcessed(page, renamed);
+    await page.settle();
+    assert.equal(callsTo(page, ISSUES_PATH).length, 2);
+
+    assert.deepEqual(selected(page), [filePath(4)]);
+    assert.deepEqual(checkedBoxes(page), [filePath(4)]);
+    assert.equal(page.$('#selectInfo').textContent, '1 file selected');
+    assert.deepEqual(selectAllState(page), { checked: false, indeterminate: true });
+
+    // "Select all issues" brings back nothing that is gone, and unticking it
+    // leaves nothing behind.
+    page.input('#selectAll', true);
+    assert.deepEqual(selected(page), [filePath(1), renamed, filePath(4)].sort());
+    assert.equal(page.$('#selectInfo').textContent, '3 files selected');
+    page.input('#selectAll', false);
+    assert.deepEqual(selected(page), []);
+    assert.equal(page.$('#selectInfo').textContent, 'No files selected');
+    assert.equal(page.$('#batchUpdateBtn').disabled, true);
+});
+
+test('a reload leaves the files selected in another series alone', async () => {
+    const { page, server } = await bootSeriesPage();
+    const other = 'Other/Other #001.cbz';
+    page.route('GET /api/files/series/series-2/issues',
+        issuesResponse([makeIssue(1, { file_path: other, file_name: 'Other #001.cbz' })]));
+    page.window.location.hash = '#/series/series-2';
+    await page.settle();
+    page.click(page.$(`#seriesDetailPanel .series-issue-card[data-file-path="${other}"] .series-issue-select input`));
+    page.window.location.hash = '#/series/series-1';
+    await page.settle();
+    toggleIssue(page, 4);
+    assert.deepEqual(selected(page), [other, filePath(4)].sort());
+
+    // #4 is deleted elsewhere.
+    server.issues = [1, 2, 5].map(n => makeIssue(n));
+    fileProcessed(page, filePath(5));
+    await page.settle();
+
+    assert.deepEqual(selected(page), [other]);
+    assert.equal(page.$('#selectInfo').textContent, '1 file selected');
+});
+
+test('a reload that finishes after the series page was left still corrects the selection', async () => {
+    const { page } = await bootSeriesPage();
+    toggleIssue(page, 2);
+    toggleIssue(page, 5);
+    const reload = deferred();
+    page.route(`GET ${ISSUES_PATH}`, () => reload.promise);
+    fileProcessed(page, filePath(5));
+    await page.settle();
+
+    page.click('#seriesDetailPanel .series-detail-back');
+    await page.settle();
+    assert.equal(page.window.location.hash, '#/library');
+    assert.equal(page.$('#selectInfo').textContent, '2 files selected');
+
+    // #5 has been deleted.
+    reload.resolve(issuesResponse([1, 2, 4].map(n => makeIssue(n))));
+    await page.settle();
+    assert.deepEqual(selected(page), [filePath(2)]);
+    assert.equal(page.$('#selectInfo').textContent, '1 file selected');
+});
+
+test('a reload with another filter than the list it replaces unselects nothing that filter hides', async () => {
+    const server = { unmarked: [1, 2] };
+    const save = deferred();
+    const page = await bootLibrary({
+        hash: '#/series/series-1',
+        series: makeSeriesList(2),
+        routes: {
+            'PUT /api/preferences': () => save.promise,
+            [`GET ${ISSUES_PATH}`]: call => issuesResponse(
+                (call.query.filter === 'unmarked' ? server.unmarked : [1, 2, 4, 5]).map(n => makeIssue(n)))
+        }
+    });
+    assert.equal(callsTo(page, ISSUES_PATH)[0].query.filter, undefined);
+    toggleIssue(page, 4);
+    toggleIssue(page, 5);
+
+    // The user changes the filter while the preference save is pending. A
+    // reload started during that save must not unselect issues the new filter
+    // hides.
+    page.run("setHeaderFilter('unmarked')");
+    fileProcessed(page, filePath(1));
+    await page.settle();
+    assert.equal(callsTo(page, ISSUES_PATH).at(-1).query.filter, 'unmarked');
+    assert.deepEqual(selected(page), [filePath(4), filePath(5)]);
+    assert.equal(page.$('#selectInfo').textContent, '2 files selected');
+    save.resolve({});
+    await page.settle();
+
+    // Under the filter of the list it replaces, a reload does unselect the
+    // issues it no longer lists.
+    toggleIssue(page, 2);
+    server.unmarked = [1];
+    fileProcessed(page, filePath(2));
+    await page.settle();
+    assert.deepEqual(selected(page), [filePath(4), filePath(5)]);
+});
+
+test('overlapping reloads unselect by the newest list, whichever answer arrives last', async () => {
+    const { page } = await bootSeriesPage();
+    toggleIssue(page, 2);
+    toggleIssue(page, 5);
+    const first = deferred();
+    page.route(`GET ${ISSUES_PATH}`, () => first.promise);
+    fileProcessed(page, filePath(2));
+    await page.settle();
+
+    // Another change reloads the page before the first answer arrives; by
+    // now #5 has been deleted.
+    page.route(`GET ${ISSUES_PATH}`, issuesResponse([1, 2, 4].map(n => makeIssue(n))));
+    fileProcessed(page, filePath(5));
+    await page.settle();
+    assert.equal(callsTo(page, ISSUES_PATH).length, 3);
+    assert.deepEqual(selected(page), [filePath(2)]);
+    assert.equal(page.$('#selectInfo').textContent, '1 file selected');
+
+    // The older answer, taken while #2 was being moved, unselects nothing.
+    first.resolve(issuesResponse([1, 4, 5].map(n => makeIssue(n))));
+    await page.settle();
+    assert.deepEqual(selected(page), [filePath(2)]);
+    assert.deepEqual(checkedBoxes(page), [filePath(2)]);
+    assert.equal(page.$('#selectInfo').textContent, '1 file selected');
 });

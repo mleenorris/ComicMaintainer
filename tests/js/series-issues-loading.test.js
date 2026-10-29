@@ -9,12 +9,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { deferred } = require('./support/app');
 const {
-    seriesCard, issue, issuesBody, issuesPath, bootSeries, callsTo, text, issueCards
+    seriesCard, issue, issuesBody, libraryBody, issuesPath, bootSeries, callsTo, text, issueCards
 } = require('./support/series-helpers');
 
 const ISSUES = issuesPath('saga');
 const paths = page => issueCards(page).map(card => card.dataset.filePath);
 const selectionMeta = page => text(page.$('#seriesDetailPanel .series-detail-selection-meta'));
+const tickIssue = (page, filePath) => page.click(issueCards(page)
+    .find(card => card.dataset.filePath === filePath)
+    .querySelector('.series-issue-select input[type="checkbox"]'));
+const routeSeriesLookup = (page, handler) =>
+    page.route(call => call.path === '/api/files/series' && 'search' in call.query, handler);
 
 test('every issue comes from one request, even when the response reports more pages', async () => {
     // The client asks for the whole list (per_page=-1) and never pages, so no
@@ -229,4 +234,71 @@ test('an unfiltered answer arriving after a filter change leaves the filtered se
     await page.settle();
     assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz']);
     assert.equal(text(page.$('#seriesDetailPanel .series-detail-summary .series-detail-meta')), '1 issue · 1.0 MB');
+});
+
+test('a reload removes selected issues that no longer belong to the series', async () => {
+    const series = seriesCard({ issue_count: 2 });
+    const reload = deferred();
+    let answer = () => issuesBody(series, [issue(1), issue(2)], { issue_count: 2 });
+    const page = await bootSeries({ series, routes: { [`GET ${ISSUES}`]: () => answer() } });
+
+    answer = () => reload.promise;
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+
+    reload.resolve(issuesBody(series, [issue(1)], { issue_count: 1 }));
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 001.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+});
+
+test('a stale filtered reload does not unselect an issue still present in the new filter', async () => {
+    const series = seriesCard({ issue_count: 2 });
+    const reload = deferred();
+    let unmarkedAnswer = () => issuesBody(series, [issue(1), issue(2)], { issue_count: 2 });
+    const page = await bootSeries({
+        series,
+        routes: {
+            [`GET ${ISSUES}`]: call => (call.query.filter === 'unmarked'
+                ? unmarkedAnswer()
+                : issuesBody(series, [issue(1), issue(2)], { issue_count: 2 }))
+        }
+    });
+    page.run("setHeaderFilter('unmarked')");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+
+    unmarkedAnswer = () => reload.promise;
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+    page.run("setHeaderFilter('all')");
+    await page.settle();
+
+    reload.resolve(issuesBody(series, [issue(1)], { issue_count: 1 }));
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+});
+
+test('a 404 reload looks up a renamed series before removing selected issues', async () => {
+    const page = await bootSeries();
+    page.run("setHeaderFilter('unmarked')");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+
+    const renamed = seriesCard({ id: 'saga-2', title: 'Saga (2012)' });
+    page.route(`GET ${ISSUES}`, 404);
+    routeSeriesLookup(page, libraryBody([renamed]));
+    page.route(`GET ${issuesPath('saga-2')}`, issuesBody(renamed, [issue(2), issue(3)]));
+    page.eventSources.at(-1).emit('message', {
+        type: 'file_processed',
+        data: { filename: '/comics/Saga/Saga 001.cbz', success: true }
+    });
+    await page.settle();
+
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });

@@ -193,14 +193,16 @@ test('read-only users are offered only the read actions of a file row', async ()
 
     // What each row's menu shows once opened (menus.js then moves it to
     // <body>, out of its row); a divider reads as '—'.
-    const shown = page.$$('#fileList .file-item').map(row => {
+    const shown = [];
+    for (const row of page.$$('#fileList .file-item')) {
         page.click(row.querySelector('.dropdown-toggle'));
-        const items = [...page.$('body > .dropdown-menu.show').children]
+        await page.waitFor(() => page.$('body > .dropdown-menu.show'));
+        shown.push([...page.$('body > .dropdown-menu.show').children]
             .filter(isDisplayed)
-            .map(item => (item.classList.contains('dropdown-divider') ? '—' : item.textContent.trim()));
+            .map(item => (item.classList.contains('dropdown-divider') ? '—' : item.textContent.trim())));
         page.run('closeAllDropdowns()');
-        return items;
-    });
+        await page.settle();
+    }
     assert.deepEqual(shown, [
         ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Read'],
         ['Info', 'View/Edit', 'Read Comic', 'Review Duplicate', '—', 'Mark Unread']

@@ -395,20 +395,25 @@ test('read-only users are offered only the read actions of an issue and no Serie
     });
     // What each issue's menu shows once opened (menus.js then moves it to
     // <body>, out of its card); a divider reads as '—'.
-    const issueMenus = page => issueCards(page).map(card => {
-        page.click(card.querySelector('.series-issue-actions-toggle'));
-        const shown = [...page.$('body > .dropdown-menu.show').children]
-            .filter(isDisplayed)
-            .map(item => (item.classList.contains('dropdown-divider') ? '—' : text(item)));
-        page.run('closeAllDropdowns()');
-        return shown;
-    });
+    const issueMenus = async page => {
+        const menus = [];
+        for (const card of issueCards(page)) {
+            page.click(card.querySelector('.series-issue-actions-toggle'));
+            await page.waitFor(() => page.$('body > .dropdown-menu.show'));
+            menus.push([...page.$('body > .dropdown-menu.show').children]
+                .filter(isDisplayed)
+                .map(item => (item.classList.contains('dropdown-divider') ? '—' : text(item))));
+            page.run('closeAllDropdowns()');
+            await page.settle();
+        }
+        return menus;
+    };
     const seriesActions = page => page.$('#seriesDetailPanel .series-actions-dropdown');
     const seriesActionItems = page => [...seriesActions(page).querySelectorAll('.dropdown-item')];
 
     const readOnly = await boot({ canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] });
     assert.ok(readOnly.document.body.classList.contains('user-read-only'));
-    assert.deepEqual(issueMenus(readOnly), [
+    assert.deepEqual(await issueMenus(readOnly), [
         ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Read'],
         ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Unread'],
         ['Info', 'View/Edit', 'Read Comic', 'Review Duplicate', '—', 'Mark Read']
@@ -419,7 +424,7 @@ test('read-only users are offered only the read actions of an issue and no Serie
     assert.deepEqual(seriesActionItems(readOnly).filter(item => !item.hasAttribute('data-requires-write')).map(text), []);
 
     const admin = await boot({});
-    assert.deepEqual(issueMenus(admin)[0], [
+    assert.deepEqual((await issueMenus(admin))[0], [
         'Info', 'View/Edit', 'Read Comic', 'Email to Ereader…', '—', 'Mark Read',
         '—', 'Process', 'Rename', 'Normalize', 'Remove Metadata', '—', 'Delete'
     ]);

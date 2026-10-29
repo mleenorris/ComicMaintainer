@@ -67,6 +67,11 @@ public partial class FilesController
     {
         try
         {
+            // A body without "files" (such as the old {"file", "tags"} format) binds to an empty
+            // list; reject it instead of answering 200 having updated nothing
+            if (request.Files is null || request.Files.Count == 0)
+                return BadRequest("No files provided");
+
             // Validate every path before updating any file, so a rejected path fails the whole request
             foreach (var file in request.Files)
             {

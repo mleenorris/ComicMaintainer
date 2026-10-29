@@ -162,29 +162,88 @@ List all comic files in the watched directory.
 }
 ```
 
-### GET /api/files/tags
+### GET /api/files/{encodedFilePath}/tags
 
-Get metadata tags for a specific file.
+Get the metadata stored in a file's `ComicInfo.xml`.
 
-**Query Parameters:**
-- `file` (required) - File path
+`{encodedFilePath}` is the file's full path, encoded as UTF-8 and then as base64url
+(`-` and `_` in place of `+` and `/`; the trailing `=` padding is optional). The file
+must be inside the watched directory. For example, `/comics/Batman/Batman #001.cbz`
+is encoded as `L2NvbWljcy9CYXRtYW4vQmF0bWFuICMwMDEuY2J6`:
+
+```bash
+printf '%s' '/comics/Batman/Batman #001.cbz' | base64 | tr -d '\n=' | tr '+/' '-_'
+```
+
+```python
+import base64
+path = '/comics/Batman/Batman #001.cbz'
+encoded = base64.urlsafe_b64encode(path.encode()).decode().rstrip('=')
+```
 
 **Response:**
 ```json
 {
   "series": "Batman",
-  "issue": "1",
   "title": "The Dark Knight",
-  "year": "2023",
-  "publisher": "DC Comics"
+  "issue": "1",
+  "volume": "2016",
+  "publisher": "DC Comics",
+  "year": 2023,
+  "summary": "Gotham's protector returns.",
+  "authors": ["Tom King"],
+  "tags": ["Superhero"],
+  "isUserEdited": false,
+  "userLockedFieldsMask": 0
 }
 ```
 
+`authors` holds the `<Writer>` entries and `tags` the `<Tag>` entries. Fields the file
+does not set are `null` (or `[]`). A file without a `ComicInfo.xml` reports only `series`,
+taken from its folder name, and `issue`, taken from its file name. `isUserEdited` and
+`userLockedFieldsMask` are not stored in the file: they are always `false` and `0` here,
+and the endpoints below ignore them.
+
+`400` when the path cannot be decoded (`Invalid file path`) or is outside the watched
+directory (`File path is outside the allowed directory`). `404` when the file does not
+exist, is not a comic archive, or cannot be read.
+
+### PUT /api/files/{encodedFilePath}/tags
+
+Replace the metadata of one file. Requires library write permission. `{encodedFilePath}`
+is encoded as for `GET`, and the body takes the fields of the `GET` response.
+
+**Request Body:**
+```json
+{
+  "series": "Batman",
+  "issue": "1",
+  "title": "The Dark Knight",
+  "publisher": "DC Comics",
+  "year": 2023,
+  "authors": ["Tom King"]
+}
+```
+
+Returns `200` with an empty body. The metadata replaces the file's `ComicInfo.xml`
+rather than being merged into it: every field the body leaves out is removed, as is
+every text or number field set to `null`. `authors` and `tags` cannot be `null` (that
+is rejected with a `400` validation error); send `[]` or leave them out to clear them.
+Elements the API does not model, such as `<Genre>` or `<Penciller>`, are always
+dropped, even when you send back exactly what `GET` returned.
+
+`400` for the same path errors as `GET`, and `400` (`Failed to update tags`) when the
+file does not exist or is not a comic archive.
+
 ### POST /api/files/tags
 
-Write tags to one or more files. Blank entries in `files` are ignored.
+Write the same metadata to one or more files. Requires library write permission.
 
-Each file's ComicInfo.xml is replaced by one built from `metadata` alone. Fields left out are removed, not kept, so sending only `publisher` to several issues erases their issue numbers and titles.
+`files` lists plain paths (not base64url-encoded); empty entries are ignored.
+`metadata` takes the fields of the `GET` response and replaces each file's
+`ComicInfo.xml` as `PUT` does. Every field it leaves out, including `issue`, is removed
+from every file, and leaving out `metadata` altogether clears all their tags. Use `PUT`
+for per-file fields such as `issue`.
 
 **Request Body:**
 ```json
@@ -202,14 +261,16 @@ Each file's ComicInfo.xml is replaced by one built from `metadata` alone. Fields
 
 **Response (200 OK):** empty body; every file was updated.
 
-**Response (207 Multi-Status):** some of the files could not be updated (missing, not a comic archive, or unreadable); the rest were.
+**Response (207 Multi-Status):** some files could not be updated (missing, not a comic
+archive, or unreadable); the rest were.
 ```json
 {
   "failed": ["/comics/Batman/Batman #002.cbz"]
 }
 ```
 
-**Error Response (400 - Bad Request):** none of the files could be updated.
+**Error Response (400 - Bad Request):** the request is invalid, an outside path was
+provided, or none of the files could be updated.
 ```json
 {
   "error": "Failed to update tags",
@@ -217,7 +278,12 @@ Each file's ComicInfo.xml is replaced by one built from `metadata` alone. Fields
 }
 ```
 
-A request naming any file outside the library is rejected with `400` before any file is updated.
+A request whose `files` is missing or an empty list is rejected with `400`
+(`No files provided`). A request naming any file outside the watched directory is
+rejected with `400` (`One or more file paths are outside the allowed directory`)
+before any file is updated. If `files` is explicitly `null`, model validation rejects
+the request with `400` (`The Files field is required.`), rather than returning
+`No files provided`.
 
 ### POST /api/files/cleanup-stale
 
@@ -365,6 +431,13 @@ Cancel a running job.
 
 ## Settings
 
+Changing a setting requires the `CanAdminister` policy. This normally means the
+`Admin` role, but when Authelia is enabled without `AUTHELIA_ADMIN_GROUPS`, every
+signed-in user who is not `ReadOnly` (local accounts included) passes it; see
+[Role Mapping](AUTHELIA.md#role-mapping). Each
+`PUT /api/settings/...` endpoint below also accepts `POST`, a legacy alias with the
+same body and response.
+
 ### GET /api/settings/filename-format
 
 Get the current filename format template and the built-in default (the
@@ -378,7 +451,7 @@ format "Reset Filename Format" on the settings page restores).
 }
 ```
 
-### POST /api/settings/filename-format
+### PUT /api/settings/filename-format
 
 Update the filename format template.
 
@@ -392,24 +465,26 @@ Update the filename format template.
 **Response:**
 ```json
 {
-  "success": true,
-  "format": "{series} v{volume} #{issue_no_pad}"
+  "message": "Filename format updated successfully"
 }
 ```
 
+A blank format is not saved; the response is `500` with
+`{"error": "Failed to update filename format"}`.
+
 ### GET /api/settings/issue-number-padding
 
-Get issue number padding setting.
+Get the minimum number of digits `{issue}` is padded to in generated filenames
+(default 4, so issue 1 becomes `0001`). `{issue_no_pad}` is never padded.
 
 **Response:**
 ```json
 {
-  "padding": 4,
-  "default": 4
+  "padding": 4
 }
 ```
 
-### POST /api/settings/issue-number-padding
+### PUT /api/settings/issue-number-padding
 
 Set issue number padding.
 
@@ -423,16 +498,17 @@ Set issue number padding.
 **Response:**
 ```json
 {
-  "success": true,
-  "padding": 6
+  "message": "Issue number padding updated successfully"
 }
 ```
 
-`padding` must be between 0 and 10; other values are rejected with `400` and `{ "error": "..." }`.
+`padding` must be between 0 and 10; other values are rejected with `400` and
+`{ "error": "..." }`.
 
-### GET /api/watcher/enabled
+### GET /api/settings/watcher-enable-rename
+### GET /api/settings/watcher-enable-normalize
 
-Get watcher enabled state.
+Whether processing renames files, or normalizes their metadata.
 
 **Response:**
 ```json
@@ -441,9 +517,16 @@ Get watcher enabled state.
 }
 ```
 
-### POST /api/watcher/enabled
+### PUT /api/settings/watcher-enable-rename
+### PUT /api/settings/watcher-enable-normalize
 
-Enable or disable the watcher.
+Turn renaming or normalizing on or off in the full processing pipeline. Despite the
+names, these settings apply to processing runs on request and processing jobs, not only
+to the watcher: with a step off, the pipeline skips it but still marks the file as
+renamed or normalized. Rename-only (`/api/jobs/rename-selected`) and normalize-only
+(`/api/jobs/normalize-selected`) jobs are exceptions and perform their operation even
+when the corresponding setting is off. With both settings off, the watcher still tracks
+files but processes none of them automatically.
 
 **Request Body:**
 ```json
@@ -455,14 +538,15 @@ Enable or disable the watcher.
 **Response:**
 ```json
 {
-  "success": true,
-  "enabled": false
+  "message": "Watcher enable rename updated successfully"
 }
 ```
 
-### GET /api/watcher/status
+(`Watcher enable normalize updated successfully` for the normalize setting.)
 
-Get watcher process status.
+### GET /api/watcher
+
+Get the file watcher state. `GET /api/watcher/status` is a legacy alias.
 
 **Response:**
 ```json
@@ -471,6 +555,16 @@ Get watcher process status.
   "enabled": true
 }
 ```
+
+`enabled` always equals `running`. The watcher runs whenever the watched directory
+exists and cannot be stopped through the API; use the `watcher-enable-rename` and
+`watcher-enable-normalize` settings above to control what it does.
+
+`PUT /api/watcher` and `POST /api/watcher/enable` are deprecated no-ops kept for old
+clients and scheduled for removal in v3.0. They change nothing: `PUT` returns the
+current state as `enabled` (equal to `running`) with a `message` saying the watcher is
+controlled by the rename and normalize settings, and `POST` returns `200` with an
+empty body.
 
 ## Suwayomi Downloads
 
@@ -813,7 +907,7 @@ curl -X POST http://localhost:5000/api/jobs/process-all
 curl http://localhost:5000/api/jobs/job-abc123
 
 # Update filename format
-curl -X POST http://localhost:5000/api/settings/filename-format \
+curl -X PUT http://localhost:5000/api/settings/filename-format \
   -H "Content-Type: application/json" \
   -d '{"format": "{series} - Chapter {issue}"}'
 ```

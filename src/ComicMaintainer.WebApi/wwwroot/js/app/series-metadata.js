@@ -955,17 +955,32 @@
             populateManageSeriesNameOptions(manageSeriesState.record);
         }
 
+        // The last alias PUT queued for each series title.
+        const manageSeriesAliasWrites = new Map();
+
         // PUT an alias list as the series' user aliases, replacing the stored
         // ones. Resolves to whether the server accepted it; rejects when the
-        // request cannot be sent (e.g. a network error).
-        async function putManageSeriesUserAliases(seriesTitle, aliases) {
-            const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                credentials: 'same-origin',
-                body: JSON.stringify({ aliases })
+        // request cannot be sent (e.g. a network error). Each PUT replaces
+        // the whole list, so the writes for a series are sent one at a time,
+        // in order: an older list can't be committed over a newer one.
+        function putManageSeriesUserAliases(seriesTitle, aliases) {
+            const body = JSON.stringify({ aliases });
+            const previous = manageSeriesAliasWrites.get(seriesTitle) || Promise.resolve();
+            const write = previous.then(async () => {
+                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    credentials: 'same-origin',
+                    body
+                });
+                return response.ok;
             });
-            return response.ok;
+            const done = write.catch(() => {});
+            manageSeriesAliasWrites.set(seriesTitle, done);
+            done.then(() => {
+                if (manageSeriesAliasWrites.get(seriesTitle) === done) manageSeriesAliasWrites.delete(seriesTitle);
+            });
+            return write;
         }
 
         async function saveManageSeriesNames() {

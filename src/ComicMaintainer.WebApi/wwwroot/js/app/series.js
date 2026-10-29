@@ -103,7 +103,7 @@
 
         async function loadSeriesIssues(seriesId, force = false, page = 1) {
             if (!seriesId) return;
-            // The list a forced reload, or a retry after a failure, replaces.
+            // The list that a forced reload, or a retry after a failure, replaces.
             const previous = seriesIssuesCache.get(seriesId);
             if (force) {
                 seriesIssuesCache.delete(seriesId);
@@ -246,10 +246,17 @@
             const pending = cached.unconfirmedPaths;
             cached.unconfirmedPaths = null;
             if (cached.filter !== filter) return null;
-            const paths = new Set(pending || []);
+            const paths = new Set();
+            for (const path of pending || []) {
+                if (typeof path === 'string' && path.length > 0 && selectedFiles.has(path)) {
+                    paths.add(path);
+                }
+            }
             for (const issue of cached.issues) {
                 if (typeof issue.file_path === 'string' && issue.file_path.length > 0) {
-                    paths.add(issue.file_path);
+                    if (selectedFiles.has(issue.file_path)) {
+                        paths.add(issue.file_path);
+                    }
                 }
             }
             return paths.size > 0 ? paths : null;
@@ -263,7 +270,9 @@
         // waits for the last one. Returns whether the selection changed.
         function pruneSeriesIssueSelection(entry) {
             if (!entry.unconfirmedPaths || !entry.allLoaded || entry.error) return false;
-            const listedPaths = new Set(entry.issues.map(issue => issue.file_path));
+            const listedPaths = new Set(entry.issues
+                .map(issue => issue && issue.file_path)
+                .filter(path => typeof path === 'string' && path.length > 0));
             let pruned = false;
             for (const path of entry.unconfirmedPaths) {
                 if (!listedPaths.has(path) && selectedFiles.delete(path)) {

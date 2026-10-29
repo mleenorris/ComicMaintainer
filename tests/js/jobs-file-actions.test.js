@@ -243,7 +243,7 @@ test('deleting a ticked issue from its menu unselects it for good', async (t) =>
     await page.settle();
     assert.deepEqual(selection(), { info: '2 files selected', files: [ISSUE_A, ISSUE_B], ticked: [ISSUE_A, ISSUE_B] });
 
-    answerDelete = () => undefined;
+    answerDelete = () => respond(200, 'OK');
     h.chooseIssueAction(page, ISSUE_A, 'Delete');
     await page.settle();
     assert.deepEqual(selection(), { info: '1 file selected', files: [ISSUE_B], ticked: [ISSUE_B] });

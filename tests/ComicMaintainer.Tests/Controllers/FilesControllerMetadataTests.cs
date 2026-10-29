@@ -595,12 +595,16 @@ public sealed class FilesControllerMetadataTests : IDisposable
             })
             .Returns(Task.CompletedTask);
         _fileStore
-            .Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((int max, CancellationToken _) =>
+            .Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int max, string? after, CancellationToken _) =>
             {
                 lock (pending)
                 {
-                    return pending.Values.Take(max).ToList();
+                    return pending.Values
+                        .Where(f => after is null || string.CompareOrdinal(f.FilePath, after) > 0)
+                        .OrderBy(f => f.FilePath, StringComparer.Ordinal)
+                        .Take(max)
+                        .ToList();
                 }
             });
         _fileStore

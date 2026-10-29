@@ -176,14 +176,20 @@ public partial class FileStoreService
         }
     }
 
-    public async Task<IReadOnlyList<ComicFile>> GetFilesNeedingBackfillAsync(int max, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ComicFile>> GetFilesNeedingBackfillAsync(int max, string? afterFilePath = null, CancellationToken cancellationToken = default)
     {
         if (max <= 0) return Array.Empty<ComicFile>();
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var rows = await dbContext.ComicFiles
+        var query = dbContext.ComicFiles
             .AsNoTracking()
-            .Where(e => !e.IsDuplicate && e.MetadataVersion > e.WrittenMetadataVersion)
-            .OrderByDescending(e => e.UpdatedAt)
+            .Where(e => !e.IsDuplicate && e.MetadataVersion > e.WrittenMetadataVersion);
+        if (afterFilePath is not null)
+        {
+            query = query.Where(e => string.Compare(e.FilePath, afterFilePath) > 0);
+        }
+
+        var rows = await query
+            .OrderBy(e => e.FilePath)
             .Take(max)
             .ToListAsync(cancellationToken);
         return rows.Select(ToComicFile).ToList();

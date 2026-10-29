@@ -34,7 +34,7 @@ public class MetadataBackfillJobHandlerTests
             WrittenMetadataVersion = 1,
             Metadata = new ComicMetadata { Series = "DB Series", Issue = "1" }
         };
-        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { file });
+        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { file });
         _processor.Setup(p => p.UpdateMetadataAsync(file.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
@@ -53,12 +53,12 @@ public class MetadataBackfillJobHandlerTests
         // deprecated watcher toggles. Previously it short-circuited when
         // WatcherEnableNormalize was false, which prevented it from running
         // for users who have disabled the legacy FileSystemWatcher.
-        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<CancellationToken>()))
+        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<ComicFile>());
 
         var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
 
-        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.Contains("0 files updated", summary);
     }
 
@@ -75,7 +75,7 @@ public class MetadataBackfillJobHandlerTests
                 UserLockedFieldsMask = (long)ComicMetadataFieldFlags.Series
             }
         };
-        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { file });
+        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { file });
         _processor.Setup(p => p.UpdateMetadataAsync(file.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         await BuildHandler().ExecuteAsync(null, CancellationToken.None);

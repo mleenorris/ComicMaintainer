@@ -41,27 +41,19 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
         var processed = 0;
         var failed = 0;
 
-        // Reads the queue one batch at a time until it is drained, so a run that follows edits
-        // made during an earlier run writes all of them back, not just the first batch. Each
-        // file version is attempted at most once per run: a file that failed, or that is still
-        // queued after a write, is skipped on later reads. Those skipped files are added to the
-        // read size so they cannot fill a batch and hide the files queued behind them.
-        var attempted = new HashSet<(string FilePath, int MetadataVersion)>();
-        var skipped = 0;
+        // Pages through the queue in file-path order until it is drained, so a run that follows
+        // edits made during an earlier run writes all of them back, not just the first batch.
+        // Each page starts after the last path of the previous one, so every read is bounded by
+        // maxBatch and a file that failed, or that is still queued after a write, is not read
+        // again in the same run.
+        string? afterFilePath = null;
         while (true)
         {
-            var take = options.MaxBatch + skipped;
-            var queued = await _fileStore.GetFilesNeedingBackfillAsync(take, cancellationToken);
-            skipped = queued.Count(file => attempted.Contains((file.FilePath, file.MetadataVersion)));
-            var batch = queued
-                .Where(file => !attempted.Contains((file.FilePath, file.MetadataVersion)))
-                .Take(options.MaxBatch)
-                .ToList();
+            var batch = await _fileStore.GetFilesNeedingBackfillAsync(options.MaxBatch, afterFilePath, cancellationToken);
 
             foreach (var file in batch)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                attempted.Add((file.FilePath, file.MetadataVersion));
                 if (await BackfillFileAsync(file, cancellationToken))
                 {
                     processed++;
@@ -69,17 +61,18 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
                 else
                 {
                     failed++;
-                    skipped++;
                 }
             }
 
-            if (queued.Count < take || options.MaxBatch <= 0)
+            if (options.MaxBatch <= 0 || batch.Count < options.MaxBatch)
             {
                 break;
             }
+
+            afterFilePath = batch[^1].FilePath;
         }
 
-        return $"Backfill: {processed} files updated, {failed} failed (queue size was {attempted.Count}).";
+        return $"Backfill: {processed} files updated, {failed} failed (queue size was {processed + failed}).";
     }
 
     private async Task<bool> BackfillFileAsync(ComicFile file, CancellationToken cancellationToken)

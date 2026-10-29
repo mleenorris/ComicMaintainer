@@ -152,6 +152,7 @@ for (const action of SELECTED_ACTIONS) {
         assert.equal(h.requests(page, 'GET', `/api/jobs/${h.JOB_ID}`).length, 1);
         h.assertProgress(page, { open: true, title: action.tracked, text: '0 / 2 files', cancelVisible: true });
         assert.equal(page.run('selectedFiles.size'), 2, 'the selection is kept while the job runs');
+        await h.endTrackedJob(t, page);
 
         // A single selected issue is worded in the singular; Cancel on the
         // force prompt skips files that were already handled.
@@ -163,6 +164,7 @@ for (const action of SELECTED_ACTIONS) {
         assert.deepEqual(h.takeConfirms(page), confirmsFor(1));
         assert.deepEqual(starts().at(-1).body, expectedBody([ISSUE_A], false));
         assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: action.started(1) }]);
+        await h.endTrackedJob(t, page);
 
         answer = () => respond(500, { error: 'Error starting job' });
         start();
@@ -234,6 +236,7 @@ test('Delete deletes the selected issues in a background job', async (t) => {
     assert.equal(page.run('selectedFiles.size'), 0, 'the deleted files are no longer selected');
     assert.equal(h.requests(page, 'GET', `/api/jobs/${h.JOB_ID}`).length, 1);
     h.assertProgress(page, { open: true, title: 'Deleting 2 file(s)...', text: '0 / 2 files', cancelVisible: true });
+    await h.endTrackedJob(t, page);
 
     // The snake_case-only shape is understood too, and without a count the
     // selection size is reported.
@@ -244,6 +247,7 @@ test('Delete deletes the selected issues in a background job', async (t) => {
     h.takeConfirms(page);
     assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: 'Deleting 2 file(s) in background' }]);
     assert.equal(h.requests(page, 'GET', `/api/jobs/${h.OTHER_JOB_ID}`).length, 1);
+    await h.endTrackedJob(t, page, h.OTHER_JOB_ID);
 
     // The server's error message is shown when there is one...
     selectBoth();

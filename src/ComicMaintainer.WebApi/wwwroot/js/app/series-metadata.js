@@ -99,6 +99,7 @@
         }
 
         async function updateAllSeriesCovers() {
+            if (!jobProgress.canStartJob()) return;
             if (!confirm('Re-apply the current cached series image to cover sidecars and first-issue archives for ALL series in the library? This may rewrite archive files and can take a while.')) {
                 return;
             }
@@ -162,6 +163,7 @@
                 showMessage('Select at least one series from the library view', 'error');
                 return;
             }
+            if (!jobProgress.canStartJob()) return;
             if (!confirm(`Re-apply the current cached series image to ${series.length} selected series? This may rewrite archive files.`)) {
                 return;
             }
@@ -200,6 +202,7 @@
         // targets exactly one series by title.
         async function updateSeriesCoversDirect(seriesTitle) {
             if (!seriesTitle) return;
+            if (!jobProgress.canStartJob()) return;
             if (!confirm(`Re-apply the current cached series image to "${seriesTitle}"? This may rewrite the first-issue archive file.`)) {
                 return;
             }

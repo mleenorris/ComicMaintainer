@@ -186,8 +186,10 @@
                     // Refresh the cached series metadata snapshot from the
                     // response so the detail view can render correctly even
                     // when the active filter excludes this series from the
-                    // library list.
-                    if (currentSeriesDetailId === seriesId) {
+                    // library list. An answer whose cache entry was replaced
+                    // (listed under an older filter or search) must not
+                    // overwrite the snapshot with its counts and size.
+                    if (currentSeriesDetailId === seriesId && seriesIssuesCache.get(seriesId) === entry) {
                         currentSeriesDetailSeries = Object.assign(
                             {},
                             currentSeriesDetailSeries || {},
@@ -213,8 +215,9 @@
                 entry.loadingPages.delete(page);
             }
 
-            // Re-render only if the user is still on this series.
-            if (currentSeriesDetailId === seriesId) {
+            // Re-render only if the user is still on this series and this
+            // answer has not been superseded (e.g. by a filter change).
+            if (currentSeriesDetailId === seriesId && seriesIssuesCache.get(seriesId) === entry) {
                 if (page === 1 || entry.error) {
                     renderSeriesDetail(seriesId);
                 } else {

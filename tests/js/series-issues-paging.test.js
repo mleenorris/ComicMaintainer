@@ -421,3 +421,26 @@ test('there is no series id to remap while the library grid is showing', async (
     assert.equal(page.$('#seriesDetailPanel'), null);
     assert.equal(page.evaluate('remapCurrentSeriesDetailId()'), null);
 });
+
+test('an unfiltered answer arriving after a filter change leaves the filtered series summary alone', async () => {
+    const unfiltered = deferred();
+    const filtered = deferred();
+    const page = await bootSeries({
+        library: [seriesCard({ id: 'other', title: 'Other', canonical_title: 'Other' })],
+        routes: { [`GET ${ISSUES}`]: call => (call.query.filter ? filtered.promise : unfiltered.promise) }
+    });
+    page.run("filterMode = 'duplicates'; loadSeriesIssues('saga')");
+    await page.settle();
+    assert.equal(callsTo(page, ISSUES).length, 2);
+
+    unfiltered.resolve(issuesBody(seriesCard(), [issue(1), issue(2), issue(3)]));
+    await page.settle();
+    assert.equal(page.evaluate('currentSeriesDetailSeries.issue_count'), 0, 'the superseded answer does not update the snapshot');
+    assert.equal(page.evaluate('currentSeriesDetailSeries.total_size'), 0);
+    assert.equal(text(page.$('#seriesDetailPanel .loading')), 'Loading issues...');
+
+    filtered.resolve(issuesBody(seriesCard(), [issue(1, { duplicate: true })]));
+    await page.settle();
+    assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz']);
+    assert.equal(text(page.$('#seriesDetailPanel .series-detail-summary .series-detail-meta')), '1 issue · 1.0 MB');
+});

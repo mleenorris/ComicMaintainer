@@ -115,7 +115,7 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
             payload["assignees"] = new[] { assignee.Trim() };
         }
 
-        var response = await SendAsync(
+        using var response = await SendAsync(
             target,
             HttpMethod.Post,
             $"repos/{Uri.EscapeDataString(target.Owner)}/{Uri.EscapeDataString(target.Repo)}/issues",
@@ -135,10 +135,6 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         catch (JsonException ex)
         {
             throw new GitHubIssueTransientException("GitHub returned a response that could not be parsed", ex);
-        }
-        finally
-        {
-            response.Dispose();
         }
     }
 

@@ -13,7 +13,7 @@ public class ComicFileProcessorCoverageTests : IDisposable
 {
     private const string Template = "{series} - Chapter {issue}";
 
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "cfp-cov-" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(Path.GetTempPath(), "cfp-cov-" + Guid.NewGuid().ToString("N"));
 
     public void Dispose()
     {
@@ -26,9 +26,11 @@ public class ComicFileProcessorCoverageTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 
@@ -135,13 +137,13 @@ public class ComicFileProcessorCoverageTests : IDisposable
         var path = WriteCbz("Other/Series - Chapter 0001.cbz",
             "<ComicInfo><Series>Series</Series><Number>1</Number><Title>Chapter 1</Title></ComicInfo>");
 
-        Assert.True(ComicFileProcessor.IsFileAlreadyNormalized(path, Template, comicFolder: Path.Combine(_root, "Series")));
+        Assert.True(ComicFileProcessor.IsFileAlreadyNormalized(path, Template, comicFolder: Path.Join(_root, "Series")));
         Assert.False(ComicFileProcessor.IsFileAlreadyNormalized(path, Template));
     }
 
     private string WriteCbz(string relativePath, string comicInfoXml)
     {
-        var path = Path.Combine(_root, relativePath);
+        var path = Path.Join(_root, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
         var info = zip.CreateEntry("ComicInfo.xml");

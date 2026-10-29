@@ -69,7 +69,7 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
             var settings = _settings.CurrentValue;
             var configured = settings.DatabaseBackupDirectory;
             var dir = string.IsNullOrWhiteSpace(configured)
-                ? Path.Combine(settings.ConfigDirectory, "backups")
+                ? Path.Join(settings.ConfigDirectory, "backups")
                 : configured;
             return Path.GetFullPath(dir);
         }
@@ -105,7 +105,7 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         return Directory.EnumerateFiles(dir, FilePrefix + "*" + FileExtension, SearchOption.TopDirectoryOnly)
             .Select(Path.GetFileName)
             .Where(IsValidBackupName)
-            .Select(name => ToInfo(new FileInfo(Path.Combine(dir, name!))))
+            .Select(name => ToInfo(new FileInfo(Path.Join(dir, name!))))
             .OrderByDescending(b => b.CreatedUtc)
             .ThenByDescending(b => b.Name, StringComparer.Ordinal)
             .ToList();
@@ -148,7 +148,7 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         {
             try
             {
-                File.Delete(Path.Combine(BackupDirectory, backup.Name));
+                File.Delete(Path.Join(BackupDirectory, backup.Name));
                 deleted++;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -328,13 +328,12 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         // The old database's WAL/SHM belong to the file being replaced; leaving them
         // would make SQLite replay old pages on top of the restored database. The
         // safety backup taken when the restore was staged already holds their contents.
-        foreach (var sidecar in new[] { "-wal", "-shm", "-journal" })
+        var sidecarPaths = new[] { "-wal", "-shm", "-journal" }
+            .Select(sidecar => databasePath + sidecar)
+            .Where(File.Exists);
+        foreach (var sidecarPath in sidecarPaths)
         {
-            var sidecarPath = databasePath + sidecar;
-            if (File.Exists(sidecarPath))
-            {
-                File.Delete(sidecarPath);
-            }
+            File.Delete(sidecarPath);
         }
 
         File.Move(pending, databasePath, overwrite: true);
@@ -409,10 +408,10 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
     {
         var stamp = _timeProvider.GetUtcNow().UtcDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
         var baseName = FilePrefix + stamp + (suffix is null ? string.Empty : "-" + suffix);
-        var candidate = Path.Combine(dir, baseName + FileExtension);
+        var candidate = Path.Join(dir, baseName + FileExtension);
         for (var n = 2; File.Exists(candidate); n++)
         {
-            candidate = Path.Combine(dir, $"{baseName}-{n}{FileExtension}");
+            candidate = Path.Join(dir, $"{baseName}-{n}{FileExtension}");
         }
         return candidate;
     }
@@ -421,7 +420,7 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
     {
         var dir = Path.GetDirectoryName(_databasePath)!;
         Directory.CreateDirectory(dir);
-        return Path.Combine(dir, $".restore-staging-{Guid.NewGuid():N}.db");
+        return Path.Join(dir, $".restore-staging-{Guid.NewGuid():N}.db");
     }
 
     /// <summary>
@@ -436,7 +435,7 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         }
 
         var dir = Path.GetFullPath(BackupDirectory);
-        var full = Path.GetFullPath(Path.Combine(dir, name));
+        var full = Path.GetFullPath(Path.Join(dir, name));
         var dirWithSeparator = Path.EndsInDirectorySeparator(dir) ? dir : dir + Path.DirectorySeparatorChar;
         if (!full.StartsWith(dirWithSeparator, StringComparison.Ordinal)
             || !string.Equals(Path.GetDirectoryName(full), Path.TrimEndingDirectorySeparator(dir), StringComparison.Ordinal))

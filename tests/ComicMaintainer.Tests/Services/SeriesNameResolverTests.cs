@@ -110,7 +110,7 @@ public class SeriesNameResolverTests
     {
         var resolver = BuildResolver();
         _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((SeriesMetadataCacheRecord?)null);
-        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((ExternalSeriesMetadata?)null);
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(default(ExternalSeriesMetadata?));
 
         var result = await resolver.ResolveAsync("/library/Some Series/c1.cbz", metadata: null, mutateCache: false);
 
@@ -123,7 +123,7 @@ public class SeriesNameResolverTests
     {
         var resolver = BuildResolver();
         _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((SeriesMetadataCacheRecord?)null);
-        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((ExternalSeriesMetadata?)null);
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(default(ExternalSeriesMetadata?));
 
         var result = await resolver.ResolveAsync(
             "/library/Some Series/c1.cbz",

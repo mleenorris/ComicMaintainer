@@ -71,7 +71,7 @@ public sealed class ErrorReportingSink : ILogEventSink
 
             _queue.TryEnqueue(report);
         }
-        catch
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Deliberately swallowed. A failure to capture a report is strictly
             // less important than the error that was being logged, which has

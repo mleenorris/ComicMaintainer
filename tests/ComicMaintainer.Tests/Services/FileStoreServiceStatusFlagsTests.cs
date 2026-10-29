@@ -26,7 +26,7 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
         Normalized,
     }
 
-    private readonly string _root = Path.Combine(Path.GetTempPath(), $"fss_flags_{Guid.NewGuid():N}");
+    private readonly string _root = Path.Join(Path.GetTempPath(), $"fss_flags_{Guid.NewGuid():N}");
     private readonly string _library;
     private readonly string _outside;
     private readonly ServiceProvider _provider;
@@ -36,8 +36,8 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
 
     public FileStoreServiceStatusFlagsTests()
     {
-        _library = Directory.CreateDirectory(Path.Combine(_root, "library")).FullName;
-        _outside = Directory.CreateDirectory(Path.Combine(_root, "outside")).FullName;
+        _library = Directory.CreateDirectory(Path.Join(_root, "library")).FullName;
+        _outside = Directory.CreateDirectory(Path.Join(_root, "outside")).FullName;
 
         var dbName = $"fss_flags_{Guid.NewGuid()}";
         var services = new ServiceCollection();
@@ -93,7 +93,7 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
     [InlineData(Flag.Normalized)]
     public async Task MarkFlag_FileMissingOrOutsideLibrary_DoesNotCreateRow(Flag flag)
     {
-        var missing = Path.Combine(_library, "Missing.cbz");
+        var missing = Path.Join(_library, "Missing.cbz");
         var outside = WriteComic(_outside, "Stray.cbz");
         var service = CreateService();
 
@@ -131,7 +131,7 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
     public async Task MarkFlag_PathTraversingOutOfTheLibrary_DoesNotCreateRow(Flag flag)
     {
         var stray = WriteComic(_outside, "Stray.cbz");
-        var traversal = Path.Combine(_library, "..", "outside", "Stray.cbz");
+        var traversal = Path.Join(_library, "..", "outside", "Stray.cbz");
         var service = CreateService();
 
         await MarkAsync(service, flag, traversal, true);
@@ -144,7 +144,7 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
     [Fact]
     public async Task MarkFileDuplicateAsync_FileNotOnDiskYet_IsAppliedWhenTheFileIsAdded()
     {
-        var path = Path.Combine(_library, "Later.cbz");
+        var path = Path.Join(_library, "Later.cbz");
         var service = CreateService();
 
         await service.MarkFileDuplicateAsync(path, true);
@@ -189,7 +189,7 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
     [Fact]
     public async Task ClearProcessedStatusAsync_FlaggedFile_ClearsEveryFlagAndBroadcasts()
     {
-        var path = Path.Combine(_library, "Done.cbz");
+        var path = Path.Join(_library, "Done.cbz");
         await SeedAsync(Row(path, renamed: true, normalized: true, duplicate: true));
         var broadcaster = new Mock<IEventBroadcaster>();
         var service = CreateService(broadcaster.Object);
@@ -210,7 +210,7 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
     [Fact]
     public async Task ClearProcessedStatusAsync_BroadcastFails_StillReportsClearedCount()
     {
-        var path = Path.Combine(_library, "Done.cbz");
+        var path = Path.Join(_library, "Done.cbz");
         await SeedAsync(Row(path, renamed: true));
         var broadcaster = new Mock<IEventBroadcaster>();
         broadcaster.Setup(b => b.BroadcastFileListUpdateAsync()).ThrowsAsync(new InvalidOperationException("hub down"));
@@ -226,7 +226,7 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
     [Fact]
     public async Task ClearProcessedStatusAsync_DatabaseUnavailable_ReturnsZeroAndLeavesSnapshotUntouched()
     {
-        var path = Path.Combine(_library, "Done.cbz");
+        var path = Path.Join(_library, "Done.cbz");
         await SeedAsync(Row(path, renamed: true, normalized: true));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
@@ -274,7 +274,7 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
 
     private static string WriteComic(string directory, string name)
     {
-        var path = Path.Combine(directory, name);
+        var path = Path.Join(directory, name);
         File.WriteAllText(path, "comic");
         return path;
     }

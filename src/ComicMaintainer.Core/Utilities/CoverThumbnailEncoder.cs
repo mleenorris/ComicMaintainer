@@ -91,7 +91,7 @@ public static class CoverThumbnailEncoder
             image.Format = MagickFormat.WebP;
             return (image.ToByteArray(), "image/webp");
         }
-        catch
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return null;
         }

@@ -182,7 +182,7 @@ public partial class ComicProcessorService
             
             _logger.LogWarning("Restored backup file after failed replacement: {File}", LoggingHelper.SanitizePathForLog(targetFile));
         }
-        catch (Exception restoreEx)
+        catch (Exception restoreEx) when (restoreEx is IOException or UnauthorizedAccessException or OperationCanceledException)
         {
             _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", LoggingHelper.SanitizePathForLog(backupPath));
         }
@@ -499,7 +499,7 @@ public partial class ComicProcessorService
                 Path.GetFileName(targetPath));
         }
 
-        return Path.Combine(ReadLinuxDirectoryPath(directoryDescriptor), Path.GetFileName(targetPath));
+        return Path.Join(ReadLinuxDirectoryPath(directoryDescriptor), Path.GetFileName(targetPath));
     }
 
     /// <summary>
@@ -819,7 +819,7 @@ public partial class ComicProcessorService
             }
 
             var relativePath = Path.GetRelativePath(resolvedRoot, resolvedPath);
-            var logicalPath = Path.GetFullPath(Path.Combine(logicalRoot, relativePath));
+            var logicalPath = Path.GetFullPath(Path.Join(logicalRoot, relativePath));
             if (TryResolveAllowedPath(logicalPath, out var verifiedPath) &&
                 string.Equals(verifiedPath, resolvedPath, LibraryPathValidator.PathComparison))
             {
@@ -830,16 +830,16 @@ public partial class ComicProcessorService
         throw new IOException("The renamed file does not resolve within a configured library directory.");
     }
 
-    [DllImport("libc", EntryPoint = "readlink", SetLastError = true)]
-    private static extern nint ReadLinuxLink(
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+    [LibraryImport("libc", EntryPoint = "readlink", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial nint ReadLinuxLink(
+        string path,
         [Out] byte[] buffer,
         nuint bufferSize);
 
-    [DllImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
-    private static extern int UnlinkAt(
+    [LibraryImport("libc", EntryPoint = "unlinkat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int UnlinkAt(
         int directory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        string name,
         int flags);
 
     protected virtual int RenameLinuxNoReplace(
@@ -854,12 +854,12 @@ public partial class ComicProcessorService
     {
     }
 
-    [DllImport("libc", EntryPoint = "renameat2", SetLastError = true)]
-    private static extern int RenameLinuxNoReplaceNative(
+    [LibraryImport("libc", EntryPoint = "renameat2", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RenameLinuxNoReplaceNative(
         int sourceDirectory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceName,
+        string sourceName,
         int targetDirectory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName,
+        string targetName,
         uint flags);
 
     /// <summary>
@@ -927,53 +927,55 @@ public partial class ComicProcessorService
     protected virtual int UnlinkLinux(int directory, string name, int flags) =>
         UnlinkLinuxNative(directory, name, flags);
 
-    [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
-    private static extern int OpenLinuxFileNative(
+    [LibraryImport("libc", EntryPoint = "openat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int OpenLinuxFileNative(
         int directory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        string path,
         int flags,
         uint mode);
 
-    [DllImport("libc", EntryPoint = "mkdirat", SetLastError = true)]
-    private static extern int MakeLinuxDirectoryNative(
+    [LibraryImport("libc", EntryPoint = "mkdirat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int MakeLinuxDirectoryNative(
         int directory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        string name,
         uint mode);
 
-    [DllImport("libc", EntryPoint = "linkat", SetLastError = true)]
-    private static extern int LinkLinuxNative(
+    [LibraryImport("libc", EntryPoint = "linkat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int LinkLinuxNative(
         int sourceDirectory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceName,
+        string sourceName,
         int targetDirectory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName,
+        string targetName,
         int flags);
 
-    [DllImport("libc", EntryPoint = "renameat", SetLastError = true)]
-    private static extern int RenameLinuxNative(
+    [LibraryImport("libc", EntryPoint = "renameat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RenameLinuxNative(
         int sourceDirectory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceName,
+        string sourceName,
         int targetDirectory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string targetName);
+        string targetName);
 
-    [DllImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
-    private static extern int UnlinkLinuxNative(
+    [LibraryImport("libc", EntryPoint = "unlinkat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int UnlinkLinuxNative(
         int directory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        string name,
         int flags);
 
-    [DllImport("libc", EntryPoint = "fchown", SetLastError = true)]
-    private static extern int SetLinuxFileOwner(
+    [LibraryImport("libc", EntryPoint = "fchown", SetLastError = true)]
+    private static partial int SetLinuxFileOwner(
         SafeFileHandle file,
         uint owner,
         uint group);
 
-    [DllImport("libc", EntryPoint = "geteuid")]
-    private static extern uint GetLinuxEffectiveUserId();
+    // geteuid cannot fail; SetLastError only makes the generator emit a managed stub rather than
+    // an extern forwarder, keeping every native call behind generated marshalling code.
+    [LibraryImport("libc", EntryPoint = "geteuid", SetLastError = true)]
+    private static partial uint GetLinuxEffectiveUserId();
 
-    [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
-    private static extern int StatLinuxFileNative(
+    [LibraryImport("libc", EntryPoint = "statx", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int StatLinuxFileNative(
         int directory,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        string path,
         int flags,
         uint mask,
         out LinuxFileStatus status);

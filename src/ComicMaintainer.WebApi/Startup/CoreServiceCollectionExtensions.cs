@@ -43,7 +43,7 @@ internal static class CoreServiceCollectionExtensions
         // AppSettings:ConfigDirectory, then /Config) as AppSettings:ConfigDirectory.
         var configDirectory = configuration[ConfigDirectoryResolver.ConfigurationKey] ?? ConfigDirectoryResolver.DefaultDirectory;
         var rawConnectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? $"Data Source={Path.Combine(configDirectory, "comicmaintainer.db")}";
+            ?? $"Data Source={Path.Join(configDirectory, "comicmaintainer.db")}";
         // Normalize the connection string (pooling, shared cache, default timeout) once so
         // every DbContext instance is built from the same hardened settings.
         var connectionString = SqliteDbContextOptionsExtensions.NormalizeSqliteConnectionString(rawConnectionString);
@@ -75,7 +75,7 @@ internal static class CoreServiceCollectionExtensions
         // Configure Data Protection to persist keys in Config directory
         try
         {
-            var dataProtectionPath = Path.Combine(configDirectory, "DataProtection-Keys");
+            var dataProtectionPath = Path.Join(configDirectory, "DataProtection-Keys");
             Directory.CreateDirectory(dataProtectionPath);
             
             var dpBuilder = services.AddDataProtection()
@@ -95,7 +95,7 @@ internal static class CoreServiceCollectionExtensions
                 dpBuilder.UnprotectKeysWithAnyCertificate();
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             Log.Warning(ex, "Failed to configure DataProtection with persistent storage. Using temporary storage.");
         }

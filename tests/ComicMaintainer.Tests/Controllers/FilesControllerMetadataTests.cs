@@ -34,7 +34,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
 
     public FilesControllerMetadataTests()
     {
-        _root = Path.Combine(AppContext.BaseDirectory, "fc-n2a-tests", Guid.NewGuid().ToString("N"));
+        _root = Path.Join(AppContext.BaseDirectory, "fc-n2a-tests", Guid.NewGuid().ToString("N"));
         _settings.Setup(s => s.CurrentValue).Returns(new AppSettings { WatchedDirectory = _root });
         _history
             .Setup(h => h.AddHistoryEntryAsync(It.IsAny<ProcessingHistoryEntry>(), It.IsAny<CancellationToken>()))
@@ -71,7 +71,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
             seriesNameResolver: resolver,
             scheduledJobsHostedService: scheduledJobs);
 
-    private string InRoot(params string[] parts) => Path.Combine(new[] { _root }.Concat(parts).ToArray());
+    private string InRoot(params string[] parts) => Path.Join(new[] { _root }.Concat(parts).ToArray());
 
     // Path theories use "{root}" for the watched directory, e.g. to build a
     // sibling directory that shares its name prefix.
@@ -80,7 +80,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     private string CreateRealFile(string name)
     {
         Directory.CreateDirectory(_root);
-        var path = Path.Combine(_root, name);
+        var path = Path.Join(_root, name);
         File.WriteAllBytes(path, new byte[] { 1, 2, 3 });
         return path;
     }
@@ -222,7 +222,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     public async Task GetSeriesResolution_FileHasNoMetadata_ReportsNoActualSeries()
     {
         var path = InRoot("Saga 001.cbz");
-        _processor.Setup(p => p.GetMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync((ComicMetadata?)null);
+        _processor.Setup(p => p.GetMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(default(ComicMetadata?));
         _resolver
             .Setup(r => r.ResolveAsync(path, null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesNameResolution { ResolvedSeries = "Saga", WinningStep = SeriesNameResolutionStep.FolderName });
@@ -675,7 +675,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     public async Task PatchMetadata_FileNoLongerTrackedAfterEdit_ReportsVersionZero()
     {
         var path = InRoot("Saga 001.cbz");
-        _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync((ComicFile?)null);
+        _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(default(ComicFile?));
 
         var result = await CreateController()
             .PatchMetadata(path, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "One" } }, CancellationToken.None);
@@ -896,7 +896,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
         Assert.Equal(true, Prop(ok.Value, "success"));
         Assert.Equal(1, Prop(ok.Value, "cleared"));
         var entry = SingleHistoryEntry();
-        Assert.Equal(("RemoveMetadata", true, (string?)null), (entry.Action, entry.Success, entry.ErrorMessage));
+        Assert.Equal(("RemoveMetadata", true, default(string?)), (entry.Action, entry.Success, entry.ErrorMessage));
         _broadcaster.Verify(b => b.BroadcastFileProcessedAsync("Saga 001.cbz", true, null), Times.Once);
     }
 

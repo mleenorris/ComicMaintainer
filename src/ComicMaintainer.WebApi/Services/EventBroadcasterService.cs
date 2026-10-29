@@ -206,7 +206,7 @@ public class EventBroadcasterService : IEventBroadcaster
             }
             return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex, "Failed to send to SSE client {ClientId}, will disconnect", clientId);
             Disconnect(clientId, client);
@@ -226,7 +226,7 @@ public class EventBroadcasterService : IEventBroadcaster
         {
             client.Abort?.Invoke();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex, "Failed to abort SSE client {ClientId}", clientId);
         }

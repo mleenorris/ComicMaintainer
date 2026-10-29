@@ -39,28 +39,7 @@ internal static class WebApplicationExtensions
             
             foreach (var roleName in roles)
             {
-                if (!await roleManager.RoleExistsAsync(roleName))
-                {
-                    var role = new ApplicationRole
-                    { 
-                        Name = roleName,
-                        Description = $"{roleName} role"
-                    };
-
-                    try
-                    {
-                        await roleManager.CreateAsync(role);
-                    }
-                    catch (DbUpdateException)
-                    {
-                        if (!await roleManager.RoleExistsAsync(roleName))
-                        {
-                            throw;
-                        }
-
-                        db.Entry(role).State = EntityState.Detached;
-                    }
-                }
+                await EnsureRoleExistsAsync(roleManager, db, roleName);
             }
             
             // Check if admin user should be seeded from environment variables (for backward compatibility).
@@ -70,28 +49,57 @@ internal static class WebApplicationExtensions
             var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out _);
             
             // Only create default admin if both ADMIN_USERNAME and ADMIN_PASSWORD are explicitly set
-            if (!string.IsNullOrEmpty(adminUsername) && !string.IsNullOrEmpty(adminPassword))
+            if (!string.IsNullOrEmpty(adminUsername) && !string.IsNullOrEmpty(adminPassword)
+                && await userManager.FindByNameAsync(adminUsername) == null)
             {
-                if (await userManager.FindByNameAsync(adminUsername) == null)
+                var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? $"{adminUsername}@comicmaintainer.local";
+                var adminUser = new ApplicationUser
                 {
-                    var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? $"{adminUsername}@comicmaintainer.local";
-                    var adminUser = new ApplicationUser
-                    {
-                        UserName = adminUsername,
-                        Email = adminEmail,
-                        FullName = "Administrator",
-                        IsActive = true,
-                        EmailConfirmed = true
-                    };
-                    
-                    var result = await userManager.CreateAsync(adminUser, adminPassword);
-                    if (result.Succeeded)
-                    {
-                        await userManager.AddToRoleAsync(adminUser, "Admin");
-                        logger.LogInformation("Admin user '{Username}' created from environment variables", adminUsername);
-                    }
+                    UserName = adminUsername,
+                    Email = adminEmail,
+                    FullName = "Administrator",
+                    IsActive = true,
+                    EmailConfirmed = true
+                };
+
+                var result = await userManager.CreateAsync(adminUser, adminPassword);
+                if (result.Succeeded)
+                {
+                    await userManager.AddToRoleAsync(adminUser, "Admin");
+                    logger.LogInformation("Admin user '{Username}' created from environment variables", adminUsername);
                 }
             }
+        }
+    }
+
+    private static async Task EnsureRoleExistsAsync(
+        RoleManager<ApplicationRole> roleManager,
+        ComicMaintainerDbContext db,
+        string roleName)
+    {
+        if (await roleManager.RoleExistsAsync(roleName))
+        {
+            return;
+        }
+
+        var role = new ApplicationRole
+        {
+            Name = roleName,
+            Description = $"{roleName} role"
+        };
+
+        try
+        {
+            await roleManager.CreateAsync(role);
+        }
+        catch (DbUpdateException)
+        {
+            if (!await roleManager.RoleExistsAsync(roleName))
+            {
+                throw;
+            }
+
+            db.Entry(role).State = EntityState.Detached;
         }
     }
 
@@ -261,15 +269,11 @@ internal static class WebApplicationExtensions
                          ctx.Context.Request.Path.StartsWithSegments("/js"))
                 {
                     var requestedVersion = ctx.Context.Request.Query["v"].ToString();
-                    if (!string.IsNullOrEmpty(requestedVersion) &&
-                        string.Equals(requestedVersion, appVersion, StringComparison.Ordinal))
-                    {
-                        ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
-                    }
-                    else
-                    {
-                        ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
-                    }
+                    var isVersioned = !string.IsNullOrEmpty(requestedVersion) &&
+                        string.Equals(requestedVersion, appVersion, StringComparison.Ordinal);
+                    ctx.Context.Response.Headers["Cache-Control"] = isVersioned
+                        ? "public, max-age=31536000, immutable"
+                        : "no-cache, must-revalidate";
                 }
                 // Cache other static assets (images, icons, fonts) for 1 hour with cache busting via query string
                 else
@@ -334,7 +338,7 @@ internal static class WebApplicationExtensions
             }
 
             var env = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
-            var indexPath = Path.Combine(env.WebRootPath ?? string.Empty, "index.html");
+            var indexPath = Path.Join(env.WebRootPath ?? string.Empty, "index.html");
             if (!File.Exists(indexPath))
             {
                 context.Response.StatusCode = 404;

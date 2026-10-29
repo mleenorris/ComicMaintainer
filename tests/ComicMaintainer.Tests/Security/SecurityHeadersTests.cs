@@ -147,7 +147,7 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
             AllowAutoRedirect = false
         });
         
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/version");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/version");
         request.Headers.Add("X-Forwarded-Proto", "https");
 
         // Act
@@ -179,7 +179,7 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
             AllowAutoRedirect = false
         });
         
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/version");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/version");
         request.Headers.Add("X-Forwarded-Proto", "https");
 
         // Act

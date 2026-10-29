@@ -104,16 +104,14 @@ internal static class RateLimitedHttpInvoker
 
         if (response.Headers.TryGetValues("X-RateLimit-Retry-After", out var values))
         {
-            foreach (var raw in values)
+            var delay = values
+                .Select(raw => long.TryParse(raw, out var unixSeconds)
+                    ? DateTimeOffset.FromUnixTimeSeconds(unixSeconds) - DateTimeOffset.UtcNow
+                    : TimeSpan.Zero)
+                .FirstOrDefault(diff => diff > TimeSpan.Zero);
+            if (delay > TimeSpan.Zero)
             {
-                if (long.TryParse(raw, out var unixSeconds))
-                {
-                    var diff = DateTimeOffset.FromUnixTimeSeconds(unixSeconds) - DateTimeOffset.UtcNow;
-                    if (diff > TimeSpan.Zero)
-                    {
-                        return diff;
-                    }
-                }
+                return delay;
             }
         }
 

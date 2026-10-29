@@ -67,7 +67,7 @@ public class FileCoverCacheService : IFileCoverCacheService
                 return null;
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             _logger.LogDebug(ex, "FileCoverCache: stat failed for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return null;
@@ -127,7 +127,7 @@ public class FileCoverCacheService : IFileCoverCacheService
                 };
                 WriteAtomic(metaPath, JsonSerializer.SerializeToUtf8Bytes(meta));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
             {
                 _logger.LogWarning(ex, "FileCoverCache: failed to persist cover for {FilePath}",
                     LoggingHelper.SanitizePathForLog(filePath));
@@ -139,7 +139,7 @@ public class FileCoverCacheService : IFileCoverCacheService
             if (Interlocked.Increment(ref _writesSinceLastPrune) % 32 == 0)
             {
                 try { PruneIfOverLimit(dir, settings.FileCoverCacheMaxMegabytes); }
-                catch (Exception ex) { _logger.LogDebug(ex, "FileCoverCache: prune failed"); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException) { _logger.LogDebug(ex, "FileCoverCache: prune failed"); }
             }
 
             return generated;
@@ -168,7 +168,7 @@ public class FileCoverCacheService : IFileCoverCacheService
             TryDelete(blobPath);
             TryDelete(metaPath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex, "FileCoverCache: invalidate failed for {FilePath}",
                 LoggingHelper.SanitizePathForLog(filePath));
@@ -243,11 +243,11 @@ public class FileCoverCacheService : IFileCoverCacheService
             var data = File.ReadAllBytes(blobPath);
             // Best-effort: bump last-access so LRU-style pruning is accurate.
             try { File.SetLastAccessTimeUtc(blobPath, DateTime.UtcNow); }
-            catch { /* ignore */ }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
 
             return new FileCoverCacheEntry(data, meta.ContentType, sourceMtime, variant);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             _logger.LogDebug(ex, "FileCoverCache: failed to read cached entry");
             return null;
@@ -256,7 +256,7 @@ public class FileCoverCacheService : IFileCoverCacheService
 
     private static (string BlobPath, string MetaPath) GetPaths(string dir, string key)
     {
-        return (Path.Combine(dir, key + ".img"), Path.Combine(dir, key + ".meta"));
+        return (Path.Join(dir, key + ".img"), Path.Join(dir, key + ".meta"));
     }
 
     private static string ComputeKey(string filePath)
@@ -278,7 +278,7 @@ public class FileCoverCacheService : IFileCoverCacheService
             return configured;
         }
         var configDir = settings.ConfigDirectory ?? "/Config";
-        return Path.Combine(configDir, "file-covers");
+        return Path.Join(configDir, "file-covers");
     }
 
     private static void WriteAtomic(string path, byte[] bytes)
@@ -291,7 +291,7 @@ public class FileCoverCacheService : IFileCoverCacheService
         }
         catch
         {
-            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* ignore */ }
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
             throw;
         }
     }
@@ -299,7 +299,7 @@ public class FileCoverCacheService : IFileCoverCacheService
     private static void TryDelete(string path)
     {
         try { if (File.Exists(path)) File.Delete(path); }
-        catch { /* ignore */ }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 
     private void PruneIfOverLimit(string dir, int maxMegabytes)
@@ -338,7 +338,7 @@ public class FileCoverCacheService : IFileCoverCacheService
     private static DateTime SafeAccessTime(FileInfo fi)
     {
         try { return fi.LastAccessTimeUtc; }
-        catch { return DateTime.UtcNow; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return DateTime.UtcNow; }
     }
 
     private sealed class CacheMeta

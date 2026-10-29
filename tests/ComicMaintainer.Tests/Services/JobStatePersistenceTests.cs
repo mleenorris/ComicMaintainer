@@ -16,7 +16,7 @@ namespace ComicMaintainer.Tests.Services;
 public class JobStatePersistenceTests : IDisposable
 {
     private readonly string _testDirectory =
-        Path.Combine(Path.GetTempPath(), $"jobstate_{Guid.NewGuid()}");
+        Path.Join(Path.GetTempPath(), $"jobstate_{Guid.NewGuid()}");
 
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IProcessingHistoryService> _history = new();

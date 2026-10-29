@@ -35,17 +35,17 @@ public class MangaDexSeriesMetadataServiceTests
     [Fact]
     public async Task LookupSeriesAsync_RecordsOnlyTerminalRateLimitAsFailedRequest()
     {
-        var responses = new Queue<HttpResponseMessage>(
+        var responses = new Queue<Func<HttpResponseMessage>>(
         [
-            new(HttpStatusCode.TooManyRequests),
-            new(HttpStatusCode.OK)
+            () => new(HttpStatusCode.TooManyRequests),
+            () => new(HttpStatusCode.OK)
             {
                 Content = new StringContent("""{ "data": [] }""", Encoding.UTF8, "application/json")
             },
-            new(HttpStatusCode.TooManyRequests),
-            new(HttpStatusCode.TooManyRequests)
+            () => new(HttpStatusCode.TooManyRequests),
+            () => new(HttpStatusCode.TooManyRequests)
         ]);
-        var handler = new StubHttpMessageHandler(_ => responses.Dequeue());
+        var handler = new StubHttpMessageHandler(_ => responses.Dequeue()());
         using var metrics = new ComicMaintainerMetrics();
         var outcomes = new List<string>();
         using var listener = new MeterListener();

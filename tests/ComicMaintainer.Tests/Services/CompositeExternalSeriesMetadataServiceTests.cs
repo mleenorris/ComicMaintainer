@@ -38,7 +38,7 @@ public class CompositeExternalSeriesMetadataServiceTests
         var firstProvider = new Mock<IExternalSeriesMetadataService>();
         firstProvider
             .Setup(provider => provider.LookupSeriesAsync("Solo Leveling", default))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
 
         var secondProvider = new Mock<IExternalSeriesMetadataService>();
         secondProvider
@@ -61,12 +61,12 @@ public class CompositeExternalSeriesMetadataServiceTests
         var firstProvider = new Mock<IExternalSeriesMetadataService>();
         firstProvider
             .Setup(provider => provider.LookupSeriesAsync(It.IsAny<string>(), default))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
 
         var secondProvider = new Mock<IExternalSeriesMetadataService>();
         secondProvider
             .Setup(provider => provider.LookupSeriesAsync(It.IsAny<string>(), default))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
 
         var service = new CompositeExternalSeriesMetadataService(
             [firstProvider.Object, secondProvider.Object],

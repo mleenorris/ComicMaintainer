@@ -49,7 +49,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         typeof(SuwayomiDownloadImportJobHandler),
     ];
 
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "cm-coreservices-" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(Path.GetTempPath(), "cm-coreservices-" + Guid.NewGuid().ToString("N"));
 
     public CoreServiceCollectionExtensionsTests()
     {
@@ -64,9 +64,11 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 
@@ -133,7 +135,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public void ResolveSqliteDatabasePath_ReturnsTheAbsolutePathOfAFileDatabase()
     {
-        var databasePath = Path.Combine(_root, "library.db");
+        var databasePath = Path.Join(_root, "library.db");
 
         var resolved = ResolveSqliteDatabasePath($"Data Source={databasePath};Pooling=True;Default Timeout=30");
 
@@ -143,7 +145,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public void ResolveSqliteDatabasePath_ResolvesARelativePathAgainstTheCurrentDirectory()
     {
-        var relative = Path.Combine("data", "library.db");
+        var relative = Path.Join("data", "library.db");
 
         var resolved = ResolveSqliteDatabasePath($"Data Source={relative}");
 
@@ -154,7 +156,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public void AddComicMaintainerData_WithoutAConnectionString_UsesADatabaseInTheConfigDirectory()
     {
-        var expectedDatabase = Path.Combine(_root, "comicmaintainer.db");
+        var expectedDatabase = Path.Join(_root, "comicmaintainer.db");
 
         using var provider = BuildDataServices(("AppSettings:ConfigDirectory", _root));
 
@@ -178,7 +180,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public void AddComicMaintainerData_UsesTheConfiguredConnectionString()
     {
-        var customDatabase = Path.Combine(_root, "custom", "library.db");
+        var customDatabase = Path.Join(_root, "custom", "library.db");
 
         using var provider = BuildDataServices(
             ("AppSettings:ConfigDirectory", _root),
@@ -193,7 +195,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(customDatabase)!);
         File.WriteAllText(DatabaseBackupService.GetPendingRestorePath(customDatabase), string.Empty);
         Assert.True(backups.IsRestorePending);
-        Assert.False(File.Exists(Path.Combine(_root, "comicmaintainer.db")));
+        Assert.False(File.Exists(Path.Join(_root, "comicmaintainer.db")));
     }
 
     [Fact]
@@ -212,7 +214,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public void AddComicMaintainerData_WithAFileUriConnectionString_BacksUpTheFileItNames()
     {
-        var databasePath = Path.Combine(_root, "library.db");
+        var databasePath = Path.Join(_root, "library.db");
 
         using var provider = BuildDataServices(
             ("AppSettings:ConfigDirectory", _root),
@@ -227,7 +229,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public void AddComicMaintainerData_PersistsDataProtectionKeysInTheConfigDirectory()
     {
-        var keysDirectory = Path.Combine(_root, "DataProtection-Keys");
+        var keysDirectory = Path.Join(_root, "DataProtection-Keys");
 
         using var provider = BuildDataServices(("AppSettings:ConfigDirectory", _root));
 
@@ -248,7 +250,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     public void AddComicMaintainerData_WhenTheKeysDirectoryCannotBeCreated_SkipsPersistentDataProtection()
     {
         // A plain file where the keys directory should be makes Directory.CreateDirectory throw.
-        var blockingFile = Path.Combine(_root, "DataProtection-Keys");
+        var blockingFile = Path.Join(_root, "DataProtection-Keys");
         File.WriteAllText(blockingFile, "not a directory");
         var services = new ServiceCollection();
 

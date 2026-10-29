@@ -19,7 +19,7 @@ public class LibraryScanJobHandlerTests : IDisposable
 
     public LibraryScanJobHandlerTests()
     {
-        _watchDir = Path.Combine(Path.GetTempPath(), "lib-scan-tests-" + Guid.NewGuid().ToString("N"));
+        _watchDir = Path.Join(Path.GetTempPath(), "lib-scan-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_watchDir);
         _settings = new AppSettings { WatchedDirectory = _watchDir };
         _options.Setup(o => o.CurrentValue).Returns(_settings);
@@ -29,7 +29,7 @@ public class LibraryScanJobHandlerTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_watchDir, recursive: true); } catch { /* best effort */ }
+        try { Directory.Delete(_watchDir, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
     }
 
     private LibraryScanJobHandler BuildHandler() => new(
@@ -51,9 +51,9 @@ public class LibraryScanJobHandlerTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_AddsNewFilesAndQueuesProcessing()
     {
-        var seriesDir = Path.Combine(_watchDir, "One Piece");
+        var seriesDir = Path.Join(_watchDir, "One Piece");
         Directory.CreateDirectory(seriesDir);
-        var newFile = Path.Combine(seriesDir, "c001.cbz");
+        var newFile = Path.Join(seriesDir, "c001.cbz");
         await File.WriteAllBytesAsync(newFile, new byte[] { 0x50, 0x4B });
 
         _fileStore.Setup(f => f.FileExistsAsync(newFile, It.IsAny<CancellationToken>())).ReturnsAsync(false);
@@ -77,9 +77,9 @@ public class LibraryScanJobHandlerTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_IgnoresStagingFiles()
     {
-        var seriesDir = Path.Combine(_watchDir, "One Piece");
+        var seriesDir = Path.Join(_watchDir, "One Piece");
         Directory.CreateDirectory(seriesDir);
-        var staging = Path.Combine(seriesDir, ".tmp_0123456789abcdef.cbz");
+        var staging = Path.Join(seriesDir, ".tmp_0123456789abcdef.cbz");
         await File.WriteAllBytesAsync(staging, new byte[] { 0x50, 0x4B });
 
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<ComicFile>());
@@ -95,7 +95,7 @@ public class LibraryScanJobHandlerTests : IDisposable
     public async Task ExecuteAsync_ReconcileDeletions_RemovesGhostFiles()
     {
         // No disk files, but DB has one tracked file -> should be removed.
-        var ghostPath = Path.Combine(_watchDir, "Ghost", "missing.cbz");
+        var ghostPath = Path.Join(_watchDir, "Ghost", "missing.cbz");
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[]
         {
             new ComicFile { FilePath = ghostPath }
@@ -115,9 +115,9 @@ public class LibraryScanJobHandlerTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_StaleRetag_ForceNormalizesAffectedFiles()
     {
-        var seriesDir = Path.Combine(_watchDir, "One Piece");
+        var seriesDir = Path.Join(_watchDir, "One Piece");
         Directory.CreateDirectory(seriesDir);
-        var trackedFile = Path.Combine(seriesDir, "c001.cbz");
+        var trackedFile = Path.Join(seriesDir, "c001.cbz");
         await File.WriteAllBytesAsync(trackedFile, new byte[] { 0x50, 0x4B });
 
         _fileStore.Setup(f => f.FileExistsAsync(trackedFile, It.IsAny<CancellationToken>())).ReturnsAsync(true);
@@ -182,9 +182,9 @@ public class LibraryScanJobHandlerTests : IDisposable
 
     private string CreateTrackedFile(string name, out ComicFile tracked, long? sizeOverride = null, TimeSpan? mtimeOffset = null)
     {
-        var dir = Path.Combine(_watchDir, "Series");
+        var dir = Path.Join(_watchDir, "Series");
         Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, name);
+        var path = Path.Join(dir, name);
         File.WriteAllBytes(path, new byte[] { 0x50, 0x4B, 0x03, 0x04 });
         var info = new FileInfo(path);
         tracked = new ComicFile
@@ -298,7 +298,7 @@ public class LibraryScanJobHandlerTests : IDisposable
     public async Task ExecuteAsync_LoadsTrackedSnapshotOnce_AndNeverCallsFileExists()
     {
         CreateTrackedFile("c001.cbz", out var tracked);
-        var newFile = Path.Combine(_watchDir, "Series", "c002.cbz");
+        var newFile = Path.Join(_watchDir, "Series", "c002.cbz");
         File.WriteAllBytes(newFile, new byte[] { 0x50, 0x4B });
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[] { tracked });
 

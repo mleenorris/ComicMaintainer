@@ -46,7 +46,7 @@ public sealed class ErrorReportDispatchHostedService : BackgroundService
                 {
                     break;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     // Logged as a warning: an error here would be picked up by
                     // the reporting sink and fed back into this same loop.

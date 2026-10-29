@@ -91,12 +91,12 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
             .GetRequiredService<Microsoft.Extensions.Options.IOptions<RequestTimeoutOptions>>()
             .Value;
 
-        Assert.True(options.Policies.ContainsKey(RequestTimeoutPolicies.LongRunning));
+        Assert.True(options.Policies.TryGetValue(RequestTimeoutPolicies.LongRunning, out var longRunningPolicy));
         Assert.NotNull(options.DefaultPolicy);
         // Both policies must answer a timeout themselves; the framework's own
         // response is an empty body and a warning nobody reports.
         Assert.NotNull(options.DefaultPolicy!.WriteTimeoutResponse);
-        Assert.NotNull(options.Policies[RequestTimeoutPolicies.LongRunning].WriteTimeoutResponse);
+        Assert.NotNull(longRunningPolicy.WriteTimeoutResponse);
     }
 
     [Fact]

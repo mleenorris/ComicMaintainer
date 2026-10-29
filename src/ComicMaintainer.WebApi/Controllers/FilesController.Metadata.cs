@@ -28,7 +28,7 @@ public partial class FilesController
             
             return Ok(metadata);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, "Error retrieving metadata");
@@ -117,7 +117,7 @@ public partial class FilesController
                 if (_eventBroadcaster is not null)
                 {
                     try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), false, "Failed to update metadata"); }
-                    catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update failure"); }
+                    catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update failure"); }
                 }
                 return BadRequest("Failed to update metadata");
             }
@@ -133,12 +133,12 @@ public partial class FilesController
             if (_eventBroadcaster is not null)
             {
                 try { await _eventBroadcaster.BroadcastFileProcessedAsync(filename, true); }
-                catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update"); }
+                catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update"); }
             }
             
             return Ok();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await LogHistoryAsync(filePath, "Update Metadata", false, ex.Message);
@@ -191,7 +191,7 @@ public partial class FilesController
             _logger.LogWarning(ex, "Cannot patch metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return NotFound("File is not tracked");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error patching metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, "Error patching metadata");
@@ -250,7 +250,7 @@ public partial class FilesController
             var metadata = await _processor.GetMetadataAsync(filePath);
             return metadata != null ? Ok(metadata) : NotFound();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
             _logger.LogError(ex, "Error getting tags for encoded path {EncodedPath}", sanitizedEncodedPath);
@@ -278,11 +278,11 @@ public partial class FilesController
             if (success && _eventBroadcaster is not null)
             {
                 try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), true); }
-                catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for tag update"); }
+                catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for tag update"); }
             }
             return success ? Ok() : BadRequest("Failed to update tags");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
             _logger.LogError(ex, "Error updating tags for encoded path {EncodedPath}", sanitizedEncodedPath);
@@ -336,12 +336,12 @@ public partial class FilesController
             if (_eventBroadcaster is not null)
             {
                 try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), true); }
-                catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata removal"); }
+                catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata removal"); }
             }
 
             return Ok(new { success = true, cleared });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
             _logger.LogError(ex, "Error removing metadata from file with encoded path {EncodedPath}", sanitizedEncodedPath);

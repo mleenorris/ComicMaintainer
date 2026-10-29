@@ -11,7 +11,7 @@ public class ComicFileProcessorIntegrationTests : IDisposable
 
     public ComicFileProcessorIntegrationTests()
     {
-        _testDirectory = Path.Combine(Path.GetTempPath(), $"comic_processor_integration_{Guid.NewGuid()}");
+        _testDirectory = Path.Join(Path.GetTempPath(), $"comic_processor_integration_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
     }
 
@@ -20,7 +20,7 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     {
         // Arrange
         var template = "{series} - Chapter {issue}";
-        var comicFolder = Path.Combine(_testDirectory, "Batman");
+        var comicFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(comicFolder);
         
         var filePath = CreateNormalizedFile(comicFolder, "Batman", "12", template);
@@ -43,11 +43,11 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     {
         // Arrange
         var template = "{series} - Chapter {issue}";
-        var comicFolder = Path.Combine(_testDirectory, "Batman");
+        var comicFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(comicFolder);
         
         // Create with correct tags but wrong filename
-        var filePath = Path.Combine(comicFolder, "WrongName.cbz");
+        var filePath = Path.Join(comicFolder, "WrongName.cbz");
         CreateArchiveWithTags(filePath, "Batman", "12", 2023, "Chapter 12");
 
         // Act
@@ -68,10 +68,10 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     {
         // Arrange
         var template = "{series} - Chapter {issue}";
-        var comicFolder = Path.Combine(_testDirectory, "Batman");
+        var comicFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(comicFolder);
         
-        var filePath = Path.Combine(comicFolder, "Batman - Chapter 0012.cbz");
+        var filePath = Path.Join(comicFolder, "Batman - Chapter 0012.cbz");
         CreateArchiveWithTags(filePath, "Batman", "12", 2023, "Wrong Title");
 
         // Act
@@ -92,10 +92,10 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     {
         // Arrange
         var template = "{series} - Chapter {issue}";
-        var comicFolder = Path.Combine(_testDirectory, "Batman");
+        var comicFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(comicFolder);
         
-        var filePath = Path.Combine(comicFolder, "Batman - Chapter 0012.cbz");
+        var filePath = Path.Join(comicFolder, "Batman - Chapter 0012.cbz");
         CreateArchiveWithTags(filePath, "Superman", "12", 2023, "Chapter 12");
 
         // Act
@@ -116,10 +116,10 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     {
         // Arrange
         var template = "{series} - Chapter {issue}";
-        var comicFolder = Path.Combine(_testDirectory, "Batman");
+        var comicFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(comicFolder);
         
-        var filePath = Path.Combine(comicFolder, "Batman - Chapter 0012.cbz");
+        var filePath = Path.Join(comicFolder, "Batman - Chapter 0012.cbz");
         using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
         {
             var entry = archive.CreateEntry("page001.jpg");
@@ -145,10 +145,10 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     public void IsFileAlreadyNormalized_WithOnlyTitleCheck_ChecksTitleOnly()
     {
         // Arrange
-        var comicFolder = Path.Combine(_testDirectory, "Batman");
+        var comicFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(comicFolder);
         
-        var filePath = Path.Combine(comicFolder, "WrongFilename.cbz");
+        var filePath = Path.Join(comicFolder, "WrongFilename.cbz");
         CreateArchiveWithTags(filePath, "WrongSeries", "12", 2023, "Chapter 12");
 
         // Act
@@ -169,7 +169,7 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     {
         // Arrange
         var template = "{series} - Chapter {issue}";
-        var comicFolder = Path.Combine(_testDirectory, "Batman_The Dark Knight");
+        var comicFolder = Path.Join(_testDirectory, "Batman_The Dark Knight");
         Directory.CreateDirectory(comicFolder);
         
         var filePath = CreateNormalizedFile(comicFolder, "Batman:The Dark Knight", "12", template);
@@ -192,10 +192,10 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     {
         // Arrange
         var template = "{series} - {title} #{issue}";
-        var comicFolder = Path.Combine(_testDirectory, "Batman");
+        var comicFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(comicFolder);
 
-        var filePath = Path.Combine(comicFolder, "Batman - Zero_Hour__ #0012.cbz");
+        var filePath = Path.Join(comicFolder, "Batman - Zero_Hour__ #0012.cbz");
         CreateArchiveWithTags(filePath, "Batman", "12", 2023, "Zero/Hour?*");
 
         // Act
@@ -215,7 +215,7 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     public void IsFileAlreadyNormalized_NonExistentFile_ReturnsFalse()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
         // Act
         var result = ComicFileProcessor.IsFileAlreadyNormalized(
@@ -232,7 +232,7 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     private string CreateNormalizedFile(string folder, string series, string issue, string template)
     {
         var filename = ComicFileProcessor.FormatFilename(template, new ComicInfo { Series = series }, issue);
-        var filePath = Path.Combine(folder, filename);
+        var filePath = Path.Join(folder, filename);
         CreateArchiveWithTags(filePath, series, issue, 2023, $"Chapter {issue}");
         return filePath;
     }
@@ -273,7 +273,7 @@ public class ComicFileProcessorIntegrationTests : IDisposable
                 if (File.Exists(file))
                     File.Delete(file);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Ignore cleanup errors
             }
@@ -285,7 +285,7 @@ public class ComicFileProcessorIntegrationTests : IDisposable
             {
                 Directory.Delete(_testDirectory, true);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Ignore cleanup errors
             }

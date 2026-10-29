@@ -34,15 +34,15 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
 
     public ComicProcessorServiceJobCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "cps-job-cov-" + Guid.NewGuid().ToString("N"));
-        _library = Path.Combine(_root, "library");
+        _root = Path.Join(Path.GetTempPath(), "cps-job-cov-" + Guid.NewGuid().ToString("N"));
+        _library = Path.Join(_root, "library");
         Directory.CreateDirectory(_library);
 
         _settings = new AppSettings
         {
             WatchedDirectory = _library,
-            DuplicateDirectory = Path.Combine(_root, "duplicates"),
-            TempFileDirectory = Path.Combine(_root, "temp"),
+            DuplicateDirectory = Path.Join(_root, "duplicates"),
+            TempFileDirectory = Path.Join(_root, "temp"),
             FilenameFormat = "{series} - Chapter {issue}",
             IssueNumberPadding = 4,
         };
@@ -81,9 +81,11 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 
@@ -92,7 +94,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     {
         var service = CreateService();
         var ok = WriteCbz("Series/ok.cbz", Xml("Old", "1", "Chapter 1"));
-        var missing = Path.Combine(_library, "Series", "missing.cbz");
+        var missing = Path.Join(_library, "Series", "missing.cbz");
 
         var jobId = await service.UpdateMetadataAsync(new[] { ok, missing }, new ComicMetadata { Series = "Updated" });
         var job = await WaitForJobAsync(service, jobId);
@@ -109,7 +111,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     {
         var service = CreateService();
         var ok = WriteCbz("Series/ok.cbz", Xml("Old", "1", "Chapter 1"));
-        var missing = Path.Combine(_library, "Series", "missing.cbz");
+        var missing = Path.Join(_library, "Series", "missing.cbz");
 
         var jobId = await service.RemoveMetadataFromFilesAsync(new[] { ok, missing });
         var job = await WaitForJobAsync(service, jobId);
@@ -622,8 +624,8 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     {
         var service = CreateService();
         var ok = WriteCbz("Series/source.cbz", Xml("Series", "5", title: null));
-        var missing = Path.Combine(_library, "Series", "missing.cbz");
-        var expected = Path.Combine(_library, "Series", "Series - Chapter 0005.cbz");
+        var missing = Path.Join(_library, "Series", "missing.cbz");
+        var expected = Path.Join(_library, "Series", "Series - Chapter 0005.cbz");
 
         var jobId = await service.NormalizeAndRenameFilesAsync(new[] { ok, missing });
         var job = await WaitForJobAsync(service, jobId);
@@ -811,7 +813,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task Dispose_WithRunningJob_CancelsItAndIsIdempotent()
     {
-        var service = CreateService();
+        using var service = CreateService();
         var (jobId, itemToken) = await StartBlockedJobAsync(service);
 
         service.Dispose();
@@ -1020,7 +1022,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
 
     private string WriteCbz(string relativePath, string? comicInfoXml)
     {
-        var path = Path.Combine(_library, relativePath);
+        var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
         {

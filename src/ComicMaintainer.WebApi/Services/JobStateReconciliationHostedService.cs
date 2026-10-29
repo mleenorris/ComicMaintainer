@@ -61,7 +61,7 @@ public class JobStateReconciliationHostedService : IHostedService
 
             _logger.LogInformation("Restored {Count} persisted job record(s)", jobs.Count);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Job history is not worth blocking startup over; the application is still fully
             // usable without it.

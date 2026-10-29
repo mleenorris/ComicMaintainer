@@ -71,12 +71,12 @@ public class ComicMaintainerMetricsTests
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.files.processed" && (string?)x.Tags["outcome"] == "success" && (string?)x.Tags["operation"] == "Process");
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.files.processed" && (string?)x.Tags["outcome"] == "failed");
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.scheduled_job.runs" && (string?)x.Tags["job"] == "database-backup");
-        Assert.Contains(m, x => x.Instrument == "comicmaintainer.scheduled_job.duration" && x.Value == 2);
+        Assert.Contains(m, x => x.Instrument == "comicmaintainer.scheduled_job.duration" && Math.Abs(x.Value - 2) < 0.001);
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.metadata_provider.requests" && (string?)x.Tags["provider"] == "MangaDex");
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.metadata_provider.rate_limit_waits" && (string?)x.Tags["kind"] == "server");
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.email.sends" && (string?)x.Tags["outcome"] == "failed");
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.database.backups");
-        Assert.Contains(m, x => x.Instrument == "comicmaintainer.email.queue_depth" && x.Value == 2);
+        Assert.Contains(m, x => x.Instrument == "comicmaintainer.email.queue_depth" && Math.Abs(x.Value - 2) < 0.001);
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 
@@ -17,7 +18,7 @@ public class OperationalEndpointsIntegrationTests
 
     private static WebApplicationFactory<Program> CreateFactory(string environment, params (string Key, string Value)[] settings)
     {
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new TestWebApplicationFactory(builder =>
         {
             builder.UseEnvironment(environment);
             if (environment != "Development")

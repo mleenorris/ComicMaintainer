@@ -756,6 +756,11 @@ self.addEventListener('fetch', (event) => {
 
 // Listen for messages from the client
 self.addEventListener('message', (event) => {
+  // Only pages of this origin can reach the worker; never act on anything else.
+  if (event.origin !== self.location.origin) {
+    return;
+  }
+
   if (!event.data) {
     return;
   }

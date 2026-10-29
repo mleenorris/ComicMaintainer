@@ -107,9 +107,9 @@ internal static class AuthServiceCollectionExtensions
                 {
                     // Allow token to be passed via query string for EventSource/SSE connections
                     // EventSource API doesn't support custom headers, so we need this for SSE endpoints
-                    if (string.IsNullOrEmpty(context.Token) && context.Request.Query.ContainsKey("access_token"))
+                    if (string.IsNullOrEmpty(context.Token) && context.Request.Query.TryGetValue("access_token", out var accessToken))
                     {
-                        context.Token = context.Request.Query["access_token"];
+                        context.Token = accessToken;
                     }
                     return Task.CompletedTask;
                 },

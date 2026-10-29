@@ -22,7 +22,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
 {
     private static readonly DateTime Jan2020 = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    private readonly string _root = Path.Combine(Path.GetTempPath(), $"fss_writes_{Guid.NewGuid():N}");
+    private readonly string _root = Path.Join(Path.GetTempPath(), $"fss_writes_{Guid.NewGuid():N}");
     private readonly string _library;
     private readonly string _dupes;
     private readonly string _outside;
@@ -35,9 +35,9 @@ public sealed class FileStoreServiceWritesTests : IDisposable
 
     public FileStoreServiceWritesTests()
     {
-        _library = Directory.CreateDirectory(Path.Combine(_root, "library")).FullName;
-        _dupes = Directory.CreateDirectory(Path.Combine(_root, "dupes")).FullName;
-        _outside = Directory.CreateDirectory(Path.Combine(_root, "outside")).FullName;
+        _library = Directory.CreateDirectory(Path.Join(_root, "library")).FullName;
+        _dupes = Directory.CreateDirectory(Path.Join(_root, "dupes")).FullName;
+        _outside = Directory.CreateDirectory(Path.Join(_root, "outside")).FullName;
 
         var dbName = $"fss_writes_{Guid.NewGuid()}";
         var services = new ServiceCollection();
@@ -85,7 +85,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         // Regression: a ".." substring check ran after Path.GetFullPath had already collapsed
         // every real ".." segment, so it only ever rejected legitimate names such as
         // "What If...?" and those comics never made it into the library.
-        var path = WriteComic(Directory.CreateDirectory(Path.Combine(_library, folder)).FullName, name);
+        var path = WriteComic(Directory.CreateDirectory(Path.Join(_library, folder)).FullName, name);
         var service = CreateService();
 
         await service.AddFileAsync(path);
@@ -99,7 +99,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     public async Task AddFileAsync_PathTraversingOutOfTheLibrary_IsRejected()
     {
         WriteComic(_outside, "Stray.cbz");
-        var traversal = Path.Combine(_library, "..", "outside", "Stray.cbz");
+        var traversal = Path.Join(_library, "..", "outside", "Stray.cbz");
         var service = CreateService();
 
         await service.AddFileAsync(traversal);
@@ -161,7 +161,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     {
         // Regression: containment was a bare prefix test, so "<root>2/x.cbz" counted as being
         // inside "<root>".
-        var stray = WriteComic(Directory.CreateDirectory(Path.Combine(_root, sibling)).FullName, "Stray.cbz");
+        var stray = WriteComic(Directory.CreateDirectory(Path.Join(_root, sibling)).FullName, "Stray.cbz");
         var service = CreateService(duplicateDirectory: _dupes);
 
         await service.AddFileAsync(stray);
@@ -213,7 +213,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
 
         // Regression: containment ignored case even where "/comics" and "/COMICS" are two
         // different directories.
-        var stray = WriteComic(Directory.CreateDirectory(Path.Combine(_root, "LIBRARY")).FullName, "Stray.cbz");
+        var stray = WriteComic(Directory.CreateDirectory(Path.Join(_root, "LIBRARY")).FullName, "Stray.cbz");
         var service = CreateService();
 
         await service.AddFileAsync(stray);
@@ -321,7 +321,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     {
         var service = CreateService(broadcaster: _broadcaster.Object);
 
-        await service.RemoveFileAsync(Path.Combine(_library, "Ghost.cbz"));
+        await service.RemoveFileAsync(Path.Join(_library, "Ghost.cbz"));
 
         _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
         Assert.True(_logger.Contains(LogLevel.Debug, "File already removed from database"));
@@ -331,7 +331,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task RemoveFileAsync_RowDeletedConcurrently_IsTreatedAsAlreadyRemoved()
     {
-        var path = Path.Combine(_library, "Saga 006.cbz");
+        var path = Path.Join(_library, "Saga 006.cbz");
         await SeedAsync(Row(path));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
@@ -348,7 +348,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task RemoveFileAsync_DatabaseUnavailable_StillUntracksFile()
     {
-        var path = Path.Combine(_library, "Saga 007.cbz");
+        var path = Path.Join(_library, "Saga 007.cbz");
         await SeedAsync(Row(path));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
@@ -363,7 +363,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task RemoveFileAsync_BroadcastFails_DoesNotPropagate()
     {
-        var path = Path.Combine(_library, "Saga 008.cbz");
+        var path = Path.Join(_library, "Saga 008.cbz");
         await SeedAsync(Row(path));
         _broadcaster.Setup(b => b.BroadcastFileListUpdateAsync()).ThrowsAsync(new InvalidOperationException("hub down"));
         var service = CreateService(broadcaster: _broadcaster.Object);
@@ -379,11 +379,11 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_TargetOutsideLibrary_LeavesEntryUntouched()
     {
-        var oldPath = Path.Combine(_library, "Old.cbz");
+        var oldPath = Path.Join(_library, "Old.cbz");
         await SeedAsync(Row(oldPath));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
-        var target = Path.Combine(_outside, "New.cbz");
+        var target = Path.Join(_outside, "New.cbz");
 
         await service.UpdateFilePathAsync(oldPath, target);
 
@@ -396,11 +396,11 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_TargetTraversingOutOfTheLibrary_LeavesEntryUntouched()
     {
-        var oldPath = Path.Combine(_library, "Old.cbz");
+        var oldPath = Path.Join(_library, "Old.cbz");
         await SeedAsync(Row(oldPath));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
-        var target = Path.Combine(_library, "..", "outside", "New.cbz");
+        var target = Path.Join(_library, "..", "outside", "New.cbz");
 
         await service.UpdateFilePathAsync(oldPath, target);
 
@@ -412,7 +412,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_TargetNameWithConsecutiveDots_MovesTheEntry()
     {
-        var oldPath = Path.Combine(_library, "What If 001.cbz");
+        var oldPath = Path.Join(_library, "What If 001.cbz");
         await SeedAsync(Row(oldPath, renamed: true, normalized: true));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
@@ -432,7 +432,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_TargetNotOnDisk_KeepsKnownSizeAndTimestamp()
     {
-        var oldPath = Path.Combine(_library, "Old.cbz");
+        var oldPath = Path.Join(_library, "Old.cbz");
         var modified = new DateTime(2023, 5, 6, 7, 8, 9, DateTimeKind.Utc);
         await SeedAsync(Row(oldPath, configure: e =>
         {
@@ -441,8 +441,8 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         }));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
-        var newDirectory = Path.Combine(_library, "Saga");
-        var newPath = Path.Combine(newDirectory, "Saga 001.cbz");
+        var newDirectory = Path.Join(_library, "Saga");
+        var newPath = Path.Join(newDirectory, "Saga 001.cbz");
 
         await service.UpdateFilePathAsync(oldPath, newPath);
 
@@ -495,7 +495,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_DuplicateFile_MovesDuplicateMarkerToNewPath()
     {
-        var oldPath = Path.Combine(_library, "Dupe.cbz");
+        var oldPath = Path.Join(_library, "Dupe.cbz");
         await SeedAsync(Row(oldPath, duplicate: true));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
@@ -520,7 +520,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_StubRowAtTarget_ReceivesTheOldRowsState()
     {
-        var oldPath = Path.Combine(_library, "Chapter 7.cbz");
+        var oldPath = Path.Join(_library, "Chapter 7.cbz");
         var newPath = WriteComic(_library, "Saga - Chapter 007.cbz");
         var edited = new DateTime(2024, 2, 2, 0, 0, 0, DateTimeKind.Utc);
         var written = new DateTime(2024, 3, 3, 0, 0, 0, DateTimeKind.Utc);
@@ -562,7 +562,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_StubRowAtTarget_RefreshesPartialFileMetadata()
     {
-        var oldPath = Path.Combine(_library, "Chapter 7.cbz");
+        var oldPath = Path.Join(_library, "Chapter 7.cbz");
         var newPath = WriteComic(_library, "Saga - Chapter 007.cbz");
         var expectedModified = new DateTime(2024, 3, 4, 5, 6, 8, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(newPath, expectedModified);
@@ -588,7 +588,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_TargetRowAlreadyComplete_KeepsTheTargetsState()
     {
-        var oldPath = Path.Combine(_library, "Chapter 8.cbz");
+        var oldPath = Path.Join(_library, "Chapter 8.cbz");
         var newPath = WriteComic(_library, "Saga - Chapter 008.cbz");
         await SeedAsync(
             Row(oldPath, configure: e =>
@@ -625,7 +625,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_NeitherRowHasState_MergedRowStaysUnprocessed()
     {
-        var oldPath = Path.Combine(_library, "Chapter 9.cbz");
+        var oldPath = Path.Join(_library, "Chapter 9.cbz");
         var newPath = WriteComic(_library, "Saga - Chapter 009.cbz");
         await SeedAsync(
             Row(oldPath, configure: e => e.CreatedAt = Jan2020.AddYears(2)),
@@ -652,7 +652,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         var service = CreateService(broadcaster: _broadcaster.Object);
         await service.AddFileAsync(oldPath);
         await DeleteRowAsync(oldPath);
-        var newPath = Path.Combine(_library, "New.cbz");
+        var newPath = Path.Join(_library, "New.cbz");
         File.Move(oldPath, newPath);
         _broadcaster.Invocations.Clear();
 
@@ -689,7 +689,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_DatabaseUnavailable_MovesSnapshotAndStillBroadcasts()
     {
-        var oldPath = Path.Combine(_library, "Old.cbz");
+        var oldPath = Path.Join(_library, "Old.cbz");
         await SeedAsync(Row(oldPath, renamed: true));
         var service = CreateService(broadcaster: _broadcaster.Object);
         await service.InitializeFromDatabaseAsync();
@@ -707,7 +707,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_BroadcastFails_DoesNotPropagate()
     {
-        var oldPath = Path.Combine(_library, "Old.cbz");
+        var oldPath = Path.Join(_library, "Old.cbz");
         await SeedAsync(Row(oldPath));
         _broadcaster.Setup(b => b.BroadcastFileListUpdateAsync()).ThrowsAsync(new InvalidOperationException("hub down"));
         var service = CreateService(broadcaster: _broadcaster.Object);
@@ -723,7 +723,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_BroadcastDisabled_DoesNotNotifyClients()
     {
-        var oldPath = Path.Combine(_library, "Old.cbz");
+        var oldPath = Path.Join(_library, "Old.cbz");
         await SeedAsync(Row(oldPath));
         var service = CreateService(broadcaster: _broadcaster.Object);
         await service.InitializeFromDatabaseAsync();
@@ -754,7 +754,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task SetFileSeriesMetadataVersionAsync_UntrackedOrUnchanged_DoesNotWrite()
     {
-        var path = Path.Combine(_library, "Saga 009.cbz");
+        var path = Path.Join(_library, "Saga 009.cbz");
         await SeedAsync(Row(path, configure: e =>
         {
             e.SeriesMetadataVersion = 4;
@@ -763,7 +763,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         var service = CreateService();
         var before = service.ChangeVersion;
 
-        await service.SetFileSeriesMetadataVersionAsync(Path.Combine(_library, "Untracked.cbz"), 4);
+        await service.SetFileSeriesMetadataVersionAsync(Path.Join(_library, "Untracked.cbz"), 4);
         await service.SetFileSeriesMetadataVersionAsync(path, 4);
 
         Assert.Equal(before, service.ChangeVersion);
@@ -773,7 +773,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task SetFileSeriesMetadataVersionAsync_NewVersion_UpdatesRowAndSnapshot()
     {
-        var path = Path.Combine(_library, "Saga 010.cbz");
+        var path = Path.Join(_library, "Saga 010.cbz");
         await SeedAsync(Row(path, configure: e => e.SeriesMetadataVersion = 1));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
@@ -789,7 +789,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task SetFileSeriesMetadataVersionAsync_RowNotInSnapshot_UpdatesDatabaseOnly()
     {
-        var path = Path.Combine(_library, "Saga 011.cbz");
+        var path = Path.Join(_library, "Saga 011.cbz");
         await SeedAsync(Row(path));
         var service = CreateService();
 
@@ -805,7 +805,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         var service = CreateService();
         _factory.FailAll();
 
-        await service.SetFileSeriesMetadataVersionAsync(Path.Combine(_library, "Saga 012.cbz"), 2);
+        await service.SetFileSeriesMetadataVersionAsync(Path.Join(_library, "Saga 012.cbz"), 2);
 
         Assert.True(_logger.Contains(LogLevel.Warning, "Failed to stamp series metadata version"));
     }
@@ -818,7 +818,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         var service = CreateService();
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ApplyUserMetadataEditAsync(Path.Combine(_library, "Nope.cbz"), new ComicMetadata(), ComicMetadataFieldFlags.None));
+            service.ApplyUserMetadataEditAsync(Path.Join(_library, "Nope.cbz"), new ComicMetadata(), ComicMetadataFieldFlags.None));
 
         Assert.Contains("not tracked", ex.Message);
     }
@@ -826,7 +826,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task ApplyUserMetadataEditAsync_FullPatch_CopiesEveryFieldAndLocksRequestedFields()
     {
-        var path = Path.Combine(_library, "Saga 013.cbz");
+        var path = Path.Join(_library, "Saga 013.cbz");
         await SeedAsync(Row(path));
         var service = CreateService(broadcaster: _broadcaster.Object);
         var before = service.ChangeVersion;
@@ -872,7 +872,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task ApplyUserMetadataEditAsync_EmptyPatch_KeepsExistingValuesAndCapsVersion()
     {
-        var path = Path.Combine(_library, "Saga 014.cbz");
+        var path = Path.Join(_library, "Saga 014.cbz");
         await SeedAsync(Row(path, configure: e =>
         {
             e.MetadataVersion = int.MaxValue;
@@ -913,7 +913,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     [Fact]
     public async Task ApplyUserMetadataEditAsync_BroadcastFails_StillPersistsTheEdit()
     {
-        var path = Path.Combine(_library, "Saga 015.cbz");
+        var path = Path.Join(_library, "Saga 015.cbz");
         await SeedAsync(Row(path));
         _broadcaster.Setup(b => b.BroadcastFileListUpdateAsync()).ThrowsAsync(new InvalidOperationException("hub down"));
         var service = CreateService(broadcaster: _broadcaster.Object);
@@ -942,7 +942,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
 
     private static string WriteComic(string directory, string name)
     {
-        var path = Path.Combine(directory, name);
+        var path = Path.Join(directory, name);
         File.WriteAllText(path, "comic");
         return path;
     }

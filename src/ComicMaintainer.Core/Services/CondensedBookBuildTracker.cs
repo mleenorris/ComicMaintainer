@@ -260,7 +260,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
             entry.MarkCancelled(_timeProvider.GetUtcNow().UtcDateTime, _retention);
             _logger.LogInformation("Condensed book build {BuildId} was cancelled", entry.BuildId);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             entry.MarkFailed(ex.Message, _timeProvider.GetUtcNow().UtcDateTime, _retention);
             _logger.LogError(ex, "Condensed book build {BuildId} failed", entry.BuildId);
@@ -302,29 +302,34 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
 
-        foreach (var entry in _builds.Values)
+        foreach (var entry in _builds.Values.Where(e => e.IsExpired(now)))
         {
-            if (entry.IsExpired(now) && _builds.TryRemove(entry.BuildId, out _))
-            {
-                Release(entry);
-            }
+            Untrack(entry);
         }
 
-        foreach (var group in _builds.Values.GroupBy(e => e.OwnerUserId, StringComparer.Ordinal))
-        {
-            var terminal = group
+        var overflow = _builds.Values
+            .GroupBy(e => e.OwnerUserId, StringComparer.Ordinal)
+            .SelectMany(group => group
                 .Where(e => CondensedBookBuildStatus.IsTerminal(e.Snapshot().Status))
                 .OrderByDescending(e => e.CreatedAt)
-                .Skip(MaxRetainedPerOwner)
-                .ToList();
+                .Skip(MaxRetainedPerOwner))
+            .ToList();
 
-            foreach (var entry in terminal)
-            {
-                if (_builds.TryRemove(entry.BuildId, out _))
-                {
-                    Release(entry);
-                }
-            }
+        foreach (var entry in overflow)
+        {
+            Untrack(entry);
+        }
+    }
+
+    /// <summary>
+    /// Stops tracking a build and releases it, unless another caller already
+    /// removed it.
+    /// </summary>
+    private void Untrack(BuildEntry entry)
+    {
+        if (_builds.TryRemove(entry.BuildId, out _))
+        {
+            Release(entry);
         }
     }
 
@@ -405,7 +410,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         {
             _shutdownCts.Cancel();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is AggregateException or ObjectDisposedException)
         {
             _logger.LogWarning(ex, "An error occurred while cancelling condensed book builds during shutdown");
         }
@@ -414,7 +419,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         {
             Task.WhenAll(workers).GetAwaiter().GetResult();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "A condensed book build worker failed during shutdown");
         }
@@ -422,15 +427,12 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         {
             foreach (var entry in _builds.Values)
             {
-                if (_builds.TryRemove(entry.BuildId, out _))
-                {
-                    Release(entry);
-                }
+                Untrack(entry);
             }
-
-            _shutdownCts.Dispose();
-            _buildSlot.Dispose();
         }
+
+        _shutdownCts.Dispose();
+        _buildSlot.Dispose();
     }
 
     /// <summary>

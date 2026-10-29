@@ -19,7 +19,8 @@ public class RequestTimeoutPoliciesCoverageTests
     {
         var sink = new CapturingSink();
         using var logger = new LoggerConfiguration().MinimumLevel.Debug().WriteTo.Sink(sink).CreateLogger();
-        var services = new ServiceCollection().AddSingleton<ILoggerFactory>(new SerilogLoggerFactory(logger));
+        using var loggerFactory = new SerilogLoggerFactory(logger);
+        var services = new ServiceCollection().AddSingleton<ILoggerFactory>(loggerFactory);
         configureServices?.Invoke(services);
 
         var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };

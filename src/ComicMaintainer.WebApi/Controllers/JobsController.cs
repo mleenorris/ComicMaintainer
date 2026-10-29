@@ -71,11 +71,11 @@ public class JobsController : ControllerBase
                 {
                     file = f,
                     success = processedFilesList.Contains(f) && !job.Errors.ContainsKey(f),
-                    error = job.Errors.ContainsKey(f) ? job.Errors[f] : null
+                    error = job.Errors.GetValueOrDefault(f)
                 }).ToList()
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting job {JobId}", jobId);
             return StatusCode(500, "Error retrieving job");
@@ -113,7 +113,7 @@ public class JobsController : ControllerBase
                 end_time = job.EndTime
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting active job");
             return StatusCode(500, "Error retrieving active job");
@@ -166,7 +166,7 @@ public class JobsController : ControllerBase
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("ProcessAll: Error starting process all job"));
             return StatusCode(500, new { error = "Error starting job" });
@@ -199,7 +199,7 @@ public class JobsController : ControllerBase
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("RenameAll: Error starting rename all job"));
             return StatusCode(500, new { error = "Error starting job" });
@@ -232,7 +232,7 @@ public class JobsController : ControllerBase
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("NormalizeAll: Error starting normalize all job"));
             return StatusCode(500, new { error = "Error starting job" });
@@ -260,7 +260,7 @@ public class JobsController : ControllerBase
             
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("ProcessSelected: Error starting process selected job"));
             return StatusCode(500, new { error = "Error starting job" });
@@ -274,7 +274,7 @@ public class JobsController : ControllerBase
         {
             return await ProcessUnprocessedFilesAsync("Process unmarked files");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error starting process unmarked job");
             return StatusCode(500, new { error = "Error starting job" });
@@ -307,7 +307,7 @@ public class JobsController : ControllerBase
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "RenameUnmarked: Error starting rename unmarked job");
             return StatusCode(500, new { error = "Error starting job" });
@@ -340,7 +340,7 @@ public class JobsController : ControllerBase
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "NormalizeUnmarked: Error starting normalize unmarked job");
             return StatusCode(500, new { error = "Error starting job" });
@@ -362,7 +362,7 @@ public class JobsController : ControllerBase
             
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error starting rename selected job");
             return StatusCode(500, new { error = "Error starting job" });
@@ -384,7 +384,7 @@ public class JobsController : ControllerBase
             
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error starting normalize selected job");
             return StatusCode(500, new { error = "Error starting job" });
@@ -411,7 +411,7 @@ public class JobsController : ControllerBase
             
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error starting update metadata selected job");
             return StatusCode(500, new { error = "Error starting job" });
@@ -433,7 +433,7 @@ public class JobsController : ControllerBase
 
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("RemoveMetadataSelected: Error starting remove metadata selected job"));
             return StatusCode(500, new { error = "Error starting job" });
@@ -461,7 +461,7 @@ public class JobsController : ControllerBase
 
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("RemoveMetadataAll: Error starting remove metadata all job"));
             return StatusCode(500, new { error = "Error starting job" });
@@ -507,7 +507,7 @@ public class JobsController : ControllerBase
                 totalItems = request.Files.Count
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("DeleteSelected: error starting delete-selected job"));
             return StatusCode(500, new { error = "Error starting job" });
@@ -534,7 +534,7 @@ public class JobsController : ControllerBase
 
             return Ok(new { jobs = jobList, count = jobList.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error listing jobs");
             return StatusCode(500, "Error retrieving jobs");
@@ -554,7 +554,7 @@ public class JobsController : ControllerBase
             
             return NoContent();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error deleting job {JobId}", jobId);
             return StatusCode(500, "Error deleting job");
@@ -569,16 +569,11 @@ public class JobsController : ControllerBase
             _logger.LogInformation("Cancel requested for job {JobId}", jobId);
             var cancelled = _processor.CancelJob(jobId);
             
-            if (cancelled)
-            {
-                return Ok(new { success = true });
-            }
-            else
-            {
-                return NotFound(new { success = false, error = "Job not found or already completed" });
-            }
+            return cancelled
+                ? Ok(new { success = true })
+                : NotFound(new { success = false, error = "Job not found or already completed" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error cancelling job {JobId}", jobId);
             return StatusCode(500, new { success = false, error = "Error cancelling job" });

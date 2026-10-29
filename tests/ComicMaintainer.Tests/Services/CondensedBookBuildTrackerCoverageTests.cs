@@ -26,7 +26,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
 
     public CondensedBookBuildTrackerCoverageTests()
     {
-        _workDir = Path.Combine(Path.GetTempPath(), $"condense-build-cov-{Guid.NewGuid():N}");
+        _workDir = Path.Join(Path.GetTempPath(), $"condense-build-cov-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
 
         _email
@@ -201,8 +201,8 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
             (EpubConversionPhase.Recompressing, "recompressing"),
             ((EpubConversionPhase)99, "writing")
         };
-        var reported = new SemaphoreSlim(0);
-        var proceed = new SemaphoreSlim(0);
+        using var reported = new SemaphoreSlim(0);
+        using var proceed = new SemaphoreSlim(0);
         IProgress<EpubConversionProgress>? captured = null;
 
         SetupBuild(async (progress, token) =>
@@ -301,7 +301,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
     public async Task Dispose_LogsAWorkerThatFailedWhileShuttingDown()
     {
         var logger = new CapturingLogger(message => message.Contains("was cancelled", StringComparison.Ordinal));
-        var tracker = new CondensedBookBuildTracker(_email.Object, logger, _clock, TimeSpan.FromMinutes(30));
+        using var tracker = new CondensedBookBuildTracker(_email.Object, logger, _clock, TimeSpan.FromMinutes(30));
         var entered = NewSignal();
         SetupBuild(async (_, token) =>
         {
@@ -362,9 +362,9 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
 
     private string CreateBook(string name)
     {
-        var directory = Path.Combine(_workDir, Guid.NewGuid().ToString("N"));
+        var directory = Path.Join(_workDir, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, $"{name}.epub");
+        var path = Path.Join(directory, $"{name}.epub");
         File.WriteAllText(path, "epub bytes");
         return path;
     }

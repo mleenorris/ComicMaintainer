@@ -294,9 +294,11 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
             }
             catch (IOException)
             {
+                // Best-effort cleanup.
             }
             catch (UnauthorizedAccessException)
             {
+                // Best-effort cleanup.
             }
         }
 

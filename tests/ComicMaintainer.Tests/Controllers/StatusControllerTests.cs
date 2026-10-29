@@ -55,7 +55,7 @@ public class StatusControllerTests
     {
         _seriesMock
             .Setup(x => x.GetSeriesIssuesAsync("abc", null, 1, -1, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SeriesIssuesResult?)null);
+            .ReturnsAsync(default(SeriesIssuesResult?));
 
         var result = await _controller.ClearSeries("abc");
         Assert.IsType<NotFoundObjectResult>(result.Result);
@@ -107,16 +107,16 @@ public class StatusControllerTests
     [Fact]
     public async Task ClearFolder_MatchesFilesUnderFolder()
     {
-        var rootDir = Path.Combine(Path.GetTempPath(), $"statustests_{Guid.NewGuid()}");
-        var insideDir = Path.Combine(rootDir, "Series A");
-        var insideSubDir = Path.Combine(rootDir, "Series A", "Vol 1");
-        var outsideDir = Path.Combine(Path.GetTempPath(), $"other_{Guid.NewGuid()}");
+        var rootDir = Path.Join(Path.GetTempPath(), $"statustests_{Guid.NewGuid()}");
+        var insideDir = Path.Join(rootDir, "Series A");
+        var insideSubDir = Path.Join(rootDir, "Series A", "Vol 1");
+        var outsideDir = Path.Join(Path.GetTempPath(), $"other_{Guid.NewGuid()}");
 
         var files = new List<ComicFile>
         {
-            new() { FilePath = Path.Combine(insideDir, "01.cbz"), Directory = insideDir },
-            new() { FilePath = Path.Combine(insideSubDir, "02.cbz"), Directory = insideSubDir },
-            new() { FilePath = Path.Combine(outsideDir, "x.cbz"), Directory = outsideDir },
+            new() { FilePath = Path.Join(insideDir, "01.cbz"), Directory = insideDir },
+            new() { FilePath = Path.Join(insideSubDir, "02.cbz"), Directory = insideSubDir },
+            new() { FilePath = Path.Join(outsideDir, "x.cbz"), Directory = outsideDir },
         };
         _fileStoreMock
             .Setup(x => x.GetAllFilesAsync(It.IsAny<CancellationToken>()))
@@ -133,8 +133,8 @@ public class StatusControllerTests
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.NotNull(captured);
         Assert.Equal(2, captured!.Count);
-        Assert.Contains(Path.Combine(insideDir, "01.cbz"), captured);
-        Assert.Contains(Path.Combine(insideSubDir, "02.cbz"), captured);
-        Assert.DoesNotContain(Path.Combine(outsideDir, "x.cbz"), captured);
+        Assert.Contains(Path.Join(insideDir, "01.cbz"), captured);
+        Assert.Contains(Path.Join(insideSubDir, "02.cbz"), captured);
+        Assert.DoesNotContain(Path.Join(outsideDir, "x.cbz"), captured);
     }
 }

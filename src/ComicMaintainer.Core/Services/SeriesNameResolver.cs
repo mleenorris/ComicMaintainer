@@ -185,7 +185,7 @@ public class SeriesNameResolver : ISeriesNameResolver
                     {
                         throw;
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
                     {
                         _logger.LogWarning(ex,
                             "Failed to persist external lookup for series {SeriesName}",
@@ -340,7 +340,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to consult cache for user-selected name {SeriesName}",
                 LoggingHelper.SanitizeForLog(seriesName));
@@ -367,7 +367,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to consult cache for matched title {SeriesName}",
                 LoggingHelper.SanitizeForLog(seriesName));
@@ -386,7 +386,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to resolve external metadata for series {SeriesName}",
                 LoggingHelper.SanitizeForLog(seriesName));
@@ -406,9 +406,8 @@ public class SeriesNameResolver : ISeriesNameResolver
     private async Task<bool> AnyCandidateClearedAsync(IReadOnlyList<string> candidates, CancellationToken cancellationToken)
     {
         if (_cache is null || candidates.Count == 0) return false;
-        foreach (var candidate in candidates)
+        foreach (var candidate in candidates.Where(candidate => !string.IsNullOrWhiteSpace(candidate)))
         {
-            if (string.IsNullOrWhiteSpace(candidate)) continue;
             try
             {
                 var record = await ResolveRecordByTitleAsync(candidate, cancellationToken);
@@ -422,7 +421,7 @@ public class SeriesNameResolver : ISeriesNameResolver
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogWarning(ex,
                     "Failed to consult cache for cleared-status check on {SeriesName}",
@@ -486,7 +485,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex,
                 "Failed to add folder name {Folder} as alias for series {Series}",

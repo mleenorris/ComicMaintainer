@@ -25,7 +25,7 @@ namespace ComicMaintainer.Tests.Controllers;
 /// </summary>
 public sealed class DiagnosticsControllerCoverageTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "cm_diag_cov_" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(Path.GetTempPath(), "cm_diag_cov_" + Guid.NewGuid().ToString("N"));
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IJobStateStore> _jobStateStore = new();
     private readonly Mock<ILogger<DiagnosticsController>> _logger = new();
@@ -42,10 +42,10 @@ public sealed class DiagnosticsControllerCoverageTests : IDisposable
     {
         foreach (var directory in _overlongDirectories)
         {
-            try { OverlongPath.Release(directory); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            try { OverlongPath.Release(directory); } catch (IOException) { /* best-effort cleanup */ } catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
         }
 
-        try { Directory.Delete(_root, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        try { Directory.Delete(_root, recursive: true); } catch (IOException) { /* best-effort cleanup */ } catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public sealed class DiagnosticsControllerCoverageTests : IDisposable
     public async Task MissingLogDirectoryListsNoFilesAndNoError()
     {
         var settings = Settings();
-        settings.ConfigDirectory = Path.Combine(_root, "not-created");
+        settings.ConfigDirectory = Path.Join(_root, "not-created");
 
         var json = Serialize(await CreateController(settings).GetDiagnostics());
 
@@ -161,9 +161,9 @@ public sealed class DiagnosticsControllerCoverageTests : IDisposable
 
     private AppSettings Settings()
     {
-        var config = Path.Combine(_root, "config");
-        var watched = Path.Combine(_root, "watched");
-        var duplicates = Path.Combine(_root, "duplicates");
+        var config = Path.Join(_root, "config");
+        var watched = Path.Join(_root, "watched");
+        var duplicates = Path.Join(_root, "duplicates");
         Directory.CreateDirectory(config);
         Directory.CreateDirectory(watched);
         Directory.CreateDirectory(duplicates);
@@ -226,14 +226,14 @@ public sealed class DiagnosticsControllerCoverageTests : IDisposable
             var nested = parent;
             while (Utf8Length(nested) + 1 + LeafName.Length + 1 + Utf8Length(fileName) < PathMax)
             {
-                nested = Path.Combine(nested, NestedName);
+                nested = Path.Join(nested, NestedName);
             }
 
-            var shortLeaf = Path.Combine(nested, ShortLeafName);
+            var shortLeaf = Path.Join(nested, ShortLeafName);
             Directory.CreateDirectory(shortLeaf);
-            File.WriteAllText(Path.Combine(shortLeaf, fileName), "unreachable");
+            File.WriteAllText(Path.Join(shortLeaf, fileName), "unreachable");
 
-            var leaf = Path.Combine(nested, LeafName);
+            var leaf = Path.Join(nested, LeafName);
             Directory.Move(shortLeaf, leaf);
             return leaf;
         }
@@ -242,7 +242,7 @@ public sealed class DiagnosticsControllerCoverageTests : IDisposable
         {
             if (Directory.Exists(leaf))
             {
-                Directory.Move(leaf, Path.Combine(Path.GetDirectoryName(leaf)!, ShortLeafName));
+                Directory.Move(leaf, Path.Join(Path.GetDirectoryName(leaf)!, ShortLeafName));
             }
         }
 

@@ -6,6 +6,9 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
+        // Shared state declared in state.js and reassigned here.
+        /* global duplicateReviewFiles: true, combineFolderGroups: true */
+
         function showFileInfo(filepath, filename) {
             // Show file information in a modal
             document.getElementById('fileInfoPath').textContent = filepath;

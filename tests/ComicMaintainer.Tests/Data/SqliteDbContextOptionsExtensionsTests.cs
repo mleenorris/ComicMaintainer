@@ -8,7 +8,7 @@ namespace ComicMaintainer.Tests.Data;
 
 public sealed class SqliteDbContextOptionsExtensionsTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), $"cm-sqlite-options-{Guid.NewGuid():N}");
+    private readonly string _root = Path.Join(Path.GetTempPath(), $"cm-sqlite-options-{Guid.NewGuid():N}");
 
     public SqliteDbContextOptionsExtensionsTests()
     {
@@ -114,7 +114,7 @@ public sealed class SqliteDbContextOptionsExtensionsTests : IDisposable
 
     private string CreateRollbackJournalDatabase()
     {
-        var path = Path.Combine(_root, $"{Guid.NewGuid():N}.db");
+        var path = Path.Join(_root, $"{Guid.NewGuid():N}.db");
         using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
         connection.Open();
         using var command = connection.CreateCommand();

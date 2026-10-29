@@ -102,7 +102,7 @@ public class ComicReaderController : ControllerBase
                 pageCount
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting comic info for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading comic file" });
@@ -155,7 +155,7 @@ public class ComicReaderController : ControllerBase
             
             return File(data, contentType);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting page {Page} from {FilePath}", page, LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading page" });
@@ -210,7 +210,7 @@ public class ComicReaderController : ControllerBase
             Response.Headers.LastModified = entry.Value.LastModified.ToString("R");
             return File(entry.Value.Data, entry.Value.ContentType);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting cover for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading cover" });
@@ -258,7 +258,7 @@ public class ComicReaderController : ControllerBase
             var pages = await _readerService.GetPageNamesAsync(resolvedPath);
             return Ok(new { pages, count = pages.Count });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting pages from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading comic file" });
@@ -295,7 +295,7 @@ public class ComicReaderController : ControllerBase
 
             if (!adjacent.HasAdjacent)
             {
-                return Ok(new { hasAdjacent = false, filePath = (string?)null, fileName = (string?)null });
+                return Ok(new { hasAdjacent = false, filePath = default(string?), fileName = default(string?) });
             }
 
             return Ok(new
@@ -305,7 +305,7 @@ public class ComicReaderController : ControllerBase
                 fileName = adjacent.FileName
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting adjacent file for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error finding adjacent file" });
@@ -337,7 +337,7 @@ public class ComicReaderController : ControllerBase
             _logger.LogDebug("Marked file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return Ok();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error marking file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error marking file as read" });
@@ -375,7 +375,7 @@ public class ComicReaderController : ControllerBase
             _logger.LogDebug("Saved reading progress for {FilePath}: page {Page}", LoggingHelper.SanitizePathForLog(filePath), page);
             return Ok();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error saving reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error saving reading progress" });
@@ -405,7 +405,7 @@ public class ComicReaderController : ControllerBase
             var progress = await _fileStore.GetReadingProgressAsync(filePath, cancellationToken);
             return Ok(new { currentPage = progress });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error getting reading progress" });
@@ -452,7 +452,7 @@ public class ComicReaderController : ControllerBase
             ReadingProgressCalculator.ApplyProgress(existing, targetPage, DateTime.UtcNow);
             await _readingProgress.SaveProgressAsync(existing, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to record per-user reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
         }

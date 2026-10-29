@@ -136,7 +136,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
                 {
                     throw;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex, "Library scan: failed to add new file {Path}",
                         LoggingHelper.SanitizePathForLog(path));
@@ -164,7 +164,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
                 {
                     throw;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex, "Library scan: failed to remove deleted file {Path}",
                         LoggingHelper.SanitizePathForLog(path));
@@ -224,7 +224,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogWarning(ex, "Library scan: stale-metadata pass failed");
             }
@@ -297,7 +297,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             var delta = (info.LastWriteTime - file.LastModified).Duration();
             return delta > ModifiedTimeTolerance;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             _logger.LogDebug(ex, "Library scan: stat failed for {Path}", LoggingHelper.SanitizePathForLog(file.FilePath));
             return false;
@@ -314,7 +314,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Library scan: failed to refresh stored stats for {Count} file(s)", files.Count);
         }
@@ -323,9 +323,9 @@ public class LibraryScanJobHandler : IScheduledJobHandler
     private async Task<Dictionary<string, ComicFile>> LoadTrackedSnapshotAsync(CancellationToken cancellationToken)
     {
         var tracked = new Dictionary<string, ComicFile>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in await _fileStore.GetAllFilesAsync(cancellationToken) ?? Enumerable.Empty<ComicFile>())
+        var files = await _fileStore.GetAllFilesAsync(cancellationToken) ?? Enumerable.Empty<ComicFile>();
+        foreach (var file in files.Where(f => f is not null && !string.IsNullOrWhiteSpace(f.FilePath)))
         {
-            if (file is null || string.IsNullOrWhiteSpace(file.FilePath)) continue;
             tracked.TryAdd(file.FilePath, file);
         }
         return tracked;
@@ -342,7 +342,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         {
             jobId = await _processor.NormalizeAndRenameFilesAsync(files, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Library scan: failed to queue {Count} added file(s)", files.Count);
             return " [added: queue failed]";
@@ -377,7 +377,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         {
             jobId = await _processor.NormalizeFilesAsync(files, forceReprocess: true, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Library scan: failed to queue {Count} {Label} file(s)", files.Count, label);
             return ($" [{label}: queue failed]", null);
@@ -438,7 +438,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                    ?? new LibraryScanOptions();
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
             return new LibraryScanOptions();
         }

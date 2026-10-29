@@ -137,7 +137,7 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
             // The caller gave up: neither "no match" nor a provider failure.
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "MangaDex lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
             _health.RecordFailure(ex.Message);
@@ -240,7 +240,7 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         {
             return (false, $"Network error: {ex.Message}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return (false, ex.Message);
         }
@@ -471,21 +471,18 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
             {
                 AddIfNew(enTitle.GetString(), "en");
             }
-            foreach (var property in titleObj.EnumerateObject())
+            foreach (var property in StringProperties(titleObj))
             {
-                if (property.Value.ValueKind != JsonValueKind.String) continue;
                 AddIfNew(property.Value.GetString(), property.Name);
             }
         }
 
         if (attributes.TryGetProperty("altTitles", out var altTitles) && altTitles.ValueKind == JsonValueKind.Array)
         {
-            foreach (var altTitleObj in altTitles.EnumerateArray())
+            foreach (var altTitleObj in altTitles.EnumerateArray().Where(alt => alt.ValueKind == JsonValueKind.Object))
             {
-                if (altTitleObj.ValueKind != JsonValueKind.Object) continue;
-                foreach (var property in altTitleObj.EnumerateObject())
+                foreach (var property in StringProperties(altTitleObj))
                 {
-                    if (property.Value.ValueKind != JsonValueKind.String) continue;
                     AddIfNew(property.Value.GetString(), property.Name);
                 }
             }
@@ -498,6 +495,9 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         result.AddRange(englishTitles);
         result.AddRange(otherTitles);
         return result;
+
+        static IEnumerable<JsonProperty> StringProperties(JsonElement obj) =>
+            obj.EnumerateObject().Where(property => property.Value.ValueKind == JsonValueKind.String);
     }
 
     /// <summary>

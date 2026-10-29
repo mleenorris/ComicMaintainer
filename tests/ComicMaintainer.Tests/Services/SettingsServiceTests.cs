@@ -21,7 +21,7 @@ public class SettingsServiceTests : IDisposable
     public SettingsServiceTests()
     {
         // Create a temporary directory for test settings
-        _testConfigDir = Path.Combine(Path.GetTempPath(), $"ComicMaintainerTests_{Guid.NewGuid()}");
+        _testConfigDir = Path.Join(Path.GetTempPath(), $"ComicMaintainerTests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testConfigDir);
 
         _appSettings = new AppSettings
@@ -90,13 +90,13 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateLogMaxBytesAsync(newMaxBytes);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
 
-        Assert.True(settings.ContainsKey("LogMaxBytes"));
-        Assert.Equal(newMaxBytes, settings["LogMaxBytes"].GetInt32());
+        Assert.True(settings.TryGetValue("LogMaxBytes", out var stored));
+        Assert.Equal(newMaxBytes, stored.GetInt32());
     }
 
     [Fact]
@@ -120,13 +120,13 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateFilenameFormatAsync(newFormat);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
 
-        Assert.True(settings.ContainsKey("FilenameFormat"));
-        Assert.Equal(newFormat, settings["FilenameFormat"].GetString());
+        Assert.True(settings.TryGetValue("FilenameFormat", out var stored));
+        Assert.Equal(newFormat, stored.GetString());
     }
 
     [Fact]
@@ -150,13 +150,13 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateIssueNumberPaddingAsync(newPadding);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
 
-        Assert.True(settings.ContainsKey("IssueNumberPadding"));
-        Assert.Equal(newPadding, settings["IssueNumberPadding"].GetInt32());
+        Assert.True(settings.TryGetValue("IssueNumberPadding", out var stored));
+        Assert.Equal(newPadding, stored.GetInt32());
     }
 
     [Fact]
@@ -169,13 +169,13 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateWatcherEnableRenameAsync(newValue);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
 
-        Assert.True(settings.ContainsKey("WatcherEnableRename"));
-        Assert.Equal(newValue, settings["WatcherEnableRename"].GetBoolean());
+        Assert.True(settings.TryGetValue("WatcherEnableRename", out var stored));
+        Assert.Equal(newValue, stored.GetBoolean());
     }
 
     [Fact]
@@ -188,13 +188,13 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateGitHubTokenAsync(newToken);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
 
-        Assert.True(settings.ContainsKey("GitHubToken"));
-        Assert.Equal(newToken, settings["GitHubToken"].GetString());
+        Assert.True(settings.TryGetValue("GitHubToken", out var stored));
+        Assert.Equal(newToken, stored.GetString());
     }
 
     [Fact]
@@ -207,13 +207,13 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateGitHubRepositoryAsync(newRepo);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
 
-        Assert.True(settings.ContainsKey("GitHubRepository"));
-        Assert.Equal(newRepo, settings["GitHubRepository"].GetString());
+        Assert.True(settings.TryGetValue("GitHubRepository", out var stored));
+        Assert.Equal(newRepo, stored.GetString());
     }
 
     [Fact]
@@ -226,13 +226,13 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateDatabaseCleanupIntervalHoursAsync(newInterval);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
 
-        Assert.True(settings.ContainsKey("DatabaseCleanupIntervalHours"));
-        Assert.Equal(newInterval, settings["DatabaseCleanupIntervalHours"].GetInt32());
+        Assert.True(settings.TryGetValue("DatabaseCleanupIntervalHours", out var stored));
+        Assert.Equal(newInterval, stored.GetInt32());
     }
 
     [Fact]
@@ -245,13 +245,13 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateDatabaseCleanupIntervalHoursAsync(newInterval);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
 
-        Assert.True(settings.ContainsKey("DatabaseCleanupIntervalHours"));
-        Assert.Equal(newInterval, settings["DatabaseCleanupIntervalHours"].GetInt32());
+        Assert.True(settings.TryGetValue("DatabaseCleanupIntervalHours", out var stored));
+        Assert.Equal(newInterval, stored.GetInt32());
     }
 
     [Fact]
@@ -276,13 +276,13 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateDefaultLibraryViewAsync(input);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
-        Assert.True(settings.ContainsKey("DefaultLibraryView"));
+        Assert.True(settings.TryGetValue("DefaultLibraryView", out var stored));
         var expected = input.Trim().ToLowerInvariant();
-        Assert.Equal(expected, settings["DefaultLibraryView"].GetString());
+        Assert.Equal(expected, stored.GetString());
     }
 
     [Theory]
@@ -306,7 +306,7 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateWatcherEnableRenameAsync(false);
 
         // Assert
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
         var settings = ReadAppSettingsSection(settingsFilePath);
@@ -339,7 +339,7 @@ public class SettingsServiceTests : IDisposable
         // service writes to, and asserts that the new value is observed via IOptionsMonitor
         // without recreating any object — proving that Settings changes take effect without
         // restarting the service.
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
 
         // Seed the file with the new "AppSettings" object root so the configuration provider
         // has something to bind from process start (matches Program.cs bootstrap behaviour).
@@ -374,7 +374,7 @@ public class SettingsServiceTests : IDisposable
     public async Task LegacyFlatShape_ReadCorrectlyAndRewrittenInNewShape()
     {
         // Arrange — pre-populate the file with the legacy flat shape that previous versions wrote
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         await File.WriteAllTextAsync(settingsFilePath,
             "{\n  \"FilenameFormat\": \"old-format\",\n  \"IssueNumberPadding\": 5\n}");
 
@@ -396,7 +396,7 @@ public class SettingsServiceTests : IDisposable
 
         // Assert — the file MUST be rooted under "AppSettings" so the configuration provider
         // can bind it directly to the AppSettings section with reload-on-change support.
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         var json = await File.ReadAllTextAsync(settingsFilePath);
         using var doc = System.Text.Json.JsonDocument.Parse(json);
         Assert.Equal(System.Text.Json.JsonValueKind.Object, doc.RootElement.ValueKind);
@@ -414,7 +414,7 @@ public class SettingsServiceTests : IDisposable
             username: " reader ",
             password: "a-password-value");
 
-        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
 
         Assert.True(settings["EnableSuwayomi"].GetBoolean());
         // The trailing slash is normalized away so the GraphQL endpoint is
@@ -445,7 +445,7 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateSuwayomiSettingsAsync(true, "http://suwayomi.example:4567", "reader", "a-password-value");
         await _service.UpdateSuwayomiSettingsAsync(true, "http://suwayomi.example:4567", "reader", null);
 
-        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
         Assert.Equal("a-password-value", settings["SuwayomiPassword"].GetString());
     }
 
@@ -455,7 +455,7 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateSuwayomiSettingsAsync(true, "http://suwayomi.example:4567", "reader", "a-password-value");
         await _service.UpdateSuwayomiSettingsAsync(true, "http://suwayomi.example:4567", "reader", string.Empty);
 
-        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
         Assert.Equal(JsonValueKind.Null, settings["SuwayomiPassword"].ValueKind);
     }
 
@@ -486,7 +486,7 @@ public class SettingsServiceTests : IDisposable
             false, null, null, null, downloadsDirectory: $" {downloads} ", importDirectory: " Manga ");
         await _service.UpdateSuwayomiSettingsAsync(false, null, null, null);
 
-        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
         Assert.Equal(downloads, settings["SuwayomiDownloadsDirectory"].GetString());
         Assert.Equal("Manga", settings["SuwayomiImportDirectory"].GetString());
     }
@@ -501,7 +501,7 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateSuwayomiSettingsAsync(
             false, null, null, null, downloadsDirectory: string.Empty, importDirectory: " ");
 
-        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
         Assert.Equal(JsonValueKind.Null, settings["SuwayomiDownloadsDirectory"].ValueKind);
         Assert.Equal(JsonValueKind.Null, settings["SuwayomiImportDirectory"].ValueKind);
     }
@@ -511,10 +511,10 @@ public class SettingsServiceTests : IDisposable
     {
         var exception = await Assert.ThrowsAsync<ArgumentException>(
             () => _service.UpdateSuwayomiSettingsAsync(
-                false, null, null, null, downloadsDirectory: Path.Combine(_appSettings.WatchedDirectory, "suwayomi")));
+                false, null, null, null, downloadsDirectory: Path.Join(_appSettings.WatchedDirectory, "suwayomi")));
 
         Assert.Contains("watched directory", exception.Message);
-        Assert.False(File.Exists(Path.Combine(_testConfigDir, "user-settings.json")));
+        Assert.False(File.Exists(Path.Join(_testConfigDir, "user-settings.json")));
     }
 
     [Fact]
@@ -530,9 +530,9 @@ public class SettingsServiceTests : IDisposable
     {
         await Assert.ThrowsAsync<ArgumentException>(
             () => _service.UpdateSuwayomiSettingsAsync(
-                false, null, null, null, importDirectory: Path.Combine("..", "elsewhere")));
+                false, null, null, null, importDirectory: Path.Join("..", "elsewhere")));
 
-        Assert.False(File.Exists(Path.Combine(_testConfigDir, "user-settings.json")));
+        Assert.False(File.Exists(Path.Join(_testConfigDir, "user-settings.json")));
     }
 
     [Fact]
@@ -546,7 +546,7 @@ public class SettingsServiceTests : IDisposable
             dedupeWindowHours: 12,
             commentOnRecurrence: false);
 
-        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
         var settings = ReadAppSettingsSection(settingsFilePath);
 
         Assert.True(settings["ErrorReportingEnabled"].GetBoolean());
@@ -589,7 +589,7 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateErrorReportingSettingsAsync(
             true, null, null, 5, 12, true);
 
-        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
         Assert.Equal("a-token-value", settings["ErrorReportingGitHubToken"].GetString());
     }
 
@@ -602,7 +602,7 @@ public class SettingsServiceTests : IDisposable
         await _service.UpdateErrorReportingSettingsAsync(
             false, string.Empty, null, 5, 12, true);
 
-        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
         Assert.Equal(JsonValueKind.Null, settings["ErrorReportingGitHubToken"].ValueKind);
     }
 
@@ -641,7 +641,7 @@ public class SettingsServiceTests : IDisposable
                 dedupeWindowHours: 12,
                 commentOnRecurrence: true));
 
-            var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+            var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
             Assert.False(settings["ErrorReportingEnabled"].GetBoolean());
             Assert.Equal(JsonValueKind.Null, settings["ErrorReportingGitHubToken"].ValueKind);
         }

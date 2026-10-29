@@ -193,7 +193,7 @@ public partial class ComicProcessorService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "RenameFileAsync: Error renaming file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
@@ -248,9 +248,9 @@ public partial class ComicProcessorService
 
             filename = ComicFileProcessor.SanitizeFileName(filename);
             
-            return Path.Combine(directory, filename + extension);
+            return Path.Join(directory, filename + extension);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error generating filename");
             return null;

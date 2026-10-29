@@ -42,7 +42,7 @@ public partial class FilesController
                 unmarked_count = unmarkedCount
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting files");
             return StatusCode(500, "Error retrieving files");
@@ -115,7 +115,7 @@ public partial class FilesController
                 unmarked_count = unmarkedCount
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting series library");
             return StatusCode(500, "Error retrieving series library");
@@ -153,7 +153,7 @@ public partial class FilesController
                 unmarked_count = unmarkedCount
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting folders");
             return StatusCode(500, "Error retrieving folders");
@@ -187,7 +187,7 @@ public partial class FilesController
                 files = dtos
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting files for folder");
             return StatusCode(500, "Error retrieving folder files");
@@ -245,7 +245,7 @@ public partial class FilesController
                 total_pages = result.TotalPages
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting issues for series {SeriesId}", LoggingHelper.SanitizeForLog(seriesId));
             return StatusCode(500, "Error retrieving series issues");
@@ -313,7 +313,7 @@ public partial class FilesController
                             .Directory;
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogDebug(ex, "Failed to resolve combine group for series {SeriesId}",
                         LoggingHelper.SanitizeForLog(seriesId));
@@ -329,7 +329,7 @@ public partial class FilesController
                 suggested_destination_directory = suggestedDestination
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting folders for series {SeriesId}", LoggingHelper.SanitizeForLog(seriesId));
             return StatusCode(500, "Error retrieving series folders");
@@ -356,7 +356,7 @@ public partial class FilesController
 
             return Ok(new { total, processed, unprocessed, duplicates, combinableFolders });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting file counts");
             return StatusCode(500, "Error retrieving file counts");

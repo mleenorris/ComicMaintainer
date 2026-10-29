@@ -32,8 +32,8 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
 
     public ComicEmailServiceCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), $"email-coverage-{Guid.NewGuid():N}");
-        _watchedDir = Path.Combine(_root, "library");
+        _root = Path.Join(Path.GetTempPath(), $"email-coverage-{Guid.NewGuid():N}");
+        _watchedDir = Path.Join(_root, "library");
         Directory.CreateDirectory(_watchedDir);
 
         var dbName = $"EmailCoverage_{Guid.NewGuid():N}";
@@ -44,8 +44,8 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         _settings = new AppSettings
         {
             WatchedDirectory = _watchedDir,
-            DuplicateDirectory = Path.Combine(_root, "duplicates"),
-            TempFileDirectory = Path.Combine(_root, "temp"),
+            DuplicateDirectory = Path.Join(_root, "duplicates"),
+            TempFileDirectory = Path.Join(_root, "temp"),
             EmailMaxAttachmentMegabytes = 25,
             SmtpHost = "smtp.example.com",
             EmailFromAddress = "library@example.com"
@@ -226,10 +226,10 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     public async Task PlanCondensedDeliveryAsync_ReportsWhyEachRequestedPathWasSkipped()
     {
         var valid = CreateComic("Series 001.cbz", folder: "Series");
-        var missing = Path.Combine(_watchedDir, "Series", "Series 404.cbz");
-        var notAComic = Path.Combine(_watchedDir, "Series", "notes.txt");
+        var missing = Path.Join(_watchedDir, "Series", "Series 404.cbz");
+        var notAComic = Path.Join(_watchedDir, "Series", "notes.txt");
         await File.WriteAllTextAsync(notAComic, "not a comic");
-        var outside = CreateFile(Path.Combine(_root, "outside", "Escaped 001.cbz"));
+        var outside = CreateFile(Path.Join(_root, "outside", "Escaped 001.cbz"));
 
         var plan = await CreateService().PlanCondensedDeliveryAsync(
             new[] { " ", valid, outside, missing, notAComic, valid },
@@ -249,7 +249,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task PlanCondensedDeliveryAsync_HasNoBooksWhenEveryPathIsSkipped()
     {
-        var missing = Path.Combine(_watchedDir, "Series 404.cbz");
+        var missing = Path.Join(_watchedDir, "Series 404.cbz");
 
         var plan = await CreateService().PlanCondensedDeliveryAsync(
             new[] { missing }, EmailCondenseMode.All, null);
@@ -493,7 +493,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     public async Task ProcessDeliveryAsync_RefusesAStoredPathOutsideTheLibrary()
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
-        var outside = CreateFile(Path.Combine(_root, "outside", "Escaped 001.cbz"));
+        var outside = CreateFile(Path.Join(_root, "outside", "Escaped 001.cbz"));
         var deliveryId = await InsertDeliveryAsync(device.Id, outside, EmailDeliveryStatus.Pending);
 
         await CreateService().ProcessDeliveryAsync(deliveryId);
@@ -549,8 +549,8 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var file = CreateComic("Cached 001.cbz", folder: "Cached Folder");
-        CreateFile(Path.Combine(_watchedDir, "Cached Folder", "cover.jpg"));
-        var cachedImage = Path.Combine(_root, "series-images", "cached.jpg");
+        CreateFile(Path.Join(_watchedDir, "Cached Folder", "cover.jpg"));
+        var cachedImage = Path.Join(_root, "series-images", "cached.jpg");
         _seriesCache.Setup(s => s.GetByTitleAsync("Cached Folder", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord
             {
@@ -583,7 +583,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var file = CreateComic("Cached 001.cbz", folder: "Cached Folder");
-        var sidecar = CreateFile(Path.Combine(_watchedDir, "Cached Folder", "cover.png"));
+        var sidecar = CreateFile(Path.Join(_watchedDir, "Cached Folder", "cover.png"));
         _seriesCache.Setup(s => s.GetByTitleAsync("Cached Folder", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord
             {
@@ -591,7 +591,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
                 ResolvedSeriesName = " ",
                 LocalImageFile = localImageFile
             });
-        _seriesImages.Setup(i => i.ResolveAbsolutePath(It.IsAny<string>())).Returns((string?)null);
+        _seriesImages.Setup(i => i.ResolveAbsolutePath(It.IsAny<string>())).Returns(default(string?));
 
         var service = CreateService();
         var queued = Assert.Single((await service.QueueFilesAsync(
@@ -630,7 +630,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(queued.Id)).Status);
         Assert.NotNull(workDirectory);
         Assert.Equal(
-            Path.Combine(Path.GetTempPath(), "ComicMaintainer", "email"),
+            Path.Join(Path.GetTempPath(), "ComicMaintainer", "email"),
             Path.GetDirectoryName(workDirectory));
     }
 
@@ -755,9 +755,9 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
             .Returns<string, string, EpubConversionOptions?, CancellationToken>((_, outDir, options, _) =>
             {
                 onConvert?.Invoke(outDir, options);
-                var directory = Path.Combine(_root, "converted", Guid.NewGuid().ToString("N"));
+                var directory = Path.Join(_root, "converted", Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(directory);
-                bookPath = Path.Combine(directory, Path.GetFileNameWithoutExtension(source) + ".epub");
+                bookPath = Path.Join(directory, Path.GetFileNameWithoutExtension(source) + ".epub");
                 File.WriteAllBytes(bookPath, bytes ?? new byte[] { 1, 2, 3, 4 });
                 return Task.FromResult(bookPath);
             });
@@ -772,8 +772,8 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
 
     private string CreateComic(string fileName, int sizeBytes = 16, string? folder = null)
     {
-        var directory = folder is null ? _watchedDir : Path.Combine(_watchedDir, folder);
-        return CreateFile(Path.Combine(directory, fileName), sizeBytes);
+        var directory = folder is null ? _watchedDir : Path.Join(_watchedDir, folder);
+        return CreateFile(Path.Join(directory, fileName), sizeBytes);
     }
 
     private static string CreateFile(string path, int sizeBytes = 16)

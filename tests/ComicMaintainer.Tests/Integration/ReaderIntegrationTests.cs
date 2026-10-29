@@ -18,7 +18,7 @@ public class ReaderIntegrationTests
         // Find the wwwroot directory from the test project
         var currentDir = Directory.GetCurrentDirectory();
         var solutionDir = Directory.GetParent(currentDir)?.Parent?.Parent?.Parent?.Parent?.FullName;
-        _wwwrootPath = Path.Combine(solutionDir ?? "", "src", "ComicMaintainer.WebApi", "wwwroot");
+        _wwwrootPath = Path.Join(solutionDir ?? "", "src", "ComicMaintainer.WebApi", "wwwroot");
         
         if (!Directory.Exists(_wwwrootPath))
         {
@@ -29,14 +29,14 @@ public class ReaderIntegrationTests
     // The reader page: its markup followed by its page script
     // (js/pages/reader.js), which holds all of the reader's JavaScript.
     private string ReadReaderPage() =>
-        File.ReadAllText(Path.Combine(_wwwrootPath, "reader.html")) + "\n" +
-        File.ReadAllText(Path.Combine(_wwwrootPath, "js", "pages", "reader.js"));
+        File.ReadAllText(Path.Join(_wwwrootPath, "reader.html")) + "\n" +
+        File.ReadAllText(Path.Join(_wwwrootPath, "js", "pages", "reader.js"));
 
     [Fact]
     public void ReaderHtml_FileExists()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
+        var readerPath = Path.Join(_wwwrootPath, "reader.html");
 
         // Act & Assert
         Assert.True(File.Exists(readerPath), $"reader.html should exist at {readerPath}");
@@ -111,7 +111,7 @@ public class ReaderIntegrationTests
     public void MainJs_DoesNotContainWindowOpen()
     {
         // Arrange
-        var mainJsPath = Path.Combine(_wwwrootPath, "js", "main.js");
+        var mainJsPath = Path.Join(_wwwrootPath, "js", "main.js");
         var content = File.ReadAllText(mainJsPath);
 
         // Assert - Verify readComic function exists and uses window.location.href, not window.open
@@ -129,7 +129,7 @@ public class ReaderIntegrationTests
     public void MainJs_ReadComicFunction_NavigatesInSameWindow()
     {
         // Arrange
-        var mainJsPath = Path.Combine(_wwwrootPath, "js", "main.js");
+        var mainJsPath = Path.Join(_wwwrootPath, "js", "main.js");
         var content = File.ReadAllText(mainJsPath);
 
         // Assert - Extract and verify the readComic function implementation
@@ -175,7 +175,7 @@ public class ReaderIntegrationTests
         // Arrange
         // The SPA is split across several classic scripts that share one global scope.
         var content = string.Concat(
-            Directory.EnumerateFiles(Path.Combine(_wwwrootPath, "js"), "*.js", SearchOption.AllDirectories)
+            Directory.EnumerateFiles(Path.Join(_wwwrootPath, "js"), "*.js", SearchOption.AllDirectories)
                 .Select(File.ReadAllText));
 
         // Assert - Verify the Read Comic action is available in the file actions dropdown.

@@ -58,7 +58,7 @@ public class LogsController : ControllerBase
                 count = logFiles.Length
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error listing log files");
             return StatusCode(500, new
@@ -113,7 +113,7 @@ public class LogsController : ControllerBase
                         content = $"File does not match expected log type: {sanitizedFilename}",
                         total_lines = 0,
                         shown_lines = 0,
-                        filename = (string?)null
+                        filename = default(string?)
                     });
                 }
 
@@ -137,7 +137,7 @@ public class LogsController : ControllerBase
                         content = $"Log file not found: {sanitizedFilename}",
                         total_lines = 0,
                         shown_lines = 0,
-                        filename = (string?)null
+                        filename = default(string?)
                     });
                 }
 
@@ -157,7 +157,7 @@ public class LogsController : ControllerBase
                         content = $"No log files found matching pattern: {logFilePattern}",
                         total_lines = 0,
                         shown_lines = 0,
-                        filename = (string?)null
+                        filename = default(string?)
                     });
                 }
 
@@ -206,7 +206,7 @@ public class LogsController : ControllerBase
                 filename = Path.GetFileName(logFilePath)
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading logs");
             return StatusCode(500, new

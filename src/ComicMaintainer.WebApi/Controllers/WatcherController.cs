@@ -31,7 +31,7 @@ public class WatcherController : ControllerBase
             // This endpoint returns the current running state for display purposes only
             return Ok(new { running = isRunning, enabled = isRunning });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting watcher status");
             return StatusCode(500, "Error retrieving watcher status");
@@ -58,7 +58,7 @@ public class WatcherController : ControllerBase
             var isRunning = _watcher.IsRunning;
             return Ok(new { enabled = isRunning, message = "Watcher is automatically controlled by rename and normalize settings" });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error in deprecated watcher endpoint");
             return StatusCode(500, "Error in watcher endpoint");
@@ -77,7 +77,7 @@ public class WatcherController : ControllerBase
             _logger.LogWarning("EnableWatcher called but is deprecated. Watcher is now controlled by WatcherEnableRename and WatcherEnableNormalize settings.");
             return Ok();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error in deprecated watcher endpoint");
             return StatusCode(500, "Error in watcher endpoint");

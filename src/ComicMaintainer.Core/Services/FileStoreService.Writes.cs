@@ -62,7 +62,7 @@ public partial class FileStoreService
                 tracked = ToComicFile(entity);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading file status from database: {FilePath}", SanitizeForLogging(filePath));
         }
@@ -162,7 +162,7 @@ public partial class FileStoreService
                 _logger.LogDebug("Updated existing file in database: {FilePath}", SanitizeForLogging(filePath));
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error persisting file to database: {FilePath}", SanitizeForLogging(filePath));
         }
@@ -174,7 +174,7 @@ public partial class FileStoreService
             {
                 await _eventBroadcaster.BroadcastFileListUpdateAsync();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogWarning(ex, "Failed to broadcast file list update");
             }
@@ -212,7 +212,7 @@ public partial class FileStoreService
             // File was already deleted by another process/thread - this is not an error
             _logger.LogDebug(ex, "File already removed from database (concurrency)");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error removing file from database");
         }
@@ -224,7 +224,7 @@ public partial class FileStoreService
             {
                 await _eventBroadcaster.BroadcastFileListUpdateAsync();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogWarning(ex, "Failed to broadcast file list update");
             }
@@ -465,7 +465,7 @@ public partial class FileStoreService
                 return;
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
         }
@@ -477,7 +477,7 @@ public partial class FileStoreService
             {
                 await _eventBroadcaster.BroadcastFileListUpdateAsync();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogWarning(ex, "Failed to broadcast file list update after path update");
             }
@@ -575,7 +575,7 @@ public partial class FileStoreService
                 MarkChanged();
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to stamp series metadata version on {File}", SanitizeForLogging(filePath));
         }

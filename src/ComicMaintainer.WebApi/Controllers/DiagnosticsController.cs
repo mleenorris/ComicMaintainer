@@ -134,7 +134,7 @@ public class DiagnosticsController : ControllerBase
                 }).ToArray()
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Diagnostics: health checks could not be evaluated");
             return new { status = "Unknown", error = "Health checks could not be evaluated." };
@@ -154,10 +154,10 @@ public class DiagnosticsController : ControllerBase
                 fileStabilityDelaySeconds = settings.WatcherFileStabilityDelaySeconds
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Diagnostics: watcher status unavailable");
-            return new { running = (bool?)null, error = "Watcher status unavailable." };
+            return new { running = default(bool?), error = "Watcher status unavailable." };
         }
     }
 
@@ -168,7 +168,7 @@ public class DiagnosticsController : ControllerBase
             var (total, processed, unprocessed, duplicates) = await _fileStore.GetFileCountsAsync(cancellationToken);
             return new { total, processed, unprocessed, duplicates };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Diagnostics: library counts unavailable");
             return new { error = "Library counts unavailable." };
@@ -199,7 +199,7 @@ public class DiagnosticsController : ControllerBase
                     .ToString("O")
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Diagnostics: job summary unavailable");
             return new { error = "Job summary unavailable." };
@@ -215,7 +215,7 @@ public class DiagnosticsController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            return new { name, path = (string?)null, exists = false, writable = false };
+            return new { name, path = default(string?), exists = false, writable = false };
         }
 
         try
@@ -241,7 +241,7 @@ public class DiagnosticsController : ControllerBase
                     freeBytes = drive.AvailableFreeSpace;
                     totalBytes = drive.TotalSize;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
                 {
                     // Bind mounts and overlay filesystems can refuse this; the
                     // rest of the entry is still worth reporting.
@@ -259,7 +259,7 @@ public class DiagnosticsController : ControllerBase
                 totalBytes
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Diagnostics: directory {Name} could not be inspected", name);
             return new { name, path, exists = false, writable = false, error = "Directory could not be inspected." };
@@ -281,7 +281,7 @@ public class DiagnosticsController : ControllerBase
     /// </remarks>
     private static bool IsWritable(string path)
     {
-        var probe = Path.Combine(path, $".cm-write-probe-{Guid.NewGuid():N}.tmp");
+        var probe = Path.Join(path, $".cm-write-probe-{Guid.NewGuid():N}.tmp");
         try
         {
             using (new FileStream(
@@ -296,7 +296,7 @@ public class DiagnosticsController : ControllerBase
 
             return true;
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             return false;
         }
@@ -332,7 +332,7 @@ public class DiagnosticsController : ControllerBase
 
             return new { directory, files };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Diagnostics: log files could not be listed");
             return new { directory, files = Array.Empty<object>(), error = "Log files could not be listed." };

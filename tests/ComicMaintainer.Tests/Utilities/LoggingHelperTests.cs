@@ -106,7 +106,7 @@ public class LoggingHelperTests
         // Arrange
         var param1 = ("key1", "value1");
         var param2 = ("key2", "value2\nwith\nnewlines");
-        var param3 = ("key3", (string?)null);
+        var param3 = ("key3", default(string?));
 
         // Act
         var result = LoggingHelper.CreateLogData(param1, param2, param3);

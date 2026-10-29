@@ -42,9 +42,9 @@ internal static class UserSettingsBootstrap
                 return legacyBytes;
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            // If any error occurs, use default value
+            // An unreadable or malformed settings file falls back to the default value.
         }
 
         return defaultLogMaxBytes;
@@ -107,10 +107,10 @@ internal static class UserSettingsBootstrap
             File.WriteAllText(tempPath, serialized);
             File.Move(tempPath, userSettingsPath, overwrite: true);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            // If migration fails, leave the file untouched. The configuration provider will
-            // simply not pick up legacy values until the user re-saves a setting.
+            // If migration fails (unreadable file or malformed JSON), leave the file untouched. The
+            // configuration provider will simply not pick up legacy values until the user re-saves a setting.
         }
     }
 }

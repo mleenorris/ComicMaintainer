@@ -94,7 +94,7 @@ public partial class FileStoreService
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating duplicate status in database for {FilePath}", SanitizeForLogging(filePath));
         }
@@ -168,7 +168,7 @@ public partial class FileStoreService
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating renamed status in database for {FilePath}", SanitizeForLogging(filePath));
         }
@@ -242,7 +242,7 @@ public partial class FileStoreService
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating normalized status in database for {FilePath}", SanitizeForLogging(filePath));
         }
@@ -279,17 +279,15 @@ public partial class FileStoreService
                     .Where(e => chunk.Contains(e.FilePath))
                     .ToListAsync(cancellationToken);
 
-                foreach (var entity in entities)
+                var flagged = entities.Where(e => e.IsRenamed || e.IsNormalized || e.IsProcessed || e.IsDuplicate);
+                foreach (var entity in flagged)
                 {
-                    if (entity.IsRenamed || entity.IsNormalized || entity.IsProcessed || entity.IsDuplicate)
-                    {
-                        entity.IsRenamed = false;
-                        entity.IsNormalized = false;
-                        entity.IsProcessed = false;
-                        entity.IsDuplicate = false;
-                        entity.UpdatedAt = now;
-                        updated++;
-                    }
+                    entity.IsRenamed = false;
+                    entity.IsNormalized = false;
+                    entity.IsProcessed = false;
+                    entity.IsDuplicate = false;
+                    entity.UpdatedAt = now;
+                    updated++;
                 }
 
                 if (entities.Count > 0)
@@ -328,14 +326,14 @@ public partial class FileStoreService
                     {
                         await _eventBroadcaster.BroadcastFileListUpdateAsync();
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
                     {
                         _logger.LogDebug(ex, "ClearProcessedStatusAsync: file list broadcast failed");
                     }
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error clearing processed status for {Count} file(s)", pathList.Count);
         }

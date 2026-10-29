@@ -15,7 +15,7 @@ namespace ComicMaintainer.Tests.Controllers;
 /// </summary>
 public sealed class LogsControllerCoverageTests : IDisposable
 {
-    private readonly string _logDir = Path.Combine(Path.GetTempPath(), "cm_logs_cov_" + Guid.NewGuid().ToString("N"));
+    private readonly string _logDir = Path.Join(Path.GetTempPath(), "cm_logs_cov_" + Guid.NewGuid().ToString("N"));
     private readonly AppSettings _settings;
     private readonly LogsController _controller;
 
@@ -30,7 +30,7 @@ public sealed class LogsControllerCoverageTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_logDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        try { Directory.Delete(_logDir, recursive: true); } catch (IOException) { /* best-effort cleanup */ } catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
     }
 
     [Theory]
@@ -76,7 +76,7 @@ public sealed class LogsControllerCoverageTests : IDisposable
         var json = OkJson(_controller.GetLogs(type: type, filename: filename));
 
         Assert.Equal(filename, json.GetProperty("filename").GetString());
-        Assert.Equal(File.ReadAllText(Path.Combine(_logDir, filename)).TrimEnd(), json.GetProperty("content").GetString());
+        Assert.Equal(File.ReadAllText(Path.Join(_logDir, filename)).TrimEnd(), json.GetProperty("content").GetString());
     }
 
     [Theory]
@@ -93,7 +93,7 @@ public sealed class LogsControllerCoverageTests : IDisposable
     public void GetLogs_FilenameOfAnotherTypeIsRefusedEvenWhenItExists(string type, string filename)
     {
         WriteAllLogTypes();
-        File.WriteAllText(Path.Combine(_logDir, filename), "must not be served");
+        File.WriteAllText(Path.Join(_logDir, filename), "must not be served");
 
         var json = OkJson(_controller.GetLogs(type: type, filename: filename));
 
@@ -141,8 +141,8 @@ public sealed class LogsControllerCoverageTests : IDisposable
         var newer = DateTime.UtcNow.AddHours(-1);
         foreach (var prefix in new[] { "app", "watcher", "metadata", "auth", "debug" })
         {
-            var oldFile = Path.Combine(_logDir, $"{prefix}20260101.log");
-            var newFile = Path.Combine(_logDir, $"{prefix}20260102.log");
+            var oldFile = Path.Join(_logDir, $"{prefix}20260101.log");
+            var newFile = Path.Join(_logDir, $"{prefix}20260102.log");
             File.WriteAllText(oldFile, $"{prefix} oldest\n");
             File.WriteAllText(newFile, $"{prefix} newest\n");
             File.SetLastWriteTimeUtc(oldFile, older);

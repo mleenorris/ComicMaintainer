@@ -30,15 +30,8 @@ public partial class SeriesLibraryService
         {
             titles.Add(accumulator.CanonicalTitle);
         }
-        foreach (var alias in accumulator.Aliases)
-        {
-            if (!string.IsNullOrWhiteSpace(alias) &&
-                !titles.Contains(alias, StringComparer.OrdinalIgnoreCase))
-            {
-                titles.Add(alias);
-            }
-        }
-        return titles;
+        titles.AddRange(accumulator.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
+        return titles.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     public async Task<SeriesFoldersResult?> GetFoldersForSeriesIdAsync(
@@ -77,14 +70,9 @@ public partial class SeriesLibraryService
                 continue;
             }
 
-            if (byDirectory.TryGetValue(directory, out var existing))
-            {
-                byDirectory[directory] = (existing.Count + 1, existing.Size + issue.Size);
-            }
-            else
-            {
-                byDirectory[directory] = (1, issue.Size);
-            }
+            byDirectory[directory] = byDirectory.TryGetValue(directory, out var existing)
+                ? (existing.Count + 1, existing.Size + issue.Size)
+                : (1, issue.Size);
         }
 
         var folders = byDirectory
@@ -133,14 +121,9 @@ public partial class SeriesLibraryService
                     continue;
                 }
 
-                if (byDirectory.TryGetValue(directory, out var existing))
-                {
-                    byDirectory[directory] = (existing.Count + 1, existing.Size + issue.Size);
-                }
-                else
-                {
-                    byDirectory[directory] = (1, issue.Size);
-                }
+                byDirectory[directory] = byDirectory.TryGetValue(directory, out var existing)
+                    ? (existing.Count + 1, existing.Size + issue.Size)
+                    : (1, issue.Size);
             }
 
             var folders = byDirectory
@@ -204,14 +187,9 @@ public partial class SeriesLibraryService
                 {
                     continue;
                 }
-                if (byDirectory.TryGetValue(directory, out var existing))
-                {
-                    byDirectory[directory] = (existing.Count + 1, existing.Size + issue.Size);
-                }
-                else
-                {
-                    byDirectory[directory] = (1, issue.Size);
-                }
+                byDirectory[directory] = byDirectory.TryGetValue(directory, out var existing)
+                    ? (existing.Count + 1, existing.Size + issue.Size)
+                    : (1, issue.Size);
             }
         }
 

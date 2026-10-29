@@ -28,14 +28,14 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
 
     public SeriesImagesControllerCoverageTests()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "series_images_cov_" + Guid.NewGuid().ToString("N"));
+        _dir = Path.Join(Path.GetTempPath(), "series_images_cov_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
     }
 
     public void Dispose()
     {
         _cts.Dispose();
-        try { Directory.Delete(_dir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        try { Directory.Delete(_dir, recursive: true); } catch (IOException) { /* best-effort cleanup */ } catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
     }
 
     private SeriesImagesController CreateController(
@@ -86,7 +86,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
 
     private string WriteImage(string name = "batman-abc.png")
     {
-        var path = Path.Combine(_dir, name);
+        var path = Path.Join(_dir, name);
         File.WriteAllBytes(path, PngSignature);
         File.SetLastWriteTimeUtc(path, new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc));
         return path;
@@ -186,7 +186,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     public async Task Get_ImageFileOutsideStore_ReturnsNotFound()
     {
         _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
-        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns((string?)null);
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(default(string?));
 
         var result = await CreateController().Get("batman", CancellationToken.None);
 
@@ -467,7 +467,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     public async Task Get_ImageDeletedAfterResolving_ReturnsNotFound()
     {
         _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
-        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(Path.Combine(_dir, "gone.png"));
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(Path.Join(_dir, "gone.png"));
         var controller = CreateController();
 
         var result = await controller.Get("batman", CancellationToken.None);
@@ -487,10 +487,9 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
 
     // ---- Upload -------------------------------------------------------------------------
 
-    private static FormFile PngUpload(string? contentType = "image/png")
+    private static FormFile PngUpload(Stream content, string? contentType = "image/png")
     {
-        var stream = new MemoryStream(PngSignature);
-        var file = new FormFile(stream, 0, stream.Length, "file", "cover.png") { Headers = new HeaderDictionary() };
+        var file = new FormFile(content, 0, content.Length, "file", "cover.png") { Headers = new HeaderDictionary() };
         if (contentType is not null)
         {
             file.ContentType = contentType;
@@ -503,7 +502,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     [InlineData("  ")]
     public async Task Upload_BlankTitle_ReturnsBadRequest(string title)
     {
-        var result = await CreateController().Upload(title, PngUpload(), CancellationToken.None);
+        using var png = new MemoryStream(PngSignature);
+        var result = await CreateController().Upload(title, PngUpload(png), CancellationToken.None);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Series title is required", bad.Value);
@@ -521,7 +521,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     [Fact]
     public async Task Upload_EmptyFile_ReturnsBadRequest()
     {
-        var empty = new FormFile(new MemoryStream(), 0, 0, "file", "cover.png");
+        using var stream = new MemoryStream();
+        var empty = new FormFile(stream, 0, 0, "file", "cover.png");
 
         var result = await CreateController().Upload("Batman", empty, CancellationToken.None);
 
@@ -557,7 +558,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
             })
             .ReturnsAsync(record);
 
-        var result = await CreateController().Upload("Batman", PngUpload(), _cts.Token);
+        using var png = new MemoryStream(PngSignature);
+        var result = await CreateController().Upload("Batman", PngUpload(png), _cts.Token);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Same(record, ok.Value);
@@ -569,7 +571,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     {
         var file = new Mock<IFormFile>();
         file.SetupGet(f => f.Length).Returns(PngSignature.Length);
-        file.SetupGet(f => f.ContentType).Returns((string)null!);
+        file.SetupGet(f => f.ContentType).Returns(default(string)!);
         file.Setup(f => f.OpenReadStream()).Returns(() => new MemoryStream(PngSignature));
         var record = ImageRecord(status: "user");
         _cache.Setup(c => c.SetUserImageAsync("Batman", It.IsAny<Stream>(), string.Empty, It.IsAny<CancellationToken>()))
@@ -588,7 +590,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         _cache.Setup(c => c.SetUserImageAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Unsupported image type"));
 
-        var result = await CreateController().Upload("Batman", PngUpload("text/plain"), CancellationToken.None);
+        using var png = new MemoryStream(PngSignature);
+        var result = await CreateController().Upload("Batman", PngUpload(png, "text/plain"), CancellationToken.None);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Unsupported image type", ErrorOf(bad.Value));
@@ -600,7 +603,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         _cache.Setup(c => c.SetUserImageAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("disk full"));
 
-        var result = await CreateController().Upload("Batman", PngUpload(), CancellationToken.None);
+        using var png = new MemoryStream(PngSignature);
+        var result = await CreateController().Upload("Batman", PngUpload(png), CancellationToken.None);
 
         var obj = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, obj.StatusCode);

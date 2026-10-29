@@ -15,7 +15,7 @@ public class EpubConversionServiceTests : IDisposable
 
     public EpubConversionServiceTests()
     {
-        _workDir = Path.Combine(Path.GetTempPath(), $"epub-tests-{Guid.NewGuid():N}");
+        _workDir = Path.Join(Path.GetTempPath(), $"epub-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
         _service = new EpubConversionService(new Mock<ILogger<EpubConversionService>>().Object);
     }
@@ -24,7 +24,7 @@ public class EpubConversionServiceTests : IDisposable
     public async Task ConvertToEpubAsync_ProducesValidEpubStructure()
     {
         var cbz = CreateCbz("Series Name - Chapter 0001.cbz", pageCount: 3, includeComicInfo: true);
-        var outputDir = Path.Combine(_workDir, "out");
+        var outputDir = Path.Join(_workDir, "out");
 
         var epubPath = await _service.ConvertToEpubAsync(cbz, outputDir);
 
@@ -61,7 +61,7 @@ public class EpubConversionServiceTests : IDisposable
     {
         var cbz = CreateCbz("Mystery Issue.cbz", pageCount: 1, includeComicInfo: false);
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out2"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out2"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         Assert.Contains("""<dc:title id="title">Mystery Issue</dc:title>""", ReadEntry(archive, "OEBPS/content.opf"));
@@ -77,7 +77,7 @@ public class EpubConversionServiceTests : IDisposable
             series: "Tom & Jerry <Deluxe>",
             number: "2");
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out3"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out3"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         var opf = ReadEntry(archive, "OEBPS/content.opf");
@@ -90,7 +90,7 @@ public class EpubConversionServiceTests : IDisposable
     {
         var cbz = CreateCbz("Numbered.cbz", pageCount: 1, includeComicInfo: true, number: "12.5");
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-number"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out-number"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         var opf = ReadEntry(archive, "OEBPS/content.opf");
@@ -117,7 +117,7 @@ public class EpubConversionServiceTests : IDisposable
     {
         var cbz = CreateCbz($"decorated-{expectedPosition}.cbz", pageCount: 1, includeComicInfo: true, number: number);
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, $"out-num-{expectedPosition}"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, $"out-num-{expectedPosition}"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         var opf = ReadEntry(archive, "OEBPS/content.opf");
@@ -130,7 +130,7 @@ public class EpubConversionServiceTests : IDisposable
     {
         var cbz = CreateCbz("annual.cbz", pageCount: 1, includeComicInfo: true, number: "Annual");
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-annual"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out-annual"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         var opf = ReadEntry(archive, "OEBPS/content.opf");
@@ -143,12 +143,12 @@ public class EpubConversionServiceTests : IDisposable
     public async Task ConvertToEpubAsync_WithSeriesImage_EmbedsItAsTheCover()
     {
         var cbz = CreateCbz("Covered.cbz", pageCount: 2, includeComicInfo: true);
-        var coverPath = Path.Combine(_workDir, "series-cover.jpg");
+        var coverPath = Path.Join(_workDir, "series-cover.jpg");
         await File.WriteAllBytesAsync(coverPath, CreateJpeg(60, 90));
 
         var epubPath = await _service.ConvertToEpubAsync(
             cbz,
-            Path.Combine(_workDir, "out-cover"),
+            Path.Join(_workDir, "out-cover"),
             new EpubConversionOptions(coverPath, "Series Name"));
 
         using var archive = ZipFile.OpenRead(epubPath);
@@ -178,18 +178,18 @@ public class EpubConversionServiceTests : IDisposable
     public async Task ConvertToEpubAsync_WithMissingOrInvalidSeriesImage_FallsBackToFirstPage()
     {
         var cbz = CreateCbz("Fallback.cbz", pageCount: 2, includeComicInfo: true);
-        var notAnImage = Path.Combine(_workDir, "broken-cover.jpg");
+        var notAnImage = Path.Join(_workDir, "broken-cover.jpg");
         await File.WriteAllTextAsync(notAnImage, "not an image");
 
         foreach (var (candidate, outDir) in new[]
                  {
-                     (Path.Combine(_workDir, "missing-cover.jpg"), "out-missing"),
+                     (Path.Join(_workDir, "missing-cover.jpg"), "out-missing"),
                      (notAnImage, "out-broken")
                  })
         {
             var epubPath = await _service.ConvertToEpubAsync(
                 cbz,
-                Path.Combine(_workDir, outDir),
+                Path.Join(_workDir, outDir),
                 new EpubConversionOptions(candidate, "Series Name"));
 
             using var archive = ZipFile.OpenRead(epubPath);
@@ -206,7 +206,7 @@ public class EpubConversionServiceTests : IDisposable
         // The series cover an archive carries sorts after the numbered pages,
         // so without special handling the book would open on page 1 and show
         // the series art at the very end.
-        var cbz = Path.Combine(_workDir, "embedded-cover.cbz");
+        var cbz = Path.Join(_workDir, "embedded-cover.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             WriteImageEntry(zip, "001.jpg");
@@ -214,7 +214,7 @@ public class EpubConversionServiceTests : IDisposable
             WriteImageEntry(zip, "cover.jpg", CreateJpeg(60, 90));
         }
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-embedded-cover"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out-embedded-cover"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         var names = archive.Entries.Select(e => e.FullName).ToList();
@@ -231,13 +231,13 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_WithEmbeddedCopyOfTheSeriesImage_DropsTheDuplicatePage()
     {
-        var coverPath = Path.Combine(_workDir, "duplicate-cover.jpg");
+        var coverPath = Path.Join(_workDir, "duplicate-cover.jpg");
         var coverBytes = CreateJpeg(60, 90);
         await File.WriteAllBytesAsync(coverPath, coverBytes);
 
         // ComicMaintainer embeds the cached series cover into the first archive
         // of a series, so the same image would otherwise appear twice in a row.
-        var cbz = Path.Combine(_workDir, "duplicate-cover.cbz");
+        var cbz = Path.Join(_workDir, "duplicate-cover.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             WriteImageEntry(zip, "001.jpg");
@@ -247,7 +247,7 @@ public class EpubConversionServiceTests : IDisposable
 
         var epubPath = await _service.ConvertToEpubAsync(
             cbz,
-            Path.Combine(_workDir, "out-duplicate-cover"),
+            Path.Join(_workDir, "out-duplicate-cover"),
             new EpubConversionOptions(coverPath, "Series Name"));
 
         using var archive = ZipFile.OpenRead(epubPath);
@@ -263,11 +263,11 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_WithOnlyACoverEntry_KeepsItAsThePage()
     {
-        var coverPath = Path.Combine(_workDir, "sole-cover.jpg");
+        var coverPath = Path.Join(_workDir, "sole-cover.jpg");
         var coverBytes = CreateJpeg(60, 90);
         await File.WriteAllBytesAsync(coverPath, coverBytes);
 
-        var cbz = Path.Combine(_workDir, "sole-cover.cbz");
+        var cbz = Path.Join(_workDir, "sole-cover.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             WriteImageEntry(zip, "cover.jpg", coverBytes);
@@ -275,7 +275,7 @@ public class EpubConversionServiceTests : IDisposable
 
         var epubPath = await _service.ConvertToEpubAsync(
             cbz,
-            Path.Combine(_workDir, "out-sole-cover"),
+            Path.Join(_workDir, "out-sole-cover"),
             new EpubConversionOptions(coverPath, "Series Name"));
 
         using var archive = ZipFile.OpenRead(epubPath);
@@ -288,14 +288,14 @@ public class EpubConversionServiceTests : IDisposable
     {
         // Only a root-level cover.* is series art; one inside a chapter folder
         // is that chapter's own page and must keep its place.
-        var cbz = Path.Combine(_workDir, "nested-cover.cbz");
+        var cbz = Path.Join(_workDir, "nested-cover.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             WriteImageEntry(zip, "chapter 1/001.jpg");
             WriteImageEntry(zip, "chapter 1/cover.jpg", CreateJpeg(60, 90));
         }
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-nested-cover"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out-nested-cover"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         Assert.DoesNotContain("content=\"width=60, height=90\"", ReadEntry(archive, "OEBPS/page0001.xhtml"));
@@ -305,14 +305,14 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_CondensedBook_PlacesEachIssueCoverFirst()
     {
-        var first = Path.Combine(_workDir, "Condensed - Chapter 0001.cbz");
+        var first = Path.Join(_workDir, "Condensed - Chapter 0001.cbz");
         using (var zip = ZipFile.Open(first, ZipArchiveMode.Create))
         {
             WriteImageEntry(zip, "001.jpg");
             WriteImageEntry(zip, "cover.jpg", CreateJpeg(60, 90));
         }
 
-        var second = Path.Combine(_workDir, "Condensed - Chapter 0002.cbz");
+        var second = Path.Join(_workDir, "Condensed - Chapter 0002.cbz");
         using (var zip = ZipFile.Open(second, ZipArchiveMode.Create))
         {
             WriteImageEntry(zip, "001.jpg");
@@ -321,7 +321,7 @@ public class EpubConversionServiceTests : IDisposable
 
         var epubPath = await _service.ConvertToEpubAsync(
             new[] { first, second },
-            Path.Combine(_workDir, "out-condensed-cover"),
+            Path.Join(_workDir, "out-condensed-cover"),
             new EpubConversionOptions(Title: "Condensed 001-002"));
 
         using var archive = ZipFile.OpenRead(epubPath);
@@ -336,7 +336,7 @@ public class EpubConversionServiceTests : IDisposable
 
         var epubPath = await _service.ConvertToEpubAsync(
             cbz,
-            Path.Combine(_workDir, "out-series-title"),
+            Path.Join(_workDir, "out-series-title"),
             new EpubConversionOptions(null, "Library Series"));
 
         using var archive = ZipFile.OpenRead(epubPath);
@@ -348,7 +348,7 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_SortsPagesNaturally()
     {
-        var cbz = Path.Combine(_workDir, "natural.cbz");
+        var cbz = Path.Join(_workDir, "natural.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             foreach (var name in new[] { "page10.jpg", "page2.jpg", "page1.jpg" })
@@ -357,7 +357,7 @@ public class EpubConversionServiceTests : IDisposable
             }
         }
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out4"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out4"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         // page0002 is the second spine entry, so the source page2.jpg must map to it.
@@ -369,7 +369,7 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_IgnoresNonImageAndResourceForkEntries()
     {
-        var cbz = Path.Combine(_workDir, "noise.cbz");
+        var cbz = Path.Join(_workDir, "noise.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             WriteImageEntry(zip, "001.jpg");
@@ -377,7 +377,7 @@ public class EpubConversionServiceTests : IDisposable
             zip.CreateEntry("readme.txt").Open().Dispose();
         }
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out5"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out5"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         Assert.Single(archive.Entries, e => e.FullName.StartsWith("OEBPS/images/", StringComparison.Ordinal));
@@ -386,29 +386,29 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_WithNoImages_Throws()
     {
-        var cbz = Path.Combine(_workDir, "empty.cbz");
+        var cbz = Path.Join(_workDir, "empty.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             zip.CreateEntry("readme.txt").Open().Dispose();
         }
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out6")));
-        Assert.False(Directory.Exists(Path.Combine(_workDir, "out6")) &&
-                     Directory.EnumerateFiles(Path.Combine(_workDir, "out6")).Any());
+            () => _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out6")));
+        Assert.False(Directory.Exists(Path.Join(_workDir, "out6")) &&
+                     Directory.EnumerateFiles(Path.Join(_workDir, "out6")).Any());
     }
 
     [Fact]
     public async Task ConvertToEpubAsync_WithMissingFile_Throws()
     {
         await Assert.ThrowsAsync<FileNotFoundException>(
-            () => _service.ConvertToEpubAsync(Path.Combine(_workDir, "nope.cbz"), _workDir));
+            () => _service.ConvertToEpubAsync(Path.Join(_workDir, "nope.cbz"), _workDir));
     }
 
     [Fact]
     public async Task ConvertToEpubAsync_WithUnsupportedExtension_Throws()
     {
-        var path = Path.Combine(_workDir, "not-a-comic.txt");
+        var path = Path.Join(_workDir, "not-a-comic.txt");
         await File.WriteAllTextAsync(path, "nope");
 
         await Assert.ThrowsAsync<NotSupportedException>(
@@ -418,7 +418,7 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_WithUndecodablePage_ThrowsAndWritesNoEpub()
     {
-        var cbz = Path.Combine(_workDir, "corrupt.cbz");
+        var cbz = Path.Join(_workDir, "corrupt.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             WriteImageEntry(zip, "001.jpg");
@@ -430,7 +430,7 @@ public class EpubConversionServiceTests : IDisposable
             stream.Write(bytes, 0, bytes.Length);
         }
 
-        var outDir = Path.Combine(_workDir, "out-corrupt");
+        var outDir = Path.Join(_workDir, "out-corrupt");
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => _service.ConvertToEpubAsync(cbz, outDir));
 
@@ -440,7 +440,7 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_WithEmptyPageEntry_Throws()
     {
-        var cbz = Path.Combine(_workDir, "empty-page.cbz");
+        var cbz = Path.Join(_workDir, "empty-page.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             WriteImageEntry(zip, "001.jpg");
@@ -448,13 +448,13 @@ public class EpubConversionServiceTests : IDisposable
         }
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-empty-page")));
+            () => _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out-empty-page")));
     }
 
     [Fact]
     public async Task ConvertToEpubAsync_WithUnsupportedPageFormat_ReencodesAsJpeg()
     {
-        var cbz = Path.Combine(_workDir, "webp.cbz");
+        var cbz = Path.Join(_workDir, "webp.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             using var image = new MagickImage(MagickColors.White, 20, 30)
@@ -464,7 +464,7 @@ public class EpubConversionServiceTests : IDisposable
             WriteImageEntry(zip, "001.webp", image.ToByteArray());
         }
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-webp"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out-webp"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         var names = archive.Entries.Select(e => e.FullName).ToList();
@@ -476,7 +476,7 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_WithMislabeledPageExtension_UsesTheRealFormat()
     {
-        var cbz = Path.Combine(_workDir, "mislabeled.cbz");
+        var cbz = Path.Join(_workDir, "mislabeled.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             using var image = new MagickImage(MagickColors.White, 20, 30)
@@ -491,7 +491,7 @@ public class EpubConversionServiceTests : IDisposable
             stream.Write(bytes, 0, bytes.Length);
         }
 
-        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-mislabeled"));
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Join(_workDir, "out-mislabeled"));
 
         using var archive = ZipFile.OpenRead(epubPath);
         Assert.Contains("OEBPS/images/page0001.png", archive.Entries.Select(e => e.FullName));
@@ -501,7 +501,7 @@ public class EpubConversionServiceTests : IDisposable
     [Fact]
     public async Task ConvertToEpubAsync_WhenOverSizeBudget_CompressesPagesToFit()
     {
-        var cbz = Path.Combine(_workDir, "large.cbz");
+        var cbz = Path.Join(_workDir, "large.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
             for (var i = 1; i <= 3; i++)
@@ -512,14 +512,14 @@ public class EpubConversionServiceTests : IDisposable
 
         var uncompressed = await _service.ConvertToEpubAsync(
             cbz,
-            Path.Combine(_workDir, "out-nobudget"),
+            Path.Join(_workDir, "out-nobudget"),
             new EpubConversionOptions());
         var uncompressedLength = new FileInfo(uncompressed).Length;
 
         var budget = uncompressedLength / 4;
         var compressed = await _service.ConvertToEpubAsync(
             cbz,
-            Path.Combine(_workDir, "out-budget"),
+            Path.Join(_workDir, "out-budget"),
             new EpubConversionOptions(MaxSizeBytes: budget));
 
         Assert.True(
@@ -543,7 +543,7 @@ public class EpubConversionServiceTests : IDisposable
 
         var epubPath = await _service.ConvertToEpubAsync(
             cbz,
-            Path.Combine(_workDir, "out-within-budget"),
+            Path.Join(_workDir, "out-within-budget"),
             new EpubConversionOptions(MaxSizeBytes: 50L * 1024 * 1024));
 
         using var archive = ZipFile.OpenRead(epubPath);
@@ -559,7 +559,7 @@ public class EpubConversionServiceTests : IDisposable
     {
         var first = CreateCbz("Series Name - Chapter 0001.cbz", pageCount: 2, includeComicInfo: true, number: "1");
         var second = CreateCbz("Series Name - Chapter 0002.cbz", pageCount: 3, includeComicInfo: true, number: "2");
-        var outputDir = Path.Combine(_workDir, "condensed");
+        var outputDir = Path.Join(_workDir, "condensed");
 
         var epubPath = await _service.ConvertToEpubAsync(
             new[] { first, second },
@@ -594,7 +594,7 @@ public class EpubConversionServiceTests : IDisposable
     public async Task ConvertToEpubAsync_RejectsAnEmptyFileList()
     {
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            _service.ConvertToEpubAsync(Array.Empty<string>(), Path.Combine(_workDir, "none")));
+            _service.ConvertToEpubAsync(Array.Empty<string>(), Path.Join(_workDir, "none")));
     }
 
     [Fact]
@@ -604,11 +604,11 @@ public class EpubConversionServiceTests : IDisposable
 
         var epubPath = await _service.ConvertToEpubAsync(
             new[] { cbz },
-            Path.Combine(_workDir, "sanitized"),
+            Path.Join(_workDir, "sanitized"),
             new EpubConversionOptions(OutputFileName: "../../escape/Series 001-005"));
 
         Assert.Equal(
-            Path.GetFullPath(Path.Combine(_workDir, "sanitized")),
+            Path.GetFullPath(Path.Join(_workDir, "sanitized")),
             Path.GetFullPath(Path.GetDirectoryName(epubPath)!));
         Assert.DoesNotContain("..", Path.GetFileName(epubPath));
     }
@@ -622,7 +622,7 @@ public class EpubConversionServiceTests : IDisposable
 
         await _service.ConvertToEpubAsync(
             new[] { first, second },
-            Path.Combine(_workDir, "progress"),
+            Path.Join(_workDir, "progress"),
             new EpubConversionOptions(
                 Title: "Progress 001-002",
                 Progress: new CollectingProgress(reports)));
@@ -651,7 +651,7 @@ public class EpubConversionServiceTests : IDisposable
 
         var epubPath = await _service.ConvertToEpubAsync(
             new[] { cbz },
-            Path.Combine(_workDir, "throwing-progress"),
+            Path.Join(_workDir, "throwing-progress"),
             new EpubConversionOptions(Progress: new ThrowingProgress()));
 
         Assert.True(File.Exists(epubPath));
@@ -678,7 +678,7 @@ public class EpubConversionServiceTests : IDisposable
         string series = "Series Name",
         string number = "1")
     {
-        var path = Path.Combine(_workDir, fileName);
+        var path = Path.Join(_workDir, fileName);
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
 
         if (includeComicInfo)

@@ -39,7 +39,7 @@ public class DatabaseHealthCheck : IHealthCheck
 
             return HealthCheckResult.Unhealthy("Database is not reachable.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Database readiness check failed.");
             return HealthCheckResult.Unhealthy("Database readiness check threw an exception.", ex);

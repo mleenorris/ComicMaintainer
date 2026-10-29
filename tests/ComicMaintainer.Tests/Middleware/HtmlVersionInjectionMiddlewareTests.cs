@@ -14,7 +14,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
 
     public HtmlVersionInjectionMiddlewareTests()
     {
-        _tempRoot = Path.Combine(Path.GetTempPath(), "html_mw_" + Guid.NewGuid().ToString("N"));
+        _tempRoot = Path.Join(Path.GetTempPath(), "html_mw_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempRoot);
 
         _env = new Mock<IWebHostEnvironment>();
@@ -25,7 +25,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempRoot, recursive: true); } catch { /* ignore */ }
+        try { Directory.Delete(_tempRoot, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 
     private static HttpContext CreateContext(string path)
@@ -47,7 +47,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
     public async Task RootPath_ServesIndexWithVersionSubstituted()
     {
         File.WriteAllText(
-            Path.Combine(_tempRoot, "index.html"),
+            Path.Join(_tempRoot, "index.html"),
             "<link href=\"/css/main.css?v=__APP_VERSION__\"><script src=\"/js/main.js?v=__APP_VERSION__\"></script>");
 
         var nextCalled = false;
@@ -69,7 +69,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
     public async Task DotHtmlPath_ServesFileWithVersionSubstituted()
     {
         File.WriteAllText(
-            Path.Combine(_tempRoot, "reader.html"),
+            Path.Join(_tempRoot, "reader.html"),
             "<link href=\"/css/main.css?v=__APP_VERSION__\">");
 
         var mw = new HtmlVersionInjectionMiddleware(_ => Task.CompletedTask, _env.Object, _logger.Object);
@@ -85,7 +85,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
     [Fact]
     public async Task ApiPath_IsPassedThroughToNext()
     {
-        File.WriteAllText(Path.Combine(_tempRoot, "index.html"), "<html>__APP_VERSION__</html>");
+        File.WriteAllText(Path.Join(_tempRoot, "index.html"), "<html>__APP_VERSION__</html>");
 
         var nextCalled = false;
         var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object);
@@ -101,8 +101,6 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
     [Fact]
     public async Task SwJsAndManifest_ArePassedThroughToNext()
     {
-        var mw = new HtmlVersionInjectionMiddleware(_ => Task.CompletedTask, _env.Object, _logger.Object);
-
         foreach (var path in new[] { "/sw.js", "/manifest.json" })
         {
             var nextCalled = false;

@@ -105,7 +105,7 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Metadata backfill failed for {FilePath}", LoggingHelper.SanitizePathForLog(file.FilePath));
             return false;
@@ -127,7 +127,7 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                    ?? new MetadataBackfillOptions();
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
             return new MetadataBackfillOptions();
         }

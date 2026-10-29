@@ -179,7 +179,7 @@ public class EpubConversionService : IEpubConversionService
 
         var fileName = SanitizeFileName(options?.OutputFileName)
             ?? Path.GetFileNameWithoutExtension(primary.FilePath);
-        var epubPath = Path.Combine(outputDirectory, fileName + ".epub");
+        var epubPath = Path.Join(outputDirectory, fileName + ".epub");
         var tempPath = epubPath + ".tmp";
         var label = issues.Count == 1 ? Path.GetFileName(primary.FilePath) : fileName;
 
@@ -486,12 +486,9 @@ public class EpubConversionService : IEpubConversionService
                 // condensed book spans.
                 using var archive = OpenArchive(issue.FilePath);
                 var entriesByKey = new Dictionary<string, IArchiveEntry>(StringComparer.Ordinal);
-                foreach (var entry in archive.Entries)
+                foreach (var entry in archive.Entries.Where(e => !e.IsDirectory && e.Key is not null))
                 {
-                    if (!entry.IsDirectory && entry.Key is { } key)
-                    {
-                        entriesByKey.TryAdd(key, entry);
-                    }
+                    entriesByKey.TryAdd(entry.Key!, entry);
                 }
 
                 var isFirstPageOfIssue = true;
@@ -616,7 +613,7 @@ public class EpubConversionService : IEpubConversionService
                 pass,
                 totalPasses));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex, "EPUB conversion progress callback failed; continuing the conversion");
         }

@@ -29,14 +29,14 @@ public class SeriesImageStoreCoverageTests : IDisposable
 
     public SeriesImageStoreCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "cm-image-store-cov-" + Guid.NewGuid().ToString("N"));
-        _cacheDir = Path.Combine(_root, "cache");
+        _root = Path.Join(Path.GetTempPath(), "cm-image-store-cov-" + Guid.NewGuid().ToString("N"));
+        _cacheDir = Path.Join(_root, "cache");
         Directory.CreateDirectory(_cacheDir);
     }
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch { /* ignore */ }
+        try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 
     // ---- argument validation ---------------------------------------------
@@ -476,14 +476,14 @@ public class SeriesImageStoreCoverageTests : IDisposable
     {
         var (store, _) = CreateStore();
         var fileName = $"series-a-{ShortHash(JpegMagic)}.jpg";
-        Directory.CreateDirectory(Path.Combine(_cacheDir, fileName));
+        Directory.CreateDirectory(Path.Join(_cacheDir, fileName));
         await using var stream = new MemoryStream(JpegMagic);
 
         await Assert.ThrowsAnyAsync<IOException>(() =>
             store.SaveUserImageAsync("series-a", stream, "image/jpeg", previousFile: null));
 
-        Assert.False(File.Exists(Path.Combine(_cacheDir, fileName + ".tmp")));
-        Assert.True(Directory.Exists(Path.Combine(_cacheDir, fileName)));
+        Assert.False(File.Exists(Path.Join(_cacheDir, fileName + ".tmp")));
+        Assert.True(Directory.Exists(Path.Join(_cacheDir, fileName)));
     }
 
     // ---- cache directory resolution ----------------------------------------
@@ -496,7 +496,7 @@ public class SeriesImageStoreCoverageTests : IDisposable
 
         var result = await store.SaveUserImageAsync("series-a", stream, "image/jpeg", previousFile: null);
 
-        Assert.Equal(Path.Combine(_cacheDir, result.FileName), store.ResolveAbsolutePath(result.FileName));
+        Assert.Equal(Path.Join(_cacheDir, result.FileName), store.ResolveAbsolutePath(result.FileName));
     }
 
     [Theory]
@@ -505,7 +505,7 @@ public class SeriesImageStoreCoverageTests : IDisposable
     [InlineData("   ")]
     public async Task BlankCacheDirectory_FallsBackToConfigDirectory(string? configured)
     {
-        var configDir = Path.Combine(_root, "config");
+        var configDir = Path.Join(_root, "config");
         var (store, _) = CreateStore(s =>
         {
             s.SeriesImageCacheDirectory = configured;
@@ -515,7 +515,7 @@ public class SeriesImageStoreCoverageTests : IDisposable
 
         var result = await store.SaveUserImageAsync("series-a", stream, "image/jpeg", previousFile: null);
 
-        var expected = Path.Combine(configDir, "series-images", result.FileName);
+        var expected = Path.Join(configDir, "series-images", result.FileName);
         Assert.True(File.Exists(expected));
         Assert.Equal(expected, store.ResolveAbsolutePath(result.FileName));
     }
@@ -553,7 +553,7 @@ public class SeriesImageStoreCoverageTests : IDisposable
     public void Delete_BlankUnknownOrUnsafeName_IsNoOp(string? fileName)
     {
         var (store, _) = CreateStore();
-        var outside = Path.Combine(_root, "outside.png");
+        var outside = Path.Join(_root, "outside.png");
         File.WriteAllBytes(outside, JpegMagic);
 
         store.Delete(fileName);
@@ -582,7 +582,7 @@ public class SeriesImageStoreCoverageTests : IDisposable
         var settings = new AppSettings
         {
             SeriesImageCacheDirectory = _cacheDir,
-            ConfigDirectory = Path.Combine(_root, "unused-config")
+            ConfigDirectory = Path.Join(_root, "unused-config")
         };
         configure?.Invoke(settings);
         var monitor = new Mock<IOptionsMonitor<AppSettings>>();

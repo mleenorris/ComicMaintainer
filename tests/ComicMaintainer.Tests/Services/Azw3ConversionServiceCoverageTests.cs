@@ -22,7 +22,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
 
     public Azw3ConversionServiceCoverageTests()
     {
-        _workDir = Path.Combine(Path.GetTempPath(), $"azw3-coverage-{Guid.NewGuid():N}");
+        _workDir = Path.Join(Path.GetTempPath(), $"azw3-coverage-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
         _service = new Azw3ConversionService(_epub.Object, new Mock<ILogger<Azw3ConversionService>>().Object);
     }
@@ -104,7 +104,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
         UseIntermediateBook("Broken", entries);
-        var outputDir = Path.Combine(_workDir, "out");
+        var outputDir = Path.Join(_workDir, "out");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => _service.ConvertToAzw3Async(new[] { "Broken.cbz" }, outputDir));
@@ -152,11 +152,11 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
             Text("text/blank.xhtml", PageDocument("Blank", imageSource: null)),
             ("images/one.png", png),
             ("images/two.jpg", jpeg));
-        var outputDir = Path.Combine(_workDir, "out");
+        var outputDir = Path.Join(_workDir, "out");
 
         var path = await _service.ConvertToAzw3Async(new[] { "Quirky.cbz" }, outputDir);
 
-        Assert.Equal(Path.Combine(outputDir, "Quirky.azw3"), path);
+        Assert.Equal(Path.Join(outputDir, "Quirky.azw3"), path);
         Assert.Equal(new[] { "Quirky.azw3" }, Directory.GetFileSystemEntries(outputDir).Select(Path.GetFileName));
 
         var book = Azw3Reader.Read(path);
@@ -185,7 +185,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
     public async Task ConvertToAzw3Async_FallsBackWhenThePackageMetadataIsEmpty()
     {
         UseIntermediateBook("Bare", SimpleBook(Metadata()));
-        var outputDir = Path.Combine(_workDir, "out");
+        var outputDir = Path.Join(_workDir, "out");
 
         var path = await _service.ConvertToAzw3Async(new[] { "Bare.cbz" }, outputDir);
 
@@ -231,7 +231,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
             creator: "Writer",
             publisher: "Publisher &amp; Co",
             language: language)));
-        var outputDir = Path.Combine(_workDir, "out");
+        var outputDir = Path.Join(_workDir, "out");
 
         var path = await _service.ConvertToAzw3Async(new[] { "Language.cbz" }, outputDir);
 
@@ -248,7 +248,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
     public async Task ConvertToAzw3Async_TreatsABlankLanguageAsEnglish()
     {
         UseIntermediateBook("Blank Language", SimpleBook(Metadata(title: "Blank Language", language: "  ")));
-        var outputDir = Path.Combine(_workDir, "out");
+        var outputDir = Path.Join(_workDir, "out");
 
         var path = await _service.ConvertToAzw3Async(new[] { "Blank Language.cbz" }, outputDir);
 
@@ -264,7 +264,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
         // boundary, so records end 0, 1, 2 and 3 bytes into a character.
         var title = string.Concat(Enumerable.Repeat("\U0001D11Ea", 5000));
         UseIntermediateBook("Music", SimpleBook(Metadata(title: "Music"), pageTitle: title));
-        var outputDir = Path.Combine(_workDir, "out");
+        var outputDir = Path.Join(_workDir, "out");
 
         var path = await _service.ConvertToAzw3Async(new[] { "Music.cbz" }, outputDir);
 
@@ -283,8 +283,8 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
     public async Task ConvertToAzw3Async_RemovesThePartialBookWhenItCannotBeMovedIntoPlace()
     {
         UseIntermediateBook("Blocked", SimpleBook(Metadata(title: "Blocked")));
-        var outputDir = Path.Combine(_workDir, "out");
-        var blocker = Path.Combine(outputDir, "Blocked.azw3");
+        var outputDir = Path.Join(_workDir, "out");
+        var blocker = Path.Join(outputDir, "Blocked.azw3");
         Directory.CreateDirectory(blocker);
 
         await Assert.ThrowsAnyAsync<IOException>(
@@ -312,7 +312,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
             .Returns<IReadOnlyList<string>, string, EpubConversionOptions?, CancellationToken>((_, stagingDirectory, _, _) =>
             {
                 Directory.CreateDirectory(stagingDirectory);
-                var path = Path.Combine(stagingDirectory, bookName + ".epub");
+                var path = Path.Join(stagingDirectory, bookName + ".epub");
                 using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
                 foreach (var (name, data) in entries)
                 {

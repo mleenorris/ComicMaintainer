@@ -24,13 +24,13 @@ public sealed class UserSettingsBootstrapTests : IDisposable
         .GetMethod("EnsureUserSettingsFileMigrated", BindingFlags.Static | BindingFlags.NonPublic)!
         .CreateDelegate<Action<string>>();
 
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "cm-usersettings-" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(Path.GetTempPath(), "cm-usersettings-" + Guid.NewGuid().ToString("N"));
     private readonly string _settingsPath;
 
     public UserSettingsBootstrapTests()
     {
         Directory.CreateDirectory(_root);
-        _settingsPath = Path.Combine(_root, "user-settings.json");
+        _settingsPath = Path.Join(_root, "user-settings.json");
     }
 
     public void Dispose()
@@ -41,6 +41,7 @@ public sealed class UserSettingsBootstrapTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
     }
 

@@ -42,7 +42,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
 
     private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(10);
 
-    private readonly string _root = Path.Combine(Path.GetTempPath(), $"fws_cov_{Guid.NewGuid():N}");
+    private readonly string _root = Path.Join(Path.GetTempPath(), $"fws_cov_{Guid.NewGuid():N}");
     private readonly string _library;
     private readonly string _staging;
     private readonly RecordingLogger _logger = new();
@@ -57,8 +57,8 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
 
     public FileWatcherServiceCoverageTests()
     {
-        _library = Path.Combine(_root, "library");
-        _staging = Path.Combine(_root, "staging");
+        _library = Path.Join(_root, "library");
+        _staging = Path.Join(_root, "staging");
         Directory.CreateDirectory(_library);
         Directory.CreateDirectory(_staging);
 
@@ -99,16 +99,18 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         }
         catch (IOException)
         {
+            // Best-effort cleanup.
         }
         catch (UnauthorizedAccessException)
         {
+            // Best-effort cleanup.
         }
     }
 
     [Fact]
     public async Task SettingsChange_ToAnotherDirectory_RebindsWatcherAndBroadcastsEachTransition()
     {
-        var otherLibrary = Path.Combine(_root, "other-library");
+        var otherLibrary = Path.Join(_root, "other-library");
         Directory.CreateDirectory(otherLibrary);
         var broadcasts = new Recorder<(bool Running, bool Enabled)>();
         var broadcaster = new Mock<IEventBroadcaster>();
@@ -165,7 +167,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         monitor.Setup(m => m.OnChange(It.IsAny<Action<AppSettings, string?>>()))
             .Callback<Action<AppSettings, string?>>(l => listener = l)
             .Returns(subscription.Object);
-        var service = CreateService(monitor.Object);
+        using var service = CreateService(monitor.Object);
 
         service.Dispose();
         service.Dispose();
@@ -208,11 +210,11 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     [Fact]
     public async Task InitialScan_WithoutTrackedSnapshot_AddsEveryComicAndContinuesPastFailures()
     {
-        var ok = Path.Combine(_library, "ok.cbz");
-        var bad = Path.Combine(_library, "bad.cbz");
+        var ok = Path.Join(_library, "ok.cbz");
+        var bad = Path.Join(_library, "bad.cbz");
         File.WriteAllText(ok, "comic");
         File.WriteAllText(bad, "comic");
-        File.WriteAllText(Path.Combine(_library, "notes.txt"), "not a comic");
+        File.WriteAllText(Path.Join(_library, "notes.txt"), "not a comic");
         _store.Setup(s => s.GetAllFilesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<IEnumerable<ComicFile>>(null!));
         var failure = new IOException("unreadable archive");
@@ -240,14 +242,14 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         await _logger.WaitForAsync(LogLevel.Information, $"Directory scan completed: {series}");
         AssertLogged(LogLevel.Information, $"Directory created: {series}, scanning for comic files");
         AssertLogged(LogLevel.Information, $"Found 3 comic files in new directory: {series}");
-        var broken = Path.Combine(series, "broken.cbz");
+        var broken = Path.Join(series, "broken.cbz");
         var error = Assert.Single(_logger.Entries.Snapshot(), e => e.Level == LogLevel.Error);
         Assert.Equal($"[WATCHER] Error processing file from new directory: {broken}", error.Message);
         Assert.Same(failure, error.Exception);
         Assert.DoesNotContain(_added.Snapshot(), p => p.EndsWith("cover.jpg", StringComparison.Ordinal));
 
-        var first = Path.Combine(series, "001.cbz");
-        var second = Path.Combine(series, "002.cbr");
+        var first = Path.Join(series, "001.cbz");
+        var second = Path.Join(series, "002.cbr");
         await _processed.WaitUntilAsync(p => p.Contains(first) && p.Contains(second), "both readable comics to be processed");
         Assert.DoesNotContain(broken, _processed.Snapshot());
     }
@@ -256,20 +258,13 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     public async Task DirectoryArrival_RemovedBeforeItIsScanned_IsSkippedWithWarning()
     {
         await StartWatchingAsync();
-        var gone = Path.Combine(_library, "Gone");
+        var gone = Path.Join(_library, "Gone");
         var hookFailures = new ConcurrentQueue<Exception>();
         _logger.OnLog = entry =>
         {
             if (entry.Message == $"[WATCHER] Scanning directory for comic files: {gone}")
             {
-                try
-                {
-                    Directory.Delete(gone, recursive: true);
-                }
-                catch (Exception ex)
-                {
-                    hookFailures.Enqueue(ex);
-                }
+                RecordFailure(hookFailures, () => Directory.Delete(gone, recursive: true));
             }
         };
 
@@ -285,7 +280,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     public async Task DirectoryArrival_UnexpectedScanFailure_IsLogged()
     {
         await StartWatchingAsync();
-        var batch = Path.Combine(_library, "Batch");
+        var batch = Path.Join(_library, "Batch");
         var failure = new InvalidOperationException("log sink failure");
         _logger.OnLog = entry =>
         {
@@ -316,7 +311,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         var batch = MoveInDirectory("Batch", "001.cbz");
 
         await _logger.WaitForAsync(LogLevel.Information, $"Directory scan completed: {batch}");
-        Assert.Equal(new[] { Path.Combine(batch, "001.cbz") }, _added.Snapshot());
+        Assert.Equal(new[] { Path.Join(batch, "001.cbz") }, _added.Snapshot());
         Assert.False(service.IsRunning);
         Assert.Empty(_processed.Snapshot());
         _store.Verify(s => s.IsFileProcessedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -373,10 +368,10 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     public async Task NonComicFiles_AreIgnoredWhenCreatedChangedOrRenamed()
     {
         await StartWatchingAsync();
-        var notes = Path.Combine(_library, "notes.txt");
+        var notes = Path.Join(_library, "notes.txt");
         File.WriteAllText(notes, "first draft");
         File.AppendAllText(notes, ", second draft");
-        File.Move(notes, Path.Combine(_library, "notes-final.txt"));
+        File.Move(notes, Path.Join(_library, "notes-final.txt"));
         var control = MoveIn("control.cbz");
 
         // Events are delivered in order, so once the comic shows up every notification for the
@@ -395,9 +390,9 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     public async Task SingleModeProcessing_SkipsComicsAlreadyHandledForThatMode(ProcessingMode mode)
     {
         var renameOnly = mode == ProcessingMode.RenameOnly;
-        var fresh = Path.Combine(_library, "fresh.cbz");
-        var flagged = Path.Combine(_library, "flagged.cbz");
-        var processed = Path.Combine(_library, "processed.cbz");
+        var fresh = Path.Join(_library, "fresh.cbz");
+        var flagged = Path.Join(_library, "flagged.cbz");
+        var processed = Path.Join(_library, "processed.cbz");
         _store.Setup(s => s.IsFileProcessedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns<string, CancellationToken>((p, _) => Task.FromResult(p == processed));
         if (renameOnly)
@@ -452,8 +447,8 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     [Fact]
     public async Task WatcherError_TriggersRecoveryRescanThatRequeuesComics()
     {
-        var existing = Path.Combine(_library, "existing.cbz");
-        var bad = Path.Combine(_library, "bad.cbz");
+        var existing = Path.Join(_library, "existing.cbz");
+        var bad = Path.Join(_library, "bad.cbz");
         File.WriteAllText(existing, "comic");
         File.WriteAllText(bad, "comic");
         await StartWatchingAsync();
@@ -488,14 +483,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         {
             if (entry.Message.Contains("Recovery rescan found", StringComparison.Ordinal))
             {
-                try
-                {
-                    service.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    hookFailures.Enqueue(ex);
-                }
+                RecordFailure(hookFailures, () => service.Dispose());
             }
         });
 
@@ -541,7 +529,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
                 return;
             }
 
-            try
+            RecordFailure(hookFailures, () =>
             {
                 if (cause == Unavailability.DirectoryDeleted)
                 {
@@ -551,11 +539,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
                 {
                     service.StopAsync().GetAwaiter().GetResult();
                 }
-            }
-            catch (Exception ex)
-            {
-                hookFailures.Enqueue(ex);
-            }
+            });
         });
 
         MoveIn("trigger.cbz");
@@ -829,14 +813,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
             // The library disappears between the rescan's existence check and its enumeration.
             if (entry.Message.Contains("Starting recovery rescan of directory", StringComparison.Ordinal))
             {
-                try
-                {
-                    Directory.Delete(_library, recursive: true);
-                }
-                catch (Exception ex)
-                {
-                    hookFailures.Enqueue(ex);
-                }
+                RecordFailure(hookFailures, () => Directory.Delete(_library, recursive: true));
             }
         });
 
@@ -879,23 +856,23 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
 
     private string MoveIn(string fileName, string? directory = null)
     {
-        var staged = Path.Combine(_staging, fileName);
+        var staged = Path.Join(_staging, fileName);
         File.WriteAllText(staged, "comic");
-        var target = Path.Combine(directory ?? _library, fileName);
+        var target = Path.Join(directory ?? _library, fileName);
         File.Move(staged, target);
         return target;
     }
 
     private string MoveInDirectory(string name, params string[] fileNames)
     {
-        var staged = Path.Combine(_staging, name);
+        var staged = Path.Join(_staging, name);
         Directory.CreateDirectory(staged);
         foreach (var fileName in fileNames)
         {
-            File.WriteAllText(Path.Combine(staged, fileName), "comic");
+            File.WriteAllText(Path.Join(staged, fileName), "comic");
         }
 
-        var target = Path.Combine(_library, name);
+        var target = Path.Join(_library, name);
         Directory.Move(staged, target);
         return target;
     }
@@ -908,7 +885,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     /// </summary>
     private (string Trigger, Exception Failure) ArmWatcherFailure(string fileName, Action<LogEntry>? alsoOnLog = null, Exception? failure = null)
     {
-        var trigger = Path.Combine(_library, fileName);
+        var trigger = Path.Join(_library, fileName);
         failure ??= new IOException("simulated watcher failure");
         var armed = 1;
         _logger.OnLog = entry =>
@@ -975,13 +952,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
             lock (_gate)
             {
                 _items.Add(item);
-                foreach (var waiter in _waiters)
-                {
-                    if (waiter.Condition(_items))
-                    {
-                        satisfied.Add(waiter);
-                    }
-                }
+                satisfied.AddRange(_waiters.Where(waiter => waiter.Condition(_items)));
 
                 _waiters.RemoveAll(satisfied.Contains);
             }
@@ -1113,5 +1084,13 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
                 $"a {level} log containing \"{fragment}\"");
 
         public string Dump() => string.Join(Environment.NewLine, Entries.Snapshot());
+    }
+
+    private static void RecordFailure(ConcurrentQueue<Exception> failures, Action action)
+    {
+        if (Record.Exception(action) is { } failure)
+        {
+            failures.Enqueue(failure);
+        }
     }
 }

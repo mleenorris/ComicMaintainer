@@ -28,7 +28,7 @@ public class ComicReaderService : IComicReaderService
             var pages = await GetPageNamesAsync(filePath);
             return pages.Count;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting page count for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return 0;
@@ -59,7 +59,7 @@ public class ComicReaderService : IComicReaderService
             _logger.LogWarning("Unsupported file extension: {Extension}", LoggingHelper.SanitizeForLog(extension));
             return null;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting page {PageNumber} from {FilePath}", pageNumber, LoggingHelper.SanitizePathForLog(filePath));
             return null;
@@ -90,7 +90,7 @@ public class ComicReaderService : IComicReaderService
             _logger.LogWarning("Unsupported file extension: {Extension}", LoggingHelper.SanitizeForLog(extension));
             return new List<string>();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error getting page names from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return new List<string>();

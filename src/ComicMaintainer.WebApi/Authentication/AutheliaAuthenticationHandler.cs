@@ -234,7 +234,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
 
             return user;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error ensuring Authelia user exists: {Username}", username);
             return null;

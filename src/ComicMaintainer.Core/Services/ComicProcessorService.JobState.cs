@@ -95,7 +95,7 @@ public partial class ComicProcessorService
                     _lastPersistedAt.TryRemove(snapshot.JobId, out _);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 if (snapshot.IsTerminal)
                 {

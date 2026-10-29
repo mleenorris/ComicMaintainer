@@ -87,7 +87,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 var nextRetry = RecordFailure(provider);
                 _logger.LogDebug(
@@ -134,7 +134,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 var nextRetry = RecordFailure(provider);
                 _logger.LogDebug(
@@ -176,7 +176,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogDebug(ex, "Health check failed for provider {ProviderType}", provider.GetType().Name);
                 results.Add(new ProviderHealth

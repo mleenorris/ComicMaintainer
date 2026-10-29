@@ -18,7 +18,7 @@ public class SeriesFolderCoverWriterTests : IDisposable
 
     public SeriesFolderCoverWriterTests()
     {
-        _testDirectory = Path.Combine(Path.GetTempPath(), $"folder_cover_test_{Guid.NewGuid()}");
+        _testDirectory = Path.Join(Path.GetTempPath(), $"folder_cover_test_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
         _settings.Setup(s => s.CurrentValue).Returns(() => _appSettings);
     }
@@ -39,9 +39,9 @@ public class SeriesFolderCoverWriterTests : IDisposable
     public async Task WriteAsync_ForceEnabled_WritesEvenWhenFeatureDisabled()
     {
         _appSettings = new AppSettings { WriteCoverToSeriesFolder = false };
-        var seriesFolder = Path.Combine(_testDirectory, "Batman");
+        var seriesFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(seriesFolder);
-        var coverSrc = Path.Combine(_testDirectory, "cover.jpg");
+        var coverSrc = Path.Join(_testDirectory, "cover.jpg");
         var coverBytes = new byte[] { 1, 9, 9, 5 };
         await File.WriteAllBytesAsync(coverSrc, coverBytes);
         _library.Setup(l => l.GetFoldersForNormalizedKeyAsync("series-a", It.IsAny<CancellationToken>()))
@@ -49,13 +49,13 @@ public class SeriesFolderCoverWriterTests : IDisposable
 
         await CreateWriter().WriteAsync("series-a", coverSrc, "image/jpeg", true);
 
-        var destination = Path.Combine(seriesFolder, "cover.jpg");
+        var destination = Path.Join(seriesFolder, "cover.jpg");
         Assert.True(File.Exists(destination));
         Assert.Equal(coverBytes, await File.ReadAllBytesAsync(destination));
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_testDirectory, true); } catch { /* ignore */ }
+        try { Directory.Delete(_testDirectory, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 }

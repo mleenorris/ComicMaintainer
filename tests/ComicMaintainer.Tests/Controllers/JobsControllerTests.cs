@@ -64,7 +64,7 @@ public class JobsControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor.Setup(p => p.GetJob(jobId)).Returns((ProcessingJob?)null);
+        _mockProcessor.Setup(p => p.GetJob(jobId)).Returns(default(ProcessingJob?));
 
         // Act
         var result = _controller.GetJob(jobId);
@@ -92,7 +92,7 @@ public class JobsControllerTests
     public void GetActiveJob_WhenNoActiveJob_ReturnsInactive()
     {
         // Arrange
-        _mockProcessor.Setup(p => p.GetActiveJob()).Returns((ProcessingJob?)null);
+        _mockProcessor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
         _mockProcessor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob>());
 
         // Act
@@ -115,7 +115,7 @@ public class JobsControllerTests
             FailedFiles = 1
         };
 
-        _mockProcessor.Setup(p => p.GetActiveJob()).Returns((ProcessingJob?)null);
+        _mockProcessor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
         _mockProcessor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob> { interrupted });
 
         var result = _controller.GetActiveJob();

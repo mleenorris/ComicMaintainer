@@ -77,9 +77,47 @@ jobs:
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
-        upload: true
-        wait-for-processing: true
+        # Uploaded by the steps below, once results in generated code have been removed.
+        upload: never
+        output: sarif-results
       timeout-minutes: 30
+
+    - name: Remove results in generated code
+      # paths-ignore does not apply to compiled languages, so the source generators' output
+      # that the build writes under obj/ (the regex and OpenAPI generators) is analyzed too,
+      # producing alerts that cannot be fixed in this repository.
+      run: |
+        python3 - <<'EOF'
+        import glob
+        import json
+        import re
+
+        generated = re.compile(r"(^|/)obj/")
+        for path in glob.glob("sarif-results/*.sarif"):
+            with open(path, encoding="utf-8") as file:
+                sarif = json.load(file)
+            for run in sarif.get("runs", []):
+                results = run.get("results", [])
+                kept = [
+                    result for result in results
+                    if not generated.search(
+                        (result.get("locations") or [{}])[0]
+                        .get("physicalLocation", {})
+                        .get("artifactLocation", {})
+                        .get("uri", ""))
+                ]
+                run["results"] = kept
+                print(f"{path}: removed {len(results) - len(kept)} result(s) in generated code")
+            with open(path, "w", encoding="utf-8") as file:
+                json.dump(sarif, file)
+        EOF
+
+    - name: Upload CodeQL results
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: sarif-results
+        category: "/language:${{matrix.language}}"
+        wait-for-processing: true
 
     - name: Generate analysis summary
       if: always()

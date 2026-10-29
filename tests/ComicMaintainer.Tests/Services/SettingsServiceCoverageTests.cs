@@ -17,8 +17,8 @@ public sealed class SettingsServiceCoverageTests : IDisposable
 
     public SettingsServiceCoverageTests()
     {
-        _configDir = Path.Combine(Path.GetTempPath(), $"SettingsServiceCoverage_{Guid.NewGuid():N}");
-        _settingsPath = Path.Combine(_configDir, "user-settings.json");
+        _configDir = Path.Join(Path.GetTempPath(), $"SettingsServiceCoverage_{Guid.NewGuid():N}");
+        _settingsPath = Path.Join(_configDir, "user-settings.json");
         _service = new SettingsService(
             _logger,
             new TestOptionsMonitor<AppSettings>(new AppSettings { ConfigDirectory = _configDir }));
@@ -665,7 +665,7 @@ public sealed class SettingsServiceEnvironmentTokenTests : IDisposable
 
     public SettingsServiceEnvironmentTokenTests()
     {
-        _configDir = Path.Combine(Path.GetTempPath(), $"SettingsServiceEnvToken_{Guid.NewGuid():N}");
+        _configDir = Path.Join(Path.GetTempPath(), $"SettingsServiceEnvToken_{Guid.NewGuid():N}");
         _service = new SettingsService(
             new SettingsServiceCoverageTests.CapturingLogger(),
             new TestOptionsMonitor<AppSettings>(new AppSettings { ConfigDirectory = _configDir }));
@@ -699,7 +699,7 @@ public sealed class SettingsServiceEnvironmentTokenTests : IDisposable
             Environment.SetEnvironmentVariable(TokenVariable, previous);
         }
 
-        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(_configDir, "user-settings.json")));
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Join(_configDir, "user-settings.json")));
         var section = document.RootElement.GetProperty("AppSettings");
         Assert.True(section.GetProperty("ErrorReportingEnabled").GetBoolean());
         // The environment token is an override; it must never be copied into the file.

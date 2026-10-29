@@ -19,9 +19,9 @@ public class FileCoverCacheServiceTests : IDisposable
 
     public FileCoverCacheServiceTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "filecover_test_" + Guid.NewGuid());
+        _testDir = Path.Join(Path.GetTempPath(), "filecover_test_" + Guid.NewGuid());
         Directory.CreateDirectory(_testDir);
-        _cacheDir = Path.Combine(_testDir, "cache");
+        _cacheDir = Path.Join(_testDir, "cache");
 
         _settings = new AppSettings
         {
@@ -40,12 +40,12 @@ public class FileCoverCacheServiceTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_testDir, recursive: true); } catch { /* ignore */ }
+        try { Directory.Delete(_testDir, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 
     private string CreateFile(string name, byte[]? content = null)
     {
-        var path = Path.Combine(_testDir, name);
+        var path = Path.Join(_testDir, name);
         File.WriteAllBytes(path, content ?? new byte[] { 1, 2, 3, 4 });
         return path;
     }
@@ -54,7 +54,7 @@ public class FileCoverCacheServiceTests : IDisposable
     {
         _reader
             .Setup(r => r.GetPageAsync(It.IsAny<string>(), 1))
-            .ReturnsAsync(((byte[], string)?)(data, contentType));
+            .ReturnsAsync((data, contentType));
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public class FileCoverCacheServiceTests : IDisposable
     [Fact]
     public async Task GetOrCreateAsync_MissingFile_ReturnsNull()
     {
-        var entry = await _service.GetOrCreateAsync(Path.Combine(_testDir, "missing.cbz"));
+        var entry = await _service.GetOrCreateAsync(Path.Join(_testDir, "missing.cbz"));
         Assert.Null(entry);
         _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), 1), Times.Never);
     }
@@ -162,7 +162,7 @@ public class FileCoverCacheServiceTests : IDisposable
             {
                 Interlocked.Increment(ref callCount);
                 await gate.Task;
-                return ((byte[], string)?)(new byte[] { 7 }, "image/jpeg");
+                return (new byte[] { 7 }, "image/jpeg");
             });
 
         var t1 = _service.GetOrCreateAsync(file);

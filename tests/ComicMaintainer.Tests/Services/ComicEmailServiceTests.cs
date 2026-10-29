@@ -27,7 +27,7 @@ public class ComicEmailServiceTests : IDisposable
 
     public ComicEmailServiceTests()
     {
-        _watchedDir = Path.Combine(Path.GetTempPath(), $"email-tests-{Guid.NewGuid():N}");
+        _watchedDir = Path.Join(Path.GetTempPath(), $"email-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_watchedDir);
 
         var dbName = $"TestDb_{Guid.NewGuid()}";
@@ -39,8 +39,8 @@ public class ComicEmailServiceTests : IDisposable
         _settings = new AppSettings
         {
             WatchedDirectory = _watchedDir,
-            DuplicateDirectory = Path.Combine(_watchedDir, "..", "duplicates-none"),
-            TempFileDirectory = Path.Combine(_watchedDir, "temp"),
+            DuplicateDirectory = Path.Join(_watchedDir, "..", "duplicates-none"),
+            TempFileDirectory = Path.Join(_watchedDir, "temp"),
             EmailMaxAttachmentMegabytes = 25,
             SmtpHost = "smtp.example.com",
             EmailFromAddress = "library@example.com"
@@ -105,7 +105,7 @@ public class ComicEmailServiceTests : IDisposable
     public async Task QueueFilesAsync_SkipsFilesOutsideTheLibrary()
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
-        var outside = Path.Combine(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}.cbz");
+        var outside = Path.Join(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}.cbz");
         await File.WriteAllTextAsync(outside, "x");
 
         try
@@ -126,9 +126,9 @@ public class ComicEmailServiceTests : IDisposable
     public async Task QueueFilesAsync_SkipsSymlinksPointingOutsideTheLibrary()
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
-        var outside = Path.Combine(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}.cbz");
+        var outside = Path.Join(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}.cbz");
         await File.WriteAllTextAsync(outside, "x");
-        var link = Path.Combine(_watchedDir, "link.cbz");
+        var link = Path.Join(_watchedDir, "link.cbz");
 
         try
         {
@@ -216,8 +216,8 @@ public class ComicEmailServiceTests : IDisposable
     public async Task QueueFilesAsync_SkipsMissingAndUnsupportedFiles()
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
-        var missing = Path.Combine(_watchedDir, "gone.cbz");
-        var notAComic = Path.Combine(_watchedDir, "notes.txt");
+        var missing = Path.Join(_watchedDir, "gone.cbz");
+        var notAComic = Path.Join(_watchedDir, "notes.txt");
         await File.WriteAllTextAsync(notAComic, "x");
 
         var result = await _service.QueueFilesAsync(
@@ -294,7 +294,7 @@ public class ComicEmailServiceTests : IDisposable
             {
                 usedOptions = options;
                 Directory.CreateDirectory(outDir);
-                epubPath = Path.Combine(outDir, "Series - Chapter 0001.epub");
+                epubPath = Path.Join(outDir, "Series - Chapter 0001.epub");
                 File.WriteAllText(epubPath, "epub-bytes");
                 return Task.FromResult(epubPath);
             });
@@ -326,7 +326,7 @@ public class ComicEmailServiceTests : IDisposable
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var file = CreateComic("Series - Chapter 0001.cbz", folder: "Covered Series");
-        var sidecar = Path.Combine(Path.GetDirectoryName(file)!, "cover.jpg");
+        var sidecar = Path.Join(Path.GetDirectoryName(file)!, "cover.jpg");
         await File.WriteAllBytesAsync(sidecar, new byte[] { 1, 2, 3 });
 
         var queued = Assert.Single((await _service.QueueFilesAsync(
@@ -344,7 +344,7 @@ public class ComicEmailServiceTests : IDisposable
             {
                 usedOptions = options;
                 Directory.CreateDirectory(outDir);
-                var epubPath = Path.Combine(outDir, "Series - Chapter 0001.epub");
+                var epubPath = Path.Join(outDir, "Series - Chapter 0001.epub");
                 File.WriteAllText(epubPath, "epub-bytes");
                 return Task.FromResult(epubPath);
             });
@@ -378,7 +378,7 @@ public class ComicEmailServiceTests : IDisposable
             {
                 usedOptions = options;
                 Directory.CreateDirectory(outDir);
-                azw3Path = Path.Combine(outDir, "Series - Chapter 0001.azw3");
+                azw3Path = Path.Join(outDir, "Series - Chapter 0001.azw3");
                 File.WriteAllText(azw3Path, "azw3-bytes");
                 return Task.FromResult(azw3Path);
             });
@@ -485,9 +485,9 @@ public class ComicEmailServiceTests : IDisposable
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
         await _devices.UpsertSubscriptionAsync("Folder Series", device.Id, EmailDeliveryFormat.Original, true);
 
-        var folder = Path.Combine(_watchedDir, "Folder Series");
+        var folder = Path.Join(_watchedDir, "Folder Series");
         Directory.CreateDirectory(folder);
-        var file = Path.Combine(folder, "Folder Series - Chapter 0003.cbz");
+        var file = Path.Join(folder, "Folder Series - Chapter 0003.cbz");
         await File.WriteAllTextAsync(file, "comic");
 
         // Metadata series differs from the folder the library groups by.
@@ -668,7 +668,7 @@ public class ComicEmailServiceTests : IDisposable
                 converted = paths;
                 usedOptions = options;
                 Directory.CreateDirectory(outDir);
-                var epubPath = Path.Combine(outDir, "Series 001-003.epub");
+                var epubPath = Path.Join(outDir, "Series 001-003.epub");
                 File.WriteAllText(epubPath, "epub-bytes");
                 return Task.FromResult(epubPath);
             });
@@ -909,7 +909,7 @@ public class ComicEmailServiceTests : IDisposable
             {
                 converted = paths;
                 Directory.CreateDirectory(outDir);
-                var azw3Path = Path.Combine(outDir, "Series 001-003.azw3");
+                var azw3Path = Path.Join(outDir, "Series 001-003.azw3");
                 File.WriteAllText(azw3Path, "azw3-bytes");
                 return Task.FromResult(azw3Path);
             });
@@ -947,7 +947,7 @@ public class ComicEmailServiceTests : IDisposable
             {
                 converted = paths;
                 Directory.CreateDirectory(outDir);
-                var azw3Path = Path.Combine(outDir, "Series 001-002.azw3");
+                var azw3Path = Path.Join(outDir, "Series 001-002.azw3");
                 File.WriteAllText(azw3Path, "azw3-bytes");
                 return Task.FromResult(azw3Path);
             });
@@ -985,7 +985,7 @@ public class ComicEmailServiceTests : IDisposable
             {
                 workDirectory = outDir;
                 Directory.CreateDirectory(outDir);
-                File.WriteAllText(Path.Combine(outDir, "leftover.tmp"), "partial");
+                File.WriteAllText(Path.Join(outDir, "leftover.tmp"), "partial");
                 return Task.FromException<string>(new InvalidOperationException("conversion failed"));
             });
 
@@ -998,9 +998,9 @@ public class ComicEmailServiceTests : IDisposable
 
     private string CreateComic(string fileName, int sizeBytes = 16, string? folder = null)
     {
-        var directory = folder is null ? _watchedDir : Path.Combine(_watchedDir, folder);
+        var directory = folder is null ? _watchedDir : Path.Join(_watchedDir, folder);
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, fileName);
+        var path = Path.Join(directory, fileName);
         File.WriteAllBytes(path, new byte[sizeBytes]);
         return path;
     }

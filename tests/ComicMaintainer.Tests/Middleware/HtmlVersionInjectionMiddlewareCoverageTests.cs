@@ -15,9 +15,9 @@ public class HtmlVersionInjectionMiddlewareCoverageTests : IDisposable
 
     public HtmlVersionInjectionMiddlewareCoverageTests()
     {
-        _webRoot = Path.Combine(Path.GetTempPath(), "html_mw_cov_" + Guid.NewGuid().ToString("N"));
+        _webRoot = Path.Join(Path.GetTempPath(), "html_mw_cov_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_webRoot);
-        File.WriteAllText(Path.Combine(_webRoot, "index.html"), "<script src=\"/js/app.js?v=__APP_VERSION__\"></script>");
+        File.WriteAllText(Path.Join(_webRoot, "index.html"), "<script src=\"/js/app.js?v=__APP_VERSION__\"></script>");
         _env.SetupGet(e => e.WebRootPath).Returns(_webRoot);
     }
 

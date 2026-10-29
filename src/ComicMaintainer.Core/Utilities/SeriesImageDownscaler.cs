@@ -61,7 +61,7 @@ public static class SeriesImageDownscaler
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             throw new InvalidOperationException(
                 "Could not read the source image header for downscaling", ex);
@@ -72,7 +72,7 @@ public static class SeriesImageDownscaler
         {
             image = new MagickImage(sourceBytes);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             throw new InvalidOperationException(
                 "Could not decode the source image for downscaling", ex);
@@ -88,13 +88,12 @@ public static class SeriesImageDownscaler
             {
                 ResizeInPlace(image, targetDimension);
 
-                foreach (var quality in QualitySteps)
+                var encoded = QualitySteps
+                    .Select(quality => EncodeJpeg(image, quality))
+                    .FirstOrDefault(candidate => candidate.Length <= maxBytes);
+                if (encoded is not null)
                 {
-                    var encoded = EncodeJpeg(image, quality);
-                    if (encoded.Length <= maxBytes)
-                    {
-                        return encoded;
-                    }
+                    return encoded;
                 }
 
                 // Still too big at the lowest quality: shrink further and retry.

@@ -17,7 +17,7 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
 
     public FileStoreServiceFolderSummariesTests()
     {
-        _testDirectory = Path.Combine(Path.GetTempPath(), $"folder_summary_tests_{Guid.NewGuid()}");
+        _testDirectory = Path.Join(Path.GetTempPath(), $"folder_summary_tests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
         var dbName = $"TestDb_{Guid.NewGuid()}";
 
@@ -36,13 +36,13 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_testDirectory, recursive: true); } catch { }
+        try { Directory.Delete(_testDirectory, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort cleanup */ }
         (_serviceProvider as IDisposable)?.Dispose();
     }
 
     private async Task AddFileAsync(string relativePath, int size = 100)
     {
-        var full = Path.Combine(_testDirectory, relativePath);
+        var full = Path.Join(_testDirectory, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         await File.WriteAllTextAsync(full, new string('a', size));
         await _service.AddFileAsync(full);
@@ -51,7 +51,7 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
     [Fact]
     public async Task ComputeFolderKey_FileInRoot_ReturnsEmptyString()
     {
-        var path = Path.Combine(_testDirectory, "a.cbz");
+        var path = Path.Join(_testDirectory, "a.cbz");
         var key = FileStoreService.ComputeFolderKey(path, _testDirectory);
         Assert.Equal(string.Empty, key);
     }
@@ -59,7 +59,7 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
     [Fact]
     public async Task ComputeFolderKey_FileInSubdir_ReturnsRelativeForwardSlash()
     {
-        var path = Path.Combine(_testDirectory, "Batman", "Year One", "a.cbz");
+        var path = Path.Join(_testDirectory, "Batman", "Year One", "a.cbz");
         var key = FileStoreService.ComputeFolderKey(path, _testDirectory);
         Assert.Equal("Batman/Year One", key);
     }
@@ -67,9 +67,9 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
     [Fact]
     public async Task GetFolderSummariesAsync_GroupsByFolderAndComputesAggregates()
     {
-        await AddFileAsync(Path.Combine("Batman", "001.cbz"), 100);
-        await AddFileAsync(Path.Combine("Batman", "002.cbz"), 200);
-        await AddFileAsync(Path.Combine("Superman", "001.cbz"), 50);
+        await AddFileAsync(Path.Join("Batman", "001.cbz"), 100);
+        await AddFileAsync(Path.Join("Batman", "002.cbz"), 200);
+        await AddFileAsync(Path.Join("Superman", "001.cbz"), 50);
         await AddFileAsync("loose.cbz", 25);
 
         var result = await _service.GetFolderSummariesAsync(limit: 100);
@@ -87,8 +87,8 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
     [Fact]
     public async Task GetFolderSummariesAsync_AppliesSearchFilter()
     {
-        await AddFileAsync(Path.Combine("Batman", "001.cbz"));
-        await AddFileAsync(Path.Combine("Superman", "001.cbz"));
+        await AddFileAsync(Path.Join("Batman", "001.cbz"));
+        await AddFileAsync(Path.Join("Superman", "001.cbz"));
 
         var result = await _service.GetFolderSummariesAsync(search: "Batman", limit: 100);
 
@@ -99,9 +99,9 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
     [Fact]
     public async Task GetFolderSummariesAsync_SortsByNameDescending()
     {
-        await AddFileAsync(Path.Combine("A", "1.cbz"));
-        await AddFileAsync(Path.Combine("C", "1.cbz"));
-        await AddFileAsync(Path.Combine("B", "1.cbz"));
+        await AddFileAsync(Path.Join("A", "1.cbz"));
+        await AddFileAsync(Path.Join("C", "1.cbz"));
+        await AddFileAsync(Path.Join("B", "1.cbz"));
 
         var result = await _service.GetFolderSummariesAsync(sort: "name", direction: "desc", limit: 100);
 
@@ -111,9 +111,9 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
     [Fact]
     public async Task GetFolderSummariesAsync_SortsBySize()
     {
-        await AddFileAsync(Path.Combine("Small", "1.cbz"), 10);
-        await AddFileAsync(Path.Combine("Big", "1.cbz"), 1000);
-        await AddFileAsync(Path.Combine("Mid", "1.cbz"), 100);
+        await AddFileAsync(Path.Join("Small", "1.cbz"), 10);
+        await AddFileAsync(Path.Join("Big", "1.cbz"), 1000);
+        await AddFileAsync(Path.Join("Mid", "1.cbz"), 100);
 
         var result = await _service.GetFolderSummariesAsync(sort: "size", direction: "asc", limit: 100);
 
@@ -125,7 +125,7 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
     {
         for (var i = 0; i < 5; i++)
         {
-            await AddFileAsync(Path.Combine($"Folder{i}", "1.cbz"));
+            await AddFileAsync(Path.Join($"Folder{i}", "1.cbz"));
         }
 
         var page = await _service.GetFolderSummariesAsync(offset: 2, limit: 2);
@@ -141,7 +141,7 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
     [Fact]
     public async Task GetFolderSummariesAsync_LimitZero_ReturnsEmptyButTotal()
     {
-        await AddFileAsync(Path.Combine("A", "1.cbz"));
+        await AddFileAsync(Path.Join("A", "1.cbz"));
         var page = await _service.GetFolderSummariesAsync(limit: 0);
         Assert.Empty(page.Folders);
         Assert.Equal(1, page.TotalFolders);

@@ -19,7 +19,7 @@ public sealed class FilesControllerFileActionsTests
 {
     private const string OutsidePath = "/etc/passwd";
 
-    private readonly string _root = Path.Combine(AppContext.BaseDirectory, "fc-n2a-tests", Guid.NewGuid().ToString("N"));
+    private readonly string _root = Path.Join(AppContext.BaseDirectory, "fc-n2a-tests", Guid.NewGuid().ToString("N"));
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<IProcessingHistoryService> _history = new();
@@ -40,7 +40,7 @@ public sealed class FilesControllerFileActionsTests
             _settings.Object);
     }
 
-    private string InRoot(params string[] parts) => Path.Combine(new[] { _root }.Concat(parts).ToArray());
+    private string InRoot(params string[] parts) => Path.Join(new[] { _root }.Concat(parts).ToArray());
 
     // Path theories use "{root}" for the watched directory, e.g. to build a
     // sibling directory that shares its name prefix.

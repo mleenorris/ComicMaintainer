@@ -286,15 +286,11 @@ public partial class FilesController
             // Resolve every series-library directory back to its tracked-file
             // bucket. We skip the series entirely if none of the directories
             // have any tracked files (defensive — shouldn't happen).
-            var directoryFiles = new Dictionary<string, List<(ComicFile File, DateTime AddedAt)>>(StringComparer.Ordinal);
-            foreach (var folder in series.Folders)
-            {
-                if (string.IsNullOrWhiteSpace(folder.Directory)) continue;
-                if (filesByDirectory.TryGetValue(folder.Directory, out var dirFiles) && dirFiles.Count > 0)
-                {
-                    directoryFiles[folder.Directory] = dirFiles;
-                }
-            }
+            var directoryFiles = series.Folders
+                .Select(folder => folder.Directory)
+                .Where(directory => HasTrackedFiles(filesByDirectory, directory))
+                .Distinct(StringComparer.Ordinal)
+                .ToDictionary(directory => directory, directory => filesByDirectory[directory], StringComparer.Ordinal);
 
             if (directoryFiles.Count < 2)
             {
@@ -316,18 +312,7 @@ public partial class FilesController
             // overlapping group (those may be additional folders the alias
             // index discovered).
             var mergedDirectoryFiles = new Dictionary<string, List<(ComicFile File, DateTime AddedAt)>>(directoryFiles, StringComparer.Ordinal);
-            foreach (var overlap in overlapping)
-            {
-                foreach (var folder in overlap.Folders)
-                {
-                    if (string.IsNullOrWhiteSpace(folder.Directory)) continue;
-                    if (mergedDirectoryFiles.ContainsKey(folder.Directory)) continue;
-                    if (filesByDirectory.TryGetValue(folder.Directory, out var dirFiles) && dirFiles.Count > 0)
-                    {
-                        mergedDirectoryFiles[folder.Directory] = dirFiles;
-                    }
-                }
-            }
+            AddTrackedDirectories(mergedDirectoryFiles, overlapping, filesByDirectory);
 
             // If the only overlap is a single group whose folders are exactly
             // this series's folders (no extras, none missing), leave it alone
@@ -369,6 +354,32 @@ public partial class FilesController
                     : $"Contains the most recently added file ({suggested.NewestFileAddedAt:yyyy-MM-dd}).",
                 TotalFileCount = mergedFolders.Sum(f => f.FileCount)
             });
+        }
+    }
+
+    private static bool HasTrackedFiles(
+        IReadOnlyDictionary<string, List<(ComicFile File, DateTime AddedAt)>> filesByDirectory,
+        string directory) =>
+        !string.IsNullOrWhiteSpace(directory)
+        && filesByDirectory.TryGetValue(directory, out var files)
+        && files.Count > 0;
+
+    /// <summary>
+    /// Adds every directory of <paramref name="groups"/> that has tracked files
+    /// and is not already in <paramref name="directoryFiles"/>.
+    /// </summary>
+    private static void AddTrackedDirectories(
+        Dictionary<string, List<(ComicFile File, DateTime AddedAt)>> directoryFiles,
+        IEnumerable<CombinableFolderGroup> groups,
+        IReadOnlyDictionary<string, List<(ComicFile File, DateTime AddedAt)>> filesByDirectory)
+    {
+        var directories = groups
+            .SelectMany(group => group.Folders)
+            .Select(folder => folder.Directory)
+            .Where(directory => HasTrackedFiles(filesByDirectory, directory));
+        foreach (var directory in directories)
+        {
+            directoryFiles.TryAdd(directory, filesByDirectory[directory]);
         }
     }
 
@@ -503,25 +514,11 @@ public partial class FilesController
 
             // Merge the directories with any overlapping groups' directories.
             var mergedDirectoryFiles = new Dictionary<string, List<(ComicFile File, DateTime AddedAt)>>(StringComparer.Ordinal);
-            foreach (var dir in directories)
+            foreach (var dir in directories.Where(dir => HasTrackedFiles(filesByDirectory, dir)))
             {
-                if (filesByDirectory.TryGetValue(dir, out var dirFiles) && dirFiles.Count > 0)
-                {
-                    mergedDirectoryFiles[dir] = dirFiles;
-                }
+                mergedDirectoryFiles[dir] = filesByDirectory[dir];
             }
-            foreach (var overlap in coveringGroups)
-            {
-                foreach (var folder in overlap.Folders)
-                {
-                    if (string.IsNullOrWhiteSpace(folder.Directory)) continue;
-                    if (mergedDirectoryFiles.ContainsKey(folder.Directory)) continue;
-                    if (filesByDirectory.TryGetValue(folder.Directory, out var dirFiles) && dirFiles.Count > 0)
-                    {
-                        mergedDirectoryFiles[folder.Directory] = dirFiles;
-                    }
-                }
-            }
+            AddTrackedDirectories(mergedDirectoryFiles, coveringGroups, filesByDirectory);
 
             if (mergedDirectoryFiles.Count < 2)
             {
@@ -588,7 +585,7 @@ public partial class FilesController
             var dtos = groups.Select(ToCombinableFolderGroupDto).ToList();
             return Ok(new { groups = dtos });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error retrieving combinable folders");
             return StatusCode(500, "Error retrieving combinable folders");

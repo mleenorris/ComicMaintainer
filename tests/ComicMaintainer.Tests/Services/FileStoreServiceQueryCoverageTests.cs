@@ -38,7 +38,7 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
     private static readonly DateTime D2020 = new(2020, 6, 1, 12, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime E2024 = new(2024, 6, 1, 12, 0, 0, DateTimeKind.Local);
 
-    private readonly string _library = Path.Combine(Path.GetTempPath(), $"fss_query_{Guid.NewGuid():N}", "library");
+    private readonly string _library = Path.Join(Path.GetTempPath(), $"fss_query_{Guid.NewGuid():N}", "library");
     private readonly ServiceProvider _provider;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _db;
     private readonly FlakyDbContextFactory _factory;
@@ -55,11 +55,11 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
         _factory = new FlakyDbContextFactory(_db);
     }
 
-    private string PathA => Path.Combine(_library, "A", "a.cbz");
+    private string PathA => Path.Join(_library, "A", "a.cbz");
 
-    private string PathB => Path.Combine(_library, "B", "b.cbz");
+    private string PathB => Path.Join(_library, "B", "b.cbz");
 
-    private string PathC => Path.Combine(_library, "c.cbz");
+    private string PathC => Path.Join(_library, "c.cbz");
 
     public async Task InitializeAsync()
     {
@@ -68,8 +68,8 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
             Row(PathA, 300, A2021, renamed: true, normalized: true, seriesVersion: 1),
             Row(PathB, 100, B2023, renamed: true, seriesVersion: 3),
             Row(PathC, 200, C2022, normalized: true, seriesVersion: 2),
-            Row(Path.Combine(_library, "A", "d.cbz"), 400, D2020, duplicate: true),
-            Row(Path.Combine(_library, "B", "e.cbz"), 50, E2024));
+            Row(Path.Join(_library, "A", "d.cbz"), 400, D2020, duplicate: true),
+            Row(Path.Join(_library, "B", "e.cbz"), 50, E2024));
         db.UserFileReadStatuses.AddRange(
             new UserFileReadStatusEntity { UserId = Reader, FilePath = PathB, IsRead = true },
             new UserFileReadStatusEntity { UserId = Reader, FilePath = PathC, IsRead = false },
@@ -158,7 +158,7 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
         var service = CreateService(_cache);
         Assert.Equal(5, (await service.GetFilesPageAsync()).TotalFiles);
 
-        await AddRowOutOfBandAsync(Path.Combine(_library, "f.cbz"));
+        await AddRowOutOfBandAsync(Path.Join(_library, "f.cbz"));
         Assert.Equal(5, (await service.GetFilesPageAsync()).TotalFiles);
 
         var before = service.ChangeVersion;
@@ -191,15 +191,15 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
     public async Task FolderQueries_NoSettingsAvailable_UseRawDirectoriesAsKeys()
     {
         var monitor = new Mock<IOptionsMonitor<AppSettings>>();
-        monitor.Setup(m => m.CurrentValue).Returns((AppSettings)null!);
+        monitor.Setup(m => m.CurrentValue).Returns(default(AppSettings)!);
         var service = new FileStoreService(monitor.Object, _logger, _factory, userContext: new TestUserContextAccessor(Reader));
 
-        var files = await service.GetFolderFilesAsync(Path.Combine(_library, "A"));
+        var files = await service.GetFolderFilesAsync(Path.Join(_library, "A"));
         var summaries = await service.GetFolderSummariesAsync();
 
         Assert.Equal("a,d", Names(files));
         Assert.Equal(
-            new[] { _library, Path.Combine(_library, "A"), Path.Combine(_library, "B") },
+            new[] { _library, Path.Join(_library, "A"), Path.Join(_library, "B") },
             summaries.Folders.Select(f => f.Path));
     }
 
@@ -209,7 +209,7 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
         var service = CreateService(_cache);
         Assert.Empty(await service.GetFolderFilesAsync("C"));
 
-        await AddRowOutOfBandAsync(Path.Combine(_library, "C", "f.cbz"));
+        await AddRowOutOfBandAsync(Path.Join(_library, "C", "f.cbz"));
         Assert.Empty(await service.GetFolderFilesAsync("C"));
 
         await service.InitializeFromDatabaseAsync();
@@ -250,7 +250,7 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
         var service = CreateService(_cache);
         Assert.Equal(3, await service.GetUnmarkedCountAsync());
 
-        await AddRowOutOfBandAsync(Path.Combine(_library, "f.cbz"));
+        await AddRowOutOfBandAsync(Path.Join(_library, "f.cbz"));
         Assert.Equal(3, await service.GetUnmarkedCountAsync());
 
         await service.InitializeFromDatabaseAsync();
@@ -283,7 +283,7 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
     public async Task IsFileRenamedOrNormalized_UntrackedFile_ReturnsFalse()
     {
         var service = CreateService();
-        var untracked = Path.Combine(_library, "untracked.cbz");
+        var untracked = Path.Join(_library, "untracked.cbz");
 
         Assert.False(await service.IsFileRenamedAsync(untracked));
         Assert.False(await service.IsFileNormalizedAsync(untracked));
@@ -307,7 +307,7 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
         var service = CreateService();
 
         var stale = await service.GetFilesWithStaleSeriesMetadataAsync(
-            new[] { PathA, PathB, PathC, PathA.ToUpperInvariant(), Path.Combine(_library, "missing.cbz") },
+            new[] { PathA, PathB, PathC, PathA.ToUpperInvariant(), Path.Join(_library, "missing.cbz") },
             3);
 
         Assert.Equal(new[] { PathA, PathC }, stale.Order(StringComparer.Ordinal));
@@ -331,7 +331,7 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
         var service = CreateService();
 
         Assert.Null(await service.GetFileAsync("  "));
-        Assert.Null(await service.GetFileAsync(Path.Combine(_library, "missing.cbz")));
+        Assert.Null(await service.GetFileAsync(Path.Join(_library, "missing.cbz")));
     }
 
     [Fact]
@@ -342,7 +342,7 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
         _factory.FailAll();
 
         var tracked = await service.GetFileAsync(PathA);
-        var untracked = await service.GetFileAsync(Path.Combine(_library, "missing.cbz"));
+        var untracked = await service.GetFileAsync(Path.Join(_library, "missing.cbz"));
 
         Assert.NotNull(tracked);
         Assert.Equal(PathA, tracked.FilePath);

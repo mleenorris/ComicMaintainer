@@ -31,15 +31,15 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
 
     public SeriesArchiveCoverWriterCoverageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "cm-archive-cover-cov-" + Guid.NewGuid().ToString("N"));
+        _root = Path.Join(Path.GetTempPath(), "cm-archive-cover-cov-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_root);
-        _source = Path.Combine(_root, "source-cover.jpg");
+        _source = Path.Join(_root, "source-cover.jpg");
         File.WriteAllBytes(_source, NewCover);
     }
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch { /* ignore */ }
+        try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
     }
 
     // ---- WriteAsync guards -------------------------------------------------------
@@ -60,7 +60,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     [InlineData("missing.jpg")]
     public async Task WriteAsync_BlankOrMissingSource_DoesNothing(string source)
     {
-        var path = source.Length > 1 ? Path.Combine(_root, source) : source;
+        var path = source.Length > 1 ? Path.Join(_root, source) : source;
 
         await CreateWriter().WriteAsync(Key, path, "image/jpeg");
 
@@ -112,7 +112,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     [Fact]
     public async Task WriteAsync_CorruptArchive_IsLoggedAndLeftUntouched()
     {
-        var cbz = Path.Combine(_root, "broken.cbz");
+        var cbz = Path.Join(_root, "broken.cbz");
         var garbage = Encoding.ASCII.GetBytes("this is definitely not a zip archive");
         File.WriteAllBytes(cbz, garbage);
         SetupFirstArchive(cbz);
@@ -236,11 +236,13 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     [Fact]
     public async Task WriteAsync_EntryWithEmptyName_IsPreserved()
     {
-        var cbz = Path.Combine(_root, "issue1.cbz");
+        var cbz = Path.Join(_root, "issue1.cbz");
         using (var archive = SharpZipArchive.CreateArchive())
         {
-            archive.AddEntry("01.jpg", new MemoryStream(PageBytes), true, PageBytes.Length, DateTime.Now);
-            archive.AddEntry("", new MemoryStream([7, 7]), true, 2, DateTime.Now);
+            using var page = new MemoryStream(PageBytes);
+            using var emptyNamePage = new MemoryStream([7, 7]);
+            archive.AddEntry("01.jpg", page, true, PageBytes.Length, DateTime.Now);
+            archive.AddEntry("", emptyNamePage, true, 2, DateTime.Now);
             using var stream = File.Create(cbz);
             archive.SaveTo(stream, new ZipWriterOptions(CompressionType.Deflate));
         }
@@ -347,7 +349,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     [InlineData("missing.cbz")]
     public async Task RemoveAsync_NoUsableFirstArchive_DoesNothing(string? archive)
     {
-        SetupFirstArchive(archive is { Length: > 0 } ? Path.Combine(_root, archive) : archive);
+        SetupFirstArchive(archive is { Length: > 0 } ? Path.Join(_root, archive) : archive);
 
         await CreateWriter().RemoveAsync(Key);
 
@@ -357,7 +359,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     [Fact]
     public async Task RemoveAsync_ReadOnlyArchiveFormat_IsSkipped()
     {
-        var cbr = Path.Combine(_root, "issue1.cbr");
+        var cbr = Path.Join(_root, "issue1.cbr");
         File.WriteAllBytes(cbr, [0x52, 0x61, 0x72, 0x21]);
         SetupFirstArchive(cbr);
 
@@ -370,7 +372,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     [Fact]
     public async Task RemoveAsync_CorruptArchive_IsSwallowed()
     {
-        var cbz = Path.Combine(_root, "broken.cbz");
+        var cbz = Path.Join(_root, "broken.cbz");
         var garbage = Encoding.ASCII.GetBytes("still not a zip archive");
         File.WriteAllBytes(cbz, garbage);
         SetupFirstArchive(cbz);
@@ -455,7 +457,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
 
     private string CreateCbz(string name, params (string Name, byte[] Data)[] entries)
     {
-        var path = Path.Combine(_root, name);
+        var path = Path.Join(_root, name);
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
         foreach (var (entryName, data) in entries)
         {

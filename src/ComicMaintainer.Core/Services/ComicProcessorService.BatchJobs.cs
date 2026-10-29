@@ -94,7 +94,7 @@ public partial class ComicProcessorService
                 {
                     await _fileStore.ClearProcessedStatusAsync(new[] { filePath }, token);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(
                         ex,
@@ -191,7 +191,7 @@ public partial class ComicProcessorService
                         foreach (var storePath in storePaths)
                             await _fileStore.RemoveFileAsync(storePath, token);
                     }
-                    catch (Exception removeEx)
+                    catch (Exception removeEx) when (removeEx is not OutOfMemoryException)
                     {
                         _logger.LogDebug(removeEx,
                             "DeleteFilesAsync: file-store cleanup failed for missing file {FilePath}",
@@ -200,7 +200,7 @@ public partial class ComicProcessorService
                     await LogHistoryAsync(canonicalPath, "Delete", false, "File not found on disk", token);
                     return false;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex,
                         "DeleteFilesAsync: error deleting file {FilePath}",
@@ -315,117 +315,119 @@ public partial class ComicProcessorService
         // Cancelled and release jobCts, rather than StartNew skipping it and leaving it Queued.
         _ = Task.Factory.StartNew(async () =>
         {
-            try
+            using (jobCts)
             {
-                jobCts.Token.ThrowIfCancellationRequested();
-
-                _logger.LogDebug("{OperationName}: Job {JobId} starting execution", operationName, jobId);
-                lock (jobSyncLock)
+                try
                 {
-                    job.Status = JobStatus.Running;
-                }
-                await BroadcastJobStatusAsync(job);
+                    jobCts.Token.ThrowIfCancellationRequested();
 
-                var parallelOptions = new ParallelOptions
-                {
-                    CancellationToken = jobCts.Token,
-                    MaxDegreeOfParallelism = _maxWorkers
-                };
-
-                await Parallel.ForEachAsync(
-                    fileList.Select((file, index) => new { file, index }),
-                    parallelOptions,
-                    async (item, token) =>
+                    _logger.LogDebug("{OperationName}: Job {JobId} starting execution", operationName, jobId);
+                    lock (jobSyncLock)
                     {
-                        _logger.LogDebug("{OperationName}: Job {JobId} {ActionDescription} file {FileIndex}/{TotalFiles}: {FilePath}",
-                            operationName,
-                            jobId,
-                            actionDescription,
-                            item.index + 1,
-                            fileList.Count,
-                            LoggingHelper.SanitizePathForLog(item.file));
+                        job.Status = JobStatus.Running;
+                    }
+                    await BroadcastJobStatusAsync(job);
 
-                        var success = await fileOperation(item.file, token);
-                        _metrics?.RecordFileProcessed(operationName, success);
+                    var parallelOptions = new ParallelOptions
+                    {
+                        CancellationToken = jobCts.Token,
+                        MaxDegreeOfParallelism = _maxWorkers
+                    };
 
-                        lock (jobSyncLock)
+                    await Parallel.ForEachAsync(
+                        fileList.Select((file, index) => new { file, index }),
+                        parallelOptions,
+                        async (item, token) =>
                         {
-                            job.CurrentFile = item.file;
-                            if (success)
+                            _logger.LogDebug("{OperationName}: Job {JobId} {ActionDescription} file {FileIndex}/{TotalFiles}: {FilePath}",
+                                operationName,
+                                jobId,
+                                actionDescription,
+                                item.index + 1,
+                                fileList.Count,
+                                LoggingHelper.SanitizePathForLog(item.file));
+
+                            var success = await fileOperation(item.file, token);
+                            _metrics?.RecordFileProcessed(operationName, success);
+
+                            lock (jobSyncLock)
                             {
-                                job.ProcessedFiles++;
+                                job.CurrentFile = item.file;
+                                if (success)
+                                {
+                                    job.ProcessedFiles++;
+                                }
+                                else
+                                {
+                                    job.FailedFiles++;
+                                    job.Errors[item.file] = failureMessage;
+                                }
                             }
-                            else
-                            {
-                                job.FailedFiles++;
-                                job.Errors[item.file] = failureMessage;
-                            }
-                        }
 
-                        _logger.LogDebug("{OperationName}: Job {JobId} completed file {FileIndex}/{TotalFiles} with success={Success}: {FilePath}",
-                            operationName,
-                            jobId,
-                            item.index + 1,
-                            fileList.Count,
-                            success,
-                            LoggingHelper.SanitizePathForLog(item.file));
-
-                        // Broadcast progress after each file
-                        await BroadcastJobStatusAsync(job);
-
-                        // Broadcast individual file processed event
-                        if (_eventBroadcaster != null)
-                        {
-                            await _eventBroadcaster.BroadcastFileProcessedAsync(
-                                Path.GetFileName(item.file),
+                            _logger.LogDebug("{OperationName}: Job {JobId} completed file {FileIndex}/{TotalFiles} with success={Success}: {FilePath}",
+                                operationName,
+                                jobId,
+                                item.index + 1,
+                                fileList.Count,
                                 success,
-                                success ? null : failureMessage);
-                        }
-                    });
+                                LoggingHelper.SanitizePathForLog(item.file));
 
-                if (postLoopAsync is not null)
-                {
-                    _logger.LogDebug("{OperationName}: Job {JobId} running post-loop hook", operationName, jobId);
-                    await postLoopAsync(jobCts.Token);
-                }
+                            // Broadcast progress after each file
+                            await BroadcastJobStatusAsync(job);
 
-                lock (jobSyncLock)
-                {
-                    job.Status = JobStatus.Completed;
-                    job.EndTime = DateTime.UtcNow;
+                            // Broadcast individual file processed event
+                            if (_eventBroadcaster != null)
+                            {
+                                await _eventBroadcaster.BroadcastFileProcessedAsync(
+                                    Path.GetFileName(item.file),
+                                    success,
+                                    success ? null : failureMessage);
+                            }
+                        });
+
+                    if (postLoopAsync is not null)
+                    {
+                        _logger.LogDebug("{OperationName}: Job {JobId} running post-loop hook", operationName, jobId);
+                        await postLoopAsync(jobCts.Token);
+                    }
+
+                    lock (jobSyncLock)
+                    {
+                        job.Status = JobStatus.Completed;
+                        job.EndTime = DateTime.UtcNow;
+                    }
+                    _logger.LogInformation("{OperationName}: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
+                        operationName, jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
+                    await BroadcastJobStatusAsync(job);
                 }
-                _logger.LogInformation("{OperationName}: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
-                    operationName, jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
-                await BroadcastJobStatusAsync(job);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("{OperationName}: Job cancelled: {JobId}", operationName, jobId);
-                lock (jobSyncLock)
+                catch (OperationCanceledException)
                 {
-                    job.Status = JobStatus.Cancelled;
-                    job.EndTime = DateTime.UtcNow;
+                    _logger.LogInformation("{OperationName}: Job cancelled: {JobId}", operationName, jobId);
+                    lock (jobSyncLock)
+                    {
+                        job.Status = JobStatus.Cancelled;
+                        job.EndTime = DateTime.UtcNow;
+                    }
+                    await BroadcastJobStatusAsync(job);
                 }
-                await BroadcastJobStatusAsync(job);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "{OperationName}: Error processing batch job: {JobId}", operationName, jobId);
-                lock (jobSyncLock)
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
-                    job.Status = JobStatus.Failed;
-                    job.EndTime = DateTime.UtcNow;
+                    _logger.LogError(ex, "{OperationName}: Error processing batch job: {JobId}", operationName, jobId);
+                    lock (jobSyncLock)
+                    {
+                        job.Status = JobStatus.Failed;
+                        job.EndTime = DateTime.UtcNow;
+                    }
+                    await BroadcastJobStatusAsync(job);
                 }
-                await BroadcastJobStatusAsync(job);
-            }
-            finally
-            {
-                _metrics?.RecordProcessingJob(
-                    operationName,
-                    job.Status.ToString(),
-                    (job.EndTime ?? DateTime.UtcNow) - job.StartTime);
-                _jobCancellationTokens.TryRemove(jobId, out _);
-                jobCts.Dispose();
+                finally
+                {
+                    _metrics?.RecordProcessingJob(
+                        operationName,
+                        job.Status.ToString(),
+                        (job.EndTime ?? DateTime.UtcNow) - job.StartTime);
+                    _jobCancellationTokens.TryRemove(jobId, out _);
+                }
             }
         }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 

@@ -176,7 +176,7 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
             // The caller gave up: neither "no match" nor a provider failure.
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "AniList manga lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
             _health.RecordFailure(ex.Message);
@@ -281,7 +281,7 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
         {
             return (false, $"Network error: {ex.Message}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return (false, ex.Message);
         }
@@ -371,22 +371,11 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
             return (null, null);
         }
 
-        string? PickFirst(params string[] keys)
-        {
-            foreach (var key in keys)
-            {
-                if (cover.TryGetProperty(key, out var value)
-                    && value.ValueKind == JsonValueKind.String)
-                {
-                    var str = value.GetString();
-                    if (!string.IsNullOrWhiteSpace(str))
-                    {
-                        return str;
-                    }
-                }
-            }
-            return null;
-        }
+        string? PickFirst(params string[] keys) => keys
+            .Select(key => cover.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null)
+            .FirstOrDefault(str => !string.IsNullOrWhiteSpace(str));
 
         return (PickFirst("extraLarge", "large", "medium"), PickFirst("medium", "large"));
     }
@@ -457,9 +446,8 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
 
         if (media.TryGetProperty("synonyms", out var synonyms) && synonyms.ValueKind == JsonValueKind.Array)
         {
-            foreach (var synonym in synonyms.EnumerateArray())
+            foreach (var synonym in synonyms.EnumerateArray().Where(s => s.ValueKind == JsonValueKind.String))
             {
-                if (synonym.ValueKind != JsonValueKind.String) continue;
                 AddIfNew(synonym.GetString(), null);
             }
         }

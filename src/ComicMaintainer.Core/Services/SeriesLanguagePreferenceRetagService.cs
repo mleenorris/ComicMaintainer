@@ -113,24 +113,17 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
         }
         if (record.Aliases is { Count: > 0 })
         {
-            foreach (var alias in record.Aliases)
-            {
-                if (!string.IsNullOrWhiteSpace(alias)) titles.Add(alias);
-            }
+            titles.UnionWith(record.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
         }
         if (record.UserAliases is { Count: > 0 })
         {
-            foreach (var alias in record.UserAliases)
-            {
-                if (!string.IsNullOrWhiteSpace(alias)) titles.Add(alias);
-            }
+            titles.UnionWith(record.UserAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
         }
         if (record.LocalizedTitles is { Count: > 0 })
         {
-            foreach (var localized in record.LocalizedTitles)
-            {
-                if (!string.IsNullOrWhiteSpace(localized?.Title)) titles.Add(localized!.Title);
-            }
+            titles.UnionWith(record.LocalizedTitles
+                .Where(localized => !string.IsNullOrWhiteSpace(localized?.Title))
+                .Select(localized => localized!.Title));
         }
         return titles;
     }

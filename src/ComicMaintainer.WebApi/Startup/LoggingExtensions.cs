@@ -73,7 +73,7 @@ internal static class LoggingExtensions
             .WriteTo.Logger(lc => lc
                 .Filter.ByExcluding(e => isWatcherSource(e) || isMetadataSource(e) || isAuthSource(e))
                 .WriteTo.File(
-                    Path.Combine(configDir, "app.log"),
+                    Path.Join(configDir, "app.log"),
                     restrictedToMinimumLevel: LogEventLevel.Information,
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 7,
@@ -81,7 +81,7 @@ internal static class LoggingExtensions
                     outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
             // Debug log file - capture everything at Debug level and above (including watcher and metadata)
             .WriteTo.File(
-                Path.Combine(configDir, "debug.log"),
+                Path.Join(configDir, "debug.log"),
                 restrictedToMinimumLevel: LogEventLevel.Debug,
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 3,
@@ -91,7 +91,7 @@ internal static class LoggingExtensions
             .WriteTo.Logger(lc => lc
                 .Filter.ByIncludingOnly(e => isWatcherSource(e))
                 .WriteTo.File(
-                    Path.Combine(configDir, "watcher.log"),
+                    Path.Join(configDir, "watcher.log"),
                     restrictedToMinimumLevel: LogEventLevel.Debug,
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 7,
@@ -103,7 +103,7 @@ internal static class LoggingExtensions
             .WriteTo.Logger(lc => lc
                 .Filter.ByIncludingOnly(e => isMetadataSource(e))
                 .WriteTo.File(
-                    Path.Combine(configDir, "metadata.log"),
+                    Path.Join(configDir, "metadata.log"),
                     restrictedToMinimumLevel: LogEventLevel.Debug,
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 7,
@@ -115,7 +115,7 @@ internal static class LoggingExtensions
             .WriteTo.Logger(lc => lc
                 .Filter.ByIncludingOnly(e => isAuthSource(e))
                 .WriteTo.File(
-                    Path.Combine(configDir, "auth.log"),
+                    Path.Join(configDir, "auth.log"),
                     restrictedToMinimumLevel: LogEventLevel.Debug,
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 7,

@@ -24,16 +24,16 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
 
     public SuwayomiDownloadImportServiceTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), $"SuwayomiImportTests_{Guid.NewGuid():N}");
-        _library = Directory.CreateDirectory(Path.Combine(_root, "library")).FullName;
-        _downloads = Directory.CreateDirectory(Path.Combine(_root, "suwayomi", "mangas")).FullName;
+        _root = Path.Join(Path.GetTempPath(), $"SuwayomiImportTests_{Guid.NewGuid():N}");
+        _library = Directory.CreateDirectory(Path.Join(_root, "library")).FullName;
+        _downloads = Directory.CreateDirectory(Path.Join(_root, "suwayomi", "mangas")).FullName;
 
         _settings = new AppSettings
         {
             WatchedDirectory = _library,
-            DuplicateDirectory = Path.Combine(_root, "duplicates"),
-            ConfigDirectory = Path.Combine(_root, "config"),
-            TempFileDirectory = Path.Combine(_root, "config", "temp"),
+            DuplicateDirectory = Path.Join(_root, "duplicates"),
+            ConfigDirectory = Path.Join(_root, "config"),
+            TempFileDirectory = Path.Join(_root, "config", "temp"),
             SuwayomiDownloadsDirectory = _downloads
         };
 
@@ -121,7 +121,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     }
 
     private string Download(string source, string series, string chapter, string page = "page")
-        => WriteCbz(Path.Combine(_downloads, source, series, chapter), page);
+        => WriteCbz(Path.Join(_downloads, source, series, chapter), page);
 
     [Fact]
     public async Task ImportAsync_MovesAFinishedChapterIntoASeriesFolderAndRemovesTheEmptiedFolders()
@@ -130,7 +130,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
 
         var result = await CreateService().ImportAsync();
 
-        var destination = Path.Combine(_library, "Solo Leveling", "Official_Chapter 1.cbz");
+        var destination = Path.Join(_library, "Solo Leveling", "Official_Chapter 1.cbz");
         var imported = Assert.Single(result.Imported);
         Assert.Equal(source, imported.SourcePath);
         Assert.Equal(destination, imported.DestinationPath);
@@ -139,7 +139,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         // No staging file is left behind next to the chapter.
         Assert.Single(Directory.GetFiles(Path.GetDirectoryName(destination)!));
 
-        Assert.False(Directory.Exists(Path.Combine(_downloads, "MangaDex (EN)")));
+        Assert.False(Directory.Exists(Path.Join(_downloads, "MangaDex (EN)")));
         Assert.True(Directory.Exists(_downloads));
         Assert.Equal(2, result.RemovedFolders);
         Assert.Null(result.SkippedReason);
@@ -158,8 +158,8 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(3, result.Imported.Count);
         Assert.Equal(
             new[] { "Chapter 1.cbz", "Chapter 2.cbz" },
-            Directory.GetFiles(Path.Combine(_library, "Solo Leveling")).Select(Path.GetFileName).Order());
-        Assert.True(File.Exists(Path.Combine(_library, "Omniscient Reader", "Chapter 7.cbz")));
+            Directory.GetFiles(Path.Join(_library, "Solo Leveling")).Select(Path.GetFileName).Order());
+        Assert.True(File.Exists(Path.Join(_library, "Omniscient Reader", "Chapter 7.cbz")));
         Assert.Empty(Directory.GetFileSystemEntries(_downloads));
     }
 
@@ -172,20 +172,20 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         var result = await CreateService().ImportAsync();
 
         Assert.Equal(
-            Path.Combine(_library, "Manga", "Solo Leveling", "Chapter 1.cbz"),
+            Path.Join(_library, "Manga", "Solo Leveling", "Chapter 1.cbz"),
             Assert.Single(result.Imported).DestinationPath);
     }
 
     [Fact]
     public async Task ImportAsync_JoinsAFolderNamedLikeTheSeriesIgnoringCaseAndPunctuation()
     {
-        var existing = Directory.CreateDirectory(Path.Combine(_library, "solo-leveling")).FullName;
+        var existing = Directory.CreateDirectory(Path.Join(_library, "solo-leveling")).FullName;
         Download("Source", "Solo Leveling", "Chapter 2.cbz");
 
         var result = await CreateService().ImportAsync();
 
-        Assert.Equal(Path.Combine(existing, "Chapter 2.cbz"), Assert.Single(result.Imported).DestinationPath);
-        Assert.False(Directory.Exists(Path.Combine(_library, "Solo Leveling")));
+        Assert.Equal(Path.Join(existing, "Chapter 2.cbz"), Assert.Single(result.Imported).DestinationPath);
+        Assert.False(Directory.Exists(Path.Join(_library, "Solo Leveling")));
         // A folder match needs no library lookup.
         _seriesLibrary.Verify(
             l => l.GetAllSeriesFolderGroupsAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()),
@@ -195,8 +195,8 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     [Fact]
     public async Task ImportAsync_JoinsTheLargestLibraryFolderOfTheSeriesKnownByThatTitle()
     {
-        var mainFolder = Directory.CreateDirectory(Path.Combine(_library, "Manhwa", "Na Honjaman Level Up")).FullName;
-        var strayFolder = Directory.CreateDirectory(Path.Combine(_library, "Unsorted")).FullName;
+        var mainFolder = Directory.CreateDirectory(Path.Join(_library, "Manhwa", "Na Honjaman Level Up")).FullName;
+        var strayFolder = Directory.CreateDirectory(Path.Join(_library, "Unsorted")).FullName;
         SetupLibrary(
             new[]
             {
@@ -215,7 +215,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         var result = await CreateService().ImportAsync();
 
         Assert.Equal(
-            new[] { Path.Combine(mainFolder, "Chapter 3.cbz"), Path.Combine(mainFolder, "Chapter 4.cbz") },
+            new[] { Path.Join(mainFolder, "Chapter 3.cbz"), Path.Join(mainFolder, "Chapter 4.cbz") },
             result.Imported.Select(chapter => chapter.DestinationPath));
         // The library is read once per run, not once per chapter.
         _seriesLibrary.Verify(
@@ -226,8 +226,8 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     [Fact]
     public async Task ImportAsync_CreatesANewFolderWhenTheTitleBelongsToSeveralLibrarySeries()
     {
-        var first = Directory.CreateDirectory(Path.Combine(_library, "A", "First")).FullName;
-        var second = Directory.CreateDirectory(Path.Combine(_library, "B", "Second")).FullName;
+        var first = Directory.CreateDirectory(Path.Join(_library, "A", "First")).FullName;
+        var second = Directory.CreateDirectory(Path.Join(_library, "B", "Second")).FullName;
         SetupLibrary(
             new[]
             {
@@ -240,14 +240,14 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         var result = await CreateService().ImportAsync();
 
         Assert.Equal(
-            Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz"),
+            Path.Join(_library, "Solo Leveling", "Chapter 1.cbz"),
             Assert.Single(result.Imported).DestinationPath);
     }
 
     [Fact]
     public async Task ImportAsync_NeverJoinsLibraryFoldersThatAreTheLibraryRootOrOutsideIt()
     {
-        var outside = Directory.CreateDirectory(Path.Combine(_root, "elsewhere", "Solo Leveling")).FullName;
+        var outside = Directory.CreateDirectory(Path.Join(_root, "elsewhere", "Solo Leveling")).FullName;
         SetupLibrary(
             new[] { new SeriesSummaryDto { Id = "s1", Title = "Solo Leveling" } },
             new[] { Folders("s1", _library, outside) });
@@ -256,7 +256,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         var result = await CreateService().ImportAsync();
 
         Assert.Equal(
-            Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz"),
+            Path.Join(_library, "Solo Leveling", "Chapter 1.cbz"),
             Assert.Single(result.Imported).DestinationPath);
         Assert.Empty(Directory.GetFiles(outside));
     }
@@ -274,19 +274,19 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         var result = await CreateService().ImportAsync();
 
         Assert.Equal(
-            Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz"),
+            Path.Join(_library, "Solo Leveling", "Chapter 1.cbz"),
             Assert.Single(result.Imported).DestinationPath);
     }
 
     [Fact]
     public async Task ImportAsync_KeepsBothFilesWhenTheChapterNameIsTaken()
     {
-        var existing = WriteCbz(Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz"), "already in the library");
+        var existing = WriteCbz(Path.Join(_library, "Solo Leveling", "Chapter 1.cbz"), "already in the library");
         Download("Source", "Solo Leveling", "Chapter 1.cbz");
 
         var result = await CreateService().ImportAsync();
 
-        var destination = Path.Combine(_library, "Solo Leveling", "Chapter 1 (2).cbz");
+        var destination = Path.Join(_library, "Solo Leveling", "Chapter 1 (2).cbz");
         Assert.Equal(destination, Assert.Single(result.Imported).DestinationPath);
         Assert.Equal("already in the library", ReadPage(existing));
         Assert.Equal("page", ReadPage(destination));
@@ -304,7 +304,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(1, result.StillDownloading);
         Assert.True(File.Exists(source));
         Assert.Equal(0, result.RemovedFolders);
-        Assert.False(Directory.Exists(Path.Combine(_library, "Solo Leveling")));
+        Assert.False(Directory.Exists(Path.Join(_library, "Solo Leveling")));
     }
 
     [Fact]
@@ -312,8 +312,8 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     {
         // Suwayomi writes a CBZ's central directory last: a cut-off archive
         // is one it has not finished.
-        var bytes = File.ReadAllBytes(WriteCbz(Path.Combine(_root, "whole.cbz"), new string('x', 4096)));
-        var partial = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var bytes = File.ReadAllBytes(WriteCbz(Path.Join(_root, "whole.cbz"), new string('x', 4096)));
+        var partial = Path.Join(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
         Directory.CreateDirectory(Path.GetDirectoryName(partial)!);
         File.WriteAllBytes(partial, bytes[..(bytes.Length / 2)]);
 
@@ -323,7 +323,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Empty(result.Imported);
         Assert.Equal(1, result.Unreadable);
         Assert.True(File.Exists(partial));
-        Assert.False(Directory.Exists(Path.Combine(_library, "Solo Leveling")));
+        Assert.False(Directory.Exists(Path.Join(_library, "Solo Leveling")));
     }
 
     [Fact]
@@ -361,7 +361,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         }
 
         Download("Source", "Solo Leveling", "Chapter 1.cbz");
-        var source = Path.Combine(_downloads, "Source");
+        var source = Path.Join(_downloads, "Source");
         File.SetUnixFileMode(source, UnixFileMode.None);
         try
         {
@@ -380,12 +380,12 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     [Fact]
     public async Task ImportAsync_LeavesArchivesOutsideASeriesFolderAndReportsChaptersSavedAsImages()
     {
-        var stray = WriteCbz(Path.Combine(_downloads, "stray.cbz"));
+        var stray = WriteCbz(Path.Join(_downloads, "stray.cbz"));
         foreach (var page in new[] { "001.jpg", "002.jpg" })
         {
-            File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 5")).FullName, page), "image");
+            File.WriteAllText(Path.Join(Directory.CreateDirectory(Path.Join(_downloads, "Source", "Solo Leveling", "Chapter 5")).FullName, page), "image");
             // Suwayomi's thumbnails sit one level down and are not chapters.
-            File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(_downloads, "thumbnails")).FullName, page), "image");
+            File.WriteAllText(Path.Join(Directory.CreateDirectory(Path.Join(_downloads, "thumbnails")).FullName, page), "image");
         }
 
         var result = await CreateService().ImportAsync();
@@ -400,7 +400,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     [Fact]
     public async Task ImportAsync_IgnoresStagingFiles()
     {
-        var staging = WriteCbz(Path.Combine(_downloads, "Source", "Solo Leveling", ".tmp_0123456789abcdef.cbz"));
+        var staging = WriteCbz(Path.Join(_downloads, "Source", "Solo Leveling", ".tmp_0123456789abcdef.cbz"));
 
         var result = await CreateService().ImportAsync();
 
@@ -408,7 +408,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.True(File.Exists(staging));
     }
 
-    private string PendingMovesPath => Path.Combine(_settings.ConfigDirectory, "suwayomi-import-pending.json");
+    private string PendingMovesPath => Path.Join(_settings.ConfigDirectory, "suwayomi-import-pending.json");
 
     private void WritePendingMove(string stagingPath, string sourcePath)
     {
@@ -433,13 +433,13 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     [Fact]
     public async Task ImportAsync_PublishesAChapterLeftStagedByAnInterruptedRun()
     {
-        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
-        var staging = WriteCbz(Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"), "staged");
+        var source = Path.Join(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var staging = WriteCbz(Path.Join(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"), "staged");
         WritePendingMove(staging, source);
 
         var result = await CreateService().ImportAsync();
 
-        var destination = Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz");
+        var destination = Path.Join(_library, "Solo Leveling", "Chapter 1.cbz");
         var imported = Assert.Single(result.Imported);
         Assert.Equal(destination, imported.DestinationPath);
         Assert.Equal("staged", ReadPage(destination));
@@ -451,24 +451,24 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     public async Task ImportAsync_DropsAStagedCopyWhoseDownloadIsStillInPlace()
     {
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz");
-        var staging = WriteCbz(Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"), "partial copy");
+        var staging = WriteCbz(Path.Join(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"), "partial copy");
         WritePendingMove(staging, source);
 
         var result = await CreateService().ImportAsync();
 
-        var destination = Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz");
+        var destination = Path.Join(_library, "Solo Leveling", "Chapter 1.cbz");
         Assert.Single(result.Imported);
         Assert.Equal("page", ReadPage(destination));
         Assert.False(File.Exists(source));
-        Assert.Single(Directory.GetFiles(Path.Combine(_library, "Solo Leveling")));
+        Assert.Single(Directory.GetFiles(Path.Join(_library, "Solo Leveling")));
         Assert.False(File.Exists(PendingMovesPath));
     }
 
     [Fact]
     public async Task ImportAsync_LeavesAnUnreadableStagedChapterAndItsJournalForRecovery()
     {
-        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
-        var staging = Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import");
+        var source = Path.Join(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var staging = Path.Join(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import");
         Directory.CreateDirectory(Path.GetDirectoryName(staging)!);
         File.WriteAllBytes(staging, [1, 2, 3]);
         WritePendingMove(staging, source);
@@ -490,8 +490,8 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
             return; // File modes are not enforced there.
         }
 
-        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
-        var staging = WriteCbz(Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"));
+        var source = Path.Join(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var staging = WriteCbz(Path.Join(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"));
         WritePendingMove(staging, source);
         File.SetUnixFileMode(staging, UnixFileMode.None);
         try
@@ -518,9 +518,9 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
             return; // File modes are not enforced there.
         }
 
-        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
-        var stagingFolder = Directory.CreateDirectory(Path.Combine(_library, "Solo Leveling")).FullName;
-        var staging = WriteCbz(Path.Combine(stagingFolder, ".tmp_0123456789abcdef.suwayomi-import"));
+        var source = Path.Join(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var stagingFolder = Directory.CreateDirectory(Path.Join(_library, "Solo Leveling")).FullName;
+        var staging = WriteCbz(Path.Join(stagingFolder, ".tmp_0123456789abcdef.suwayomi-import"));
         WritePendingMove(staging, source);
         File.SetUnixFileMode(stagingFolder, UnixFileMode.None);
         try
@@ -544,14 +544,14 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     {
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "partial source");
         var staging = WriteCbz(
-            Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"),
+            Path.Join(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"),
             "complete staged archive");
         WritePendingMove(staging, source);
         File.WriteAllBytes(source, [0x50, 0x4b, 0x03, 0x04]);
 
         var result = await CreateService().ImportAsync();
 
-        var destination = Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz");
+        var destination = Path.Join(_library, "Solo Leveling", "Chapter 1.cbz");
         Assert.Equal("complete staged archive", ReadPage(destination));
         Assert.Single(result.Imported);
         Assert.False(File.Exists(source));
@@ -564,7 +564,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     {
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz");
         var staging = WriteCbz(
-            Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"),
+            Path.Join(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"),
             "complete staged archive");
         WritePendingMove(staging, source);
         byte[] partial = [0x50, 0x4b, 0x03, 0x04];
@@ -579,31 +579,31 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(partial, File.ReadAllBytes(source));
         Assert.Equal("complete staged archive", ReadPage(staging));
         Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
-        Assert.False(File.Exists(Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz")));
+        Assert.False(File.Exists(Path.Join(_library, "Solo Leveling", "Chapter 1.cbz")));
     }
 
     [Fact]
     public async Task ImportAsync_ReclaimsTheCopyOfAnInterruptedRollback()
     {
-        var source = Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
+        var source = Path.Join(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz");
         var staging = WriteCbz(
-            Path.Combine(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"),
+            Path.Join(_library, "Solo Leveling", ".tmp_0123456789abcdef.suwayomi-import"),
             "complete staged archive");
         WritePendingMove(staging, source);
-        var restoreCopy = Path.Combine(
+        var restoreCopy = Path.Join(
             Directory.CreateDirectory(Path.GetDirectoryName(source)!).FullName,
             ".tmp_0123456789abcdef.suwayomi-restore");
         File.WriteAllBytes(restoreCopy, [0x50, 0x4b, 0x03, 0x04]);
 
         var result = await CreateService().ImportAsync();
 
-        var destination = Path.Combine(_library, "Solo Leveling", "Chapter 1.cbz");
+        var destination = Path.Join(_library, "Solo Leveling", "Chapter 1.cbz");
         Assert.Single(result.Imported);
         Assert.Equal("complete staged archive", ReadPage(destination));
         Assert.False(File.Exists(restoreCopy));
         Assert.False(File.Exists(staging));
         Assert.False(File.Exists(PendingMovesPath));
-        Assert.False(Directory.Exists(Path.Combine(_downloads, "Source")));
+        Assert.False(Directory.Exists(Path.Join(_downloads, "Source")));
     }
 
     [Fact]
@@ -615,8 +615,8 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         }
 
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "original chapter");
-        var stagingFolder = Directory.CreateDirectory(Path.Combine(_library, "Read-only")).FullName;
-        var staging = WriteCbz(Path.Combine(stagingFolder, ".tmp_0123456789abcdef.suwayomi-import"), "staged copy");
+        var stagingFolder = Directory.CreateDirectory(Path.Join(_library, "Read-only")).FullName;
+        var staging = WriteCbz(Path.Join(stagingFolder, ".tmp_0123456789abcdef.suwayomi-import"), "staged copy");
         WritePendingMove(staging, source);
         File.SetUnixFileMode(stagingFolder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
@@ -630,7 +630,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
             Assert.Equal("staged copy", ReadPage(staging));
             Assert.Single(Directory.GetFiles(stagingFolder));
             Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
-            Assert.False(Directory.Exists(Path.Combine(_library, "Solo Leveling")));
+            Assert.False(Directory.Exists(Path.Join(_library, "Solo Leveling")));
         }
         finally
         {
@@ -642,11 +642,11 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     public async Task ImportAsync_RestoresTheSourceWhenAllDestinationNamesAreOccupied()
     {
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "original chapter");
-        var destinationFolder = Directory.CreateDirectory(Path.Combine(_library, "Solo Leveling")).FullName;
+        var destinationFolder = Directory.CreateDirectory(Path.Join(_library, "Solo Leveling")).FullName;
         foreach (var attempt in Enumerable.Range(1, 1000))
         {
             var name = attempt == 1 ? "Chapter 1.cbz" : $"Chapter 1 ({attempt}).cbz";
-            File.WriteAllText(Path.Combine(destinationFolder, name), $"existing file {attempt}");
+            File.WriteAllText(Path.Join(destinationFolder, name), $"existing file {attempt}");
         }
 
         var result = await CreateService().ImportAsync();
@@ -662,7 +662,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         foreach (var attempt in Enumerable.Range(1, 1000))
         {
             var name = attempt == 1 ? "Chapter 1.cbz" : $"Chapter 1 ({attempt}).cbz";
-            Assert.Equal($"existing file {attempt}", File.ReadAllText(Path.Combine(destinationFolder, name)));
+            Assert.Equal($"existing file {attempt}", File.ReadAllText(Path.Join(destinationFolder, name)));
         }
     }
 
@@ -670,11 +670,11 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     public async Task ImportAsync_KeepsTheStagedChapterWhenItsDownloadIsRecreatedDuringRollback()
     {
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz", "original chapter");
-        var destinationFolder = Directory.CreateDirectory(Path.Combine(_library, "Solo Leveling")).FullName;
+        var destinationFolder = Directory.CreateDirectory(Path.Join(_library, "Solo Leveling")).FullName;
         foreach (var attempt in Enumerable.Range(1, 1000))
         {
             var name = attempt == 1 ? "Chapter 1.cbz" : $"Chapter 1 ({attempt}).cbz";
-            File.WriteAllText(Path.Combine(destinationFolder, name), $"existing file {attempt}");
+            File.WriteAllText(Path.Join(destinationFolder, name), $"existing file {attempt}");
         }
 
         byte[] newDownload = [0x50, 0x4b, 0x03, 0x04];
@@ -694,15 +694,15 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         foreach (var attempt in Enumerable.Range(1, 1000))
         {
             var name = attempt == 1 ? "Chapter 1.cbz" : $"Chapter 1 ({attempt}).cbz";
-            Assert.Equal($"existing file {attempt}", File.ReadAllText(Path.Combine(destinationFolder, name)));
+            Assert.Equal($"existing file {attempt}", File.ReadAllText(Path.Join(destinationFolder, name)));
         }
     }
 
     [Fact]
     public async Task ImportAsync_IgnoresPendingMovesOutsideTheLibrary()
     {
-        var outside = WriteCbz(Path.Combine(_root, "elsewhere", ".tmp_0123456789abcdef.suwayomi-import"));
-        WritePendingMove(outside, Path.Combine(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz"));
+        var outside = WriteCbz(Path.Join(_root, "elsewhere", ".tmp_0123456789abcdef.suwayomi-import"));
+        WritePendingMove(outside, Path.Join(_downloads, "Source", "Solo Leveling", "Chapter 1.cbz"));
 
         var result = await CreateService().ImportAsync();
 
@@ -735,17 +735,17 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         var source = Download("Source", "Solo Leveling", "Chapter 1.cbz");
         File.SetLastWriteTimeUtc(source, now.UtcDateTime.AddHours(-1));
         // Just created, perhaps for a download Suwayomi is about to write.
-        var fresh = Directory.CreateDirectory(Path.Combine(_downloads, "Source", "Omniscient Reader")).FullName;
+        var fresh = Directory.CreateDirectory(Path.Join(_downloads, "Source", "Omniscient Reader")).FullName;
         // Left empty long ago.
-        var stale = Directory.CreateDirectory(Path.Combine(_downloads, "Old Source", "Old Series")).FullName;
+        var stale = Directory.CreateDirectory(Path.Join(_downloads, "Old Source", "Old Series")).FullName;
         Directory.SetLastWriteTimeUtc(stale, now.UtcDateTime.AddHours(-1));
 
         var result = await CreateService().ImportAsync();
 
         Assert.Single(result.Imported);
-        Assert.False(Directory.Exists(Path.Combine(_downloads, "Source", "Solo Leveling")));
+        Assert.False(Directory.Exists(Path.Join(_downloads, "Source", "Solo Leveling")));
         Assert.True(Directory.Exists(fresh));
-        Assert.False(Directory.Exists(Path.Combine(_downloads, "Old Source")));
+        Assert.False(Directory.Exists(Path.Join(_downloads, "Old Source")));
         Assert.Equal(3, result.RemovedFolders);
     }
 
@@ -764,7 +764,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     [Fact]
     public async Task ImportAsync_ReportsAMissingDownloadsFolderWithoutThrowing()
     {
-        _settings.SuwayomiDownloadsDirectory = Path.Combine(_root, "not-mounted");
+        _settings.SuwayomiDownloadsDirectory = Path.Join(_root, "not-mounted");
 
         var result = await CreateService().ImportAsync();
 
@@ -788,8 +788,8 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     [Fact]
     public async Task ImportAsync_RefusesADownloadsFolderInsideTheLibrary()
     {
-        var inside = Directory.CreateDirectory(Path.Combine(_library, "suwayomi")).FullName;
-        var source = WriteCbz(Path.Combine(inside, "Source", "Solo Leveling", "Chapter 1.cbz"));
+        var inside = Directory.CreateDirectory(Path.Join(_library, "suwayomi")).FullName;
+        var source = WriteCbz(Path.Join(inside, "Source", "Solo Leveling", "Chapter 1.cbz"));
         _settings.SuwayomiDownloadsDirectory = inside;
 
         var result = await CreateService().ImportAsync();
@@ -812,9 +812,9 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     [Fact]
     public void TryResolveDownloadsDirectory_RejectsRelativeAndOverlappingFolders()
     {
-        var insideLibrary = Directory.CreateDirectory(Path.Combine(_library, "suwayomi")).FullName;
-        var insideConfig = Directory.CreateDirectory(Path.Combine(_root, "config", "suwayomi")).FullName;
-        var insideDuplicates = Directory.CreateDirectory(Path.Combine(_root, "duplicates", "suwayomi")).FullName;
+        var insideLibrary = Directory.CreateDirectory(Path.Join(_library, "suwayomi")).FullName;
+        var insideConfig = Directory.CreateDirectory(Path.Join(_root, "config", "suwayomi")).FullName;
+        var insideDuplicates = Directory.CreateDirectory(Path.Join(_root, "duplicates", "suwayomi")).FullName;
 
         // _root holds the library itself.
         foreach (var folder in new[] { "suwayomi/downloads", insideLibrary, insideConfig, insideDuplicates, _root })
@@ -833,9 +833,9 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(_library, root);
 
         Assert.True(SuwayomiDownloadImportService.TryResolveImportDirectory(" Manga ", _settings, out var relative, out _));
-        Assert.Equal(Path.Combine(_library, "Manga"), relative);
+        Assert.Equal(Path.Join(_library, "Manga"), relative);
 
-        var absolute = Path.Combine(_library, "Manhwa");
+        var absolute = Path.Join(_library, "Manhwa");
         Assert.True(SuwayomiDownloadImportService.TryResolveImportDirectory(absolute, _settings, out var resolved, out _));
         Assert.Equal(absolute, resolved);
     }
@@ -843,7 +843,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     [Fact]
     public void TryResolveImportDirectory_RejectsFoldersOutsideTheWatchedDirectory()
     {
-        foreach (var folder in new[] { Path.Combine("..", "elsewhere"), _downloads })
+        foreach (var folder in new[] { Path.Join("..", "elsewhere"), _downloads })
         {
             Assert.False(
                 SuwayomiDownloadImportService.TryResolveImportDirectory(folder, _settings, out _, out var error),

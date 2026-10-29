@@ -38,7 +38,7 @@ public class EventsControllerTests
     public async Task Stream_SetsCorrectHeaders()
     {
         // Arrange
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         _controller.HttpContext.RequestAborted = cts.Token;
         
         // Cancel immediately to exit the stream loop
@@ -64,7 +64,7 @@ public class EventsControllerTests
     public async Task Stream_HandlesClientDisconnect()
     {
         // Arrange
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         _controller.HttpContext.RequestAborted = cts.Token;
         cts.Cancel(); // Simulate client disconnect
 

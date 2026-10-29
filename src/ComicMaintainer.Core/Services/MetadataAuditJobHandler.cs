@@ -80,7 +80,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
             {
                 metadata = await _processor.GetMetadataAsync(file.FilePath, cancellationToken);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogDebug(ex, "Could not read metadata for {Path}", file.FilePath);
                 metadata = null;
@@ -303,7 +303,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
                     return (record.CanonicalTitle.Trim(), null);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogDebug(ex, "Series cache lookup failed for '{Folder}'", folderSeries);
             }
@@ -340,7 +340,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                    ?? new MetadataAuditOptions();
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
             return new MetadataAuditOptions();
         }

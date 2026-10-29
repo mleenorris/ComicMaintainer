@@ -273,7 +273,7 @@ public partial class ComicProcessorService
                         await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
                         renameSuccess = false;
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
                     {
                         _logger.LogError(ex, "Failed to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                         await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
@@ -335,7 +335,7 @@ public partial class ComicProcessorService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // A single unprocessable archive is field noise, not a defect: the
             // file is recorded in history and the operator sees the log line,
@@ -401,7 +401,7 @@ public partial class ComicProcessorService
             if (record is null) return;
             await _fileStore.SetFileSeriesMetadataVersionAsync(filePath, record.MetadataVersion, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex, "Failed to stamp series-metadata version on {FilePath}",
                 LoggingHelper.SanitizePathForLog(filePath));

@@ -117,7 +117,7 @@ public partial class ComicProcessorService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "NormalizeFileAsync: Error normalizing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);

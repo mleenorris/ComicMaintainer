@@ -133,7 +133,7 @@ public class FileNamingAuditJobHandlerTests
     [Fact]
     public async Task ExecuteAsync_RenameJobRecordEvicted_ReportsQueuedCount()
     {
-        _processor.Setup(p => p.GetJob(_renameJobId)).Returns((ProcessingJob?)null);
+        _processor.Setup(p => p.GetJob(_renameJobId)).Returns(default(ProcessingJob?));
 
         var summary = await CreateHandler().ExecuteAsync("""{"autoCorrect":true}""", CancellationToken.None);
 

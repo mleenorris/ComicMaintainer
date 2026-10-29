@@ -45,7 +45,7 @@ public class FileWatcherServiceTests : IDisposable
         _mockFileStore = new Mock<IFileStoreService>();
         _mockProcessor = new Mock<IComicProcessorService>();
 
-        _testDirectory = Path.Combine(Path.GetTempPath(), $"watcher_test_{Guid.NewGuid()}");
+        _testDirectory = Path.Join(Path.GetTempPath(), $"watcher_test_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
 
         _settings = new AppSettings
@@ -94,7 +94,7 @@ public class FileWatcherServiceTests : IDisposable
     public async Task StartAsync_WhenDirectoryDoesNotExist_DoesNotStart()
     {
         // Arrange
-        _settings.WatchedDirectory = Path.Combine(Path.GetTempPath(), "nonexistent_dir");
+        _settings.WatchedDirectory = Path.Join(Path.GetTempPath(), "nonexistent_dir");
 
         // Act
         await _service.StartAsync();
@@ -154,7 +154,7 @@ public class FileWatcherServiceTests : IDisposable
         await disabledService.StartAsync();
         await Task.Delay(100);
 
-        var newFile = Path.Combine(_testDirectory, "new_comic.cbz");
+        var newFile = Path.Join(_testDirectory, "new_comic.cbz");
 
         // Act - create a new comic file
         File.WriteAllText(newFile, "fake cbz content");
@@ -197,19 +197,19 @@ public class FileWatcherServiceTests : IDisposable
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated SetEnabled no-op until it is removed.")]
     public void SetEnabled_WithTrue_IsDeprecated()
     {
         // SetEnabled is now deprecated and does nothing
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
         _service.SetEnabled(true);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert - Should not start watcher (SetEnabled is now a no-op)
         Assert.False(_service.IsRunning, "SetEnabled is deprecated and should not start watcher");
     }
 
     [Fact]
+    [Obsolete("Covers the deprecated SetEnabled no-op until it is removed.")]
     public async Task SetEnabled_WithFalse_IsDeprecated()
     {
         // Arrange
@@ -218,9 +218,7 @@ public class FileWatcherServiceTests : IDisposable
 
         // SetEnabled is now deprecated and does nothing
         // Act
-        #pragma warning disable CS0618 // Type or member is obsolete
         _service.SetEnabled(false);
-        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert - Should not stop watcher (SetEnabled is now a no-op)
         Assert.True(_service.IsRunning, "SetEnabled is deprecated and should not stop watcher");
@@ -237,9 +235,9 @@ public class FileWatcherServiceTests : IDisposable
     public async Task StartAsync_ScansExistingFiles()
     {
         // Arrange - Create some test comic files
-        var cbzFile = Path.Combine(_testDirectory, "test1.cbz");
-        var cbrFile = Path.Combine(_testDirectory, "test2.cbr");
-        var txtFile = Path.Combine(_testDirectory, "test.txt"); // Should be ignored
+        var cbzFile = Path.Join(_testDirectory, "test1.cbz");
+        var cbrFile = Path.Join(_testDirectory, "test2.cbr");
+        var txtFile = Path.Join(_testDirectory, "test.txt"); // Should be ignored
         
         File.WriteAllText(cbzFile, "fake cbz content");
         File.WriteAllText(cbrFile, "fake cbr content");
@@ -274,11 +272,11 @@ public class FileWatcherServiceTests : IDisposable
     public async Task StartAsync_ScansExistingFilesRecursively()
     {
         // Arrange - Create files in subdirectories
-        var subDir = Path.Combine(_testDirectory, "subdir");
+        var subDir = Path.Join(_testDirectory, "subdir");
         Directory.CreateDirectory(subDir);
         
-        var rootFile = Path.Combine(_testDirectory, "root.cbz");
-        var subFile = Path.Combine(subDir, "sub.cbr");
+        var rootFile = Path.Join(_testDirectory, "root.cbz");
+        var subFile = Path.Join(subDir, "sub.cbr");
         
         File.WriteAllText(rootFile, "fake content");
         File.WriteAllText(subFile, "fake content");
@@ -307,8 +305,8 @@ public class FileWatcherServiceTests : IDisposable
     public async Task OnFileRenamed_ProcessesRenamedComicFile()
     {
         // Arrange
-        var tempFile = Path.Combine(_testDirectory, ".temp_file.cbz.tmp123");
-        var renamedFile = Path.Combine(_testDirectory, "renamed_comic.cbz");
+        var tempFile = Path.Join(_testDirectory, ".temp_file.cbz.tmp123");
+        var renamedFile = Path.Join(_testDirectory, "renamed_comic.cbz");
         
         // Setup mock to indicate file is not processed
         _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(renamedFile, It.IsAny<CancellationToken>()))
@@ -354,8 +352,8 @@ public class FileWatcherServiceTests : IDisposable
     public async Task OnFileRenamed_SkipsProcessingIfAlreadyProcessed()
     {
         // Arrange
-        var tempFile = Path.Combine(_testDirectory, ".temp_file2.cbz.tmp456");
-        var renamedFile = Path.Combine(_testDirectory, "already_processed.cbz");
+        var tempFile = Path.Join(_testDirectory, ".temp_file2.cbz.tmp456");
+        var renamedFile = Path.Join(_testDirectory, "already_processed.cbz");
         
         // Setup mock to indicate file is already processed
         _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(renamedFile, It.IsAny<CancellationToken>()))
@@ -400,7 +398,7 @@ public class FileWatcherServiceTests : IDisposable
     public async Task OnFileCreated_IgnoresTemporaryFilesStartingWithTmpPrefix()
     {
         // Arrange - Use realistic temporary file pattern matching the issue screenshot
-        var tempFile = Path.Combine(_testDirectory, $".tmp_{Guid.NewGuid()}.cbz");
+        var tempFile = Path.Join(_testDirectory, $".tmp_{Guid.NewGuid()}.cbz");
         
         // Start the watcher
         await _service.StartAsync();
@@ -431,7 +429,7 @@ public class FileWatcherServiceTests : IDisposable
     public async Task OnFileCreated_IgnoresFilesWithTmpExtension()
     {
         // Arrange
-        var tempFile = Path.Combine(_testDirectory, "myfile.tmp");
+        var tempFile = Path.Join(_testDirectory, "myfile.tmp");
         
         // Start the watcher
         await _service.StartAsync();
@@ -461,7 +459,7 @@ public class FileWatcherServiceTests : IDisposable
     public async Task OnFileChanged_IgnoresTemporaryFiles()
     {
         // Arrange
-        var tempFile = Path.Combine(_testDirectory, ".tmp_test.cbz");
+        var tempFile = Path.Join(_testDirectory, ".tmp_test.cbz");
         
         // Create the temporary file
         File.WriteAllText(tempFile, "initial content");
@@ -489,7 +487,7 @@ public class FileWatcherServiceTests : IDisposable
     public async Task OnFileChanged_SkipsProcessingIfAlreadyProcessed()
     {
         // Arrange
-        var comicFile = Path.Combine(_testDirectory, "processed_comic.cbz");
+        var comicFile = Path.Join(_testDirectory, "processed_comic.cbz");
         
         // Setup mock to indicate file is already processed
         _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()))
@@ -528,7 +526,7 @@ public class FileWatcherServiceTests : IDisposable
     public async Task OnFileDeleted_IgnoresTemporaryFiles()
     {
         // Arrange - Use realistic temporary file pattern matching the issue screenshot
-        var tempFile = Path.Combine(_testDirectory, $".tmp_{Guid.NewGuid()}.cbz");
+        var tempFile = Path.Join(_testDirectory, $".tmp_{Guid.NewGuid()}.cbz");
         
         // Create the temporary file
         File.WriteAllText(tempFile, "fake cbz content");
@@ -686,7 +684,7 @@ public class FileWatcherServiceTests : IDisposable
     public async Task OnFileChanged_CoalescesRapidChangesIntoSingleProcessingRun()
     {
         // Arrange - a comic file that is not yet processed.
-        var comicFile = Path.Combine(_testDirectory, "bursty_comic.cbz");
+        var comicFile = Path.Join(_testDirectory, "bursty_comic.cbz");
         _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
@@ -718,7 +716,7 @@ public class FileWatcherServiceTests : IDisposable
     {
         // Arrange - a comic file that needs processing. After it is processed once, a change event
         // that the processor's own rewrite would produce must be ignored (treated as self-induced).
-        var comicFile = Path.Combine(_testDirectory, "self_induced.cbz");
+        var comicFile = Path.Join(_testDirectory, "self_induced.cbz");
         _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
@@ -747,7 +745,7 @@ public class FileWatcherServiceTests : IDisposable
     public async Task SuppressProcessing_IgnoresSubsequentChange()
     {
         // Arrange - a comic file that would otherwise be processed on change.
-        var comicFile = Path.Combine(_testDirectory, "suppressed.cbz");
+        var comicFile = Path.Join(_testDirectory, "suppressed.cbz");
         _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
@@ -778,7 +776,7 @@ public class FileWatcherServiceTests : IDisposable
             {
                 Directory.Delete(_testDirectory, true);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Ignore cleanup errors
             }

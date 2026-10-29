@@ -111,7 +111,7 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
         // does not silently drop pending cover writes.
         channel.Writer.TryComplete();
 
-        try
+        using (stoppingCts)
         {
             // If the host's shutdown deadline elapses before the queue drains,
             // cancel the consumer so shutdown is not blocked indefinitely.
@@ -119,10 +119,6 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
             {
                 await consumer;
             }
-        }
-        finally
-        {
-            stoppingCts.Dispose();
         }
     }
 
@@ -151,7 +147,7 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
         {
             // Expected on shutdown.
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Series archive cover write queue consumer terminated unexpectedly");
         }
@@ -181,7 +177,7 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex,
                 "Failed to {Operation} embedded first-archive series cover for {Key}",

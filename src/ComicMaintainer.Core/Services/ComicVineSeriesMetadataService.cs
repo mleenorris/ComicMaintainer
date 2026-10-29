@@ -159,7 +159,7 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
         {
             return (false, $"Network error: {ex.Message}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return (false, ex.Message);
         }
@@ -194,7 +194,7 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
             // The caller gave up: neither "no match" nor a provider failure.
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "ComicVine lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
             _health.RecordFailure(ex.Message);
@@ -242,14 +242,11 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
             {
                 new LocalizedTitle(canonicalTitle, "en")
             };
-            foreach (var alias in aliases)
-            {
-                if (!string.IsNullOrWhiteSpace(alias)
-                    && !localizedTitles.Any(lt => string.Equals(lt.Title, alias, StringComparison.OrdinalIgnoreCase)))
-                {
-                    localizedTitles.Add(new LocalizedTitle(alias, "en"));
-                }
-            }
+            // Except also drops repeated aliases (case-insensitively), keeping the first spelling.
+            localizedTitles.AddRange(aliases
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Except(new[] { canonicalTitle }, StringComparer.OrdinalIgnoreCase)
+                .Select(alias => new LocalizedTitle(alias, "en")));
 
             output.Add(new ExternalSeriesMetadata
             {
@@ -303,22 +300,11 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
             return (null, null);
         }
 
-        string? PickFirst(params string[] keys)
-        {
-            foreach (var key in keys)
-            {
-                if (imageObj.TryGetProperty(key, out var value)
-                    && value.ValueKind == JsonValueKind.String)
-                {
-                    var str = value.GetString();
-                    if (!string.IsNullOrWhiteSpace(str))
-                    {
-                        return str;
-                    }
-                }
-            }
-            return null;
-        }
+        string? PickFirst(params string[] keys) => keys
+            .Select(key => imageObj.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null)
+            .FirstOrDefault(str => !string.IsNullOrWhiteSpace(str));
 
         var image = PickFirst("super_url", "medium_url", "original_url", "screen_url", "small_url");
         var thumb = PickFirst("thumb_url", "icon_url", "small_url");

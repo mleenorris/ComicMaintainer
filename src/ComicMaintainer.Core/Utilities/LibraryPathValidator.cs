@@ -197,7 +197,7 @@ public static class LibraryPathValidator
                 continue;
             }
 
-            var candidate = Path.Combine(resolved, segment);
+            var candidate = Path.Join(resolved, segment);
             var target = ReadLinkTarget(candidate);
             if (target is null)
             {

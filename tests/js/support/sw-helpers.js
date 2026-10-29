@@ -495,9 +495,9 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
             });
             return { response, extended: () => extended, ended };
         },
-        /** Fire `message` with `data` (ports/source as a page would send them) and wait for its work. */
-        async message(data, { ports = [], source = null } = {}) {
-            await extend(dispatch('message', { data, ports, source, origin: ORIGIN, lastEventId: '' }).lifetime);
+        /** Fire `message` with `data` (ports/source/origin as a page would send them) and wait for its work. */
+        async message(data, { ports = [], source = null, origin = ORIGIN } = {}) {
+            await extend(dispatch('message', { data, ports, source, origin, lastEventId: '' }).lifetime);
         },
         /** Messages logged through console.* whose text contains `fragment`. */
         logged(fragment) {

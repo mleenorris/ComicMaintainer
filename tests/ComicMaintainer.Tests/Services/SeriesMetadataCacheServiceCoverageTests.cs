@@ -246,7 +246,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         }
         else
         {
-            setup.ReturnsAsync((ExternalSeriesMetadata?)null);
+            setup.ReturnsAsync(default(ExternalSeriesMetadata?));
         }
         var before = _service.ChangeVersion;
 
@@ -413,7 +413,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
     {
         _imageStore.Setup(s => s.SaveUserImageAsync("series-u", It.IsAny<Stream>(), "image/png", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesImageStoreResult("series-u.png", "image/png", 3));
-        _imageStore.Setup(s => s.ResolveAbsolutePath("series-u.png")).Returns((string?)null);
+        _imageStore.Setup(s => s.ResolveAbsolutePath("series-u.png")).Returns(default(string?));
         using var content = new MemoryStream(new byte[] { 1, 2, 3 });
 
         var record = await _service.SetUserImageAsync("Series U", content, "image/png");
@@ -518,7 +518,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         entity.ImageContentType = "image/jpeg";
         entity.ImageStatus = "downloaded";
         await SeedAsync(entity);
-        _imageStore.Setup(s => s.ResolveAbsolutePath("series-r.jpg")).Returns((string?)null);
+        _imageStore.Setup(s => s.ResolveAbsolutePath("series-r.jpg")).Returns(default(string?));
 
         var applied = await _service.ReapplyImageArtifactsAsync("Series R", embedArchiveInline: true);
 

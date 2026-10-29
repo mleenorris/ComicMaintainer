@@ -24,14 +24,14 @@ public class FileStoreServiceReadStatusQueryTests : IAsyncLifetime
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
     private readonly string _testDirectory =
-        Path.Combine(Path.GetTempPath(), $"filestore_readstatus_{Guid.NewGuid()}");
+        Path.Join(Path.GetTempPath(), $"filestore_readstatus_{Guid.NewGuid()}");
 
     private ServiceProvider _provider = null!;
     private FileStoreService _service = null!;
     private TestUserContextAccessor _userContext = null!;
 
-    private string ReadFilePath => Path.Combine(_testDirectory, "read.cbz");
-    private string UnreadFilePath => Path.Combine(_testDirectory, "unread.cbz");
+    private string ReadFilePath => Path.Join(_testDirectory, "read.cbz");
+    private string UnreadFilePath => Path.Join(_testDirectory, "unread.cbz");
 
     public async Task InitializeAsync()
     {

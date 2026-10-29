@@ -20,7 +20,7 @@ public class CorsSecurityTests : IClassFixture<WebApplicationFactory<Program>>
     {
         // Arrange
         var client = _factory.CreateClient();
-        var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
+        using var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
         request.Headers.Add("Origin", allowedOrigin);
         request.Headers.Add("Access-Control-Request-Method", "GET");
 
@@ -46,7 +46,7 @@ public class CorsSecurityTests : IClassFixture<WebApplicationFactory<Program>>
     {
         // Arrange
         var client = _factory.CreateClient();
-        var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
+        using var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
         request.Headers.Add("Origin", disallowedOrigin);
         request.Headers.Add("Access-Control-Request-Method", "GET");
 
@@ -66,7 +66,7 @@ public class CorsSecurityTests : IClassFixture<WebApplicationFactory<Program>>
     {
         // Arrange
         var client = _factory.CreateClient();
-        var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
+        using var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
         request.Headers.Add("Origin", "http://localhost:5000");
         request.Headers.Add("Access-Control-Request-Method", "GET");
 
@@ -86,7 +86,7 @@ public class CorsSecurityTests : IClassFixture<WebApplicationFactory<Program>>
     {
         // Arrange
         var client = _factory.CreateClient();
-        var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
+        using var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
         request.Headers.Add("Origin", "http://localhost:5000");
         request.Headers.Add("Access-Control-Request-Method", "GET");
 
@@ -106,7 +106,7 @@ public class CorsSecurityTests : IClassFixture<WebApplicationFactory<Program>>
     {
         // Arrange
         var client = _factory.CreateClient();
-        var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
+        using var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
         request.Headers.Add("Origin", "http://localhost:5000");
         request.Headers.Add("Access-Control-Request-Method", "POST");
 
@@ -127,7 +127,7 @@ public class CorsSecurityTests : IClassFixture<WebApplicationFactory<Program>>
     {
         // Arrange
         var client = _factory.CreateClient();
-        var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
+        using var request = new HttpRequestMessage(HttpMethod.Options, "/api/version");
         request.Headers.Add("Origin", "http://localhost:5000");
         request.Headers.Add("Access-Control-Request-Method", "GET");
         request.Headers.Add("Access-Control-Request-Headers", "Authorization");
@@ -150,7 +150,7 @@ public class CorsSecurityTests : IClassFixture<WebApplicationFactory<Program>>
     {
         // Arrange
         var client = _factory.CreateClient();
-        var request = new HttpRequestMessage(new HttpMethod(method), "/api/version");
+        using var request = new HttpRequestMessage(new HttpMethod(method), "/api/version");
         request.Headers.Add("Origin", origin);
 
         // Act

@@ -388,7 +388,7 @@ public class SeriesLibraryServiceCoverageTests
         };
         _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1") };
         var resolver = new Mock<ISeriesNameResolver>();
-        resolver.Setup(r => r.ResolveForRecord(It.IsAny<SeriesMetadataCacheRecord>())).Returns((string)null!);
+        resolver.Setup(r => r.ResolveForRecord(It.IsAny<SeriesMetadataCacheRecord>())).Returns(default(string)!);
 
         var result = await CreateService(resolver.Object).GetSeriesSummariesAsync();
 
@@ -559,7 +559,7 @@ public class SeriesLibraryServiceCoverageTests
     public async Task NullSettingsValue_UsesDefaultsForSnapshotAndUpgradeBudget()
     {
         var settings = new Mock<IOptionsMonitor<AppSettings>>();
-        settings.Setup(s => s.CurrentValue).Returns((AppSettings)null!);
+        settings.Setup(s => s.CurrentValue).Returns(default(AppSettings)!);
         _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga") };
         _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Saga/Saga 001.cbz", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadata { Title = "From Disk", Issue = "1" });
@@ -733,7 +733,7 @@ public class SeriesLibraryServiceCoverageTests
         _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 002.cbz", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("corrupt archive"));
         _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 003.cbz", It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SeriesMetadata?)null);
+            .ReturnsAsync(default(SeriesMetadata?));
 
         var result = await CreateService().GetSeriesIssuesAsync("upgrade", perPage: 0);
 

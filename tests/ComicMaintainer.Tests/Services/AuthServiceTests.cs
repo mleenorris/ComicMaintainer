@@ -292,7 +292,7 @@ public class AuthServiceTests
             .ReturnsAsync(new List<string> { "User" });
 
         // Act
-        var (success, token, error) = await _authService.LoginAsync("testuser", "password123");
+        var (success, token, _) = await _authService.LoginAsync("testuser", "password123");
 
         // Assert
         Assert.True(success);
@@ -338,7 +338,7 @@ public class AuthServiceTests
             .ReturnsAsync(new List<string> { "User" });
 
         // Act
-        var (success, token, error) = await _authService.LoginAsync("testuser", "password123");
+        var (success, token, _) = await _authService.LoginAsync("testuser", "password123");
 
         // Assert
         Assert.True(success);

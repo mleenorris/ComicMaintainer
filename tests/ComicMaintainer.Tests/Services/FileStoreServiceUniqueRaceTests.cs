@@ -31,7 +31,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     }
 
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
-    private readonly string _library = Path.Combine(Path.GetTempPath(), $"fss_unique_{Guid.NewGuid():N}");
+    private readonly string _library = Path.Join(Path.GetTempPath(), $"fss_unique_{Guid.NewGuid():N}");
     private readonly SaveHookInterceptor _interceptor = new();
     private readonly ListLogger _logger = new();
 
@@ -118,7 +118,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     [Fact]
     public async Task MarkFileReadAsync_StatusRowInsertedConcurrently_MarksTheSurvivingRowRead()
     {
-        var path = Path.Combine(_library, "Saga 003.cbz");
+        var path = Path.Join(_library, "Saga 003.cbz");
         var service = CreateService("alice");
         _interceptor.BeforeNextSave = () => InsertStatusRowAsync("alice", path, isRead: false, page: 7);
 
@@ -133,7 +133,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     [Fact]
     public async Task SaveReadingProgressAsync_StatusRowInsertedConcurrently_StoresThePageOnTheSurvivingRow()
     {
-        var path = Path.Combine(_library, "Saga 004.cbz");
+        var path = Path.Join(_library, "Saga 004.cbz");
         var service = CreateService("alice");
         _interceptor.BeforeNextSave = () => InsertStatusRowAsync("alice", path, isRead: false, page: 3);
 
@@ -148,7 +148,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     [Fact]
     public async Task MarkFileReadAsync_MarkingUnreadWhileStatusRowInsertedConcurrently_KeepsTheWinnersLastReadDate()
     {
-        var path = Path.Combine(_library, "Saga 005.cbz");
+        var path = Path.Join(_library, "Saga 005.cbz");
         var lastRead = new DateTime(2024, 5, 6, 7, 8, 9, DateTimeKind.Utc);
         var service = CreateService("alice");
         _interceptor.BeforeNextSave = () => InsertStatusRowAsync("alice", path, isRead: true, page: 7, lastRead);
@@ -200,7 +200,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     [Fact]
     public async Task MarkFileReadAsync_ConflictingStatusRowVanishesBeforeRecovery_LogsTheFailure()
     {
-        var path = Path.Combine(_library, "Saga 006.cbz");
+        var path = Path.Join(_library, "Saga 006.cbz");
         var service = CreateService("alice");
         _interceptor.BeforeNextSave = () => InsertStatusRowAsync("alice", path, isRead: true, page: 2);
         _interceptor.AfterNextFailure = () => DeleteStatusRowsAsync("alice", path);
@@ -215,7 +215,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     public async Task UpdateFilePathAsync_ConflictingTargetRowVanishesBeforeRecovery_LogsTheFailureWithoutDuplicatingRows()
     {
         var oldPath = WriteComic("Saga 007.cbz");
-        var newPath = Path.Combine(_library, "Saga 007 (renamed).cbz");
+        var newPath = Path.Join(_library, "Saga 007 (renamed).cbz");
         var service = CreateService();
         await service.AddFileAsync(oldPath);
         File.Move(oldPath, newPath);
@@ -243,7 +243,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
 
     private string WriteComic(string name)
     {
-        var path = Path.Combine(_library, name);
+        var path = Path.Join(_library, name);
         File.WriteAllText(path, "comic");
         return path;
     }

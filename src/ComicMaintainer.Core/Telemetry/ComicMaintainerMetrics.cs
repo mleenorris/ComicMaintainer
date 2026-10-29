@@ -133,6 +133,7 @@ public sealed class ComicMaintainerMetrics : IDisposable
             new KeyValuePair<string, object?>("provider", provider),
             new KeyValuePair<string, object?>("outcome", success ? "success" : "failed"));
 
+    /// <summary>Records time spent waiting out a provider's rate limit.</summary>
     /// <param name="kind"><c>client</c> (local throttle) or <c>server</c> (HTTP 429 back-off).</param>
     public void RecordProviderRateLimitWait(string provider, string kind, TimeSpan waited)
     {

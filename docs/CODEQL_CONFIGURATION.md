@@ -34,6 +34,13 @@ The CodeQL workflow is defined in `.github/workflows/codeql-analysis.yml` and co
 - `**/coveragereport` - Test coverage reports
 - `**/*.min.js`, `**/*.min.css` - Minified files
 
+`paths-ignore` does not apply to compiled languages, so the C# analysis also covers the
+source generators' output that the build writes under `obj/` (the regex and OpenAPI
+generators). Their results cannot be fixed in this repository, so the job runs the analysis
+with `upload: never`, removes every result whose location is in an `obj/` directory from the
+SARIF file, and uploads the rest with `github/codeql-action/upload-sarif` under the same
+`/language:<language>` category.
+
 ### 2. analyze-python Job
 
 **Triggers**: Runs when the branch is `master` or `python`, or when a PR targets these branches
@@ -78,7 +85,7 @@ Both jobs use the `security-and-quality` query suite, which includes:
 
 ## Results
 
-- Results are uploaded to GitHub Security tab
+- Results are uploaded to GitHub Security tab (by the analyze-dotnet job after results in generated code under `obj/` are removed)
 - Analysis summaries are stored as artifacts for 90 days
 - Separate artifact names distinguish between branches:
   - `codeql-summary-dotnet-{language}` for dotnet branch

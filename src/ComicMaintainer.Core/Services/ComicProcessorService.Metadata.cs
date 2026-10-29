@@ -21,7 +21,7 @@ public partial class ComicProcessorService
 
             return GetMetadataAtResolvedPath(resolvedPath, filePath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return Task.FromResult<ComicMetadata?>(null);
@@ -59,7 +59,7 @@ public partial class ComicProcessorService
                 Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(fallbackFilePath))
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(fallbackFilePath));
             return Task.FromResult<ComicMetadata?>(null);
@@ -93,7 +93,7 @@ public partial class ComicProcessorService
                 SeriesGroup = Path.GetFileName(Path.GetDirectoryName(filePath))
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading series metadata from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return Task.FromResult<SeriesMetadata?>(null);
@@ -158,7 +158,7 @@ public partial class ComicProcessorService
                 _logger.LogInformation("Created temp directory: {TempDir}", LoggingHelper.SanitizePathForLog(_settings.TempFileDirectory));
             }
             
-            var tempFile = Path.Combine(_settings.TempFileDirectory, $".tmp_{Guid.NewGuid()}.cbz");
+            var tempFile = Path.Join(_settings.TempFileDirectory, $".tmp_{Guid.NewGuid()}.cbz");
             
             try
             {
@@ -186,14 +186,14 @@ public partial class ComicProcessorService
                     {
                         File.Delete(tempFile);
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
                         _logger.LogWarning(ex, "Failed to delete temp file: {TempFile}", LoggingHelper.SanitizePathForLog(tempFile));
                     }
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return false;
@@ -254,7 +254,7 @@ public partial class ComicProcessorService
                 _logger.LogInformation("Created temp directory: {TempDir}", LoggingHelper.SanitizePathForLog(_settings.TempFileDirectory));
             }
 
-            var tempFile = Path.Combine(_settings.TempFileDirectory, $".tmp_{Guid.NewGuid()}.cbz");
+            var tempFile = Path.Join(_settings.TempFileDirectory, $".tmp_{Guid.NewGuid()}.cbz");
 
             try
             {
@@ -278,14 +278,14 @@ public partial class ComicProcessorService
                     {
                         File.Delete(tempFile);
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
                         _logger.LogWarning(ex, "Failed to delete temp file: {TempFile}", LoggingHelper.SanitizePathForLog(tempFile));
                     }
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error removing metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return false;
@@ -340,7 +340,7 @@ public partial class ComicProcessorService
         {
             await _fileStore.RefreshFileStatsAsync(new[] { filePath }, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex, "Failed to refresh stored file stats for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
         }

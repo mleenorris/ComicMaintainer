@@ -30,16 +30,16 @@ public class DiagnosticsControllerTests : IDisposable
 
     public DiagnosticsControllerTests()
     {
-        _configDir = Path.Combine(Path.GetTempPath(), "cm_diag_cfg_" + Guid.NewGuid().ToString("N"));
-        _watchedDir = Path.Combine(Path.GetTempPath(), "cm_diag_watch_" + Guid.NewGuid().ToString("N"));
+        _configDir = Path.Join(Path.GetTempPath(), "cm_diag_cfg_" + Guid.NewGuid().ToString("N"));
+        _watchedDir = Path.Join(Path.GetTempPath(), "cm_diag_watch_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_configDir);
         Directory.CreateDirectory(_watchedDir);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_configDir, recursive: true); } catch { /* best effort */ }
-        try { Directory.Delete(_watchedDir, recursive: true); } catch { /* best effort */ }
+        try { Directory.Delete(_configDir, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
+        try { Directory.Delete(_watchedDir, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
         GC.SuppressFinalize(this);
     }
 
@@ -49,7 +49,7 @@ public class DiagnosticsControllerTests : IDisposable
         {
             ConfigDirectory = _configDir,
             WatchedDirectory = _watchedDir,
-            DuplicateDirectory = Path.Combine(_watchedDir, "does-not-exist"),
+            DuplicateDirectory = Path.Join(_watchedDir, "does-not-exist"),
             WatcherEnableRename = true,
             WatcherEnableNormalize = false
         };
@@ -149,8 +149,8 @@ public class DiagnosticsControllerTests : IDisposable
     [Fact]
     public async Task ListsLogFilesWithTheirSize()
     {
-        File.WriteAllText(Path.Combine(_configDir, "debug.log"), "hello");
-        File.WriteAllText(Path.Combine(_configDir, "not-a-log.txt"), "ignored");
+        File.WriteAllText(Path.Join(_configDir, "debug.log"), "hello");
+        File.WriteAllText(Path.Join(_configDir, "not-a-log.txt"), "ignored");
         _fileStore
             .Setup(f => f.GetFileCountsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((0, 0, 0, 0));

@@ -18,9 +18,8 @@ public class FuzzTests
             .Select(_ => GenerateRandomString(20));
 
         // Act & Assert - Should not throw exceptions
-        foreach (var testCase in testCases)
+        foreach (var result in testCases.Select(ComicFileExtensions.IsComicArchive))
         {
-            var result = ComicFileExtensions.IsComicArchive(testCase);
             Assert.IsType<bool>(result);
         }
     }
@@ -58,9 +57,8 @@ public class FuzzTests
         };
 
         // Act & Assert - Should handle safely without throwing
-        foreach (var testCase in specialCases)
+        foreach (var result in specialCases.Select(ComicFileExtensions.IsComicArchive))
         {
-            var result = ComicFileExtensions.IsComicArchive(testCase);
             Assert.IsType<bool>(result);
         }
     }

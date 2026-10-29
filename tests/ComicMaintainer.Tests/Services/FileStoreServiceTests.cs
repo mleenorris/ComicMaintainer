@@ -23,7 +23,7 @@ public class FileStoreServiceTests : IDisposable
 
     public FileStoreServiceTests()
     {
-        _testDirectory = Path.Combine(Path.GetTempPath(), $"filestore_tests_{Guid.NewGuid()}");
+        _testDirectory = Path.Join(Path.GetTempPath(), $"filestore_tests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
         _dbName = $"TestDb_{Guid.NewGuid()}";
 
@@ -56,7 +56,7 @@ public class FileStoreServiceTests : IDisposable
     public void Dispose_DeletesTheTestDirectory()
     {
         // Regression test for #876: every test used to leave its directory (and archives) behind.
-        File.WriteAllText(Path.Combine(_testDirectory, "test.cbz"), "test content");
+        File.WriteAllText(Path.Join(_testDirectory, "test.cbz"), "test content");
 
         // xUnit only disposes test classes that implement IDisposable.
         Assert.IsAssignableFrom<IDisposable>(this);
@@ -79,7 +79,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task AddFileAsync_ValidFile_AddsToStore()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
 
         // Act
@@ -97,7 +97,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task AddFileAsync_NonExistentFile_DoesNotAdd()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
         // Act
         await _service.AddFileAsync(filePath);
@@ -111,7 +111,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task RemoveFileAsync_ExistingFile_RemovesFromStore()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -127,7 +127,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileProcessed_WhenBothRenamedAndNormalized_MarksAsProcessed()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -145,7 +145,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileProcessed_WhenOnlyRenamed_NotMarkedAsProcessed()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -164,7 +164,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileDuplicateAsync_SetTrue_MarksAsDuplicate()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -181,7 +181,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileDuplicateAsync_SetFalse_UnmarksAsDuplicate()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         await _service.MarkFileDuplicateAsync(filePath, true);
@@ -199,8 +199,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetFilteredFilesAsync_NoFilter_ReturnsAllFiles()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
         File.WriteAllText(file1, "test");
         File.WriteAllText(file2, "test");
         await _service.AddFileAsync(file1);
@@ -217,8 +217,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetFilteredFilesAsync_ProcessedFilter_ReturnsOnlyProcessed()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
         File.WriteAllText(file1, "test");
         File.WriteAllText(file2, "test");
         await _service.AddFileAsync(file1);
@@ -239,8 +239,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetFilteredFilesAsync_UnprocessedFilter_ReturnsOnlyUnprocessed()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
         File.WriteAllText(file1, "test");
         File.WriteAllText(file2, "test");
         await _service.AddFileAsync(file1);
@@ -261,8 +261,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetFilteredFilesAsync_DuplicatesFilter_ReturnsOnlyDuplicates()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
         File.WriteAllText(file1, "test");
         File.WriteAllText(file2, "test");
         await _service.AddFileAsync(file1);
@@ -281,8 +281,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetFilteredFilesAsync_RenamedFilter_ReturnsOnlyRenamed()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
         File.WriteAllText(file1, "test");
         File.WriteAllText(file2, "test");
         await _service.AddFileAsync(file1);
@@ -301,8 +301,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetFilteredFilesAsync_NormalizedFilter_ReturnsOnlyNormalized()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
         File.WriteAllText(file1, "test");
         File.WriteAllText(file2, "test");
         await _service.AddFileAsync(file1);
@@ -321,9 +321,9 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetFileCountsAsync_WithVariousFiles_ReturnsCorrectCounts()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
-        var file3 = Path.Combine(_testDirectory, "test3.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
+        var file3 = Path.Join(_testDirectory, "test3.cbz");
         File.WriteAllText(file1, "test");
         File.WriteAllText(file2, "test");
         File.WriteAllText(file3, "test");
@@ -349,9 +349,9 @@ public class FileStoreServiceTests : IDisposable
     public async Task InitializeFromDatabaseAsync_LoadsProcessedAndDuplicateStatus()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
-        var file3 = Path.Combine(_testDirectory, "test3.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
+        var file3 = Path.Join(_testDirectory, "test3.cbz");
         File.WriteAllText(file1, "test");
         File.WriteAllText(file2, "test");
         File.WriteAllText(file3, "test");
@@ -456,7 +456,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task IsFileProcessedAsync_WhenFileNotInStore_ReturnsFalse()
     {
         // Arrange
-        var nonExistentFile = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var nonExistentFile = Path.Join(_testDirectory, "nonexistent.cbz");
         
         // Act
         var isProcessed = await _service.IsFileProcessedAsync(nonExistentFile);
@@ -469,7 +469,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task IsFileProcessedAsync_WhenFileNotProcessed_ReturnsFalse()
     {
         // Arrange
-        var file = Path.Combine(_testDirectory, "unprocessed.cbz");
+        var file = Path.Join(_testDirectory, "unprocessed.cbz");
         File.WriteAllText(file, "test content");
         await _service.AddFileAsync(file);
         
@@ -484,7 +484,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task IsFileProcessedAsync_WhenFileProcessed_ReturnsTrue()
     {
         // Arrange
-        var file = Path.Combine(_testDirectory, "processed.cbz");
+        var file = Path.Join(_testDirectory, "processed.cbz");
         File.WriteAllText(file, "test content");
         await _service.AddFileAsync(file);
         // Mark as processed (renamed AND normalized)
@@ -502,7 +502,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task IsFileProcessedAsync_AfterUnmarkingProcessed_ReturnsFalse()
     {
         // Arrange
-        var file = Path.Combine(_testDirectory, "toggled.cbz");
+        var file = Path.Join(_testDirectory, "toggled.cbz");
         File.WriteAllText(file, "test content");
         await _service.AddFileAsync(file);
         // Mark as processed (renamed AND normalized)
@@ -524,9 +524,9 @@ public class FileStoreServiceTests : IDisposable
     public async Task InitializeFromDatabaseAsync_LoadsFileList_WithoutFilesystemScan()
     {
         // Arrange - Add files to the first service instance
-        var file1 = Path.Combine(_testDirectory, "comic1.cbz");
-        var file2 = Path.Combine(_testDirectory, "comic2.cbz");
-        var file3 = Path.Combine(_testDirectory, "comic3.cbz");
+        var file1 = Path.Join(_testDirectory, "comic1.cbz");
+        var file2 = Path.Join(_testDirectory, "comic2.cbz");
+        var file3 = Path.Join(_testDirectory, "comic3.cbz");
         
         File.WriteAllText(file1, "test content 1");
         File.WriteAllText(file2, "test content 2");
@@ -586,9 +586,9 @@ public class FileStoreServiceTests : IDisposable
     public async Task CleanupStaleEntriesAsync_RemovesDeletedFiles_FromDatabase()
     {
         // Arrange - Add files to database through service
-        var file1 = Path.Combine(_testDirectory, "comic1.cbz");
-        var file2 = Path.Combine(_testDirectory, "comic2.cbz");
-        var file3 = Path.Combine(_testDirectory, "comic3.cbz");
+        var file1 = Path.Join(_testDirectory, "comic1.cbz");
+        var file2 = Path.Join(_testDirectory, "comic2.cbz");
+        var file3 = Path.Join(_testDirectory, "comic3.cbz");
         
         File.WriteAllText(file1, "test content 1");
         File.WriteAllText(file2, "test content 2");
@@ -627,8 +627,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task CleanupStaleEntriesAsync_NoDeletedFiles_ReturnsZero()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "comic1.cbz");
-        var file2 = Path.Combine(_testDirectory, "comic2.cbz");
+        var file1 = Path.Join(_testDirectory, "comic1.cbz");
+        var file2 = Path.Join(_testDirectory, "comic2.cbz");
         
         File.WriteAllText(file1, "test content 1");
         File.WriteAllText(file2, "test content 2");
@@ -662,7 +662,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileReadAsync_NewFile_MarksAsRead()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -679,7 +679,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileReadAsync_UnmarkRead_RemovesReadStatus()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         await _service.MarkFileReadAsync(filePath, true);
@@ -697,7 +697,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task AddFileAsync_AlreadyReadFile_PreservesReadStatus()
     {
         // Arrange - a tracked file that the user has already finished
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         await _service.MarkFileReadAsync(filePath, true);
@@ -715,7 +715,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task SaveReadingProgressAsync_NewProgress_SavesPage()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -731,7 +731,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task SaveReadingProgressAsync_UpdateProgress_UpdatesPage()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         await _service.SaveReadingProgressAsync(filePath, 5);
@@ -748,7 +748,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetReadingProgressAsync_NoProgress_ReturnsOne()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -763,7 +763,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetReadingProgressAsync_NonExistentFile_ReturnsOne()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
         // Act
         var progress = await _service.GetReadingProgressAsync(filePath);
@@ -776,7 +776,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task IsFileRenamedAsync_NotRenamed_ReturnsFalse()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -791,7 +791,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task IsFileRenamedAsync_AfterMarkingRenamed_ReturnsTrue()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         await _service.MarkFileRenamedAsync(filePath, true);
@@ -807,7 +807,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task IsFileNormalizedAsync_NotNormalized_ReturnsFalse()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -822,7 +822,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task IsFileNormalizedAsync_AfterMarkingNormalized_ReturnsTrue()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         await _service.MarkFileNormalizedAsync(filePath, true);
@@ -837,7 +837,7 @@ public class FileStoreServiceTests : IDisposable
     [Fact]
     public async Task RefreshFileStatsAsync_UpdatesSizeAndMtimeInMemoryAndDb()
     {
-        var filePath = Path.Combine(_testDirectory, "stats.cbz");
+        var filePath = Path.Join(_testDirectory, "stats.cbz");
         File.WriteAllText(filePath, "abc");
         await _service.AddFileAsync(filePath);
 
@@ -845,7 +845,7 @@ public class FileStoreServiceTests : IDisposable
         var newMtime = DateTime.Now.AddMinutes(-30);
         File.SetLastWriteTime(filePath, newMtime);
 
-        var changed = await _service.RefreshFileStatsAsync(new[] { filePath, Path.Combine(_testDirectory, "missing.cbz") });
+        var changed = await _service.RefreshFileStatsAsync(new[] { filePath, Path.Join(_testDirectory, "missing.cbz") });
         var again = await _service.RefreshFileStatsAsync(new[] { filePath });
 
         Assert.Equal(1, changed);
@@ -865,7 +865,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task FileExistsAsync_ExistingFile_ReturnsTrue()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -880,7 +880,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task FileExistsAsync_NonExistentFile_ReturnsFalse()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+        var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
         // Act
         var exists = await _service.FileExistsAsync(filePath);
@@ -893,9 +893,9 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFilesReadAsync_MultipleFiles_MarksAllAsRead()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
-        var file3 = Path.Combine(_testDirectory, "test3.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
+        var file3 = Path.Join(_testDirectory, "test3.cbz");
         
         File.WriteAllText(file1, "test content 1");
         File.WriteAllText(file2, "test content 2");
@@ -927,7 +927,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileReadAsync_ReadStatus_IsNotVisibleToOtherUsers()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -948,8 +948,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFilesReadAsync_BulkMark_IsNotVisibleToOtherUsers()
     {
         // Arrange
-        var file1 = Path.Combine(_testDirectory, "test1.cbz");
-        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        var file1 = Path.Join(_testDirectory, "test1.cbz");
+        var file2 = Path.Join(_testDirectory, "test2.cbz");
         File.WriteAllText(file1, "content 1");
         File.WriteAllText(file2, "content 2");
         await _service.AddFileAsync(file1);
@@ -968,8 +968,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task GetFilteredFilesAsync_ReadFilter_IsScopedToCurrentUser()
     {
         // Arrange
-        var readFile = Path.Combine(_testDirectory, "read.cbz");
-        var unreadFile = Path.Combine(_testDirectory, "unread.cbz");
+        var readFile = Path.Join(_testDirectory, "read.cbz");
+        var unreadFile = Path.Join(_testDirectory, "unread.cbz");
         File.WriteAllText(readFile, "content");
         File.WriteAllText(unreadFile, "content");
         await _service.AddFileAsync(readFile);
@@ -995,7 +995,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileReadAsync_NoUserInScope_IsIgnored()
     {
         // Arrange - background work (a scan, an audit) has no user
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         _userContext.UserId = null;
@@ -1016,7 +1016,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task SaveReadingProgressAsync_ResumePosition_IsPerUser()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
@@ -1037,8 +1037,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task UpdateFilePathAsync_Rename_CarriesReadStatusToNewPath()
     {
         // Arrange
-        var oldPath = Path.Combine(_testDirectory, "old.cbz");
-        var newPath = Path.Combine(_testDirectory, "new.cbz");
+        var oldPath = Path.Join(_testDirectory, "old.cbz");
+        var newPath = Path.Join(_testDirectory, "new.cbz");
         File.WriteAllText(oldPath, "test content");
         await _service.AddFileAsync(oldPath);
         await _service.MarkFileReadAsync(oldPath, true);
@@ -1058,8 +1058,8 @@ public class FileStoreServiceTests : IDisposable
     [Fact]
     public async Task UpdateFilePathAsync_Rename_MovesReadingProgressContentId()
     {
-        var oldPath = Path.Combine(_testDirectory, "old-progress.cbz");
-        var newPath = Path.Combine(_testDirectory, "new-progress.cbz");
+        var oldPath = Path.Join(_testDirectory, "old-progress.cbz");
+        var newPath = Path.Join(_testDirectory, "new-progress.cbz");
         File.WriteAllText(oldPath, "test content");
         await _service.AddFileAsync(oldPath);
 
@@ -1092,7 +1092,7 @@ public class FileStoreServiceTests : IDisposable
     [Fact]
     public async Task MarkFileReadAsync_SynchronizesStatusCurrentPageWithReadingProgress()
     {
-        var filePath = Path.Combine(_testDirectory, "sync-progress.cbz");
+        var filePath = Path.Join(_testDirectory, "sync-progress.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         await _service.SaveReadingProgressAsync(filePath, 5);
@@ -1124,7 +1124,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileRenamedAsync_SetFalse_UnmarksRenamed()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         await _service.MarkFileRenamedAsync(filePath, true);
@@ -1141,7 +1141,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task MarkFileNormalizedAsync_SetFalse_UnmarksNormalized()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
         await _service.MarkFileNormalizedAsync(filePath, true);
@@ -1159,10 +1159,10 @@ public class FileStoreServiceTests : IDisposable
     {
         // Arrange: two files fully processed (one also flagged as duplicate),
         // a third file flagged only as a duplicate, and one untouched.
-        var file1 = Path.Combine(_testDirectory, "clear1.cbz");
-        var file2 = Path.Combine(_testDirectory, "clear2.cbz");
-        var dupOnly = Path.Combine(_testDirectory, "dup-only.cbz");
-        var untouched = Path.Combine(_testDirectory, "untouched.cbz");
+        var file1 = Path.Join(_testDirectory, "clear1.cbz");
+        var file2 = Path.Join(_testDirectory, "clear2.cbz");
+        var dupOnly = Path.Join(_testDirectory, "dup-only.cbz");
+        var untouched = Path.Join(_testDirectory, "untouched.cbz");
         File.WriteAllText(file1, "x");
         File.WriteAllText(file2, "x");
         File.WriteAllText(dupOnly, "x");
@@ -1220,7 +1220,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task AddFileAsync_WithEventBroadcaster_BroadcastsFileListUpdate()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         
         var settings = new AppSettings { WatchedDirectory = _testDirectory };
@@ -1242,7 +1242,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task RemoveFileAsync_WithEventBroadcaster_BroadcastsFileListUpdate()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test_remove.cbz");
+        var filePath = Path.Join(_testDirectory, "test_remove.cbz");
         File.WriteAllText(filePath, "test content");
         
         var settings = new AppSettings { WatchedDirectory = _testDirectory };
@@ -1269,7 +1269,7 @@ public class FileStoreServiceTests : IDisposable
     public async Task AddFileAsync_WithoutEventBroadcaster_DoesNotThrow()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test_no_broadcaster.cbz");
+        var filePath = Path.Join(_testDirectory, "test_no_broadcaster.cbz");
         File.WriteAllText(filePath, "test content");
         
         var settings = new AppSettings { WatchedDirectory = _testDirectory };
@@ -1291,8 +1291,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task UpdateFilePathAsync_PreservesProcessingState()
     {
         // Arrange - add a file and mark it as renamed
-        var oldPath = Path.Combine(_testDirectory, "old_name.cbz");
-        var newPath = Path.Combine(_testDirectory, "new_name.cbz");
+        var oldPath = Path.Join(_testDirectory, "old_name.cbz");
+        var newPath = Path.Join(_testDirectory, "new_name.cbz");
         File.WriteAllText(oldPath, "content");
         await _service.AddFileAsync(oldPath);
         await _service.MarkFileRenamedAsync(oldPath, true);
@@ -1315,8 +1315,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task UpdateFilePathAsync_OldPathNotInStore_FallsBackToAddFile()
     {
         // Arrange - do not add old path, only create physical file at new path
-        var oldPath = Path.Combine(_testDirectory, "ghost_old.cbz");
-        var newPath = Path.Combine(_testDirectory, "ghost_new.cbz");
+        var oldPath = Path.Join(_testDirectory, "ghost_old.cbz");
+        var newPath = Path.Join(_testDirectory, "ghost_new.cbz");
         File.WriteAllText(newPath, "content");
 
         // Act - should not throw even though old path was never tracked
@@ -1331,8 +1331,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task UpdateFilePathAsync_UpdatesDatabasePath()
     {
         // Arrange
-        var oldPath = Path.Combine(_testDirectory, "db_old.cbz");
-        var newPath = Path.Combine(_testDirectory, "db_new.cbz");
+        var oldPath = Path.Join(_testDirectory, "db_old.cbz");
+        var newPath = Path.Join(_testDirectory, "db_new.cbz");
         File.WriteAllText(oldPath, "content");
         await _service.AddFileAsync(oldPath);
 
@@ -1354,8 +1354,8 @@ public class FileStoreServiceTests : IDisposable
     public async Task UpdateFilePathAsync_PreservesNormalizedState()
     {
         // Arrange
-        var oldPath = Path.Combine(_testDirectory, "norm_old.cbz");
-        var newPath = Path.Combine(_testDirectory, "norm_new.cbz");
+        var oldPath = Path.Join(_testDirectory, "norm_old.cbz");
+        var newPath = Path.Join(_testDirectory, "norm_new.cbz");
         File.WriteAllText(oldPath, "content");
         await _service.AddFileAsync(oldPath);
         await _service.MarkFileRenamedAsync(oldPath, true);
@@ -1384,8 +1384,8 @@ public class FileStoreServiceTests : IDisposable
         // (e.g. IsNormalized set by a preceding normalize) from the old row onto the surviving
         // new-path row rather than dropping it. Otherwise a normalize-then-rename sequence
         // leaves the file permanently "unprocessed".
-        var oldPath = Path.Combine(_testDirectory, "collide_old.cbz");
-        var newPath = Path.Combine(_testDirectory, "collide_new.cbz");
+        var oldPath = Path.Join(_testDirectory, "collide_old.cbz");
+        var newPath = Path.Join(_testDirectory, "collide_new.cbz");
         File.WriteAllText(oldPath, "content");
         await _service.AddFileAsync(oldPath);
         await _service.MarkFileNormalizedAsync(oldPath, true);
@@ -1422,8 +1422,8 @@ public class FileStoreServiceTests : IDisposable
         // tracked instance to the surviving row makes EF reject the save ("part of a key and
         // so cannot be modified"). The merge then failed outright and left both rows behind,
         // losing the user's edits. A copy must be stored instead.
-        var oldPath = Path.Combine(_testDirectory, "meta_collide_old.cbz");
-        var newPath = Path.Combine(_testDirectory, "meta_collide_new.cbz");
+        var oldPath = Path.Join(_testDirectory, "meta_collide_old.cbz");
+        var newPath = Path.Join(_testDirectory, "meta_collide_new.cbz");
         File.WriteAllText(oldPath, "content");
         await _service.AddFileAsync(oldPath);
         await _service.ApplyUserMetadataEditAsync(
@@ -1469,8 +1469,8 @@ public class FileStoreServiceTests : IDisposable
         // CreatedAt within a 30-day window. A rename/normalize must not reset CreatedAt
         // (previously it was dropped to DateTime.MinValue when rebuilding the in-memory
         // record), otherwise the series falls out of the list almost immediately.
-        var oldPath = Path.Combine(_testDirectory, "created_old.cbz");
-        var newPath = Path.Combine(_testDirectory, "created_new.cbz");
+        var oldPath = Path.Join(_testDirectory, "created_old.cbz");
+        var newPath = Path.Join(_testDirectory, "created_new.cbz");
         File.WriteAllText(oldPath, "content");
         await _service.AddFileAsync(oldPath);
 
@@ -1497,8 +1497,8 @@ public class FileStoreServiceTests : IDisposable
         // Regression: when merging the authoritative old row into a watcher-created stub
         // row (stamped with "now"), the earlier original CreatedAt must be preserved so the
         // series' recency window is not reset.
-        var oldPath = Path.Combine(_testDirectory, "created_collide_old.cbz");
-        var newPath = Path.Combine(_testDirectory, "created_collide_new.cbz");
+        var oldPath = Path.Join(_testDirectory, "created_collide_old.cbz");
+        var newPath = Path.Join(_testDirectory, "created_collide_new.cbz");
         File.WriteAllText(oldPath, "content");
         await _service.AddFileAsync(oldPath);
 
@@ -1528,7 +1528,7 @@ public class FileStoreServiceTests : IDisposable
     [Fact]
     public async Task ApplyUserMetadataEditAsync_BumpsVersionAndSetsUserEditFlags()
     {
-        var filePath = Path.Combine(_testDirectory, "metadata-edit.cbz");
+        var filePath = Path.Join(_testDirectory, "metadata-edit.cbz");
         File.WriteAllText(filePath, "content");
         await _service.AddFileAsync(filePath);
 

@@ -29,10 +29,10 @@ public class SeriesDisplayTitleResolverTests
         var record = BuildRecord(
             canonical: "One Piece",
             preferredLanguage: "ja",
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("One Piece", (string?)"en"),
-                ("ワンピース", (string?)"ja"),
+                ("One Piece", "en"),
+                ("ワンピース", "ja"),
                 ("Wan Piisu", "ja-Latn")
             });
 
@@ -46,10 +46,10 @@ public class SeriesDisplayTitleResolverTests
         var record = BuildRecord(
             canonical: "Solo Leveling",
             preferredLanguage: "ja",
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("Solo Leveling", (string?)"en"),
-                ("Soro Reberingu", (string?)"ja-Latn")
+                ("Solo Leveling", "en"),
+                ("Soro Reberingu", "ja-Latn")
             });
 
         Assert.Equal("Soro Reberingu", SeriesDisplayTitleResolver.Resolve(record, null));
@@ -61,10 +61,10 @@ public class SeriesDisplayTitleResolverTests
         var record = BuildRecord(
             canonical: "Kingdom",
             preferredLanguage: "zh",
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("Kingdom", (string?)"en"),
-                ("キングダム", (string?)"ja")
+                ("Kingdom", "en"),
+                ("キングダム", "ja")
             });
 
         Assert.Equal("Kingdom", SeriesDisplayTitleResolver.Resolve(record, null));
@@ -77,10 +77,10 @@ public class SeriesDisplayTitleResolverTests
             canonical: "My Preferred Title",
             preferredLanguage: "ja",
             seriesName: "My Preferred Title",
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("English Title", (string?)"en"),
-                ("日本語タイトル", (string?)"ja")
+                ("English Title", "en"),
+                ("日本語タイトル", "ja")
             });
 
         Assert.Equal("My Preferred Title", SeriesDisplayTitleResolver.Resolve(record, null));
@@ -92,10 +92,10 @@ public class SeriesDisplayTitleResolverTests
         var record = BuildRecord(
             canonical: "Naruto",
             preferredLanguage: null,
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("Naruto", (string?)"en"),
-                ("ナルト", (string?)"ja")
+                ("Naruto", "en"),
+                ("ナルト", "ja")
             });
 
         Assert.Equal("ナルト", SeriesDisplayTitleResolver.Resolve(record, globalDefaultLanguage: "ja"));
@@ -107,10 +107,10 @@ public class SeriesDisplayTitleResolverTests
         var record = BuildRecord(
             canonical: "Naruto",
             preferredLanguage: "en",
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("Naruto", (string?)"en"),
-                ("ナルト", (string?)"ja")
+                ("Naruto", "en"),
+                ("ナルト", "ja")
             });
 
         Assert.Equal("Naruto", SeriesDisplayTitleResolver.Resolve(record, globalDefaultLanguage: "ja"));
@@ -123,10 +123,10 @@ public class SeriesDisplayTitleResolverTests
         var record = BuildRecord(
             canonical: "Some Title",
             preferredLanguage: "ja",
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("Some Title", (string?)"en"),
-                ("Untagged Synonym", (string?)null)
+                ("Some Title", "en"),
+                ("Untagged Synonym", null)
             });
 
         Assert.Equal("Some Title", SeriesDisplayTitleResolver.Resolve(record, null));
@@ -151,10 +151,10 @@ public class SeriesDisplayTitleResolverTests
         var record = BuildRecord(
             canonical: "One Piece",
             preferredLanguage: "ja",
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("One Piece", (string?)"en"),
-                ("ワンピース", (string?)"ja"),
+                ("One Piece", "en"),
+                ("ワンピース", "ja"),
                 ("Wan Piisu", "ja-Latn")
             });
         record.SeriesName = "Wan Piisu";
@@ -168,10 +168,10 @@ public class SeriesDisplayTitleResolverTests
         var record = BuildRecord(
             canonical: "Naruto",
             preferredLanguage: null,
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("Naruto", (string?)"en"),
-                ("ナルト", (string?)"ja")
+                ("Naruto", "en"),
+                ("ナルト", "ja")
             });
         record.SeriesName = "Naruto";
 
@@ -188,10 +188,10 @@ public class SeriesDisplayTitleResolverTests
             canonical: "My Preferred Title",
             preferredLanguage: "ja",
             seriesName: "My Preferred Title",
-            localized: new[]
+            localized: new (string, string?)[]
             {
-                ("English Title", (string?)"en"),
-                ("日本語タイトル", (string?)"ja")
+                ("English Title", "en"),
+                ("日本語タイトル", "ja")
             });
         record.SeriesName = "My Preferred Title";
 

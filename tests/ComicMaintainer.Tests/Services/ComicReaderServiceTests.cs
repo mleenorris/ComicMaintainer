@@ -15,7 +15,7 @@ public class ComicReaderServiceTests : IDisposable
     {
         _mockLogger = new Mock<ILogger<ComicReaderService>>();
         _service = new ComicReaderService(_mockLogger.Object);
-        _testDir = Path.Combine(Path.GetTempPath(), "comic_reader_test_" + Guid.NewGuid().ToString());
+        _testDir = Path.Join(Path.GetTempPath(), "comic_reader_test_" + Guid.NewGuid());
         Directory.CreateDirectory(_testDir);
     }
 
@@ -36,7 +36,7 @@ public class ComicReaderServiceTests : IDisposable
     public async Task GetPageCountAsync_WithNonExistentFile_ReturnsZero()
     {
         // Arrange
-        var nonExistentPath = Path.Combine(_testDir, "nonexistent.cbz");
+        var nonExistentPath = Path.Join(_testDir, "nonexistent.cbz");
 
         // Act
         var count = await _service.GetPageCountAsync(nonExistentPath);
@@ -65,7 +65,7 @@ public class ComicReaderServiceTests : IDisposable
     public async Task GetPageAsync_WithNonExistentFile_ReturnsNull()
     {
         // Arrange
-        var nonExistentPath = Path.Combine(_testDir, "nonexistent.cbz");
+        var nonExistentPath = Path.Join(_testDir, "nonexistent.cbz");
 
         // Act
         var result = await _service.GetPageAsync(nonExistentPath, 1);
@@ -91,7 +91,7 @@ public class ComicReaderServiceTests : IDisposable
     public async Task GetPageAsync_WithUnsupportedExtension_ReturnsNull()
     {
         // Arrange
-        var txtPath = Path.Combine(_testDir, "test.txt");
+        var txtPath = Path.Join(_testDir, "test.txt");
         File.WriteAllText(txtPath, "test");
 
         // Act
@@ -120,7 +120,7 @@ public class ComicReaderServiceTests : IDisposable
     public async Task GetPageNamesAsync_WithNonExistentFile_ReturnsEmptyList()
     {
         // Arrange
-        var nonExistentPath = Path.Combine(_testDir, "nonexistent.cbz");
+        var nonExistentPath = Path.Join(_testDir, "nonexistent.cbz");
 
         // Act
         var pageNames = await _service.GetPageNamesAsync(nonExistentPath);
@@ -134,7 +134,7 @@ public class ComicReaderServiceTests : IDisposable
     public async Task GetPageNamesAsync_WithUnsupportedExtension_ReturnsEmptyList()
     {
         // Arrange
-        var txtPath = Path.Combine(_testDir, "test.txt");
+        var txtPath = Path.Join(_testDir, "test.txt");
         File.WriteAllText(txtPath, "test");
 
         // Act
@@ -177,7 +177,7 @@ public class ComicReaderServiceTests : IDisposable
 
     private string CreateTestCbz(int pageCount)
     {
-        var cbzPath = Path.Combine(_testDir, $"test_{Guid.NewGuid()}.cbz");
+        var cbzPath = Path.Join(_testDir, $"test_{Guid.NewGuid()}.cbz");
         
         using (var archive = ZipFile.Open(cbzPath, ZipArchiveMode.Create))
         {
@@ -195,7 +195,7 @@ public class ComicReaderServiceTests : IDisposable
 
     private string CreateTestCbzWithMultipleTypes()
     {
-        var cbzPath = Path.Combine(_testDir, $"test_multi_{Guid.NewGuid()}.cbz");
+        var cbzPath = Path.Join(_testDir, $"test_multi_{Guid.NewGuid()}.cbz");
         
         using (var archive = ZipFile.Open(cbzPath, ZipArchiveMode.Create))
         {
@@ -221,7 +221,7 @@ public class ComicReaderServiceTests : IDisposable
 
     private string CreateTestCbzWithMixedFiles()
     {
-        var cbzPath = Path.Combine(_testDir, $"test_mixed_{Guid.NewGuid()}.cbz");
+        var cbzPath = Path.Join(_testDir, $"test_mixed_{Guid.NewGuid()}.cbz");
         
         using (var archive = ZipFile.Open(cbzPath, ZipArchiveMode.Create))
         {

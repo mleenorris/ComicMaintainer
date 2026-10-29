@@ -460,11 +460,10 @@ public sealed class FilesControllerFileActionsTests
     [InlineData(OutsidePath)]
     [InlineData("../../etc/passwd")]
     [InlineData("{root}-private/Saga 001.cbz")]
+    [Obsolete("Covers the deprecated /api/rename-file alias until it is removed in v3.0.")]
     public async Task RenameSingleFile_PathOutsideWatchedDirectory_ReturnsBadRequest(string path)
     {
-#pragma warning disable CS0618 // Type or member is obsolete
         var result = await _controller.RenameSingleFile(Expand(path));
-#pragma warning restore CS0618 // Type or member is obsolete
 
         AssertStatus(result, 400, "File path is outside the allowed directory");
         VerifyWarned("Attempt to rename file outside watched directory");

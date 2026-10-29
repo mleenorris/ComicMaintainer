@@ -5919,6 +5919,19 @@ summary:focus-visible,
     color: var(--text-muted);
 }
 
+/* Held at the bottom of the scrolling dialog, so the outcome of adding a
+   series shows however far down the results it was added from. */
+.suwayomi-search-messages {
+    position: sticky;
+    bottom: 12px;
+    z-index: 1;
+}
+
+.suwayomi-search-messages .message {
+    margin: 8px 0 0;
+    box-shadow: var(--shadow-md);
+}
+
 .suwayomi-search-section {
     margin-bottom: 16px;
 }

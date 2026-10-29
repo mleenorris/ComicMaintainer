@@ -60,6 +60,7 @@
             input.value = term || (typeof searchQuery === 'string' ? searchQuery.trim() : '');
             setSuwayomiSearchStatus('');
             clearChildren(document.getElementById('suwayomiSearchResults'));
+            clearChildren(document.getElementById('suwayomiSearchMessages'));
             modal.classList.add('active');
 
             if (term) {
@@ -95,6 +96,15 @@
         function setSuwayomiSearchStatus(text) {
             const status = document.getElementById('suwayomiSearchStatus');
             if (status) status.textContent = text;
+        }
+
+        // Reports in the dialog while it is open, as it covers the page's
+        // messages; one closed before the answer came reports on the page.
+        function showSuwayomiSearchMessage(text, type, options = {}) {
+            const modal = document.getElementById('suwayomiSearchModal');
+            const container = document.getElementById('suwayomiSearchMessages');
+            const inDialog = !!modal && !!container && modal.classList.contains('active');
+            return showMessage(text, type, inDialog ? { ...options, container } : options);
         }
 
         // The error thrown for a failed response, carrying the server's own
@@ -452,12 +462,12 @@
                 const queued = result && result.downloads && Array.isArray(result.downloads.queuedChapters)
                     ? result.downloads.queuedChapters.length
                     : 0;
-                showMessage(describeSuwayomiAddResult(result), queued || !(result && result.alreadyInLibrary) ? 'success' : 'info');
+                showSuwayomiSearchMessage(describeSuwayomiAddResult(result), queued || !(result && result.alreadyInLibrary) ? 'success' : 'info');
                 markSuwayomiSeriesInLibrary(id);
             } catch (error) {
                 console.error('Adding the Suwayomi series failed', error);
                 const text = error.fromServer ? error.message : `Could not add the series on Suwayomi: ${error.message}`;
-                showMessage(text, 'error', { reference: error });
+                showSuwayomiSearchMessage(text, 'error', { reference: error });
             } finally {
                 if (button) button.disabled = false;
                 if (label) label.textContent = suwayomiAddActionLabel(inLibrary());

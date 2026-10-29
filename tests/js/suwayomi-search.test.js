@@ -75,6 +75,8 @@ const optionTexts = select => [...select.options].map(option => option.textConte
 const item = (page, id) => page.$(`#suwayomiSearchResults [data-suwayomi-series-id="${id}"]`);
 const addButton = (page, id) => item(page, id).querySelector('button');
 const failures = page => page.$('#suwayomiSearchResults .suwayomi-search-failures');
+// What adding a series reported in the dialog; messages(page) is what reached the page.
+const dialogMessages = page => messages(page, '#suwayomiSearchMessages');
 
 // The visible result sections, each with the titles it lists.
 const sections = page => page.$$('#suwayomiSearchResults .suwayomi-search-section')
@@ -582,11 +584,12 @@ test('adding a series puts it in the Suwayomi library and queues the issues the 
 
     answer.resolve(addResult({ title: 'Saga Deluxe', localSeriesTitle: 'Saga', chapterCount: 10, queued: 3, owned: 7 }));
     await page.settle();
-    assert.deepEqual(messages(page), [{
+    assert.deepEqual(dialogMessages(page), [{
         type: 'success',
         text: 'Added "Saga Deluxe" to the Suwayomi library and queued 3 chapters for download. 7 issues are already in your library as "Saga".',
         role: null
     }]);
+    assert.deepEqual(messages(page), []);
     assert.equal(button.disabled, false);
     assert.equal(text(button), 'Download missing');
     assert.equal(item(page, 2).dataset.inLibrary, 'true');
@@ -608,7 +611,7 @@ test('a series already in the Suwayomi library only has its missing chapters que
 
     answer.resolve(addResult({ id: 1, alreadyInLibrary: true, chapterCount: 12, queued: 1, owned: 9, downloaded: 2 }));
     await page.settle();
-    assert.deepEqual(messages(page).at(-1), {
+    assert.deepEqual(dialogMessages(page).at(-1), {
         type: 'success',
         text: '"Saga" is already in the Suwayomi library; queued 1 chapter for download. 9 issues are already in your library. 2 chapters were already downloaded.',
         role: null
@@ -638,7 +641,7 @@ test('a series already in the Suwayomi library with nothing to queue is reported
     page.click(addButton(page, 1));
     await page.settle();
 
-    assert.deepEqual(messages(page).at(-1), {
+    assert.deepEqual(dialogMessages(page).at(-1), {
         type: 'info',
         text: '"Saga" is already in the Suwayomi library; there is nothing new to download. 3 issues are already in your library.',
         role: null
@@ -660,12 +663,41 @@ test('a failed add says why and leaves the series as it was', async () => {
         page.route('POST /api/suwayomi/series/2/add', failure);
         page.click(button);
         await page.settle();
-        assert.deepEqual(messages(page).at(-1), { type: 'error', text: message, role: 'alert' });
+        assert.deepEqual(dialogMessages(page).at(-1), { type: 'error', text: message, role: 'alert' });
         assert.equal(button.disabled, false);
         assert.equal(text(button), 'Add & download');
         assert.equal(item(page, 2).dataset.inLibrary, 'false');
     }
+    assert.deepEqual(messages(page), []);
     assert.equal(consoleLines(page, 'error').filter(line => line.startsWith('Adding the Suwayomi series failed')).length, 3);
+});
+
+test('an add answered after the dialog closed is reported on the page, and reopening the dialog clears earlier reports', async () => {
+    const late = deferred();
+    const page = await bootSearch({
+        found: { 102: [series(2, 'Saga'), series(3, 'Saga Deluxe')] },
+        routes: {
+            'POST /api/suwayomi/series/2/add': addResult({ chapterCount: 2, queued: 2 }),
+            'POST /api/suwayomi/series/3/add': () => late.promise
+        }
+    });
+    await search(page, 'Saga');
+    page.click(addButton(page, 2));
+    await page.settle();
+    assert.deepEqual(dialogMessages(page).map(message => message.text), ['Added "Saga" to the Suwayomi library and queued 2 chapters for download.']);
+
+    page.click(addButton(page, 3));
+    await page.settle();
+    press(page, 'Escape');
+    await page.settle();
+    assert.equal(isOpen(page), false);
+    late.resolve(addResult({ id: 3, title: 'Saga Deluxe' }));
+    await page.settle();
+    assert.deepEqual(messages(page), [{ type: 'success', text: 'Added "Saga Deluxe" to the Suwayomi library; its source lists no chapters yet.', role: null }]);
+    assert.equal(dialogMessages(page).length, 1);
+
+    await openFromSidebar(page);
+    assert.deepEqual(dialogMessages(page), []);
 });
 
 test('an expired session goes to the login page, from searching and from adding', async () => {
@@ -688,4 +720,5 @@ test('an expired session goes to the login page, from searching and from adding'
     await adding.settle();
     assert.ok(wentToLogin(adding));
     assert.deepEqual(messages(adding), []);
+    assert.deepEqual(dialogMessages(adding), []);
 });

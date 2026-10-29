@@ -9,7 +9,8 @@
 //  - `self` is the global itself; addEventListener() records the install,
 //    activate, fetch and message listeners, which install()/activate()/
 //    fetchEvent()/respond()/message() dispatch as plain event objects and whose
-//    waitUntil()/respondWith() promises they await;
+//    waitUntil()/respondWith() promises they await (respondEarly() resolves
+//    with the response and lets the test watch the waitUntil() ones);
 //  - `caches` is an in-memory CacheStorage. Entries are keyed by absolute URL
 //    and kept in insertion order (a replaced entry moves to the end), as the
 //    real Cache.keys() reports them; match() hands out a fresh clone each time
@@ -474,6 +475,25 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
             const { handled, response, event } = await worker.fetchEvent(input, init);
             if (!handled) throw new Error(`sw.js left ${event.request.method} ${event.request.url} to the browser`);
             return response;
+        },
+        /**
+         * Fire `fetch` for a request the worker must answer, and resolve as
+         * soon as it has its response rather than once the event is done:
+         * `{ response, extended, ended }`. `extended()` tells whether a
+         * promise passed to waitUntil() is still unsettled (all that lets the
+         * browser keep the worker running once the response is delivered);
+         * `ended` resolves once none is, including any added in the meantime.
+         */
+        async respondEarly(input, init) {
+            const request = input instanceof Request ? input : makeRequest(input, init);
+            const { lifetime, responded } = dispatch('fetch', { request, clientId: 'window-1', resultingClientId: '' });
+            if (!responded()) throw new Error(`sw.js left ${request.method} ${request.url} to the browser`);
+            const response = await responded();
+            let extended = true;
+            const ended = extend(lifetime).finally(() => {
+                extended = false;
+            });
+            return { response, extended: () => extended, ended };
         },
         /** Fire `message` with `data` (ports/source as a page would send them) and wait for its work. */
         async message(data, { ports = [], source = null } = {}) {

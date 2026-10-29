@@ -203,6 +203,9 @@ public static class EmailDeliveryStatus
     public const string Pending = "pending";
     public const string Sent = "sent";
     public const string Failed = "failed";
+
+    /// <summary>The user cancelled the delivery before it was sent.</summary>
+    public const string Cancelled = "cancelled";
 }
 
 /// <summary>Origin of a delivery: user-initiated or series auto-send.</summary>
@@ -210,6 +213,18 @@ public static class EmailDeliverySource
 {
     public const string Manual = "manual";
     public const string Auto = "auto";
+}
+
+/// <summary>
+/// Accepted ranges for the email rate-limit settings. 0 disables a limit.
+/// </summary>
+public static class EmailRateLimitBounds
+{
+    public const int MaxSendsPerHour = 10_000;
+    public const int MaxSendsPerDay = 100_000;
+
+    /// <summary>One day.</summary>
+    public const int MaxMinSecondsBetweenSends = 86_400;
 }
 
 /// <summary>A saved ereader destination.</summary>
@@ -248,6 +263,63 @@ public record ComicEmailDeliveryDto(
     DateTime CreatedAt,
     DateTime? SentAt,
     int IssueCount = 1);
+
+/// <summary>One page of the delivery history, newest first.</summary>
+/// <param name="Total">Number of deliveries in the whole history.</param>
+/// <param name="PendingCount">Deliveries still waiting to be sent, across every page.</param>
+/// <param name="RateLimitedUntil">
+/// When the email rate limit holds the next delivery back, the UTC time it
+/// becomes eligible to be sent; otherwise null.
+/// </param>
+public record ComicEmailDeliveryPage(
+    IReadOnlyList<ComicEmailDeliveryDto> Deliveries,
+    int Total,
+    int Offset,
+    int Limit,
+    int PendingCount,
+    DateTime? RateLimitedUntil);
+
+/// <summary>Outcome of a request to cancel a single delivery.</summary>
+public enum EmailDeliveryCancelOutcome
+{
+    /// <summary>No delivery has the requested id.</summary>
+    NotFound,
+
+    /// <summary>The delivery was pending and is now cancelled.</summary>
+    Cancelled,
+
+    /// <summary>
+    /// The delivery is being prepared; it has been asked to stop and will be
+    /// marked cancelled as soon as the work in progress notices.
+    /// </summary>
+    Stopping,
+
+    /// <summary>
+    /// The message is already being handed to the mail server and can no
+    /// longer be cancelled.
+    /// </summary>
+    Sending,
+
+    /// <summary>The delivery had already been sent, failed or been cancelled.</summary>
+    AlreadyFinished,
+}
+
+/// <summary>Result of cancelling a single delivery, with its latest state.</summary>
+public record EmailDeliveryCancelResult(
+    EmailDeliveryCancelOutcome Outcome,
+    ComicEmailDeliveryDto? Delivery);
+
+/// <summary>Result of cancelling every pending delivery.</summary>
+/// <param name="Cancelled">Deliveries that are now cancelled.</param>
+/// <param name="Stopping">
+/// Deliveries that were being prepared and have been asked to stop; they are
+/// marked cancelled once the work in progress notices.
+/// </param>
+/// <param name="Sending">
+/// Deliveries already being handed to the mail server, which can no longer be
+/// cancelled.
+/// </param>
+public record EmailDeliveryBulkCancelResult(int Cancelled, int Stopping, int Sending);
 
 /// <summary>
 /// One condensed book: the issues it contains, the name it will be delivered

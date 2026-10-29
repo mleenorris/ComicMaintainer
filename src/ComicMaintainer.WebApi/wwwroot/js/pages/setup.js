@@ -30,6 +30,11 @@
             localStorage.setItem('theme', newTheme);
         }
         
+        // Hide timers of the messages below. Showing a message again cancels
+        // its earlier timer, which would otherwise hide the new one early.
+        let errorHideTimer = null;
+        let successHideTimer = null;
+        
         // Show error message
         function showError(message) {
             const errorElement = document.getElementById('errorMessage');
@@ -40,7 +45,8 @@
             errorElement.classList.add('show');
             errorElement.textContent = message;
             
-            setTimeout(() => {
+            clearTimeout(errorHideTimer);
+            errorHideTimer = setTimeout(() => {
                 errorElement.classList.remove('show');
                 errorElement.textContent = '';
             }, 5000);
@@ -52,7 +58,8 @@
             successElement.classList.add('show');
             successElement.textContent = message;
             
-            setTimeout(() => {
+            clearTimeout(successHideTimer);
+            successHideTimer = setTimeout(() => {
                 successElement.classList.remove('show');
                 successElement.textContent = '';
             }, 3000);

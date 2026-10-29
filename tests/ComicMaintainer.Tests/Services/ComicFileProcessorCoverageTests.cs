@@ -35,7 +35,7 @@ public class ComicFileProcessorCoverageTests : IDisposable
     [Theory]
     [InlineData("{series} - {issue_no_pad}", "5.0", 4, "S - 5.cbz")]
     [InlineData("{series} - {issue}", "5.0", 4, "S - 0005.cbz")]
-    [InlineData("{series} - {issue}", "7", int.MaxValue, "S - 7.cbz")]
+    [InlineData("{series} - {issue}", "7", int.MaxValue, "S - 0000000007.cbz")]
     [InlineData("{series}.cbr", "1", 4, "S.cbr")]
     [InlineData("{series}.CBZ", "1", 4, "S.CBZ")]
     public void FormatFilename_HandlesTrailingZeroDecimalsHugePaddingAndExplicitExtensions(
@@ -53,6 +53,24 @@ public class ComicFileProcessorCoverageTests : IDisposable
         {
             CultureInfo.CurrentCulture = previous;
         }
+    }
+
+    // Padding can reach the formatter unchecked from user-settings.json or the environment: a negative
+    // value used to render "{issue}" as the literal "D-1", and 1,000,000,000 and above made "D{padding}"
+    // throw, so the padding was silently dropped.
+    [Theory]
+    [InlineData(int.MinValue, "S - Chapter 5.cbz")]
+    [InlineData(-1, "S - Chapter 5.cbz")]
+    [InlineData(0, "S - Chapter 5.cbz")]
+    [InlineData(10, "S - Chapter 0000000005.cbz")]
+    [InlineData(11, "S - Chapter 0000000005.cbz")]
+    [InlineData(1_000_000_000, "S - Chapter 0000000005.cbz")]
+    [InlineData(int.MaxValue, "S - Chapter 0000000005.cbz")]
+    public void FormatFilename_ClampsPaddingTo0Through10(int padding, string expected)
+    {
+        var result = ComicFileProcessor.FormatFilename(Template, new ComicInfo { Series = "S" }, "5", ".cbz", padding);
+
+        Assert.Equal(expected, result);
     }
 
     [Theory]

@@ -228,6 +228,46 @@ test('a network failure or an unreadable answer shows a generic error', async t 
     }
 });
 
+test('an error shown again stays for its full five seconds', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = openSetup();
+    await page.settle();
+    const error = page.$('#errorMessage');
+
+    submit(page, { confirm: 'Sup3r$ecret?' });
+    await page.settle();
+    assert.equal(error.textContent, 'Passwords do not match');
+    t.mock.timers.tick(3000);
+    submit(page, { username: '  ab  ' });
+    await page.settle();
+
+    // The first error's timer, due two seconds in, must not hide the second.
+    t.mock.timers.tick(4999);
+    assert.equal(error.textContent, 'Username must be at least 3 characters');
+    assert.equal(error.classList.contains('show'), true);
+    t.mock.timers.tick(1);
+    assert.equal(error.textContent, '');
+    assert.equal(error.classList.contains('show'), false);
+});
+
+test('a newer success message is not hidden by the timer of an earlier one', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = openSetup();
+    await page.settle();
+    const success = page.$('#successMessage');
+
+    page.run("showSuccess('First')");
+    t.mock.timers.tick(2000);
+    page.run("showSuccess('Second')");
+
+    t.mock.timers.tick(2999);
+    assert.equal(success.textContent, 'Second');
+    assert.equal(success.classList.contains('show'), true);
+    t.mock.timers.tick(1);
+    assert.equal(success.textContent, '');
+    assert.equal(success.classList.contains('show'), false);
+});
+
 test('API paths are resolved from the site root', () => {
     const page = openSetup();
 

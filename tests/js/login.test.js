@@ -44,6 +44,12 @@ function assertButtonReady(page, label) {
     assert.equal(page.$('#loginBtnSpinner').classList.contains('hidden'), true, label);
 }
 
+function assertButtonBusy(page, label) {
+    assert.equal(page.$('#loginBtn').disabled, true, label);
+    assert.equal(page.$('#loginBtnText').classList.contains('hidden'), true, label);
+    assert.equal(page.$('#loginBtnSpinner').classList.contains('hidden'), false, label);
+}
+
 // --- on load -------------------------------------------------------------------
 
 test('on load the page applies the saved theme and checks for first-run setup and an existing session', async () => {
@@ -86,6 +92,36 @@ test('a failed setup check is logged and the user stays on the sign-in page', as
 
         assert.ok(consoleLines(page, 'error').includes('Error checking setup status:'));
         assert.deepEqual(page.navigations, []);
+    }
+});
+
+test('while setup is required an existing session sends the user only to first-run setup', async () => {
+    const sessions = [
+        ['an Authelia session', { routes: { 'GET /api/auth/status': { autheliaEnabled: true, isAuthenticated: true, username: 'bob', authMethod: 'authelia', requiresLogin: false } } }],
+        ['a stored session token', { localStorage: { jwt_token: validToken() } }]
+    ];
+    for (const [label, { routes = {}, ...session }] of sessions) {
+        // The setup check answers last, so a session check running alongside
+        // it would already have sent the user to the app.
+        const setupCheck = deferred();
+        const page = openLogin({ ...session, routes: { ...routes, 'GET /api/auth/setup-required': () => setupCheck.promise } });
+        await page.settle();
+        assert.deepEqual(page.navigations, [], label);
+
+        setupCheck.resolve({ setupRequired: true });
+        await page.settle();
+        assert.deepEqual(page.navigations, [{ url: 'http://localhost/setup.html', replace: false }], label);
+        page.close();
+    }
+});
+
+test('a failed setup check still lets an existing session open the app', async () => {
+    for (const answer of [networkError, badGateway]) {
+        const page = openLogin({ localStorage: { jwt_token: validToken() }, routes: { 'GET /api/auth/setup-required': answer } });
+        await page.settle();
+
+        assert.deepEqual(page.navigations, [{ url: 'http://localhost/', replace: false }]);
+        page.close();
     }
 });
 
@@ -194,6 +230,26 @@ test('signing in stores the token and user name, confirms, then opens the app', 
     assert.equal(success.classList.contains('show'), false);
 });
 
+test('after signing in the button stays busy until the app opens, so a second click sends nothing', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = openLogin({ routes: { 'POST /api/auth/login': { token: 'jwt-for-alice' } } });
+    await page.settle();
+
+    signIn(page, 'alice', 'correct horse');
+    await page.settle();
+    assert.equal(page.$('#successMessage').textContent, 'Login successful! Redirecting...');
+    assertButtonBusy(page);
+
+    // An impatient second click while "Redirecting..." is shown.
+    page.click('#loginBtn');
+    await page.settle();
+    assert.equal(loginCalls(page).length, 1);
+
+    t.mock.timers.tick(500);
+    assert.deepEqual(page.navigations, [{ url: 'http://localhost/', replace: false }]);
+    assertButtonBusy(page);
+});
+
 test('a rejected sign-in shows the reason and lets the user try again', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const cases = [
@@ -250,6 +306,45 @@ test('an error message disappears after five seconds', async t => {
     t.mock.timers.tick(1);
     assert.equal(error.textContent, '');
     assert.equal(error.classList.contains('show'), false);
+});
+
+test('the error after a repeated failed sign-in also stays for five seconds', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = openLogin({ routes: { 'POST /api/auth/login': respond(401, { error: 'Invalid username or password' }) } });
+    await page.settle();
+    const error = page.$('#errorMessage');
+
+    signIn(page, 'alice', 'wrong');
+    await page.settle();
+    t.mock.timers.tick(3000);
+    signIn(page, 'alice', 'wrong again');
+    await page.settle();
+
+    // The first attempt's timer, due two seconds in, must not hide it.
+    t.mock.timers.tick(4999);
+    assert.equal(error.textContent, 'Invalid username or password');
+    assert.equal(error.classList.contains('show'), true);
+    t.mock.timers.tick(1);
+    assert.equal(error.textContent, '');
+    assert.equal(error.classList.contains('show'), false);
+});
+
+test('a newer success message is not hidden by the timer of an earlier one', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = openLogin();
+    await page.settle();
+    const success = page.$('#successMessage');
+
+    page.run("showSuccess('First')");
+    t.mock.timers.tick(2000);
+    page.run("showSuccess('Second')");
+
+    t.mock.timers.tick(2999);
+    assert.equal(success.textContent, 'Second');
+    assert.equal(success.classList.contains('show'), true);
+    t.mock.timers.tick(1);
+    assert.equal(success.textContent, '');
+    assert.equal(success.classList.contains('show'), false);
 });
 
 test('blank credentials are not sent', async t => {

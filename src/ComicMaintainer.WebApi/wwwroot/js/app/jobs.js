@@ -27,6 +27,21 @@
         let hasActiveJob = false;
         let currentJobId = null;  // Track current job ID for cancellation
         let currentJobTitle = null;  // Track current job title for progress updates
+        // Pending timers that finish a tracked job's progress modal once the job
+        // ends (handleJobUpdatedEvent): they are cleared when another job takes
+        // over the modal, and do nothing once their job is no longer the current one.
+        let jobFinalizeTimer = null;
+        let progressModalCloseTimer = null;
+        // Set while a job is being started: from beginJobStart() (or
+        // showProgressModal()) until the job is tracked (trackJobStatus) or its
+        // start is given up (endJobStart / closeProgressModal). Only jobs.js
+        // changes it; other scripts go through the jobProgress API below.
+        let jobStarting = false;
+        // Bumped by every start, so a stale endJobStart() cannot release a newer one.
+        let jobStartGeneration = 0;
+        // A modal can only release the pending start that opened it. An older
+        // finished-job dialog may remain visible while another start is pending.
+        let progressModalStartGeneration = null;
         window.addEventListener('beforeunload', function(event) {
             // Clean up SSE connection
             cleanupEventSource();
@@ -39,8 +54,42 @@
                 return message;
             }
         });
+
+        // The progress modal, its header indicator and its Cancel button follow
+        // one job at a time. Starting another job while one is being started or
+        // tracked would take them over (or close them if the start failed),
+        // leaving the running job with no progress, no Cancel and no refresh
+        // when it ends, so every action that starts a tracked job checks this first.
+        // hasActiveJob stays set until the tracked job's end has been handled.
+        function canStartJob() {
+            if (!hasActiveJob && !jobStarting) return true;
+            showMessage('Another job is already in progress (starting, running or finishing). Wait for it to finish, or cancel it, before starting a new one.', 'warning');
+            return false;
+        }
+
+        // Blocks other job starts (canStartJob) while the server is asked to
+        // start a job. Returns a token for endJobStart(), which releases the
+        // block unless the job got tracked or another start took over since.
+        // No job is current until trackJobStatus() names the new one, so the
+        // pending finish or auto-close of a job that ended can neither retitle
+        // nor close the progress modal, nor release this start.
+        function beginJobStart() {
+            clearProgressModalTimers();
+            currentJobId = null;
+            jobStarting = true;
+            progressModalStartGeneration = null;
+            return ++jobStartGeneration;
+        }
+
+        function endJobStart(token) {
+            if (token === jobStartGeneration) {
+                jobStarting = false;
+                if (progressModalStartGeneration === token) progressModalStartGeneration = null;
+            }
+        }
         
         async function processAllFiles() {
+            if (!canStartJob()) return;
             if (!confirm('This will process all files in the watched directory. Continue?')) {
                 return;
             }
@@ -92,6 +141,7 @@
         }
         
         async function processAllFilesAsync() {
+            if (!canStartJob()) return;
             if (!confirm('This will process all files in the watched directory asynchronously. Continue?')) {
                 return;
             }
@@ -147,6 +197,7 @@
                 showMessage('Please select at least one file to process', 'error');
                 return;
             }
+            if (!canStartJob()) return;
             
             if (!confirm(`This will process ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''} asynchronously. Continue?`)) {
                 return;
@@ -234,9 +285,18 @@
                     `Cleared processed status on ${data.cleared} of ${data.requested} file(s). ` +
                     'Run Process / Rename / Normalize to reapply.',
                     'success');
-                // Refresh the file list so badges update.
-                if (typeof loadFiles === 'function') {
-                    loadFiles(true);
+                // Reload what is shown so the status badges update: an open
+                // series's issues in place, then the library view (kept
+                // behind an open series), which also updates the
+                // "… Unmarked" actions and the library health. Every loaded
+                // series page is reloaded so series selected beyond the
+                // first page stay selected for reprocessing.
+                if (libraryViewMode === 'series' && currentSeriesDetailId &&
+                    typeof loadSeriesIssues === 'function') {
+                    await loadSeriesIssues(currentSeriesDetailId, true);
+                }
+                if (typeof loadActiveLibraryView === 'function') {
+                    await loadActiveLibraryView({ refresh: true, keepLoaded: true });
                 }
             } catch (err) {
                 console.error('clearSelectedProcessedStatus failed', err);
@@ -249,6 +309,7 @@
                 showMessage('Please select at least one file', 'error');
                 return;
             }
+            if (!canStartJob()) return;
             const count = selectedFiles.size;
             if (!confirm(
                 `Remove embedded metadata (ComicInfo.xml) from ${count} selected file${count > 1 ? 's' : ''}?\n\n` +
@@ -292,6 +353,7 @@
         }
 
         async function removeMetadataAll() {
+            if (!canStartJob()) return;
             if (!confirm(
                 'Remove embedded metadata (ComicInfo.xml) from ALL files in the library?\n\n' +
                 'Every archive will be rewritten without its ComicInfo.xml and all files will be marked unprocessed so they can be re-processed. This may take a while.')) {
@@ -352,19 +414,16 @@
                 }
                 
                 const status = await response.json();
-                const processed = status.processed_items || 0;
+                // Take the counts from the job's counters, as the job_updated
+                // events do: processed_items counts the files that succeeded and
+                // failed_items those that failed. `results` lists every file of
+                // the job, including the ones not processed yet, so counting its
+                // non-successes would report unfinished files as failures.
+                const successCount = status.processed_items || 0;
+                const errorCount = status.failed_items || 0;
+                const processed = successCount + errorCount;
                 const total = status.total_items || 0;
                 setProgressCurrentFile(status.current_file);
-                
-                // Count successes and errors from results
-                let successCount = 0;
-                let errorCount = 0;
-                if (status.results && Array.isArray(status.results)) {
-                    for (const result of status.results) {
-                        if (result.success) successCount++;
-                        else errorCount++;
-                    }
-                }
                 
                 console.log(`[JOB ${jobId}] Current status: ${status.status}, ${processed}/${total} (${successCount} success, ${errorCount} errors)`);
                 
@@ -414,6 +473,12 @@
             hasActiveJob = true;
             currentJobId = jobId;  // Track for cancellation
             currentJobTitle = title;  // Track title for progress updates
+            jobStarting = false;
+            jobStartGeneration++;
+            progressModalStartGeneration = null;
+            // The modal now follows this job: a previous job's pending finish
+            // must neither retitle nor close it.
+            clearProgressModalTimers();
             
             // Fetch initial job state to display immediately
             await pollJobStatusOnce(jobId);
@@ -543,7 +608,7 @@
                     showMessage(`Batch processing completed: ${successCount} of ${total} files processed successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`, successCount > 0 ? 'success' : 'warning');
                     
                     // Refresh file list to show updated status
-                    await loadActiveLibraryView(1, true);
+                    await loadActiveLibraryView({ refresh: true });
                 } else if (status.status === 'failed') {
                     // Job failed while we were away
                     console.error(`[JOB RESUME] Job ${activeJobId} already failed`);
@@ -561,7 +626,7 @@
                     showMessage(
                         `Batch processing was interrupted by a server restart after ${processed} of ${total} files. Re-run it to process the rest.`,
                         'warning');
-                    await loadActiveLibraryView(1, true);
+                    await loadActiveLibraryView({ refresh: true });
                 }
             } catch (error) {
                 // Network error or other exception
@@ -573,6 +638,7 @@
         }
         
         async function renameAllFiles() {
+            if (!canStartJob()) return;
             if (!confirm('This will rename all files in the watched directory based on metadata. Continue?')) {
                 return;
             }
@@ -624,6 +690,7 @@
         }
         
         async function normalizeAllFiles() {
+            if (!canStartJob()) return;
             if (!confirm('This will normalize metadata for all files in the watched directory. Continue?')) {
                 return;
             }
@@ -675,6 +742,7 @@
         }
         
         async function processUnmarkedFiles() {
+            if (!canStartJob()) return;
             if (!confirm('This will process all unmarked files in the watched directory. Continue?')) {
                 return;
             }
@@ -722,6 +790,7 @@
         }
         
         async function renameUnmarkedFiles() {
+            if (!canStartJob()) return;
             if (!confirm('This will rename all unmarked files in the watched directory based on metadata. Continue?')) {
                 return;
             }
@@ -769,6 +838,7 @@
         }
         
         async function normalizeUnmarkedFiles() {
+            if (!canStartJob()) return;
             if (!confirm('This will normalize metadata for all unmarked files in the watched directory. Continue?')) {
                 return;
             }
@@ -824,6 +894,7 @@
                 showMessage('No files selected', 'error');
                 return;
             }
+            if (!canStartJob()) return;
             
             if (!confirm(`This will process ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''}. Continue?`)) {
                 return;
@@ -880,6 +951,7 @@
                 showMessage('No files selected', 'error');
                 return;
             }
+            if (!canStartJob()) return;
             
             if (!confirm(`This will rename ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''} based on metadata. Continue?`)) {
                 return;
@@ -936,6 +1008,7 @@
                 showMessage('No files selected', 'error');
                 return;
             }
+            if (!canStartJob()) return;
             
             if (!confirm(`This will normalize metadata for ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''}. Continue?`)) {
                 return;
@@ -988,6 +1061,7 @@
         }
         
         async function processSingleFile(filepath) {
+            if (!canStartJob()) return;
             if (!confirm(`Process ${filepath}?`)) {
                 return;
             }
@@ -1036,6 +1110,7 @@
         }
         
         async function renameSingleFile(filepath) {
+            if (!canStartJob()) return;
             if (!confirm(`Rename ${filepath} based on metadata?`)) {
                 return;
             }
@@ -1085,6 +1160,7 @@
         }
         
         async function normalizeSingleFile(filepath) {
+            if (!canStartJob()) return;
             if (!confirm(`Normalize metadata for ${filepath}?`)) {
                 return;
             }
@@ -1160,7 +1236,7 @@
                 // A deleted file must not stay selected for the next batch
                 // action.
                 toggleFileSelection(filepath, false);
-                await loadActiveLibraryView(1, true);
+                await loadActiveLibraryView({ refresh: true });
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');
             }
@@ -1186,7 +1262,7 @@
                 }
 
                 showMessage('Metadata removed and file marked unprocessed.', 'success');
-                await loadActiveLibraryView(1, true);
+                await loadActiveLibraryView({ refresh: true });
             } catch (error) {
                 showMessage('Failed to remove metadata: ' + error.message, 'error');
             }
@@ -1200,7 +1276,7 @@
             if (libraryViewMode === 'series' && currentSeriesDetailId) {
                 await loadSeriesIssues(currentSeriesDetailId, true);
             } else {
-                await loadActiveLibraryView(1, true);
+                await loadActiveLibraryView({ refresh: true });
             }
         }
 
@@ -1401,7 +1477,7 @@
         
         function refreshFiles() {
             showMessage('Refreshing file list...', 'info');
-            loadActiveLibraryView(1, true);
+            loadActiveLibraryView({ refresh: true });
         }
         
         // Helper: toggle the progress indicator pill, adding the
@@ -1424,6 +1500,11 @@
         }
 
         function showProgressModal(title) {
+            // The modal now belongs to a job that is only being started: no job
+            // is current until trackJobStatus() names it, so the pending finish
+            // of a job that ended can neither retitle nor close it, and no other
+            // job can be started meanwhile (canStartJob).
+            progressModalStartGeneration = beginJobStart();
             const modal = document.getElementById('progressModal');
             const indicator = document.getElementById('progressIndicator');
             document.getElementById('progressTitle').textContent = title;
@@ -1601,6 +1682,13 @@
         }
         
         function closeProgressModal() {
+            clearTimeout(progressModalCloseTimer);
+            progressModalCloseTimer = null;
+            if (progressModalStartGeneration === jobStartGeneration) {
+                jobStarting = false;
+                jobStartGeneration++;
+                progressModalStartGeneration = null;
+            }
             document.getElementById('progressModal').classList.remove('active');
             setProgressIndicatorVisible(false);
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button
@@ -1612,6 +1700,46 @@
                 console.warn('Could not clear localStorage:', e);
             }
         }
+
+        // Close the progress modal of a job that ended after `delay` ms, unless
+        // another job has taken the modal over by then.
+        function scheduleProgressModalClose(jobId, delay) {
+            if (currentJobId !== jobId) return;
+            clearTimeout(progressModalCloseTimer);
+            progressModalCloseTimer = setTimeout(() => {
+                progressModalCloseTimer = null;
+                if (currentJobId === jobId) closeProgressModal();
+            }, delay);
+        }
+
+        // Finish the progress modal of a job that ended after `delay` ms, unless
+        // another job has taken the modal over by then (clearProgressModalTimers).
+        function scheduleJobFinalize(jobId, finalize, delay) {
+            clearTimeout(jobFinalizeTimer);
+            jobFinalizeTimer = setTimeout(async () => {
+                jobFinalizeTimer = null;
+                if (currentJobId === jobId) await finalize();
+            }, delay);
+        }
+
+        // Drop the pending finish (and close) of a job that ended, when another
+        // job takes the progress modal over.
+        function clearProgressModalTimers() {
+            clearTimeout(jobFinalizeTimer);
+            jobFinalizeTimer = null;
+            clearTimeout(progressModalCloseTimer);
+            progressModalCloseTimer = null;
+        }
+
+        // The job-tracking API used by other scripts (events.js, file-actions.js,
+        // series-metadata.js); the state behind it stays owned by jobs.js.
+        window.jobProgress = Object.freeze({
+            canStartJob,
+            beginJobStart,
+            endJobStart,
+            scheduleJobFinalize,
+            scheduleProgressModalClose
+        });
         
         function minimizeProgressModal() {
             const modal = document.getElementById('progressModal');
@@ -1661,6 +1789,7 @@
                 showMessage('No files selected', 'error');
                 return;
             }
+            if (!canStartJob()) return;
 
             // Confirm deletion
             if (!confirm(`Are you sure you want to delete ${selectedFilesArray.length} file(s)? This action cannot be undone.`)) {
@@ -1697,11 +1826,12 @@
                 console.log(`[BULK DELETE] Created job ${jobId} for ${totalItems} file(s)`);
                 showMessage(`Deleting ${totalItems} file(s) in background`, 'info');
 
-                // Clear selected files now; the server is authoritative from this
-                // point on and SSE events (job_updated / file_processed /
-                // file_list_updated) will refresh the library in place.
-                selectedFiles.clear();
-                resetSeriesSelectionState();
+                // Clear the selection now, on the page too: the server is
+                // authoritative from this point on, and the SSE events
+                // (job_updated / file_processed / file_list_updated) that
+                // refresh the library in place never come if the job is
+                // cancelled before it deletes a file or the event stream is down.
+                clearSelection();
 
                 // Track via the standard SSE-driven progress modal.
                 await trackJobStatus(jobId, `Deleting ${totalItems} file(s)...`);

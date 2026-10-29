@@ -135,17 +135,21 @@ public class FrontendUsabilityTests
         Assert.Contains("options.reference", js);
         Assert.Contains("withApiFailureReference(message, options.reference)", js);
         Assert.Contains("function withApiFailureReference(message, reference)", js);
-        Assert.Contains("showMessage('Failed to load files: ' + error.message, 'error', { reference: true });", js);
-        Assert.Contains("function recordApiFailure(", js);
+        Assert.Contains("showMessage('Failed to load files: ' + error.message, 'error', { reference: error });", js);
 
-        // Expired references would be worse than none: they would point the
-        // reader at an unrelated request.
-        Assert.Contains("API_FAILURE_REFERENCE_WINDOW_MS", js);
+        // The id travels on the error of the failed request itself. Quoting
+        // whichever response failed last instead would give a network error or
+        // a proxy error page (neither carries an id) an unrelated request's
+        // reference and send the reader to the wrong log line.
+        Assert.Contains("function apiResponseError(", js);
+        Assert.Contains("error.correlationId = apiFailureReference(response)", js);
+        Assert.DoesNotContain("lastApiFailure", js);
+        Assert.DoesNotContain("reference: true", js);
 
         // 401/403 are routine (expired token, non-admin probing an admin route)
-        // and must not overwrite the reference for a real failure.
+        // and are explained by their own handling, so they carry no reference.
         Assert.Matches(
-            new Regex(@"function recordApiFailure\([\s\S]{0,600}?401[\s\S]{0,80}?403", RegexOptions.Singleline),
+            new Regex(@"function apiFailureReference\([\s\S]{0,600}?response\.status === 401 \|\| response\.status === 403\) return null;", RegexOptions.Singleline),
             js);
     }
 

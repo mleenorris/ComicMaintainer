@@ -306,6 +306,28 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckHealthAsync_CallerCancelsMidProbe_RethrowsWithoutCachingTimedOut()
+    {
+        using var cts = new CancellationTokenSource();
+        var handler = new StubHandler(_ =>
+        {
+            if (cts.IsCancellationRequested) return Json("{\"results\":[]}");
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        var service = CreateService(handler);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckHealthAsync(cts.Token));
+
+        // The next check probes again instead of reporting a cached "Timed out".
+        Assert.False(_cache.TryGetValue(ProbeCacheKey, out _));
+        var health = await service.CheckHealthAsync();
+        Assert.True(health.Reachable);
+        Assert.Equal("Reachable", health.StatusMessage);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task CheckHealthAsync_ProbeNetworkError_ReportsNetworkError()
     {
         var service = CreateService(new StubHandler(_ => throw new HttpRequestException("connection refused")));

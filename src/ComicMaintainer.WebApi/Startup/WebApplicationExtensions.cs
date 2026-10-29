@@ -63,10 +63,11 @@ internal static class WebApplicationExtensions
                 }
             }
             
-            // Check if admin user should be seeded from environment variables (for backward compatibility)
+            // Check if admin user should be seeded from environment variables (for backward compatibility).
+            // ADMIN_PASSWORD_FILE can name a file holding the password instead, such as a Docker secret.
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
             var adminUsername = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
-            var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+            var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out _);
             
             // Only create default admin if both ADMIN_USERNAME and ADMIN_PASSWORD are explicitly set
             if (!string.IsNullOrEmpty(adminUsername) && !string.IsNullOrEmpty(adminPassword))

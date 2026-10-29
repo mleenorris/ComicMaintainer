@@ -20,10 +20,17 @@ function bootResuming(t, status, activeJob = ACTIVE_JOB) {
 }
 
 test('a job still running at boot reopens the progress modal and keeps being tracked', async (t) => {
+    // The files still to do are listed too, and are not counted as failed (#846).
+    const toDo = file => ({ file, success: false, error: null });
     const page = await bootResuming(t, h.jobStatus({
         processed_items: 1,
         current_file: 'Comics/Batman/Batman 002.cbz',
-        results: [finished('Comics/Batman/Batman 001.cbz', true)]
+        results: [
+            finished('Comics/Batman/Batman 001.cbz', true),
+            toDo('Comics/Batman/Batman 002.cbz'),
+            toDo('Comics/Batman/Batman 003.cbz'),
+            toDo('Comics/Batman/Batman 004.cbz')
+        ]
     }));
 
     assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: 'Resuming active job...' }]);

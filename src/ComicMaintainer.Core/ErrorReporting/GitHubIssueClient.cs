@@ -124,7 +124,7 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
 
         try
         {
-            var created = await response.Content.ReadFromJsonAsync<IssueResponse>(JsonOptions, cancellationToken);
+            var created = await ReadJsonAsync<IssueResponse>(response.Content, cancellationToken);
             if (created is null || created.Number <= 0)
             {
                 throw new GitHubIssueTransientException("GitHub accepted the issue but returned no issue number");
@@ -264,7 +264,7 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
     {
         try
         {
-            var body = await response.Content.ReadFromJsonAsync<ValidationErrorResponse>(JsonOptions, cancellationToken);
+            var body = await ReadJsonAsync<ValidationErrorResponse>(response.Content, cancellationToken);
             return body?.Errors?.Any(e =>
                 string.Equals(e.Field, "assignees", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(e.Field, "assignee", StringComparison.OrdinalIgnoreCase)) == true;
@@ -273,6 +273,24 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads a response body as UTF-8 JSON whatever charset it declares. GitHub's
+    /// REST API responses are UTF-8 JSON, so an incorrect charset declaration is
+    /// ignored to keep <c>ReadFromJsonAsync</c> from throwing while it resolves the
+    /// encoding: a name .NET cannot resolve (<c>utf8</c>, or <c>windows-1252</c>
+    /// before anything has registered the code pages) throws
+    /// <see cref="InvalidOperationException"/>, which would escape the
+    /// transient/permanent classification, and any other non-UTF-8 charset
+    /// garbles non-ASCII text. A body that cannot be parsed, including an empty
+    /// one, still fails with <see cref="JsonException"/>, as it did with
+    /// <c>ReadFromJsonAsync</c>.
+    /// </summary>
+    private static async Task<T?> ReadJsonAsync<T>(HttpContent content, CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken);
     }
 
     private sealed record IssueResponse

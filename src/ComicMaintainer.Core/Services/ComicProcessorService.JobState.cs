@@ -193,12 +193,31 @@ public partial class ComicProcessorService
         if (_jobCancellationTokens.TryGetValue(jobId, out var cts))
         {
             _logger.LogInformation("Cancelling job: {JobId}", jobId);
-            cts.Cancel();
-            return true;
+            if (TryCancel(cts))
+            {
+                return true;
+            }
         }
         
         _logger.LogWarning("Cannot cancel job {JobId}: no active cancellation token found", jobId);
         return false;
+    }
+
+    /// <summary>
+    /// Signals a job to stop. Returns false when the job has already finished and disposed its
+    /// token source, which it can do between a caller's lookup and this call.
+    /// </summary>
+    private static bool TryCancel(CancellationTokenSource cts)
+    {
+        try
+        {
+            cts.Cancel();
+            return true;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
     }
 
     private ProcessingJob CloneJob(ProcessingJob job)

@@ -75,6 +75,23 @@ public class LibraryScanJobHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_IgnoresStagingFiles()
+    {
+        var seriesDir = Path.Combine(_watchDir, "One Piece");
+        Directory.CreateDirectory(seriesDir);
+        var staging = Path.Combine(seriesDir, ".tmp_0123456789abcdef.cbz");
+        await File.WriteAllBytesAsync(staging, new byte[] { 0x50, 0x4B });
+
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<ComicFile>());
+
+        var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
+
+        _fileStore.Verify(f => f.AddFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains("+0 added", summary);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ReconcileDeletions_RemovesGhostFiles()
     {
         // No disk files, but DB has one tracked file -> should be removed.
@@ -202,10 +219,11 @@ public class LibraryScanJobHandlerTests : IDisposable
         _processor.Verify(p => p.NormalizeFilesAsync(
             It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { path })),
             true, It.IsAny<CancellationToken>()), Times.Once);
-        // Before queuing (record the external change) and after the job (absorb our own write).
+        // Only after the job succeeds (absorbing the change and our own write); never before
+        // queuing, or a failed re-normalize would be recorded as handled (#864).
         _fileStore.Verify(f => f.RefreshFileStatsAsync(
             It.Is<IEnumerable<string>>(paths => paths.Contains(path)),
-            It.IsAny<CancellationToken>()), Times.Exactly(2));
+            It.IsAny<CancellationToken>()), Times.Once);
         Assert.Contains("1 modified reprocessed", summary);
         Assert.Contains("[modified: 1/1 ok", summary);
     }

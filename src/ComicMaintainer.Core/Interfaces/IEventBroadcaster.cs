@@ -22,7 +22,8 @@ public interface IEventBroadcaster
     Task BroadcastFileProcessedAsync(string filename, bool success, string? error = null);
     
     /// <summary>
-    /// Broadcast watcher status change
+    /// Broadcast watcher status change. Completes once every client has received it or been
+    /// disconnected, so a stalled client cannot hold up later broadcasts indefinitely.
     /// </summary>
     Task BroadcastWatcherStatusAsync(bool running, bool enabled);
     

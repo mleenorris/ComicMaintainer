@@ -80,6 +80,8 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.HasIndex("CreatedAt");
 
+                    b.HasIndex("Status", "SentAt");
+
                     b.HasIndex("FilePath", "DeviceId", "Status");
 
                     b.ToTable("ComicEmailDeliveries");

@@ -77,6 +77,8 @@ public class SettingsController : ControllerBase
             suwayomi_username = _appSettings.CurrentValue.SuwayomiUsername,
             // As with the SMTP password, the password itself is never returned.
             suwayomi_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.SuwayomiPassword),
+            suwayomi_downloads_directory = _appSettings.CurrentValue.SuwayomiDownloadsDirectory,
+            suwayomi_import_directory = _appSettings.CurrentValue.SuwayomiImportDirectory,
             default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
             allow_registration = _appSettings.CurrentValue.AllowRegistration,
             default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage,
@@ -97,6 +99,9 @@ public class SettingsController : ControllerBase
             email_from_address = _appSettings.CurrentValue.EmailFromAddress,
             email_from_name = _appSettings.CurrentValue.EmailFromName,
             email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes,
+            email_max_sends_per_hour = _appSettings.CurrentValue.EmailMaxSendsPerHour,
+            email_max_sends_per_day = _appSettings.CurrentValue.EmailMaxSendsPerDay,
+            email_min_seconds_between_sends = _appSettings.CurrentValue.EmailMinSecondsBetweenSends,
             error_reporting_enabled = _appSettings.CurrentValue.ErrorReportingEnabled,
             // The destination is fixed, not a setting. It is still returned so
             // the UI can name the repository it files issues in without
@@ -166,6 +171,10 @@ public class SettingsController : ControllerBase
         {
             await _settingsService.UpdateIssueNumberPaddingAsync(request.Padding, cancellationToken);
             return Ok(new { message = "Issue number padding updated successfully" });
+        }
+        catch (ArgumentException ex) when (ex.ParamName == "padding")
+        {
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
@@ -393,10 +402,12 @@ public class SettingsController : ControllerBase
 
         try
         {
-            await _settingsService.UpdateSeriesImageMaxBytesAsync(maxBytes, cancellationToken);
-            await _settingsService.UpdateSeriesImageMaxDownloadBytesAsync(maxDownloadBytes, cancellationToken);
-            await _settingsService.UpdateSeriesImageMaxDimensionAsync(request.MaxDimension, cancellationToken);
+            await _settingsService.UpdateSeriesImageLimitsAsync(maxBytes, maxDownloadBytes, request.MaxDimension, cancellationToken);
             return Ok(new { message = "Series image limits updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
@@ -567,41 +578,23 @@ public class SettingsController : ControllerBase
 
     /// <summary>
     /// Updates the external series metadata settings. Omit <c>comicVineApiKey</c>
-    /// to keep the stored key; send an empty string to clear it.
+    /// to keep the stored key; send an empty string to clear it. The settings are
+    /// saved together: if the request fails, none of them change.
     /// </summary>
     [HttpPut("external-series-metadata")]
     public async Task<ActionResult> UpdateExternalSeriesMetadata([FromBody] ExternalSeriesMetadataSettingsRequest request, CancellationToken cancellationToken = default)
     {
         try
         {
-            await _settingsService.UpdateExternalSeriesMetadataEnabledAsync(request.Enabled, cancellationToken);
-
-            // A null key means "keep the stored secret"; a blank one clears it.
-            if (request.ComicVineApiKey is not null)
-            {
-                var trimmedApiKey = string.IsNullOrWhiteSpace(request.ComicVineApiKey)
-                    ? null
-                    : request.ComicVineApiKey.Trim();
-
-                await _settingsService.UpdateComicVineApiKeyAsync(trimmedApiKey, cancellationToken);
-            }
-
-            if (!string.IsNullOrWhiteSpace(request.ComicVineBaseUrl))
-            {
-                await _settingsService.UpdateComicVineBaseUrlAsync(request.ComicVineBaseUrl.Trim(), cancellationToken);
-            }
-
-            await _settingsService.UpdateMangaDexEnabledAsync(request.EnableMangaDex, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(request.MangaDexBaseUrl))
-            {
-                await _settingsService.UpdateMangaDexBaseUrlAsync(request.MangaDexBaseUrl.Trim(), cancellationToken);
-            }
-
-            await _settingsService.UpdateAniListEnabledAsync(request.EnableAniList, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(request.AniListBaseUrl))
-            {
-                await _settingsService.UpdateAniListBaseUrlAsync(request.AniListBaseUrl.Trim(), cancellationToken);
-            }
+            await _settingsService.UpdateExternalSeriesMetadataSettingsAsync(
+                request.Enabled,
+                request.ComicVineApiKey,
+                request.ComicVineBaseUrl,
+                request.EnableMangaDex,
+                request.MangaDexBaseUrl,
+                request.EnableAniList,
+                request.AniListBaseUrl,
+                cancellationToken);
 
             return Ok(new { message = "External series metadata settings updated successfully" });
         }
@@ -878,8 +871,57 @@ public class SettingsController : ControllerBase
     }
 
     /// <summary>
+    /// Updates the email rate limit. Each value is a non-negative integer and
+    /// 0 disables that limit.
+    /// </summary>
+    [HttpPut("email-rate-limit")]
+    public async Task<ActionResult> UpdateEmailRateLimitSettings(
+        [FromBody] EmailRateLimitSettingsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        try
+        {
+            await _settingsService.UpdateEmailRateLimitSettingsAsync(
+                request.MaxSendsPerHour,
+                request.MaxSendsPerDay,
+                request.MinSecondsBetweenSends,
+                cancellationToken);
+
+            return Ok(new { message = "Email rate limit updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            _logger.LogError(ex, "Failed to update email rate limit");
+            return StatusCode(500, new { error = "Failed to update email rate limit" });
+        }
+    }
+
+    public class EmailRateLimitSettingsRequest
+    {
+        /// <summary>Most comic emails in any rolling 60-minute window; 0 for no limit.</summary>
+        public int MaxSendsPerHour { get; set; }
+
+        /// <summary>Most comic emails in any rolling 24-hour window; 0 for no limit.</summary>
+        public int MaxSendsPerDay { get; set; }
+
+        /// <summary>Minimum gap between two comic emails; 0 to send back to back.</summary>
+        public int MinSecondsBetweenSends { get; set; }
+    }
+
+    /// <summary>
     /// Updates the Suwayomi download-server settings. Omit <c>password</c> to
-    /// keep the stored password; send an empty string to clear it.
+    /// keep the stored password; send an empty string to clear it. The
+    /// <c>downloadsDirectory</c> and <c>importDirectory</c> import folders
+    /// follow the same omit-to-keep, empty-to-clear rule.
     /// </summary>
     [HttpPut("suwayomi")]
     public async Task<ActionResult> UpdateSuwayomiSettings([FromBody] SuwayomiSettingsRequest request, CancellationToken cancellationToken = default)
@@ -896,7 +938,9 @@ public class SettingsController : ControllerBase
                 request.BaseUrl,
                 request.Username,
                 request.Password,
-                cancellationToken);
+                downloadsDirectory: request.DownloadsDirectory,
+                importDirectory: request.ImportDirectory,
+                cancellationToken: cancellationToken);
 
             return Ok(new { message = "Suwayomi settings updated successfully" });
         }
@@ -923,6 +967,19 @@ public class SettingsController : ControllerBase
 
         /// <summary>Null keeps the stored password; empty string clears it.</summary>
         public string? Password { get; set; }
+
+        /// <summary>
+        /// Folder Suwayomi saves chapters into, as seen by this service. Null
+        /// keeps the stored value; empty string clears it (disabling the import).
+        /// </summary>
+        public string? DownloadsDirectory { get; set; }
+
+        /// <summary>
+        /// Library folder imported chapters are moved into (relative to the
+        /// watched directory or absolute inside it). Null keeps the stored
+        /// value; empty string clears it (the watched directory itself).
+        /// </summary>
+        public string? ImportDirectory { get; set; }
     }
 
     /// <summary>

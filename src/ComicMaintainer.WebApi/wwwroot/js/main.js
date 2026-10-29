@@ -120,7 +120,7 @@
                 const pageSizeChanged = perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE;
                 const shouldReloadLibrary = viewChanged || filterChanged || sortChanged || pageSizeChanged;
                 if (shouldReloadLibrary) {
-                    const libraryReload = loadActiveLibraryView(1);
+                    const libraryReload = loadActiveLibraryView();
 
                     // A series page opened before the preferences arrived listed
                     // its issues without the saved filter; fetch them with it once
@@ -190,7 +190,7 @@
                     // Trigger a fresh load with the search applied. Tests for
                     // emptiness avoid an unnecessary reload when nothing
                     // changed.
-                    loadActiveLibraryView(1, false);
+                    loadActiveLibraryView();
                 }
                 // Reopen the series detail panel if one was open.
                 if (snap.currentSeriesDetailId

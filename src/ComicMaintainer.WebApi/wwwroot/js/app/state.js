@@ -95,6 +95,12 @@
         // Resolvers for callers whose reload was queued behind an in-flight
         // load; they settle once the queued reload has run.
         let seriesReloadWaiters = [];
+        // How many series the pending reload must fetch to keep every loaded
+        // series listed (0 when it starts over from the first page), and how
+        // many a fresh load in flight will list once it settles. The latter
+        // covers a list a keepLoaded refresh has already emptied.
+        let seriesReloadKeepCount = 0;
+        let seriesLoadingCount = 0;
         let scrollObserver = null;
         let currentSeriesDetailId = null;
         // Title-based identity for the open series detail. The series id is a

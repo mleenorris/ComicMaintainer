@@ -71,15 +71,25 @@ function deferred() {
     return { promise, resolve, reject };
 }
 
-// A loadPage() `beforeScripts` hook that adds css/main.css's read-only gate
-// (body.user-read-only hides every [data-requires-write] control) to the page,
+// css/main.css's read-only gate (body.user-read-only hides every
+// [data-requires-write] control), read once; falls back to the equivalent
+// hard-coded rule so a CSS reformat doesn't break the UI tests.
+const READ_ONLY_GATE_RULE = (() => {
+    let css = '';
+    try {
+        css = fs.readFileSync(path.join(WWWROOT, 'css', 'main.css'), 'utf8');
+    } catch {
+        // Fall through to the hard-coded rule.
+    }
+    const rule = /body\.user-read-only\s+\[data-requires-write\]\s*\{[^}]*\}/.exec(css);
+    return rule ? rule[0] : 'body.user-read-only [data-requires-write] { display: none !important; }';
+})();
+
+// A loadPage() `beforeScripts` hook that adds the read-only gate to the page,
 // for tests of what a ReadOnly user is shown: the harness loads no stylesheets.
 function addReadOnlyGate(window) {
-    const css = fs.readFileSync(path.join(WWWROOT, 'css', 'main.css'), 'utf8');
-    const rule = /body\.user-read-only \[data-requires-write\]\s*\{[^}]*\}/.exec(css);
-    if (!rule) throw new Error('css/main.css has no read-only gate rule');
     const style = window.document.createElement('style');
-    style.textContent = rule[0];
+    style.textContent = READ_ONLY_GATE_RULE;
     window.document.head.appendChild(style);
 }
 

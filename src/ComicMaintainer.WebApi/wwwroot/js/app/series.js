@@ -819,7 +819,7 @@
                                             <button class="dropdown-item" data-requires-write onclick="openSeriesFoldersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
                                                 ${uiIcon('folder')} Manage Folders
                                             </button>
-                                            <div class="dropdown-divider"></div>
+                                            <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 ${uiIcon('globe')} Refresh Metadata
                                             </button>
@@ -835,7 +835,7 @@
                                             <button class="dropdown-item" data-requires-write onclick="openEmailSubscriptionModal('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 ${uiIcon('copy')} Auto-send New Issues
                                             </button>
-                                            <div class="dropdown-divider"></div>
+                                            <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="resetSeriesProcessedStatus('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
                                                 ${uiIcon('rotate-ccw')} Reset Processed Status
                                             </button>

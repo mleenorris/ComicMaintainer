@@ -81,8 +81,9 @@ public class SeriesImagesController : ControllerBase
         var etag = $"W/\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}\"";
 
         var requestEtag = Request.Headers[HeaderNames.IfNoneMatch].ToString();
+        // If-None-Match uses the weak comparison, so a W/ prefix on either side is ignored.
         if (!string.IsNullOrEmpty(requestEtag)
-            && string.Equals(requestEtag, etag, StringComparison.Ordinal))
+            && string.Equals(OpaqueTag(requestEtag), OpaqueTag(etag), StringComparison.Ordinal))
         {
             Response.Headers[HeaderNames.ETag] = etag;
             return StatusCode(StatusCodes.Status304NotModified);
@@ -328,6 +329,9 @@ public class SeriesImagesController : ControllerBase
             return StatusCode(500, "Error updating series covers");
         }
     }
+
+    private static string OpaqueTag(string etag) =>
+        etag.StartsWith("W/", StringComparison.Ordinal) ? etag[2..] : etag;
 
     /// <summary>
     /// True when a series matching <paramref name="title"/> (by canonical

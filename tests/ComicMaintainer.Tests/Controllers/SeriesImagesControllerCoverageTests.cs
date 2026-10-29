@@ -214,6 +214,21 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task Get_IfNoneMatchWithoutWeakPrefix_StillReturns304()
+    {
+        var path = WriteImage();
+        var etag = ExpectedEtag(path);
+        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
+        var controller = CreateController(ifNoneMatch: etag["W/".Length..]);
+
+        var result = await controller.Get("batman", CancellationToken.None);
+
+        var status = Assert.IsType<StatusCodeResult>(result);
+        Assert.Equal(StatusCodes.Status304NotModified, status.StatusCode);
+    }
+
+    [Fact]
     public async Task Get_StaleIfNoneMatch_ReturnsFreshFile()
     {
         var path = WriteImage();

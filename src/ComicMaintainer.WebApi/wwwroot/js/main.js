@@ -66,6 +66,7 @@
             prefsPromise.then(prefs => {
                 const oldPerPage = perPage;
                 const oldLibraryViewMode = libraryViewMode;
+                const oldFilterMode = filterMode;
                 perPage = prefs.perPage || DEFAULT_PER_PAGE;
                 
                 // Set the per-page selector to the saved value
@@ -91,10 +92,16 @@
                     });
                 }
 
-                // Restore sort mode from preferences
+                // Restore sort field and direction from preferences
                 const oldSortMode = sortMode;
+                const oldSortDirection = sortDirection;
                 if (prefs.sortMode) {
                     sortMode = prefs.sortMode;
+                }
+                if (VALID_SORT_DIRECTIONS.includes(prefs.sortDirection)) {
+                    sortDirection = prefs.sortDirection;
+                }
+                if (prefs.sortMode || prefs.sortDirection) {
                     applySortUi();
                 }
 
@@ -105,9 +112,28 @@
                 updateLibraryViewButtons();
                 updateLibraryViewLayout();
                 
-                // Reload files if perPage changed from default
-                if (libraryViewMode !== oldLibraryViewMode || sortMode !== oldSortMode || (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE)) {
-                    loadActiveLibraryView();
+                // The library started loading with the defaults; reload it if
+                // the saved preferences change what it lists.
+                const viewChanged = libraryViewMode !== oldLibraryViewMode;
+                const filterChanged = filterMode !== oldFilterMode;
+                const sortChanged = sortMode !== oldSortMode || sortDirection !== oldSortDirection;
+                const pageSizeChanged = perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE;
+                const shouldReloadLibrary = viewChanged || filterChanged || sortChanged || pageSizeChanged;
+                if (shouldReloadLibrary) {
+                    const libraryReload = loadActiveLibraryView();
+
+                    // A series page opened before the preferences arrived listed
+                    // its issues without the saved filter; fetch them with it once
+                    // the library has reloaded, as that may move the series to a
+                    // new id. Issues already listed or loading under the saved
+                    // filter are reused; only entries for another filter refetch.
+                    if (filterChanged && currentSeriesDetailId) {
+                        libraryReload.finally(() => {
+                            if (currentSeriesDetailId) {
+                                loadSeriesIssues(currentSeriesDetailId);
+                            }
+                        });
+                    }
                 }
             });
             

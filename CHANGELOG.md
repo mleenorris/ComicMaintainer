@@ -418,6 +418,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in the library root, and hides the "… Unmarked" actions when nothing is unmarked.
   Changing the filter, search or sort while the root's files load no longer shows the older
   answer.
+- **The library keeps its sort direction and filter after a reload.** Only the sort field was
+  saved, so a library sorted "Date ↓" came back as "Date ↑" after a reload or on another
+  device; the direction is now saved too (`sortDirection`, `asc` or `desc`, in
+  `/api/preferences`). A saved filter that was the only non-default preference was shown in the
+  header but not applied, so every series was listed until the filter was picked again. It now
+  applies to the library and to a series page opened directly, such as when coming back from
+  the reader.
 - **Changing the filter on a phone keeps the open series on screen.** On screens up to 768 px
   wide, every filter change still switched to the Files view, which no longer exists, so
   screen readers announced "Files view selected." each time. On a series page, choosing a

@@ -25,6 +25,7 @@ function preferences(overrides = {}) {
         libraryViewMode: 'series',
         filterMode: 'all',
         sortMode: 'name',
+        sortDirection: 'asc',
         ...overrides
     };
 }

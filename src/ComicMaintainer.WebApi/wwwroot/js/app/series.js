@@ -82,9 +82,11 @@
             // migrate error entries — a 404/failure cached under the stale id
             // (e.g. from a race during a filter change) must not poison the
             // remapped id; leaving the new key empty lets renderSeriesDetail
-            // trigger a fresh fetch.
+            // trigger a fresh fetch. Nor entries still loading: their answer
+            // re-renders only the stale id, leaving the new one loading forever.
             const oldCached = seriesIssuesCache.get(currentSeriesDetailId);
-            if (oldCached && !oldCached.error && !seriesIssuesCache.has(remapped.id)) {
+            if (oldCached && !oldCached.error && !oldCached.loadingPages?.size
+                && !seriesIssuesCache.has(remapped.id)) {
                 seriesIssuesCache.set(remapped.id, oldCached);
             }
             seriesIssuesCache.delete(currentSeriesDetailId);
@@ -103,7 +105,9 @@
 
         async function loadSeriesIssues(seriesId, force = false, page = 1) {
             if (!seriesId) return;
-            if (force) {
+            // An entry listed (or being listed) under another filter is stale.
+            const cachedEntry = seriesIssuesCache.get(seriesId);
+            if (force || (cachedEntry && cachedEntry.filter !== filterMode)) {
                 seriesIssuesCache.delete(seriesId);
             }
             const existing = seriesIssuesCache.get(seriesId);
@@ -132,7 +136,8 @@
                     loadedPages: new Set(),
                     loadingPages: new Set(),
                     allLoaded: false,
-                    error: false
+                    error: false,
+                    filter: filterMode
                 };
                 seriesIssuesCache.set(seriesId, entry);
             }
@@ -181,8 +186,10 @@
                     // Refresh the cached series metadata snapshot from the
                     // response so the detail view can render correctly even
                     // when the active filter excludes this series from the
-                    // library list.
-                    if (currentSeriesDetailId === seriesId) {
+                    // library list. An answer whose cache entry was replaced
+                    // (listed under an older filter or search) must not
+                    // overwrite the snapshot with its counts and size.
+                    if (currentSeriesDetailId === seriesId && seriesIssuesCache.get(seriesId) === entry) {
                         currentSeriesDetailSeries = Object.assign(
                             {},
                             currentSeriesDetailSeries || {},
@@ -208,8 +215,9 @@
                 entry.loadingPages.delete(page);
             }
 
-            // Re-render only if the user is still on this series.
-            if (currentSeriesDetailId === seriesId) {
+            // Re-render only if the user is still on this series and this
+            // answer has not been superseded (e.g. by a filter change).
+            if (currentSeriesDetailId === seriesId && seriesIssuesCache.get(seriesId) === entry) {
                 if (page === 1 || entry.error) {
                     renderSeriesDetail(seriesId);
                 } else {

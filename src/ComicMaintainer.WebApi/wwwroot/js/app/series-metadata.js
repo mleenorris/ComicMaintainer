@@ -10,7 +10,7 @@
         // External Series Metadata (manual refresh + alias management)
         // ====================================================================
 
-        let manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false };
+        let manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false, nameChoices: 0 };
 
         // Keep a record a Manage Names request sent back. The other controls
         // save straight away but alias edits wait for Save, so once the list
@@ -448,7 +448,7 @@
         }
 
         async function openManageSeriesNamesModal(seriesTitle) {
-            manageSeriesState = { seriesTitle, record: null, aliasesEdited: false, recordLoaded: false };
+            manageSeriesState = { seriesTitle, record: null, aliasesEdited: false, recordLoaded: false, nameChoices: 0 };
             document.getElementById('manageSeriesTitle').textContent = seriesTitle;
             document.getElementById('manageSeriesProviderAliases').textContent = 'Loading...';
             document.getElementById('manageSeriesProviderSource').textContent = '';
@@ -468,7 +468,7 @@
 
         function closeManageSeriesNamesModal() {
             document.getElementById('manageSeriesNamesModal').classList.remove('active');
-            manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false };
+            manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false, nameChoices: 0 };
         }
 
         async function loadManageSeriesRecord() {
@@ -856,13 +856,19 @@
 
         // Save just the per-series name (called on the select's change event,
         // same UX pattern as the preferred-language control). An empty value
-        // reverts to automatic resolution.
-        async function saveManageSeriesName() {
+        // reverts to automatic resolution. Callers other than the select pass
+        // the name to save explicitly.
+        async function saveManageSeriesName(name) {
             const { seriesTitle } = manageSeriesState;
             if (!seriesTitle) return;
             const select = document.getElementById('manageSeriesName');
             if (!select) return;
-            const value = select.value || null;
+            if (name === undefined) {
+                manageSeriesState.nameChoices++;
+            } else {
+                selectManageSeriesName(select, name);
+            }
+            const value = (name === undefined ? select.value : name) || null;
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/name`), {
                     method: 'PUT',
@@ -1172,9 +1178,11 @@
             // saving it would replace: pin the name alone (the server adds it
             // to them) and leave the other adopted names for Save.
             if (!state.recordLoaded) {
-                await saveManageSeriesName();
+                await saveManageSeriesName(name);
                 return;
             }
+            // A name the user picks while the aliases save wins over this one.
+            const nameChoices = state.nameChoices;
             let saved = false;
             try {
                 saved = await putManageSeriesUserAliases(seriesTitle, record.user_aliases || []);
@@ -1183,18 +1191,17 @@
             }
             // The modal was closed or reopened meanwhile: leave the name alone.
             if (state !== manageSeriesState) return;
+            const nameChosen = state.nameChoices !== nameChoices;
             if (!saved) {
                 showMessage('Failed to save series names', 'error');
                 const select = document.getElementById('manageSeriesName');
-                if (select) select.value = (state.record && state.record.series_name) || '';
+                if (select && !nameChosen) select.value = (state.record && state.record.series_name) || '';
                 return;
             }
-            // Editing the aliases meanwhile rebuilds the select: pin the
-            // adopted name again so it is the one saved.
-            const select = document.getElementById('manageSeriesName');
-            if (!select) return;
-            selectManageSeriesName(select, name);
-            await saveManageSeriesName();
+            if (nameChosen) return;
+            // Editing the aliases meanwhile rebuilds the select from the
+            // stored name, so the adopted name is passed explicitly.
+            await saveManageSeriesName(name);
         }
 
         // Mark one of the candidates returned by /search as the *correct*

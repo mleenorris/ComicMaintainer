@@ -596,11 +596,11 @@ public sealed class FilesControllerMetadataTests : IDisposable
             .Returns(Task.CompletedTask);
         _fileStore
             .Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
+            .ReturnsAsync((int max, CancellationToken _) =>
             {
                 lock (pending)
                 {
-                    return pending.Values.ToList();
+                    return pending.Values.Take(max).ToList();
                 }
             });
         _fileStore

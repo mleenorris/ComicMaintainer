@@ -38,49 +38,82 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
     public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
     {
         var options = ParseOptions(optionsJson);
-        var batch = await _fileStore.GetFilesNeedingBackfillAsync(options.MaxBatch, cancellationToken);
         var processed = 0;
         var failed = 0;
 
-        foreach (var file in batch)
+        // Reads the queue one batch at a time until it is drained, so a run that follows edits
+        // made during an earlier run writes all of them back, not just the first batch. Each
+        // file version is attempted at most once per run: a file that failed, or that is still
+        // queued after a write, is skipped on later reads. Those skipped files are added to the
+        // read size so they cannot fill a batch and hide the files queued behind them.
+        var attempted = new HashSet<(string FilePath, int MetadataVersion)>();
+        var skipped = 0;
+        while (true)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                var metadata = BuildMetadata(file);
-                var flags = (ComicMetadataFieldFlags)(file.Metadata?.UserLockedFieldsMask ?? 0L);
-                if (!flags.HasFlag(ComicMetadataFieldFlags.Series))
-                {
-                    var resolution = await _seriesNameResolver.ResolveAsync(
-                        file.FilePath,
-                        metadata,
-                        mutateCache: false,
-                        cancellationToken);
-                    if (!string.IsNullOrWhiteSpace(resolution.ResolvedSeries))
-                    {
-                        metadata.Series = resolution.ResolvedSeries;
-                    }
-                }
+            var take = options.MaxBatch + skipped;
+            var queued = await _fileStore.GetFilesNeedingBackfillAsync(take, cancellationToken);
+            skipped = queued.Count(file => attempted.Contains((file.FilePath, file.MetadataVersion)));
+            var batch = queued
+                .Where(file => !attempted.Contains((file.FilePath, file.MetadataVersion)))
+                .Take(options.MaxBatch)
+                .ToList();
 
-                var success = await _processor.UpdateMetadataAsync(file.FilePath, metadata, cancellationToken);
-                if (success)
+            foreach (var file in batch)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                attempted.Add((file.FilePath, file.MetadataVersion));
+                if (await BackfillFileAsync(file, cancellationToken))
                 {
-                    await _fileStore.MarkFileBackfilledAsync(file.FilePath, file.MetadataVersion, cancellationToken);
                     processed++;
                 }
                 else
                 {
                     failed++;
+                    skipped++;
                 }
             }
-            catch (Exception ex)
+
+            if (queued.Count < take || options.MaxBatch <= 0)
             {
-                failed++;
-                _logger.LogWarning(ex, "Metadata backfill failed for {FilePath}", LoggingHelper.SanitizePathForLog(file.FilePath));
+                break;
             }
         }
 
-        return $"Backfill: {processed} files updated, {failed} failed (queue size was {batch.Count}).";
+        return $"Backfill: {processed} files updated, {failed} failed (queue size was {attempted.Count}).";
+    }
+
+    private async Task<bool> BackfillFileAsync(ComicFile file, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var metadata = BuildMetadata(file);
+            var flags = (ComicMetadataFieldFlags)(file.Metadata?.UserLockedFieldsMask ?? 0L);
+            if (!flags.HasFlag(ComicMetadataFieldFlags.Series))
+            {
+                var resolution = await _seriesNameResolver.ResolveAsync(
+                    file.FilePath,
+                    metadata,
+                    mutateCache: false,
+                    cancellationToken);
+                if (!string.IsNullOrWhiteSpace(resolution.ResolvedSeries))
+                {
+                    metadata.Series = resolution.ResolvedSeries;
+                }
+            }
+
+            if (!await _processor.UpdateMetadataAsync(file.FilePath, metadata, cancellationToken))
+            {
+                return false;
+            }
+
+            await _fileStore.MarkFileBackfilledAsync(file.FilePath, file.MetadataVersion, cancellationToken);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Metadata backfill failed for {FilePath}", LoggingHelper.SanitizePathForLog(file.FilePath));
+            return false;
+        }
     }
 
     private static ComicMetadata BuildMetadata(ComicFile file)

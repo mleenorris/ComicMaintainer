@@ -254,9 +254,9 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
     /// <summary>
     /// Runs the job whose single-flight slot the caller has already claimed and
     /// releases the slot when done. If <see cref="RunNowOrAfterCurrentRunAsync"/>
-    /// asked for another run meanwhile, the job then runs again, unless the host
-    /// is stopping or another run claims the slot first (that run then serves
-    /// the request).
+    /// asked for another run meanwhile, the job then runs again, even when this
+    /// run could not record its outcome, unless the host is stopping or another
+    /// run claims the slot first (that run then serves the request).
     /// </summary>
     private async Task RunClaimedJobAsync(IScheduledJobHandler handler, string jobKey, JobSlot slot)
     {
@@ -268,6 +268,15 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             try
             {
                 await RunOnceAsync(handler, jobKey);
+            }
+            catch (Exception ex)
+            {
+                // RunOnceAsync records a failed run itself, so what gets here is a
+                // failure to record the outcome. Logged, not rethrown: nothing
+                // observes this task, and a rethrow would skip the check below and
+                // drop the requests made during the run.
+                _logger.LogError(ex, "Scheduled job {JobKey} could not record its outcome",
+                    LoggingHelper.SanitizeForLog(jobKey));
             }
             finally
             {

@@ -338,6 +338,48 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RunNowOrAfterCurrentRunAsync_WhenTheRunCannotRecordItsOutcome_StillRunsTheJobAgain()
+    {
+        SeedJob(enabled: false);
+        var started = NewGate();
+        var release = NewGate();
+        var handler = new TestJobHandler(JobKey, async (_, _) =>
+        {
+            if (started.TrySetResult())
+            {
+                await release.Task;
+                return "first run";
+            }
+            return "follow-up run";
+        });
+        var (hosted, _) = CreateHostedService(handler);
+        await hosted.StartAsync(CancellationToken.None);
+        // The database is unavailable while the first run records its outcome: saving
+        // it as Success fails, and so does saving the Failed status recorded instead.
+        _dbFactory.WhileSaving = saved =>
+        {
+            if (saved.LastStatus != nameof(ScheduledJobStatus.Running) && handler.Invocations == 1)
+            {
+                throw new InvalidOperationException("database unavailable");
+            }
+        };
+
+        Assert.True(await hosted.RunNowOrAfterCurrentRunAsync(JobKey));
+        await started.Task.WaitAsync(SignalTimeout);
+        Assert.False(await hosted.RunNowOrAfterCurrentRunAsync(JobKey));
+        release.TrySetResult();
+        await _logger.WaitForAsync(e => e.Message.Contains("follow-up run", StringComparison.Ordinal));
+
+        Assert.Equal(2, handler.Invocations);
+        var logged = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
+        Assert.Contains($"Scheduled job {JobKey} could not record its outcome", logged.Message, StringComparison.Ordinal);
+        Assert.IsType<InvalidOperationException>(logged.Exception);
+        var row = LoadJob();
+        Assert.Equal(nameof(ScheduledJobStatus.Success), row.LastStatus);
+        Assert.Equal("follow-up run", row.LastMessage);
+    }
+
+    [Fact]
     public async Task RunNowOrAfterCurrentRunAsync_WhenTheHostStopsDuringTheRun_StartsNoFollowUpRun()
     {
         SeedJob(enabled: false);
@@ -809,8 +851,9 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         public volatile bool FailCreation;
 
         /// <summary>
-        /// Called with every saved job row from inside the save itself, so it runs
-        /// before the code that saved the row carries on.
+        /// Called with every job row being saved, from inside the save itself, so it
+        /// runs before the code that saved the row carries on. It runs before the row
+        /// is written, so throwing from it fails the save and nothing is written.
         /// </summary>
         public Action<SavedJob>? WhileSaving;
 
@@ -857,7 +900,6 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
 
         public void OnSaved(SavedJob saved)
         {
-            WhileSaving?.Invoke(saved);
             var matched = new List<TaskCompletionSource<SavedJob>>();
             lock (_gate)
             {
@@ -899,12 +941,16 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         {
             var changed = ChangeTracker.Entries<ScheduledJobEntity>()
                 .Where(e => e.State is EntityState.Added or EntityState.Modified)
-                .Select(e => e.Entity)
+                .Select(e => new SavedJob(e.Entity.JobKey, e.Entity.LastStatus, e.Entity.LastMessage, e.Entity.LastDurationMs))
                 .ToList();
+            foreach (var job in changed)
+            {
+                _factory.WhileSaving?.Invoke(job);
+            }
             var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
             foreach (var job in changed)
             {
-                _factory.OnSaved(new SavedJob(job.JobKey, job.LastStatus, job.LastMessage, job.LastDurationMs));
+                _factory.OnSaved(job);
             }
             return result;
         }

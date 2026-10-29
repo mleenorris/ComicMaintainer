@@ -103,6 +103,7 @@ for (const action of SINGLE_FILE_JOBS) {
         assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: action.started }]);
         assert.equal(h.requests(page, 'GET', `/api/jobs/${h.JOB_ID}`).length, 1);
         h.assertProgress(page, { open: true, title: action.tracked, text: '0 / 1 files', cancelVisible: true });
+        await h.endTrackedJob(t, page);
 
         answer = () => action.accepted;
         h.answerConfirms(page, true, false);
@@ -111,6 +112,7 @@ for (const action of SINGLE_FILE_JOBS) {
         assert.deepEqual(h.takeConfirms(page), [action.confirm, action.force]);
         action.assertRequest(sent().at(-1), false);
         assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: action.started }]);
+        await h.endTrackedJob(t, page);
 
         if (action.withoutJob) {
             answer = () => action.withoutJob;

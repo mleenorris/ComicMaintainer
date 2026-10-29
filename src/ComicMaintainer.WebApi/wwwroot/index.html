@@ -768,7 +768,23 @@
                         </div>
                         <div class="form-group">
                            <label for="emailMaxAttachmentMb">Max Attachment Size (MB)</label>
-                           <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" step="1" autocomplete="off" placeholder="25">
+                           <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" max="200" step="1" autocomplete="off" placeholder="25">
+                        </div>
+                        <h4 class="settings-subheading">Rate Limit</h4>
+                        <p class="form-hint">
+                           Spread comic emails out to stay within your mail provider's sending limits. Deliveries over a limit wait as pending, and can still be cancelled, until a slot frees up. A condensed book counts as one email; test emails are not limited. Use 0 for no limit.
+                        </p>
+                        <div class="form-group">
+                           <label for="emailMaxSendsPerHour">Max Emails per Hour</label>
+                           <input type="number" id="emailMaxSendsPerHour" name="emailMaxSendsPerHour" min="0" max="10000" step="1" autocomplete="off" placeholder="0">
+                        </div>
+                        <div class="form-group">
+                           <label for="emailMaxSendsPerDay">Max Emails per Day</label>
+                           <input type="number" id="emailMaxSendsPerDay" name="emailMaxSendsPerDay" min="0" max="100000" step="1" autocomplete="off" placeholder="0">
+                        </div>
+                        <div class="form-group">
+                           <label for="emailMinSecondsBetweenSends">Minimum Seconds Between Emails</label>
+                           <input type="number" id="emailMinSecondsBetweenSends" name="emailMinSecondsBetweenSends" min="0" max="86400" step="1" autocomplete="off" placeholder="0">
                         </div>
                     </section>
                     <section class="settings-card" id="settings-error-reporting" aria-labelledby="settings-error-reporting-title">
@@ -850,7 +866,7 @@
                                 Maximum Log File Size (MB)
                                 <span class="setting-restart-badge" title="This setting is only applied when the service starts.">Restart required</span>
                             </label>
-                            <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off">
+                            <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="2047" step="1" placeholder="5" autocomplete="off">
                             <small class="form-hint">
                                 When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
                             </small>
@@ -1113,7 +1129,7 @@
                                 <span>Enable Suwayomi integration</span>
                             </label>
                             <small class="form-hint">
-                                Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own download directory, so mount that directory inside the watched directory for the new files to be picked up.
+                                Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own downloads folder; set that folder under <em>Import downloaded chapters</em> below to have them moved into the library.
                             </small>
                         </div>
                         <div class="form-group">
@@ -1136,6 +1152,22 @@
                         <div class="form-group">
                             <button class="btn" type="button" onclick="testSuwayomiConnection()"><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg> Test Connection</button>
                             <small id="suwayomiStatusHint" class="form-hint">Save your settings before testing.</small>
+                        </div>
+
+                        <h4 class="settings-subheading">Import downloaded chapters</h4>
+                        <div class="form-group">
+                            <label for="suwayomiDownloadsDirectory">Suwayomi downloads folder</label>
+                            <input type="text" id="suwayomiDownloadsDirectory" name="suwayomiDownloadsDirectory" placeholder="/suwayomi/downloads/mangas" autocomplete="off" spellcheck="false">
+                            <small class="form-hint">
+                                The folder Suwayomi saves chapters to, as mounted in this container (e.g. Suwayomi's <code>downloads/mangas</code>). Chapters it saves there as <code>source/series/chapter.cbz</code> are moved into the library as <code>series/chapter.cbz</code> by the <em>Suwayomi Download Import</em> scheduled job (every 15 minutes by default), and the emptied folders are removed. The folder must be outside the watched directory and writable by ComicMaintainer; turn on <em>Save as CBZ archive</em> in Suwayomi's download settings. Works whether or not the integration above is enabled. Leave blank to turn importing off.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="suwayomiImportDirectory">Import into (optional)</label>
+                            <input type="text" id="suwayomiImportDirectory" name="suwayomiImportDirectory" placeholder="Library root" autocomplete="off" spellcheck="false">
+                            <small class="form-hint">
+                                Where new series folders are created, relative to the watched directory (e.g. <code>Manga</code>). Leave blank for the watched directory itself. Chapters of a series the library already has go into its existing folder.
+                            </small>
                         </div>
                     </section>
                     <section class="settings-card settings-card--danger" id="settings-danger" aria-labelledby="settings-danger-title">
@@ -1248,7 +1280,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="saveTags()">Save</button>
+                <button class="btn btn-primary" data-requires-write onclick="saveTags()">Save</button>
             </div>
         </div>
     </div>
@@ -1643,13 +1675,20 @@
             </div>
             <div class="modal-body">
                 <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">
-                    Recent comics queued for delivery, including failures and their error text.
+                    Comics queued for delivery, newest first, including failures and their error text. A pending delivery can be cancelled until it is handed to the mail server.
                 </p>
+                <p id="emailDeliveryHistoryRateLimit" role="status" style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;" hidden></p>
                 <div id="emailDeliveryHistoryList">
                     <div class="loading"><div class="spinner"></div><p>Loading deliveries...</p></div>
                 </div>
+                <div id="emailDeliveryHistoryPagination" style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-primary);" hidden>
+                    <button class="btn" id="emailDeliveryHistoryPrevBtn" type="button" onclick="loadPreviousEmailDeliveryHistoryPage()" disabled><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg> Previous</button>
+                    <span id="emailDeliveryHistoryPageInfo" style="color: var(--text-secondary); font-size: 14px;">Page 1</span>
+                    <button class="btn" id="emailDeliveryHistoryNextBtn" type="button" onclick="loadNextEmailDeliveryHistoryPage()" disabled>Next →</button>
+                </div>
             </div>
             <div class="modal-footer">
+                <button class="btn btn-danger" id="emailDeliveryCancelAllBtn" type="button" data-requires-write onclick="cancelAllPendingEmailDeliveries()" hidden>Cancel All Pending</button>
                 <button class="btn" onclick="loadEmailDeliveryHistory()">Refresh</button>
                 <button class="btn" onclick="closeEmailDeliveryHistoryModal()">Close</button>
             </div>
@@ -1813,7 +1852,7 @@
                          <button class="btn" onclick="openDuplicateTags()"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> View/Edit Tags</button>
                          <button class="btn" onclick="openDuplicateReader()"><svg class="icon" aria-hidden="true"><use href="#i-book-open"/></svg> Read Comic</button>
                          <button class="btn" id="duplicateReviewReadToggleBtn" onclick="toggleDuplicateReadStatus()"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Mark Read</button>
-                         <button class="btn btn-danger" onclick="deleteCurrentDuplicate()"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete Duplicate</button>
+                         <button class="btn btn-danger" onclick="deleteCurrentDuplicate()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete Duplicate</button>
                          <button class="btn btn-danger" id="duplicateReviewDeleteAllBtn" onclick="deleteAllDuplicates()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete All Duplicates</button>
                      </div>
                      <div class="duplicate-review-tip">
@@ -1879,10 +1918,10 @@
                  <div id="seriesFoldersEmptyState" class="duplicate-review-empty" style="display: none;">
                      No folders found for this series.
                  </div>
-                 <div id="seriesFoldersMergeNote" class="duplicate-review-tip" style="display: none;"></div>
+                 <div id="seriesFoldersMergeNote" class="duplicate-review-tip" data-requires-write style="display: none;"></div>
              </div>
              <div class="modal-footer">
-                 <button class="btn" id="seriesFoldersMergeBtn" onclick="openMergeForSeriesFolders()" disabled><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Merge Folders</button>
+                 <button class="btn" id="seriesFoldersMergeBtn" onclick="openMergeForSeriesFolders()" data-requires-write disabled><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Merge Folders</button>
                  <button class="btn" onclick="closeSeriesFoldersModal()">Close</button>
              </div>
          </div>
@@ -1928,7 +1967,7 @@
                      <label style="font-weight: 600; color: var(--text-secondary);">User Aliases</label>
                      <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Add alternative names so the library will merge folders that share these titles.</p>
                      <div id="manageSeriesUserAliases" style="padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px; min-height: 36px;">None</div>
-                     <div style="display: flex; gap: 8px; margin-top: 8px;">
+                     <div style="display: flex; gap: 8px; margin-top: 8px;" data-requires-write>
                          <input type="text" id="manageSeriesNewAlias" placeholder="Add an alias (e.g. The Dark Knight)" autocomplete="off" style="flex: 1; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary);">
                          <button class="btn btn-small" type="button" onclick="addManageSeriesAlias()"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add</button>
                      </div>
@@ -1940,7 +1979,7 @@
                          <img id="manageSeriesImagePreview" alt="Series cover preview" style="width: 96px; height: 144px; object-fit: cover; border-radius: 6px; background: var(--bg-hover); border: 1px solid var(--border-primary); display: block;" />
                          <div style="flex: 1; display: flex; flex-direction: column; gap: 6px;">
                              <div id="manageSeriesImageStatus" style="font-size: 12px; color: var(--text-secondary);">No image cached.</div>
-                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                             <div style="display: flex; gap: 8px; flex-wrap: wrap;" data-requires-write>
                                  <input type="file" id="manageSeriesImageInput" accept="image/jpeg,image/png,image/webp" style="display: none;" onchange="uploadManageSeriesImage()">
                                  <button class="btn btn-small" type="button" onclick="document.getElementById('manageSeriesImageInput').click()"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg> Upload Image</button>
                                  <button class="btn btn-small" type="button" onclick="openFetchSeriesImageFromProvider()" title="Search the configured external metadata providers for a cover image"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> Fetch from Provider</button>
@@ -1969,10 +2008,10 @@
                  </div>
              </div>
              <div class="modal-footer">
-                 <button class="btn btn-small" type="button" onclick="refreshSeriesMetadata()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh from Provider</button>
-                 <button class="btn btn-small" type="button" onclick="clearSeriesExternalMetadata()" title="Remove cached provider aliases, source, and downloaded image for this series. User aliases and uploaded images are kept."><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clear External Metadata</button>
-                 <button class="btn btn-small" type="button" onclick="checkCombinableFoldersFromManageSeries()" title="Re-scan the library for folders that can now be merged with this series"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Check for Combinable Folders</button>
-                 <button class="btn btn-primary" type="button" onclick="saveManageSeriesNames()"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg> Save</button>
+                 <button class="btn btn-small" type="button" data-requires-write onclick="refreshSeriesMetadata()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh from Provider</button>
+                 <button class="btn btn-small" type="button" data-requires-write onclick="clearSeriesExternalMetadata()" title="Remove cached provider aliases, source, and downloaded image for this series. User aliases and uploaded images are kept."><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clear External Metadata</button>
+                 <button class="btn btn-small" type="button" data-requires-write onclick="checkCombinableFoldersFromManageSeries()" title="Re-scan the library for folders that can now be merged with this series"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Check for Combinable Folders</button>
+                 <button class="btn btn-primary" type="button" data-requires-write onclick="saveManageSeriesNames()"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg> Save</button>
                  <button class="btn" type="button" onclick="closeManageSeriesNamesModal()">Close</button>
              </div>
          </div>

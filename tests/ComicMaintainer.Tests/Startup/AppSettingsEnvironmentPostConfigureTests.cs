@@ -44,6 +44,11 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
         ("ERROR_REPORTING_DEDUPE_WINDOW_HOURS", o => o.ErrorReportingDedupeWindowHours),
     ];
 
+    private static readonly string[] EmailRateLimitVariables =
+    [
+        "EMAIL_MAX_SENDS_PER_HOUR", "EMAIL_MAX_SENDS_PER_DAY", "EMAIL_MIN_SECONDS_BETWEEN_SENDS",
+    ];
+
     private static readonly string[] AllVariables =
     [
         .. StringVariables,
@@ -51,6 +56,7 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
         .. PositiveIntegerVariables.Select(i => i.Variable),
         "SMTP_PORT",
         "ERROR_REPORTING_MAX_ISSUES_PER_DAY",
+        .. EmailRateLimitVariables,
     ];
 
     // AppSettingsEnvironmentPostConfigure is internal to the WebApi assembly (no InternalsVisibleTo).
@@ -100,6 +106,9 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
 
         _environment.Set("SMTP_PORT", "2525");
         _environment.Set("ERROR_REPORTING_MAX_ISSUES_PER_DAY", "42");
+        _environment.Set("EMAIL_MAX_SENDS_PER_HOUR", "20");
+        _environment.Set("EMAIL_MAX_SENDS_PER_DAY", "200");
+        _environment.Set("EMAIL_MIN_SECONDS_BETWEEN_SENDS", "30");
         var options = new AppSettings();
         foreach (var (_, _, set) in BooleanVariables)
         {
@@ -136,6 +145,9 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
 
         Assert.Equal(2525, options.SmtpPort);
         Assert.Equal(42, options.ErrorReportingMaxIssuesPerDay);
+        Assert.Equal(20, options.EmailMaxSendsPerHour);
+        Assert.Equal(200, options.EmailMaxSendsPerDay);
+        Assert.Equal(30, options.EmailMinSecondsBetweenSends);
     }
 
     [Fact]
@@ -228,6 +240,35 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
         PostConfigure.PostConfigure(Options.DefaultName, options);
 
         Assert.Equal(expected, options.ErrorReportingMaxIssuesPerDay);
+    }
+
+    [Theory]
+    [InlineData("EMAIL_MAX_SENDS_PER_HOUR", "0", 0)]
+    [InlineData("EMAIL_MAX_SENDS_PER_HOUR", "10000", 10_000)]
+    [InlineData("EMAIL_MAX_SENDS_PER_HOUR", "10001", 7)]
+    [InlineData("EMAIL_MAX_SENDS_PER_HOUR", "-1", 7)]
+    [InlineData("EMAIL_MAX_SENDS_PER_DAY", "0", 0)]
+    [InlineData("EMAIL_MAX_SENDS_PER_DAY", "100000", 100_000)]
+    [InlineData("EMAIL_MAX_SENDS_PER_DAY", "100001", 7)]
+    [InlineData("EMAIL_MAX_SENDS_PER_DAY", "lots", 7)]
+    [InlineData("EMAIL_MIN_SECONDS_BETWEEN_SENDS", "0", 0)]
+    [InlineData("EMAIL_MIN_SECONDS_BETWEEN_SENDS", "86400", 86_400)]
+    [InlineData("EMAIL_MIN_SECONDS_BETWEEN_SENDS", "86401", 7)]
+    [InlineData("EMAIL_MIN_SECONDS_BETWEEN_SENDS", "1.5", 7)]
+    public void EmailRateLimitVariables_AcceptZeroUpToTheirBound(string variable, string value, int expected)
+    {
+        _environment.Set(variable, value);
+        var options = new AppSettings { EmailMaxSendsPerHour = 7, EmailMaxSendsPerDay = 7, EmailMinSecondsBetweenSends = 7 };
+
+        PostConfigure.PostConfigure(Options.DefaultName, options);
+
+        var actual = variable switch
+        {
+            "EMAIL_MAX_SENDS_PER_HOUR" => options.EmailMaxSendsPerHour,
+            "EMAIL_MAX_SENDS_PER_DAY" => options.EmailMaxSendsPerDay,
+            _ => options.EmailMinSecondsBetweenSends,
+        };
+        Assert.Equal(expected, actual);
     }
 
     /// <summary>

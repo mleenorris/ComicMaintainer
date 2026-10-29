@@ -14,6 +14,8 @@ internal static class ConfigDirectoryResolver
 
     public const string ConfigurationKey = "AppSettings:ConfigDirectory";
 
+    public const string ResolvedDirectoryConfigurationKey = "ComicMaintainer:ResolvedConfigDirectory";
+
     public const string DefaultDirectory = "/Config";
 
     public static string Resolve(IConfiguration configuration)

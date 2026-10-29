@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 
 namespace ComicMaintainer.WebApi.Startup;
 
@@ -72,6 +73,14 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         if (!string.IsNullOrEmpty(suwayomiPassword))
             options.SuwayomiPassword = suwayomiPassword;
 
+        var suwayomiDownloadsDir = Environment.GetEnvironmentVariable("SUWAYOMI_DOWNLOADS_DIR");
+        if (!string.IsNullOrEmpty(suwayomiDownloadsDir))
+            options.SuwayomiDownloadsDirectory = suwayomiDownloadsDir;
+
+        var suwayomiImportDir = Environment.GetEnvironmentVariable("SUWAYOMI_IMPORT_DIR");
+        if (!string.IsNullOrEmpty(suwayomiImportDir))
+            options.SuwayomiImportDirectory = suwayomiImportDir;
+
         var mangaDexRps = Environment.GetEnvironmentVariable("MANGADEX_REQUESTS_PER_SECOND");
         if (!string.IsNullOrEmpty(mangaDexRps) && int.TryParse(mangaDexRps, out var mdRps) && mdRps > 0)
             options.MangaDexRequestsPerSecond = mdRps;
@@ -135,6 +144,23 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var emailMaxAttachmentMb = Environment.GetEnvironmentVariable("EMAIL_MAX_ATTACHMENT_MB");
         if (!string.IsNullOrEmpty(emailMaxAttachmentMb) && int.TryParse(emailMaxAttachmentMb, out var maxAttachmentMb) && maxAttachmentMb > 0)
             options.EmailMaxAttachmentMegabytes = maxAttachmentMb;
+
+        // Email rate limit. 0 is accepted so an environment variable can switch
+        // off a limit saved from the UI.
+        var emailMaxSendsPerHour = Environment.GetEnvironmentVariable("EMAIL_MAX_SENDS_PER_HOUR");
+        if (!string.IsNullOrEmpty(emailMaxSendsPerHour) && int.TryParse(emailMaxSendsPerHour, out var maxSendsPerHour)
+            && maxSendsPerHour is >= 0 and <= EmailRateLimitBounds.MaxSendsPerHour)
+            options.EmailMaxSendsPerHour = maxSendsPerHour;
+
+        var emailMaxSendsPerDay = Environment.GetEnvironmentVariable("EMAIL_MAX_SENDS_PER_DAY");
+        if (!string.IsNullOrEmpty(emailMaxSendsPerDay) && int.TryParse(emailMaxSendsPerDay, out var maxSendsPerDay)
+            && maxSendsPerDay is >= 0 and <= EmailRateLimitBounds.MaxSendsPerDay)
+            options.EmailMaxSendsPerDay = maxSendsPerDay;
+
+        var emailMinSecondsBetweenSends = Environment.GetEnvironmentVariable("EMAIL_MIN_SECONDS_BETWEEN_SENDS");
+        if (!string.IsNullOrEmpty(emailMinSecondsBetweenSends) && int.TryParse(emailMinSecondsBetweenSends, out var minSecondsBetweenSends)
+            && minSecondsBetweenSends is >= 0 and <= EmailRateLimitBounds.MaxMinSecondsBetweenSends)
+            options.EmailMinSecondsBetweenSends = minSecondsBetweenSends;
 
         // Automated error reporting. Provided as environment variables as well as
         // settings so the token can be supplied by a Docker secret / orchestrator

@@ -223,6 +223,7 @@
                 showMessage('No duplicates to delete', 'error');
                 return;
             }
+            if (!jobProgress.canStartJob()) return;
 
             if (!confirm(`Are you sure you want to delete all ${paths.length} file(s) marked as duplicates?\n\nThis action cannot be undone!`)) {
                 return;
@@ -610,12 +611,16 @@
         async function confirmCombineFolders() {
             const body = buildCombineFoldersRequestBody();
             if (!body) return;
+            if (!jobProgress.canStartJob()) return;
             const group = getCurrentCombineFolderGroup();
             const sourceCount = group ? group.folders.length - 1 : 0;
             const message = `Combine ${sourceCount} folder${sourceCount === 1 ? '' : 's'} into:\n${combineFolderSelectedDestination}\n\nFiles will be moved on disk. Continue?`;
             if (!confirm(message)) {
                 return;
             }
+            // No other job can be started while the server plans the moves;
+            // released in `finally` unless this job got tracked meanwhile.
+            const jobStart = jobProgress.beginJobStart();
             combineFolderActionInFlight = true;
             document.getElementById('combineFoldersPreviewBtn').disabled = true;
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
@@ -666,6 +671,7 @@
                 console.error('Failed to combine folders:', error);
                 showMessage(`Failed to combine folders: ${error.message}`, 'error');
             } finally {
+                jobProgress.endJobStart(jobStart);
                 combineFolderActionInFlight = false;
                 renderCombineFolderGroup();
             }
@@ -712,6 +718,8 @@
         
         async function saveTags() {
             if (!currentEditFile) return;
+            // Refused before the dialog closes, so the edits are not lost.
+            if (!jobProgress.canStartJob()) return;
 
             // Capture the target file path before calling closeModal(), which
             // resets currentEditFile to null. Without this snapshot, the
@@ -822,6 +830,8 @@
                 showMessage('Please enter at least one tag to update', 'error');
                 return;
             }
+            // Refused before the dialog closes, so the edits are not lost.
+            if (!jobProgress.canStartJob()) return;
             
             closeBatchModal();
             showProgressModal('Updating metadata...');

@@ -9,6 +9,16 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class FileStoreService
 {
+    private readonly record struct FileStatusSnapshot(
+        bool IsRenamed,
+        bool IsNormalized,
+        bool IsDuplicate,
+        DateTime CreatedAt)
+    {
+        public static FileStatusSnapshot FromComicFile(ComicFile file) =>
+            new(file.IsRenamed, file.IsNormalized, file.IsDuplicate, file.CreatedAt);
+    }
+
     public async Task AddFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
         // Validate path is within allowed directories
@@ -24,13 +34,14 @@ public partial class FileStoreService
         var fileInfo = new FileInfo(filePath);
         
         // Check if file exists in database to preserve status
-        bool isRenamed = false;
-        bool isNormalized = false;
-        bool isDuplicate = _duplicateFiles.ContainsKey(filePath);
+        var status = new FileStatusSnapshot(
+            IsRenamed: false,
+            IsNormalized: false,
+            IsDuplicate: _duplicateFiles.ContainsKey(filePath),
+            CreatedAt: DateTime.UtcNow);
         // Default the creation stamp to now for a brand-new file; if the file is already
         // tracked in the database, preserve its original CreatedAt so re-adds (e.g. watcher
         // re-scan) don't reset the series recency window used by Overview "Series Updates".
-        DateTime createdAt = DateTime.UtcNow;
         // Durable per-file metadata and version stamps that must survive a re-add, so a
         // watcher re-scan doesn't discard authored metadata and force a needless reprocess.
         // (Read state is no longer carried here: it is per-user, keyed by path in
@@ -47,10 +58,7 @@ public partial class FileStoreService
             if (entity != null)
             {
                 // Preserve existing status from database
-                isRenamed = entity.IsRenamed;
-                isNormalized = entity.IsNormalized;
-                isDuplicate = entity.IsDuplicate;
-                createdAt = entity.CreatedAt;
+                status = new(entity.IsRenamed, entity.IsNormalized, entity.IsDuplicate, entity.CreatedAt);
                 tracked = ToComicFile(entity);
             }
         }
@@ -60,11 +68,12 @@ public partial class FileStoreService
         }
 
         // Fall back to the in-memory snapshot when the database row could not be read
-        // (or does not exist yet) so a transient database error can't silently drop
-        // read/metadata state either.
+        // (or does not exist yet) so a transient database error can't silently reset the
+        // file to unprocessed, move its CreatedAt to now, or drop its metadata either.
         if (tracked is null && _files.TryGetValue(filePath, out var cachedFile))
         {
             tracked = cachedFile;
+            status = FileStatusSnapshot.FromComicFile(cachedFile);
         }
 
         var comicFile = new ComicFile
@@ -74,11 +83,11 @@ public partial class FileStoreService
             Directory = fileInfo.DirectoryName ?? string.Empty,
             FileSize = fileInfo.Length,
             LastModified = fileInfo.LastWriteTime,
-            CreatedAt = createdAt,
-            IsRenamed = isRenamed,
-            IsNormalized = isNormalized,
-            IsProcessed = ComputeProcessedState(isRenamed, isNormalized),
-            IsDuplicate = isDuplicate,
+            CreatedAt = status.CreatedAt,
+            IsRenamed = status.IsRenamed,
+            IsNormalized = status.IsNormalized,
+            IsProcessed = ComputeProcessedState(status.IsRenamed, status.IsNormalized),
+            IsDuplicate = status.IsDuplicate,
             // Per-user read state lives in UserFileReadStatuses and is keyed by path, so a
             // re-add cannot lose it and there is nothing to carry over onto the shared
             // in-memory entry (which is visible to every user).
@@ -301,6 +310,10 @@ public partial class FileStoreService
                 var newEntity = await dbContext.ComicFiles
                     .FirstOrDefaultAsync(e => e.FilePath == newPath, cancellationToken);
 
+                // Set once the old-path row turns out to have been deleted by a concurrent
+                // writer, so the merge below must not try to delete it again.
+                var oldRowDeleted = false;
+
                 if (newEntity == null)
                 {
                     // Rename the existing row in-place to preserve all columns (including IsRenamed, IsNormalized, etc.)
@@ -320,8 +333,7 @@ public partial class FileStoreService
                         MarkChanged();
                         _logger.LogDebug("Updated file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
                     }
-                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
-                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+                    catch (DbUpdateException ex) when (IsSqliteUniqueConstraintViolation(dbContext, ex))
                     {
                         // Race condition: another writer (typically the watcher observing the
                         // move as a Created event) inserted a row for the new path between the
@@ -344,12 +356,30 @@ public partial class FileStoreService
 
                         _logger.LogDebug("New path row was created concurrently, merging instead: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
                     }
+                    catch (DbUpdateConcurrencyException)
+                    {
+                        // Race condition: another writer (typically the watcher observing the
+                        // move as a Deleted event for the old path) deleted the old-path row
+                        // between the lookup above and this save, so the rename matched no row.
+                        // The file still exists at the new path and this entity still carries
+                        // its processing state, so put a row back for the new path (or pick up
+                        // the one another writer has inserted there meanwhile) and fall through
+                        // to the merge path below, which folds that state onto it. Without this
+                        // the save failed outright, leaving the moved file without a row (losing
+                        // its processing state) and skipping the read-status move.
+                        dbContext.ChangeTracker.Clear();
+                        oldRowDeleted = true;
+                        newEntity = await FindOrRestoreMovedRowAsync(dbContext, entity, cancellationToken);
+
+                        _logger.LogDebug("Old path row was deleted concurrently, adopting or restoring the new-path row: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+                    }
                 }
 
                 if (newEntity != null)
                 {
-                    // New path already has a row (found up front, or by the unique-constraint
-                    // recovery above). This happens when the FileSystemWatcher observes the
+                    // New path already has a row (found up front, by the unique-constraint
+                    // recovery above, or restored after the old row was deleted concurrently).
+                    // This happens when the FileSystemWatcher observes the
                     // move as a Created event and inserts a default stub row for the target
                     // *before* the processor migrates the original record.
                     // The old-path row is the authoritative carrier of processing state for
@@ -358,6 +388,12 @@ public partial class FileStoreService
                     // Without this merge, a normalize-then-rename sequence loses IsNormalized
                     // (the stub's default false wins), leaving the file permanently
                     // "unprocessed" until it is normalized again.
+                    if (fileInfo != null)
+                    {
+                        newEntity.FileSize = fileInfo.Length;
+                        newEntity.LastModified = fileInfo.LastWriteTime;
+                    }
+
                     newEntity.IsRenamed = newEntity.IsRenamed || entity.IsRenamed;
                     newEntity.IsNormalized = newEntity.IsNormalized || entity.IsNormalized;
                     newEntity.IsDuplicate = newEntity.IsDuplicate || entity.IsDuplicate;
@@ -392,8 +428,25 @@ public partial class FileStoreService
 
                     newEntity.UpdatedAt = DateTime.UtcNow;
 
-                    dbContext.ComicFiles.Remove(entity);
-                    await dbContext.SaveChangesAsync(cancellationToken);
+                    if (!oldRowDeleted)
+                        dbContext.ComicFiles.Remove(entity);
+
+                    try
+                    {
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (DbUpdateConcurrencyException ex) when (ex.Entries.All(e => e.State == EntityState.Deleted))
+                    {
+                        // Race condition: the old-path row was deleted concurrently (e.g. by the
+                        // watcher) after it was loaded, so its delete matched no row and rolled
+                        // back the whole merge. That delete is moot now; drop it and save the
+                        // merged state onto the new-path row on its own.
+                        foreach (var entry in ex.Entries)
+                            entry.State = EntityState.Detached;
+
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogDebug("Old path row was deleted concurrently during merge: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+                    }
                     MarkChanged();
                     _logger.LogDebug("Merged processing state from stale old-path entry into existing new-path row: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
                 }
@@ -428,6 +481,76 @@ public partial class FileStoreService
             {
                 _logger.LogWarning(ex, "Failed to broadcast file list update after path update");
             }
+        }
+    }
+
+    // SQLite extended result codes (SQLITE_CONSTRAINT_UNIQUE / SQLITE_CONSTRAINT_PRIMARYKEY).
+    private const int SqliteConstraintUnique = 2067;
+    private const int SqliteConstraintPrimaryKey = 1555;
+
+    private bool IsSqliteUniqueConstraintViolation(ComicMaintainerDbContext dbContext, DbUpdateException exception)
+    {
+        // SQLite is the application's configured provider; other providers must not use
+        // SQLite result codes to classify a failed save as a recoverable path collision.
+        if (dbContext.Database.ProviderName != "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            _logger.LogDebug("File-path collision recovery requires SQLite; database provider is {Provider}",
+                dbContext.Database.ProviderName);
+            return false;
+        }
+
+        return exception.GetBaseException() is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
+            sqliteEx.SqliteExtendedErrorCode is SqliteConstraintUnique or SqliteConstraintPrimaryKey;
+    }
+
+    /// <summary>
+    /// Returns the tracked row at the path <paramref name="movedEntity"/> was being renamed to,
+    /// inserting a copy of it when the old-path row was deleted concurrently and no other writer
+    /// has put a row there yet. <paramref name="movedEntity"/> already holds the new path's
+    /// file details; the caller merges its processing state onto the returned row.
+    /// </summary>
+    private async Task<ComicFileEntity> FindOrRestoreMovedRowAsync(
+        ComicMaintainerDbContext dbContext,
+        ComicFileEntity movedEntity,
+        CancellationToken cancellationToken)
+    {
+        var newPath = movedEntity.FilePath;
+        var existing = await dbContext.ComicFiles
+            .FirstOrDefaultAsync(e => e.FilePath == newPath, cancellationToken);
+        if (existing != null)
+            return existing;
+
+        // Carry the moved row's processing state, timestamps and metadata on the restored row
+        // from its first save, so a concurrent reader never caches default flags for it and
+        // nothing (e.g. LastWriteAt without metadata) depends on the later merge to survive.
+        var restored = new ComicFileEntity();
+        dbContext.Entry(restored).CurrentValues.SetValues(movedEntity);
+        // Preserve every scalar except the generated key and the last-update stamp.
+        restored.Id = 0;
+        restored.UpdatedAt = DateTime.UtcNow;
+        restored.Metadata = movedEntity.Metadata?.Clone();
+        dbContext.ComicFiles.Add(restored);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            MarkChanged();
+            return restored;
+        }
+        catch (DbUpdateException ex) when (IsSqliteUniqueConstraintViolation(dbContext, ex))
+        {
+            // Another writer (e.g. the watcher) inserted the new-path row meanwhile; merge onto it.
+            if (restored.Metadata != null)
+                dbContext.Entry(restored.Metadata).State = EntityState.Detached;
+            dbContext.Entry(restored).State = EntityState.Detached;
+            var winner = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == newPath, cancellationToken);
+            if (winner == null)
+            {
+                throw;
+            }
+
+            return winner;
         }
     }
 

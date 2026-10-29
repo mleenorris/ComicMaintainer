@@ -17,9 +17,10 @@ const OTHER_JOB_ID = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 // Base64url without padding, as encodeFilePathForUrl() (js/app/api.js) puts file paths into URLs.
 const b64 = filePath => Buffer.from(filePath, 'utf8').toString('base64url');
 
-// GET /api/jobs/{id} as JobsController.GetJob returns it. `results` lists the
-// job's files; tests list only finished ones (see the final report on
-// pollJobStatusOnce counting unfinished files as failures).
+// GET /api/jobs/{id} as JobsController.GetJob returns it. processed_items
+// counts the files that succeeded and failed_items those that failed;
+// `results` lists every file of the job, the ones not processed yet as
+// { success: false, error: null } (the default lists none).
 function jobStatus(overrides = {}) {
     return {
         job_id: JOB_ID,
@@ -103,7 +104,7 @@ function unexpectedError(path, reference) {
     }, { 'X-Correlation-Id': reference });
 }
 
-// The request loadActiveLibraryView(1, true) sends to reload the series library.
+// The request loadActiveLibraryView({ refresh: true }) sends to reload the series library.
 const LIBRARY_RELOAD = /^\/api\/files\/series\?offset=0&limit=60&refresh=true$/;
 
 // The job the progress tests track: Process Unmarked (one confirm(), no
@@ -309,6 +310,13 @@ async function startTrackedJob(page) {
     takeMessages(page);
 }
 
+// End the tracked job as the server would (cancelled, which reloads nothing)
+// and let the progress modal handle it: no other job can be started before.
+async function endTrackedJob(t, page, jobId = JOB_ID) {
+    jobUpdate(page, 'cancelled', progress(0, 0), jobId);
+    await tick(t, page, 500);
+}
+
 // Tick the checkbox of a series issue card, as a user selecting it would.
 function selectIssue(page, filePath, checked = true) {
     const checkbox = issueCard(page, filePath).querySelector('.series-issue-select input[type="checkbox"]');
@@ -448,6 +456,7 @@ module.exports = {
     chooseMenuItem,
     chooseIssueAction,
     startTrackedJob,
+    endTrackedJob,
     selectIssue,
     openScheduledJobsPage,
     jobCard,

@@ -72,6 +72,32 @@ if [ "$CONFIG_DIR" != "/Config" ]; then
     chmod -R u+rwX "$CONFIG_DIR" 2>/dev/null || true
 fi
 
+# The JWT signing key the app generates when JWT_SECRET is not set (and its temporary files) must stay private to
+# its user, wherever it is kept, so it is left out of the permission change below. Keys made readable by earlier
+# versions of this script are made private again first.
+find /watched_dir /duplicates /Config "$CONFIG_DIR" -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \
+    -exec chmod 600 {} + 2>/dev/null || true
+# Secret files named by JWT_SECRET_FILE or ADMIN_PASSWORD_FILE keep the permissions they were given. When the
+# named path is a symlink, the file it points to is excluded too. find -path takes a glob pattern, so glob
+# metacharacters in the paths are escaped to match them literally.
+escape_find_glob() {
+    local value=$1
+    value=${value//\\/\\\\}
+    value=${value//\*/\\*}
+    value=${value//\?/\\?}
+    value=${value//\[/\\[}
+    printf '%s' "$value"
+}
+SECRET_FILE_EXCLUSIONS=()
+for secret_file in "${JWT_SECRET_FILE:-}" "${ADMIN_PASSWORD_FILE:-}"; do
+    if [ -n "$secret_file" ]; then
+        SECRET_FILE_EXCLUSIONS+=(! -path "$(escape_find_glob "$(realpath -ms -- "$secret_file")")")
+        SECRET_FILE_EXCLUSIONS+=(! -path "$(escape_find_glob "$(realpath -m -- "$secret_file")")")
+    fi
+done
+find /watched_dir /duplicates ! -type l ! \( -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \) \
+    "${SECRET_FILE_EXCLUSIONS[@]}" -exec chmod 755 {} + 2>/dev/null || true
+
 # Switch to the specified user and run the application
 echo "Switching to user $USER_NAME (UID=$PUID, GID=$PGID)"
 exec gosu "$USER_NAME" dotnet ComicMaintainer.WebApi.dll

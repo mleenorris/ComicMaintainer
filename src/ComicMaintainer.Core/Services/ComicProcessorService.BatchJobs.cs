@@ -110,6 +110,12 @@ public partial class ComicProcessorService
 
     public Task<Guid> DeleteFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
+        // Paths usually ignore case on Windows while the file store matches them exactly, so
+        // there the tracked spellings of a deleted file are looked up, from one listing per job.
+        var trackedPaths = new Lazy<Task<ILookup<string, string>>>(async () =>
+            (await _fileStore.GetAllFilesAsync(CancellationToken.None))
+                .ToLookup(f => f.FilePath, f => f.FilePath, StringComparer.OrdinalIgnoreCase));
+
         return QueueBatchJobAsync(
             filePaths,
             "DeleteFilesAsync",
@@ -118,14 +124,63 @@ public partial class ComicProcessorService
             {
                 try
                 {
-                    if (File.Exists(filePath))
+                    if (!TryResolveAllowedEntry(filePath, out var entryPath))
+                    {
+                        _logger.LogWarning(
+                            "DeleteFilesAsync: file is outside the allowed directories: {FilePath}",
+                            LoggingHelper.SanitizePathForLog(filePath));
+                        return false;
+                    }
+
+                    // The library path of the entry that is deleted, which differs from the
+                    // requested path when that goes through a linked directory.
+                    var entryDirectory = Path.GetDirectoryName(entryPath)!;
+                    var canonicalPath = Path.Join(GetAllowedLogicalPath(entryDirectory), Path.GetFileName(entryPath));
+                    var requestedPaths = new[] { filePath, canonicalPath };
+                    var storePaths = requestedPaths.Distinct(StringComparer.Ordinal).ToArray();
+                    if (OperatingSystem.IsWindows())
+                    {
+                        // A differently cased tracked path names this entry only where its
+                        // directories ignore case, which a Windows directory can be set not to,
+                        // so it must open as the same entry. Checked before the entry is deleted;
+                        // when it is already missing, so must the tracked path be.
+                        var tracked = await trackedPaths.Value;
+                        var entryIdentity = NativeFileSystem.TryReadWindowsEntryPath(entryPath);
+                        storePaths = storePaths
+                            .Concat(requestedPaths
+                                .SelectMany(path => tracked[path])
+                                .Where(path => string.Equals(
+                                    NativeFileSystem.TryReadWindowsEntryPath(path), entryIdentity, StringComparison.Ordinal)))
+                            .Distinct(StringComparer.Ordinal)
+                            .ToArray();
+                    }
+
+                    // Open the checked directory now, so the entry is deleted from it even if
+                    // the directory is replaced (e.g. by a link out of the library) meanwhile.
+                    using var directoryHandle = Directory.Exists(entryDirectory) ? OpenDeleteDirectory(entryPath) : null;
+                    var entryInDirectory = GetEntryPathInDirectory(directoryHandle, entryPath);
+
+                    // Only files are deleted: a directory, or a link to one, would take every
+                    // comic beneath it with it. Directory.Exists follows links, while Path.Exists
+                    // is also true for a link whose target is missing.
+                    if (Directory.Exists(entryInDirectory))
+                    {
+                        _logger.LogWarning(
+                            "DeleteFilesAsync: not deleting a directory: {FilePath}",
+                            LoggingHelper.SanitizePathForLog(filePath));
+                        await LogHistoryAsync(canonicalPath, "Delete", false, "Not a file", token);
+                        return false;
+                    }
+
+                    if (Path.Exists(entryInDirectory))
                     {
                         // Remove from file store first (unlikely to fail), then
                         // delete the physical file. This order prevents orphaned
                         // file-store entries if the disk delete fails.
-                        await _fileStore.RemoveFileAsync(filePath, token);
-                        File.Delete(filePath);
-                        await LogHistoryAsync(filePath, "Delete", true, null, token);
+                        foreach (var storePath in storePaths)
+                            await _fileStore.RemoveFileAsync(storePath, token);
+                        DeleteFileInDirectory(directoryHandle, entryPath);
+                        await LogHistoryAsync(canonicalPath, "Delete", true, null, token);
                         return true;
                     }
 
@@ -133,7 +188,8 @@ public partial class ComicProcessorService
                     // so the library list reflects reality.
                     try
                     {
-                        await _fileStore.RemoveFileAsync(filePath, token);
+                        foreach (var storePath in storePaths)
+                            await _fileStore.RemoveFileAsync(storePath, token);
                     }
                     catch (Exception removeEx)
                     {
@@ -141,7 +197,7 @@ public partial class ComicProcessorService
                             "DeleteFilesAsync: file-store cleanup failed for missing file {FilePath}",
                             LoggingHelper.SanitizePathForLog(filePath));
                     }
-                    await LogHistoryAsync(filePath, "Delete", false, "File not found on disk", token);
+                    await LogHistoryAsync(canonicalPath, "Delete", false, "File not found on disk", token);
                     return false;
                 }
                 catch (Exception ex)

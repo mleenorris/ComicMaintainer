@@ -165,6 +165,7 @@ public sealed class ConfigDirectoryStartupTests : IDisposable
         services.GetRequiredService<IDataProtectionProvider>().CreateProtector(nameof(ConfigDirectoryStartupTests)).Protect("payload");
         Assert.NotEmpty(Directory.GetFiles(keysDirectory, "key-*.xml"));
 
+        Assert.True(File.Exists(Path.Join(directory, "jwt-secret.key")), $"JWT signing key should be in {directory}");
         Assert.True(File.Exists(Path.Join(directory, "user-settings.json")), $"user-settings.json should be in {directory}");
         Assert.Equal(directory, services.GetRequiredService<IOptionsMonitor<AppSettings>>().CurrentValue.ConfigDirectory);
         Assert.Equal(Path.Join(directory, "backups"), services.GetRequiredService<IDatabaseBackupService>().BackupDirectory);

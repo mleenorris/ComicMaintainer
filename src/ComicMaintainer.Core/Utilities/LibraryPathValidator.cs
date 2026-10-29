@@ -95,18 +95,26 @@ public static class LibraryPathValidator
     /// <paramref name="fullPath"/> is the normalized <paramref name="directory"/>
     /// itself or lives beneath it. Trailing separators are ignored, a sibling that
     /// merely shares the directory's name as a prefix (<c>/comics2</c> next to
-    /// <c>/comics</c>) is outside, and case is ignored only on Windows. A directory
-    /// that is nothing but separators, such as the Unix file system root, contains
-    /// nothing: allowing it would make the check meaningless, so it fails closed.
+    /// <c>/comics</c>) is outside, and case is ignored only on Windows. A file
+    /// system root (the Unix <c>/</c>, a Windows drive root such as <c>C:\</c>, or a
+    /// UNC share root) contains nothing: allowing it would make the check
+    /// meaningless, so it fails closed.
     /// </summary>
     public static bool IsSameOrUnder(string fullPath, string directory)
     {
         var root = directory.TrimEnd(Separators);
-        if (root.Length == 0)
+        if (root.Length == 0 || IsFileSystemRoot(directory, root))
             return false;
 
         return string.Equals(fullPath.TrimEnd(Separators), root, PathComparison)
             || fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison);
+    }
+
+    private static bool IsFileSystemRoot(string directory, string trimmedDirectory)
+    {
+        var pathRoot = Path.GetPathRoot(directory);
+        return !string.IsNullOrEmpty(pathRoot)
+            && string.Equals(trimmedDirectory, pathRoot.TrimEnd(Separators), PathComparison);
     }
 
     /// <summary>

@@ -72,13 +72,13 @@ public class SeriesImagesController : ControllerBase
             return NotFound();
         }
 
-        // Use the file's last-write time and length as a strong ETag (no W/
-        // prefix) so browsers can avoid re-downloading unchanged images. Image
-        // filenames already include a content hash, so the file mtime is a
-        // stable revalidation token.
+        // Use the file's last-write time and length as a weak ETag (W/ prefix)
+        // so browsers can avoid re-downloading unchanged images. mtime + length
+        // is not a byte-for-byte guarantee, so it is not claimed as strong; weak
+        // validators are all If-None-Match revalidation needs.
         var fileInfo = new FileInfo(path);
         var lastWriteUtc = fileInfo.LastWriteTimeUtc;
-        var etag = $"\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}\"";
+        var etag = $"W/\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}\"";
 
         var requestEtag = Request.Headers[HeaderNames.IfNoneMatch].ToString();
         if (!string.IsNullOrEmpty(requestEtag)

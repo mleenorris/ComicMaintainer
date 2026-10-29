@@ -129,6 +129,23 @@ public sealed class LibraryPathValidatorTests : IDisposable
     }
 
     [Fact]
+    public void IsSameOrUnder_TreatsWindowsDriveAndShareRootsAsContainingNothing()
+    {
+        // Drive and UNC share roots are only file system roots on Windows; elsewhere they
+        // are ordinary relative names whose children are contained like any directory's.
+        var isWindows = OperatingSystem.IsWindows();
+        var sep = Path.DirectorySeparatorChar;
+
+        Assert.Equal(!isWindows, LibraryPathValidator.IsSameOrUnder($"C:{sep}comics{sep}Saga 001.cbz", $"C:{sep}"));
+        Assert.Equal(!isWindows, LibraryPathValidator.IsSameOrUnder($"C:{sep}comics{sep}Saga 001.cbz", "C:"));
+        if (isWindows)
+        {
+            Assert.False(LibraryPathValidator.IsSameOrUnder(@"\\server\share\comics\Saga 001.cbz", @"\\server\share\"));
+            Assert.True(LibraryPathValidator.IsSameOrUnder(@"\\server\share\comics\Saga 001.cbz", @"\\server\share\comics"));
+        }
+    }
+
+    [Fact]
     public void IsSameOrUnder_IgnoresCaseOnlyOnWindows()
     {
         Assert.Equal(

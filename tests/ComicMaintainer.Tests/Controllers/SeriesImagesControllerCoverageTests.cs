@@ -77,7 +77,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     private static string ExpectedEtag(string path)
     {
         var info = new FileInfo(path);
-        return $"\"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}\"";
+        return $"W/\"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}\"";
     }
 
     private static string? ErrorOf(object? value) => value is null ? null : JObject.FromObject(value)["error"]?.ToString();

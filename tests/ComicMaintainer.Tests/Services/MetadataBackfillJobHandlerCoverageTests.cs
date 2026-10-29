@@ -32,7 +32,7 @@ public class MetadataBackfillJobHandlerCoverageTests
         NullLogger<MetadataBackfillJobHandler>.Instance);
 
     private void SetupBatch(params ComicFile[] files) =>
-        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
     private static ComicFile Pending(string path, int version = 2) => new()
@@ -151,7 +151,93 @@ public class MetadataBackfillJobHandlerCoverageTests
         var summary = await CreateHandler().ExecuteAsync(optionsJson, CancellationToken.None);
 
         Assert.Equal("Backfill: 0 files updated, 0 failed (queue size was 0).", summary);
-        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(expectedBatchSize, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(expectedBatchSize, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // Stands in for the files table: honours the requested batch size and page cursor, returns
+    // files in path order, and drops a file once its version is marked as written.
+    private List<ComicFile> SetupQueue(int count, Func<string, bool>? markClearsFile = null)
+    {
+        var queue = Enumerable.Range(1, count).Select(i => Pending($"/library/A/c{i:D3}.cbz")).ToList();
+        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int max, string? after, CancellationToken _) =>
+            {
+                lock (queue)
+                {
+                    return queue
+                        .Where(f => after is null || string.CompareOrdinal(f.FilePath, after) > 0)
+                        .OrderBy(f => f.FilePath, StringComparer.Ordinal)
+                        .Take(Math.Max(0, max))
+                        .ToList();
+                }
+            });
+        _fileStore.Setup(f => f.MarkFileBackfilledAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<string, int, CancellationToken>((path, _, _) =>
+            {
+                if (markClearsFile?.Invoke(path) ?? true)
+                {
+                    lock (queue)
+                    {
+                        queue.RemoveAll(f => f.FilePath == path);
+                    }
+                }
+            })
+            .Returns(Task.CompletedTask);
+        return queue;
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MoreQueuedThanOneBatch_WritesThemAll()
+    {
+        // Regression: a run wrote one batch and stopped, so edits beyond the first 200 stayed
+        // unwritten when the schedule is disabled.
+        var queue = SetupQueue(201);
+
+        var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Equal("Backfill: 201 files updated, 0 failed (queue size was 201).", summary);
+        Assert.Empty(queue);
+        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FailedFilesFillABatch_AreTriedOnceAndDoNotHideLaterFiles()
+    {
+        var queue = SetupQueue(5);
+        var failing = new[] { "/library/A/c001.cbz", "/library/A/c002.cbz" };
+        foreach (var path in failing)
+        {
+            _processor.Setup(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+        }
+
+        var summary = await CreateHandler().ExecuteAsync("""{"maxBatch":2}""", CancellationToken.None);
+
+        Assert.Equal("Backfill: 3 files updated, 2 failed (queue size was 5).", summary);
+        Assert.Equal(failing.Order(), queue.Select(f => f.FilePath).Order());
+        foreach (var path in failing)
+        {
+            _processor.Verify(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        // Regression: each read grew by the earlier failures, so a failure backlog made reads
+        // quadratic. Every read now asks for one batch and starts after the previous page.
+        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(2, null, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(2, "/library/A/c002.cbz", It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(2, "/library/A/c004.cbz", It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WrittenFileStillQueued_IsNotWrittenAgainInTheSameRun()
+    {
+        var queue = SetupQueue(3, markClearsFile: path => path != "/library/A/c002.cbz");
+
+        var summary = await CreateHandler().ExecuteAsync("""{"maxBatch":1}""", CancellationToken.None);
+
+        Assert.Equal("Backfill: 3 files updated, 0 failed (queue size was 3).", summary);
+        Assert.Single(queue);
+        _processor.Verify(p => p.UpdateMetadataAsync("/library/A/c002.cbz", It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

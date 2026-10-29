@@ -7,6 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond, plain } = require('./support/dom');
+const { addReadOnlyGate, isDisplayed } = require('./support/app');
 const {
     bootSeriesPage,
     seriesIssue,
@@ -315,6 +316,21 @@ test('Cancel and Escape close the tag editor without saving', async t => {
     assert.ok(!isModalOpen(page, 'tagModal'));
 
     assert.equal(callsTo(page, 'POST', '/api/jobs/update-metadata-selected').length, 0);
+});
+
+test('read-only users can view an issue\'s tags but are not offered Save', async t => {
+    const page = await boot({
+        user: { canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] },
+        beforeScripts: addReadOnlyGate,
+        routes: { [`GET /api/files/${encodedPath(FIRST)}/tags`]: comicMetadata() }
+    });
+    t.after(() => page.close());
+
+    clickIssueAction(page, FIRST, 'View/Edit');
+    await page.waitFor(() => isModalOpen(page, 'tagModal'));
+
+    assert.equal(page.$('#title').value, 'Chapter One');
+    assert.deepEqual(page.$$('#tagModal .modal-footer .btn').filter(isDisplayed).map(button => button.textContent.trim()), ['Cancel']);
 });
 
 test('Update on a selection opens the batch editor and sends the filled tags', async t => {

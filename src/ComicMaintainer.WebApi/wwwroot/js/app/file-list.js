@@ -99,21 +99,21 @@
                                         ${uiIcon('check-circle')} Mark Read
                                     </button>`
                                 }
-                                <div class="dropdown-divider"></div>
-                                <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                <div class="dropdown-divider" data-requires-write></div>
+                                <button class="dropdown-item" data-requires-write onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     ${uiIcon('play')} Process
                                 </button>
-                                <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                <button class="dropdown-item" data-requires-write onclick="renameSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     ${uiIcon('pencil')} Rename
                                 </button>
-                                <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                <button class="dropdown-item" data-requires-write onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     ${uiIcon('tag')} Normalize
                                 </button>
-                                <button class="dropdown-item" onclick="removeFileMetadata('${escapeJs(file.relative_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
+                                <button class="dropdown-item" data-requires-write onclick="removeFileMetadata('${escapeJs(file.relative_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
                                     ${uiIcon('eraser')} Remove Metadata
                                 </button>
-                                <div class="dropdown-divider"></div>
-                                <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                <div class="dropdown-divider" data-requires-write></div>
+                                <button class="dropdown-item" data-requires-write onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     ${uiIcon('trash')} Delete
                                 </button>
                             </div>

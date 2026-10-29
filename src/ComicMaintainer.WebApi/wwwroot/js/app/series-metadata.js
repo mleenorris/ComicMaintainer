@@ -10,7 +10,35 @@
         // External Series Metadata (manual refresh + alias management)
         // ====================================================================
 
-        let manageSeriesState = { seriesTitle: '', record: null };
+        // recordLoaded: the initial GET of the series record succeeded.
+        // hasRecord: a record from the server is listed, so the alias list
+        // includes the stored aliases.
+        // nameChoices: counts the series names picked or adopted, so a name
+        // save that waits can tell a later choice was made.
+        let manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false, hasRecord: false, nameChoices: 0 };
+
+        // Keep a record a Manage Names request sent back. The other controls
+        // save straight away but alias edits wait for Save, so once the list
+        // has been edited the edits replace the stored aliases in it, for Save
+        // to persist. Without a server record the stored aliases were never
+        // listed, so the aliases added meanwhile are merged into them instead.
+        function setManageSeriesRecord(record) {
+            const { record: current, aliasesEdited, hasRecord } = manageSeriesState;
+            if (aliasesEdited && current && record) {
+                const edited = current.user_aliases || [];
+                if (hasRecord) {
+                    record.user_aliases = edited;
+                } else {
+                    const merged = [...(record.user_aliases || [])];
+                    edited.forEach(alias => {
+                        if (!merged.some(a => a.toLowerCase() === alias.toLowerCase())) merged.push(alias);
+                    });
+                    record.user_aliases = merged;
+                }
+            }
+            manageSeriesState.record = record;
+            if (record) manageSeriesState.hasRecord = true;
+        }
 
         async function refreshAllExternalMetadata() {
             if (!confirm('Queue an external metadata refresh for every series in the library? Lookups happen in the background and progress is reported as a job.')) {
@@ -428,7 +456,7 @@
         }
 
         async function openManageSeriesNamesModal(seriesTitle) {
-            manageSeriesState = { seriesTitle, record: null };
+            manageSeriesState = { seriesTitle, record: null, aliasesEdited: false, recordLoaded: false, hasRecord: false, nameChoices: 0 };
             document.getElementById('manageSeriesTitle').textContent = seriesTitle;
             document.getElementById('manageSeriesProviderAliases').textContent = 'Loading...';
             document.getElementById('manageSeriesProviderSource').textContent = '';
@@ -448,23 +476,28 @@
 
         function closeManageSeriesNamesModal() {
             document.getElementById('manageSeriesNamesModal').classList.remove('active');
-            manageSeriesState = { seriesTitle: '', record: null };
+            manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false, hasRecord: false, nameChoices: 0 };
         }
 
         async function loadManageSeriesRecord() {
-            const { seriesTitle } = manageSeriesState;
+            const state = manageSeriesState;
+            const { seriesTitle } = state;
             if (!seriesTitle) return;
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}`), {
                     headers: getAuthHeaders(),
                     credentials: 'same-origin'
                 });
+                if (state !== manageSeriesState) return;
                 if (!response.ok) {
                     showMessage('Failed to load series metadata', 'error');
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                if (state !== manageSeriesState) return;
+                // Aliases added while the record loaded are merged into it.
+                setManageSeriesRecord(record);
+                state.recordLoaded = true;
                 const prefSelect = document.getElementById('manageSeriesPreferredLanguage');
                 if (prefSelect) {
                     prefSelect.value = record.preferred_language || '';
@@ -540,7 +573,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesImage(record);
                 showMessage('Series image updated', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
@@ -572,7 +605,7 @@
                 }
                 if (response.ok) {
                     const updated = await response.json();
-                    manageSeriesState.record = updated;
+                    setManageSeriesRecord(updated);
                     renderManageSeriesImage(updated);
                 }
                 showMessage('Series image cleared', 'success');
@@ -697,7 +730,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesImage(record);
                 showMessage('Series image updated from provider', 'success');
                 closeFetchSeriesImageFromProvider();
@@ -765,7 +798,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 showMessage(value ? `Preferred language set to ${value}` : 'Preferred language cleared', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
@@ -834,13 +867,19 @@
 
         // Save just the per-series name (called on the select's change event,
         // same UX pattern as the preferred-language control). An empty value
-        // reverts to automatic resolution.
-        async function saveManageSeriesName() {
+        // reverts to automatic resolution. Callers other than the select pass
+        // the name to save explicitly.
+        async function saveManageSeriesName(name) {
             const { seriesTitle } = manageSeriesState;
             if (!seriesTitle) return;
             const select = document.getElementById('manageSeriesName');
             if (!select) return;
-            const value = select.value || null;
+            if (name === undefined) {
+                manageSeriesState.nameChoices++;
+            } else {
+                selectManageSeriesName(select, name);
+            }
+            const value = (name === undefined ? select.value : name) || null;
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/name`), {
                     method: 'PUT',
@@ -858,7 +897,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 populateManageSeriesNameOptions(record);
                 renderManageSeriesUserAliases(record);
                 showMessage(value ? `Series name set to "${value}"` : 'Series name set to automatic', 'success');
@@ -881,7 +920,7 @@
             renderHtml(container, aliases.map(a => html`
                 <span class="badge" style="display: inline-flex; align-items: center; padding: 4px 4px 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">
                     ${a}
-                    <button type="button" onclick="removeManageSeriesAlias('${jsArg(a)}')" style="margin-left: 6px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px;" title="Remove alias">×</button>
+                    <button type="button" data-requires-write onclick="removeManageSeriesAlias('${jsArg(a)}')" style="margin-left: 6px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px;" title="Remove alias">×</button>
                 </span>
             `));
         }
@@ -897,6 +936,7 @@
             if (!current.some(a => a.toLowerCase() === value.toLowerCase())) {
                 current.push(value);
                 manageSeriesState.record.user_aliases = current;
+                manageSeriesState.aliasesEdited = true;
                 renderManageSeriesUserAliases(manageSeriesState.record);
                 // Surface the new alias as a selectable "Series Name" option so
                 // it can immediately be picked as the sticky series name.
@@ -909,25 +949,45 @@
             if (!manageSeriesState.record) return;
             const current = manageSeriesState.record.user_aliases || [];
             manageSeriesState.record.user_aliases = current.filter(a => a.toLowerCase() !== alias.toLowerCase());
+            manageSeriesState.aliasesEdited = true;
             renderManageSeriesUserAliases(manageSeriesState.record);
             // Keep the "Series Name" dropdown in sync with the alias list.
             populateManageSeriesNameOptions(manageSeriesState.record);
         }
 
-        async function saveManageSeriesNames() {
-            const { seriesTitle, record } = manageSeriesState;
-            if (!seriesTitle || !record) return;
-            const payload = {
-                aliases: record.user_aliases || []
-            };
-            try {
+        // The last alias PUT queued for each series title.
+        const manageSeriesAliasWrites = new Map();
+
+        // PUT an alias list as the series' user aliases, replacing the stored
+        // ones. Resolves to whether the server accepted it; rejects when the
+        // request cannot be sent (e.g. a network error). Each PUT replaces
+        // the whole list, so the writes for a series are sent one at a time,
+        // in order: an older list can't be committed over a newer one.
+        function putManageSeriesUserAliases(seriesTitle, aliases) {
+            const body = JSON.stringify({ aliases });
+            const previous = manageSeriesAliasWrites.get(seriesTitle) || Promise.resolve();
+            const write = previous.then(async () => {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin',
-                    body: JSON.stringify(payload)
+                    body
                 });
-                if (!response.ok) {
+                return response.ok;
+            });
+            const done = write.catch(() => {});
+            manageSeriesAliasWrites.set(seriesTitle, done);
+            done.then(() => {
+                if (manageSeriesAliasWrites.get(seriesTitle) === done) manageSeriesAliasWrites.delete(seriesTitle);
+            });
+            return write;
+        }
+
+        async function saveManageSeriesNames() {
+            const { seriesTitle, record } = manageSeriesState;
+            if (!seriesTitle || !record) return;
+            try {
+                if (!(await putManageSeriesUserAliases(seriesTitle, record.user_aliases || []))) {
                     showMessage('Failed to save series names', 'error');
                     return;
                 }
@@ -962,7 +1022,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
@@ -1069,7 +1129,7 @@
                                 </div>
                             </div>
                             <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Aliases: ${aliases}</div>
-                            <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
+                            <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;" data-requires-write>
                                 <button class="btn btn-small btn-primary" type="button" onclick="applySearchResultAsMatch(${idx})" title="Mark this candidate as the correct match for the series">${uiIcon('check-circle')} Use This Match</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'canonical')">Adopt as Canonical</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'aliases')">Add Aliases</button>
@@ -1111,21 +1171,65 @@
                 addIfNew(result.canonical_title);
             }
             manageSeriesState.record.user_aliases = current;
+            manageSeriesState.aliasesEdited = true;
             renderManageSeriesUserAliases(manageSeriesState.record);
             populateManageSeriesNameOptions(manageSeriesState.record);
             if (mode === 'canonical' && result.canonical_title) {
                 const select = document.getElementById('manageSeriesName');
                 if (select) {
-                    if (![...select.options].some(o => o.value === result.canonical_title)) {
-                        const opt = document.createElement('option');
-                        opt.value = result.canonical_title;
-                        opt.textContent = result.canonical_title;
-                        select.appendChild(opt);
-                    }
-                    select.value = result.canonical_title;
-                    saveManageSeriesName();
+                    selectManageSeriesName(select, result.canonical_title);
+                    saveAdoptedSeriesNames(result.canonical_title);
                 }
             }
+        }
+
+        function selectManageSeriesName(select, name) {
+            if (![...select.options].some(o => o.value === name)) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                select.appendChild(opt);
+            }
+            select.value = name;
+        }
+
+        // Adopt as Canonical pins the series name, which saves straight away,
+        // so the aliases it adopted are saved first instead of waiting for
+        // Save. If they can't be saved the stored name is kept as well, and
+        // the adopted aliases stay listed for Save.
+        async function saveAdoptedSeriesNames(name) {
+            const state = manageSeriesState;
+            const { seriesTitle, record } = state;
+            if (!seriesTitle || !record) return;
+            // Adopting a title counts as a name choice, so one picked or
+            // adopted after it wins over it.
+            const nameChoice = ++state.nameChoices;
+            // Without a loaded record the list lacks the stored aliases, which
+            // saving it would replace: pin the name alone (the server adds it
+            // to them) and leave the other adopted names for Save.
+            if (!state.recordLoaded) {
+                await saveManageSeriesName(name);
+                return;
+            }
+            let saved = false;
+            try {
+                saved = await putManageSeriesUserAliases(seriesTitle, record.user_aliases || []);
+            } catch (err) {
+                console.error('saveAdoptedSeriesNames failed', err);
+            }
+            // The modal was closed or reopened meanwhile: leave the name alone.
+            if (state !== manageSeriesState) return;
+            const nameChosen = state.nameChoices !== nameChoice;
+            if (!saved) {
+                showMessage('Failed to save series names', 'error');
+                const select = document.getElementById('manageSeriesName');
+                if (select && !nameChosen) select.value = (state.record && state.record.series_name) || '';
+                return;
+            }
+            if (nameChosen) return;
+            // Editing the aliases meanwhile rebuilds the select from the
+            // stored name, so the adopted name is passed explicitly.
+            await saveManageSeriesName(name);
         }
 
         // Mark one of the candidates returned by /search as the *correct*
@@ -1169,7 +1273,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
@@ -1212,7 +1316,7 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
+                setManageSeriesRecord(record);
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);

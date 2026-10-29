@@ -9,7 +9,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
-const { deferred } = require('./support/app');
+const { deferred, addReadOnlyGate, isDisplayed } = require('./support/app');
 const {
     bootSeriesPage,
     combinableFolder,
@@ -346,4 +346,25 @@ test('Merge Folders falls back to the group suggestion and to the first group', 
     assert.deepEqual(await mergeWith({ combine_group_key: 'series:saga' }), {
         counter: '1 of 2', title: 'Paper Girls', selected: '/comics/Paper Girls'
     });
+});
+
+test('read-only users are not offered the merge, even with the modal open', async t => {
+    const page = await bootSeriesPage({
+        user: { canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] },
+        beforeScripts: addReadOnlyGate,
+        routes: { [FOLDERS]: seriesFolders() }
+    });
+    t.after(() => page.close());
+
+    // Series Actions (and its Manage Folders) is hidden from them.
+    assert.equal(isDisplayed(page.$('.series-actions-dropdown')), false);
+    await page.run("openSeriesFoldersModal('saga', 'Saga')");
+    await page.settle();
+
+    assert.deepEqual(folderRows(page), [
+        ['/comics/Saga', '12 files · 1.5 MB'],
+        ['/comics/Saga (2012)', '1 file · 900 B']
+    ]);
+    assert.equal(isDisplayed(page.$('#seriesFoldersMergeNote')), false);
+    assert.deepEqual(page.$$('#seriesFoldersModal .modal-footer .btn').filter(isDisplayed).map(button => button.textContent.trim()), ['Close']);
 });

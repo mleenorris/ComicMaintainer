@@ -348,6 +348,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed with 401 unless signed in through Authelia.
 - **Uploading a series image from the series page works**; the request was sent as JSON instead
   of a file upload and always rejected.
+- **Manage Names no longer loses alias edits.** Adopt as Canonical saved only the chosen name,
+  so the other names it adopted dropped out of the alias list. After a preferred language or
+  series image change the list still showed unsaved edits, but Save stored the earlier aliases
+  and reported "Series names saved". Adopt as Canonical now saves the adopted aliases before the
+  name, and unsaved alias edits survive the modal's other controls until Save stores them.
 - **The series page no longer keeps renamed or deleted issues selected.** When its issues
   reloaded (after the watcher renamed or moved a file, a job ran in another tab, or a ticked
   issue was deleted from its own menu), the selection kept the vanished files: the count was too
@@ -607,6 +612,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and every declared resource present and non-empty), and email delivery additionally rejects
   an empty attachment, so a bad conversion is recorded as a failed delivery rather than mailed
   to the device.
+- **Metadata edits saved while a metadata backfill is running are written to the archive.**
+  Saving an edit starts a metadata backfill that writes it to the file's ComicInfo.xml. If one
+  was already running, the request was dropped, and the running backfill had already chosen
+  its files, so the edit was not written until the next backfill; with the schedule off (the
+  default) that took another edit or a manual run. The backfill now runs again as soon as the
+  current run finishes.
 - **Error messages no longer show another request's support reference.** The `(ref: …)` added
   to an error was the correlation id of whichever API call had last failed with one in the
   previous 15 seconds, so a request that never reached the server (offline, network error) or
@@ -656,6 +667,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field that issue-number-padding never returned and documents the `PUT` routes and their
   `{"message"}` responses; the watcher section replaces the non-existent `/api/watcher/enabled`
   routes with `GET /api/watcher`.
+
+- **Read-only users are no longer offered actions that change the library on a series page.**
+  An issue's menu listed Process, Rename, Normalize, Remove Metadata and Delete; the Actions
+  menu Manage Names, Manage Folders, Refresh Metadata, Refresh Folder, Update Covers and Reset
+  Processed Status; and the Edit Tags, Series Folders, Manage Series Names and Duplicate Review
+  windows had Save, Merge Folders, editing and Delete Duplicate buttons. Choosing one ended,
+  often after a confirmation, in a generic "Failed to …" error, because the server refuses them
+  to read-only accounts. They are now hidden like the selection toolbar: an issue offers only
+  Info, View/Edit, Read Comic, Mark Read/Unread and, for a duplicate, Review Duplicate; the
+  Actions menu is gone; and the file menus of the Files view match.
 
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
@@ -3478,6 +3499,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.396] - 2026-10-29
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.397] - 2026-10-29
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.398] - 2026-10-29
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.399] - 2026-10-29
 
 ### Changed
 - Automatic version bump on merge to master

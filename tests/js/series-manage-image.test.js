@@ -400,3 +400,36 @@ test('cover candidates without a full image, or left over in a closed modal, are
     page.click(imageButton(page, 'Fetch from Provider'));
     assert.equal(providerQuery(page).value, '', 'no series is being managed');
 });
+
+test('changing the series image keeps unsaved alias edits for Save (#848)', async () => {
+    const stored = { user_aliases: ['My Saga', 'Old Saga'] };
+    const page = await coverSearchPage(metadataRecord(stored));
+    // Each image request answers with the stored record, aliases included.
+    page.route(`POST ${FROM_PROVIDER}`, metadataRecord({ ...stored, has_image: true }));
+    page.route(`PUT ${UPLOAD}`, metadataRecord({ ...stored, has_image: true, is_user_image: true }));
+    page.route(`DELETE ${IMAGE}`, metadataRecord(stored));
+    const userAliases = () => page.$$('#manageSeriesUserAliases .badge').map(badge => text(badge).replace(/\s*×$/, ''));
+    const edited = ['My Saga', 'New Saga'];
+
+    page.input('#manageSeriesNewAlias', 'New Saga');
+    page.click(buttonIn(page, MODAL, 'Add'));
+    page.run('removeManageSeriesAlias(\'Old Saga\')');
+    assert.deepEqual(userAliases(), edited);
+
+    page.click(candidateCards(page)[0]);
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { text: 'Series image updated from provider', type: 'success' });
+    chooseFile(page, imageFile(page, 'cover.png', 'image/png'));
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { text: 'Series image updated', type: 'success' });
+    page.click(imageButton(page, 'Clear Image'));
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { text: 'Series image cleared', type: 'success' });
+    assert.deepEqual(userAliases(), edited);
+
+    const aliases = '/api/metadata/series/Saga/aliases';
+    page.route(`PUT ${aliases}`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Save'));
+    await page.settle();
+    assert.deepEqual(callsTo(page, aliases, 'PUT')[0].body, { aliases: edited });
+});

@@ -21,7 +21,12 @@ public interface IFileStoreService
 
     Task ApplyUserMetadataEditAsync(string filePath, ComicMetadata patch, ComicMetadataFieldFlags lockFields, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<ComicFile>> GetFilesNeedingBackfillAsync(int max, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Get up to <paramref name="max"/> files whose DB metadata has not been written back, ordered by
+    /// file path. Pass the last path of the previous page as <paramref name="afterFilePath"/> to read
+    /// the next page.
+    /// </summary>
+    Task<IReadOnlyList<ComicFile>> GetFilesNeedingBackfillAsync(int max, string? afterFilePath = null, CancellationToken cancellationToken = default);
 
     Task MarkFileBackfilledAsync(string filePath, int version, CancellationToken cancellationToken = default);
 

@@ -68,7 +68,8 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         ISeriesNameResolver? seriesNameResolver = null,
         IJobStateStore? jobStateStore = null,
         IComicEmailService? comicEmail = null,
-        ComicMaintainerMetrics? metrics = null)
+        ComicMaintainerMetrics? metrics = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _metrics = metrics;
         _settingsMonitor = settings;
@@ -79,9 +80,12 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         _seriesMetadataCache = seriesMetadataCache;
         // DI always supplies the resolver. An instance built by hand (as tests do) gets the
         // standard one over the same cache and provider, so there is a single implementation
-        // of the series-name priority.
+        // of the series-name priority. Pass a logger factory so its warnings stay visible.
         _seriesNameResolver = seriesNameResolver ?? new SeriesNameResolver(
-            settings, NullLogger<SeriesNameResolver>.Instance, seriesMetadataCache, externalSeriesMetadata);
+            settings,
+            loggerFactory?.CreateLogger<SeriesNameResolver>() ?? NullLogger<SeriesNameResolver>.Instance,
+            seriesMetadataCache,
+            externalSeriesMetadata);
         _jobStateStore = jobStateStore;
         _comicEmail = comicEmail;
         _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);

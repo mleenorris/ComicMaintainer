@@ -51,6 +51,22 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_WithoutResolver_CreatesFallbackResolverLoggerFromFactory()
+    {
+        var loggerFactory = new Mock<ILoggerFactory>();
+        loggerFactory.Setup(f => f.CreateLogger(It.IsAny<string>())).Returns(Mock.Of<ILogger>());
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            loggerFactory: loggerFactory.Object);
+
+        loggerFactory.Verify(f => f.CreateLogger(typeof(SeriesNameResolver).FullName!), Times.Once());
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_NonExistentFile_ReturnsFalse()
     {
         // Arrange

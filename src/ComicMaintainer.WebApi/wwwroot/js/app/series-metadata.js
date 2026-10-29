@@ -12,6 +12,19 @@
 
         let manageSeriesState = { seriesTitle: '', record: null };
 
+        // Server-supplied detail from a parsed JSON error body: either a bare
+        // JSON string or an object with a string `error` field. Anything else
+        // yields '' so callers fall back to their generic message.
+        function serverErrorDetail(errorData) {
+            if (typeof errorData === 'string') {
+                return errorData.trim();
+            }
+            if (errorData && typeof errorData.error === 'string') {
+                return errorData.error.trim();
+            }
+            return '';
+        }
+
         async function refreshAllExternalMetadata() {
             if (!confirm('Queue an external metadata refresh for every series in the library? Lookups happen in the background and progress is reported as a job.')) {
                 return;
@@ -23,9 +36,9 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => null);
-                    showMessage(errorData && errorData.error
-                        ? 'Failed to queue metadata refresh: ' + errorData.error
+                    const detail = serverErrorDetail(await response.json().catch(() => null));
+                    showMessage(detail
+                        ? 'Failed to queue metadata refresh: ' + detail
                         : 'Failed to queue metadata refresh', 'error');
                     return;
                 }
@@ -53,9 +66,9 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => null);
-                    showMessage(errorData && errorData.error
-                        ? 'Failed to queue match-unmatched: ' + errorData.error
+                    const detail = serverErrorDetail(await response.json().catch(() => null));
+                    showMessage(detail
+                        ? 'Failed to queue match-unmatched: ' + detail
                         : 'Failed to queue match-unmatched', 'error');
                     return;
                 }

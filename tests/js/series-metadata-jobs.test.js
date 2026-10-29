@@ -358,6 +358,14 @@ test('Refresh All and Match All Unmatched report server and network errors', asy
     await choose(page, 'Match All Unmatched Series');
     assert.deepEqual(lastMessage(page), { text: 'Failed to queue match-unmatched', type: 'error' });
 
+    // A bare JSON string body is surfaced as the server's message.
+    page.route('POST /api/metadata/refresh-all', respond(400, JSON.stringify('Unknown provider')));
+    page.route('POST /api/metadata/match-unmatched', respond(400, JSON.stringify('Matching disabled')));
+    await choose(page, 'Refresh All External Metadata');
+    assert.deepEqual(lastMessage(page), { text: 'Failed to queue metadata refresh: Unknown provider', type: 'error' });
+    await choose(page, 'Match All Unmatched Series');
+    assert.deepEqual(lastMessage(page), { text: 'Failed to queue match-unmatched: Matching disabled', type: 'error' });
+
     const offline = () => { throw new TypeError('Failed to fetch'); };
     page.route('POST /api/metadata/refresh-all', offline);
     page.route('POST /api/metadata/match-unmatched', offline);

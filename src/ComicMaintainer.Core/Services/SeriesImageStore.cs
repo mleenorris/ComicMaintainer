@@ -335,7 +335,9 @@ public class SeriesImageStore : ISeriesImageStore
         // Count the bytes actually read and fail as soon as the running total
         // passes the cap, so oversized payloads are detected without trusting
         // Content-Length.
-        using var ms = new MemoryStream();
+        // Start with a small bounded capacity so typical uploads avoid repeated
+        // regrowth without pre-allocating the whole cap.
+        using var ms = new MemoryStream(Math.Min(64 * 1024, Math.Max(0, maxBytes)));
         var buffer = new byte[81920];
         var total = 0;
         int read;

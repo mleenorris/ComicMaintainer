@@ -431,7 +431,10 @@ Cancel a running job.
 
 ## Settings
 
-Changing a setting requires the `Admin` role (`CanAdminister` policy). Each
+Changing a setting requires the `CanAdminister` policy. This normally means the
+`Admin` role, but when Authelia is enabled without `AUTHELIA_ADMIN_GROUPS`, every
+signed-in user who is not `ReadOnly` (local accounts included) passes it; see
+[Role Mapping](AUTHELIA.md#role-mapping). Each
 `PUT /api/settings/...` endpoint below also accepts `POST`, a legacy alias with the
 same body and response.
 

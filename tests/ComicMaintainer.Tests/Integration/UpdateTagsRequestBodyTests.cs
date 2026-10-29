@@ -31,10 +31,17 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
 
     private readonly string _root = Path.Join(AppContext.BaseDirectory, "update-tags-body-tests", Guid.NewGuid().ToString("N"));
 
+    private readonly List<WebApplicationFactory<Program>> _factories = new();
+
     private string WatchedDirectory => Path.Join(_root, "watched");
 
     public void Dispose()
     {
+        foreach (var factory in _factories)
+        {
+            factory.Dispose();
+        }
+
         SqliteConnection.ClearAllPools();
         Exception? cleanupError = null;
         for (var attempt = 0; attempt < 3; attempt++)
@@ -147,8 +154,8 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
         await using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
-        using var response = await client.PostAsync("/api/files/tags",
-            new StringContent(body.Replace("{path}", JsonSerializer.Serialize(path)), Encoding.UTF8, "application/json"));
+        using var content = new StringContent(body.Replace("{path}", JsonSerializer.Serialize(path)), Encoding.UTF8, "application/json");
+        using var response = await client.PostAsync("/api/files/tags", content);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var responseBody = await response.Content.ReadAsStringAsync();
@@ -217,7 +224,9 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
             ["AppSettings:WatcherEnableNormalize"] = "false",
         };
 
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        var factory = new WebApplicationFactory<Program>();
+        _factories.Add(factory);
+        return factory.WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Development");
             foreach (var (key, value) in overrides)

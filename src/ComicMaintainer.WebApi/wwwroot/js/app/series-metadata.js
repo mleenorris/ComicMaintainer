@@ -13,6 +13,8 @@
         // recordLoaded: the initial GET of the series record succeeded.
         // hasRecord: a record from the server is listed, so the alias list
         // includes the stored aliases.
+        // nameChoices: counts the series names picked or adopted, so a name
+        // save that waits can tell a later choice was made.
         let manageSeriesState = { seriesTitle: '', record: null, aliasesEdited: false, recordLoaded: false, hasRecord: false, nameChoices: 0 };
 
         // Keep a record a Manage Names request sent back. The other controls
@@ -1181,6 +1183,9 @@
             const state = manageSeriesState;
             const { seriesTitle, record } = state;
             if (!seriesTitle || !record) return;
+            // Adopting a title counts as a name choice, so one picked or
+            // adopted after it wins over it.
+            const nameChoice = ++state.nameChoices;
             // Without a loaded record the list lacks the stored aliases, which
             // saving it would replace: pin the name alone (the server adds it
             // to them) and leave the other adopted names for Save.
@@ -1188,8 +1193,6 @@
                 await saveManageSeriesName(name);
                 return;
             }
-            // A name the user picks while the aliases save wins over this one.
-            const nameChoices = state.nameChoices;
             let saved = false;
             try {
                 saved = await putManageSeriesUserAliases(seriesTitle, record.user_aliases || []);
@@ -1198,7 +1201,7 @@
             }
             // The modal was closed or reopened meanwhile: leave the name alone.
             if (state !== manageSeriesState) return;
-            const nameChosen = state.nameChoices !== nameChoices;
+            const nameChosen = state.nameChoices !== nameChoice;
             if (!saved) {
                 showMessage('Failed to save series names', 'error');
                 const select = document.getElementById('manageSeriesName');

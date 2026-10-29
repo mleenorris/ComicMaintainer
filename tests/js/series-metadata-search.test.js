@@ -365,6 +365,49 @@ test('Adopt as Canonical keeps a series name the user picks while the aliases sa
     assert.equal(nameSelect(page).value, 'Saga Deluxe');
 });
 
+test('Adopt as Canonical pins the title adopted last, whichever adoption\'s aliases save first', async () => {
+    for (const order of [['later', 'earlier'], ['earlier', 'later']]) {
+        const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'], series_name: 'My Saga' }));
+        const saving = { earlier: deferred(), later: deferred() };
+        page.route(`PUT ${NAME}`, call => metadataRecord({ series_name: call.body.name }));
+        page.route(`PUT ${ALIASES}`, () => saving.earlier.promise);
+        await onResult(page, 0, 'Adopt as Canonical');
+        page.route(`PUT ${ALIASES}`, () => saving.later.promise);
+        await onResult(page, 1, 'Adopt as Canonical');
+
+        for (const adoption of order) {
+            saving[adoption].resolve(metadataRecord());
+            await page.settle();
+        }
+
+        const message = `${order.join(' then ')} aliases saved`;
+        assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga of the Swamp Thing' }], message);
+        assert.equal(nameSelect(page).value, 'Saga of the Swamp Thing', message);
+        assert.deepEqual(lastMessage(page), { text: 'Series name set to "Saga of the Swamp Thing"', type: 'success' }, message);
+    }
+});
+
+test('Adopt as Canonical leaves a title adopted after it selected when its own aliases fail to save', async () => {
+    const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'], series_name: 'My Saga' }));
+    const earlier = deferred();
+    const later = deferred();
+    page.route(`PUT ${NAME}`, call => metadataRecord({ series_name: call.body.name }));
+    page.route(`PUT ${ALIASES}`, () => earlier.promise);
+    await onResult(page, 0, 'Adopt as Canonical');
+    page.route(`PUT ${ALIASES}`, () => later.promise);
+    await onResult(page, 1, 'Adopt as Canonical');
+
+    earlier.resolve(respond(500, 'Error updating aliases'));
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { text: 'Failed to save series names', type: 'error' });
+    assert.equal(nameSelect(page).value, 'Saga of the Swamp Thing', 'the stored name is not selected over the later title');
+
+    later.resolve(metadataRecord());
+    await page.settle();
+    assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga of the Swamp Thing' }]);
+    assert.equal(nameSelect(page).value, 'Saga of the Swamp Thing');
+});
+
 test('candidates can still be adopted when the series record failed to load', async () => {
     const page = await searchedPage(respond(500));
 

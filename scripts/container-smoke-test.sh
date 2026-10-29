@@ -77,6 +77,10 @@ docker run --rm \
     "${IMAGE}" \
     -c "chown root:root '${APP_CONFIG_DIR}' && chmod 700 '${APP_CONFIG_DIR}' && touch '${APP_CONFIG_DIR}/.permission-test' && chmod 600 '${APP_CONFIG_DIR}/.permission-test'"
 
+# The admin password is read from a private file in /duplicates, which the entrypoint otherwise opens up to everyone.
+printf '%s\n' 'SmokeTestPassword123!' > "${DUP_DIR}/.admin-password"
+chmod 600 "${DUP_DIR}/.admin-password"
+
 log "Starting container ${CONTAINER_NAME} from ${IMAGE} on port ${HOST_PORT}"
 docker run -d \
     --name "${CONTAINER_NAME}" \
@@ -87,7 +91,7 @@ docker run -d \
     -e JWT_SECRET="smoke-test-secret-key-must-be-at-least-32-characters-long!!" \
     -e ADMIN_USERNAME=admin \
     -e ADMIN_EMAIL=admin@smoke.local \
-    -e ADMIN_PASSWORD=SmokeTestPassword123! \
+    -e ADMIN_PASSWORD_FILE=/duplicates/.admin-password \
     -e WATCHER_ENABLE_RENAME=true \
     -e WATCHER_ENABLE_NORMALIZE=false \
     -v "${WATCH_DIR}:/watched_dir" \
@@ -124,6 +128,8 @@ directory_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' "${APP_C
 secret_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' "${APP_CONFIG_DIR}/.permission-test")"
 [ "${directory_mode}" = "700" ] || fail "Custom CONFIG_DIR mode changed to ${directory_mode}, expected 700"
 [ "${secret_mode}" = "600" ] || fail "Private config file mode changed to ${secret_mode}, expected 600"
+admin_password_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' /duplicates/.admin-password)"
+[ "${admin_password_mode}" = "600" ] || fail "ADMIN_PASSWORD_FILE mode changed to ${admin_password_mode}, expected 600"
 
 # --- Verify the watcher sees / processes the fixture file -----------------
 log "Waiting up to ${PROCESSING_TIMEOUT}s for the watcher to react to the fixture..."

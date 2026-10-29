@@ -56,10 +56,11 @@ else
     useradd -r -u "$PUID" -g "$GROUP_NAME" comicmaintainer
 fi
 
-# Ensure directories exist and have correct permissions
+# Ensure directories exist and have correct permissions. /Config holds credentials and keys, so it only gains owner
+# access. Only the last find below opens up /watched_dir and /duplicates, as it leaves secret files out: a recursive
+# chmod would expose them, and that find would not make them private again.
 mkdir -p /watched_dir /duplicates /Config
 chown -R "$PUID:$PGID" /app /Config /watched_dir /duplicates 2>/dev/null || true
-chmod -R 755 /watched_dir /duplicates 2>/dev/null || true
 chmod -R u+rwX /Config 2>/dev/null || true
 
 # CONFIG_DIR holds the database, DataProtection keys, logs and settings, so a custom one must be

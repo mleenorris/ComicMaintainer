@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace ComicMaintainer.Tests.Startup;
 
 /// <summary>
@@ -49,5 +51,24 @@ public class EntrypointConfigDirectoryTests
         // Config volumes hold credentials and DataProtection keys; only owner access may be added.
         Assert.DoesNotContain("chmod -R 755 \"$CONFIG_DIR\"", script);
         Assert.DoesNotContain("chmod -R 755 /Config", script);
+    }
+
+    [Fact]
+    public void Entrypoint_WidensLibraryPermissionsOnlyThroughTheFindThatSkipsSecretFiles()
+    {
+        var script = ReadEntrypoint();
+        var gosu = script.IndexOf("exec gosu", StringComparison.Ordinal);
+
+        // A recursive chmod cannot skip the JWT signing key or the files named by JWT_SECRET_FILE and
+        // ADMIN_PASSWORD_FILE, and the find that skips them does not make them private again, so a recursive
+        // chmod may only add owner access.
+        Assert.All(Regex.Matches(script, @"\bchmod\s+-R\s+(\S+)"), chmod => Assert.Equal("u+rwX", chmod.Groups[1].Value));
+
+        // /watched_dir and /duplicates are opened up in one place: that find, after the JWT signing key is made private.
+        Assert.Single(Regex.Matches(script, @"\bchmod\s+755\b"));
+        var privatized = script.IndexOf("-exec chmod 600 {} +", StringComparison.Ordinal);
+        var widened = script.IndexOf("\"${SECRET_FILE_EXCLUSIONS[@]}\" -exec chmod 755 {} +", StringComparison.Ordinal);
+        Assert.InRange(privatized, 0, gosu);
+        Assert.InRange(widened, privatized, gosu);
     }
 }

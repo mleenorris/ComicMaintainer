@@ -166,8 +166,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the container and lost when it was recreated. Outside Docker, a non-root user could not open
   the database at all. The directory is now chosen once (`CONFIG_DIR`, then
   `AppSettings:ConfigDirectory`, then `/Config`) and used for all of them, and the container
-  makes a custom `CONFIG_DIR` writable by `PUID`. If the directory cannot be created, everything
-  falls back to one temporary directory and a warning says so.
+  makes a custom `CONFIG_DIR` writable by `PUID`. At startup the container now only gives `PUID`
+  access to the config directories (`/Config` and `CONFIG_DIR`); it no longer makes them readable
+  by everyone, even when one is inside `/watched_dir` or `/duplicates`. If the directory cannot be
+  created, everything falls back to one temporary directory and a warning says so.
   **Upgrade note:** stop the app before upgrading and preserve its existing database and
   `DataProtection-Keys` directory. The old database/key location is the previous effective
   `AppSettings:ConfigDirectory` value (from `AppSettings__ConfigDirectory` or `appsettings.json`),

@@ -57,8 +57,8 @@ else
 fi
 
 # Ensure directories exist and have correct permissions. /Config holds credentials and keys, so it only gains owner
-# access. Only the last find below opens up /watched_dir and /duplicates, as it leaves secret files out: a recursive
-# chmod would expose them, and that find would not make them private again.
+# access. Only the last find below opens up /watched_dir and /duplicates, as it leaves secret files and the config
+# directories out: a recursive chmod would expose them, and that find would not make them private again.
 mkdir -p /watched_dir /duplicates /Config
 chown -R "$PUID:$PGID" /app /Config /watched_dir /duplicates 2>/dev/null || true
 chmod -R u+rwX /Config 2>/dev/null || true
@@ -96,7 +96,17 @@ for secret_file in "${JWT_SECRET_FILE:-}" "${ADMIN_PASSWORD_FILE:-}"; do
         SECRET_FILE_EXCLUSIONS+=(! -path "$(escape_find_glob "$(realpath -m -- "$secret_file")")")
     fi
 done
-find /watched_dir /duplicates ! -type l ! \( -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \) \
+# The config directories hold the database, DataProtection keys and settings, so they keep their permissions even when
+# one is inside /watched_dir or /duplicates. They are matched by inode, which also catches a host folder nested in a
+# library folder and mounted on its own. find -samefile fails on a missing file, so only existing ones are listed.
+CONFIG_DIR_EXCLUSIONS=()
+for config_dir in /Config "$CONFIG_DIR"; do
+    if config_dir=$(realpath -e -- "$config_dir" 2>/dev/null); then
+        CONFIG_DIR_EXCLUSIONS+=(-samefile "$config_dir" -prune -o)
+    fi
+done
+find /watched_dir /duplicates "${CONFIG_DIR_EXCLUSIONS[@]}" ! -type l \
+    ! \( -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \) \
     "${SECRET_FILE_EXCLUSIONS[@]}" -exec chmod 755 {} + 2>/dev/null || true
 
 # Switch to the specified user and run the application

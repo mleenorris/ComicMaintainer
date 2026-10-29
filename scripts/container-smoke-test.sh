@@ -25,7 +25,9 @@ PROCESSING_TIMEOUT="${PROCESSING_TIMEOUT:-60}"
 WORKDIR="$(mktemp -d)"
 WATCH_DIR="${WORKDIR}/watch"
 DUP_DIR="${WORKDIR}/duplicates"
-HOST_CONFIG_DIR="${WORKDIR}/config"
+# The config folder sits inside the duplicates folder on the host, so the entrypoint's permission change on
+# /duplicates reaches it too and must leave it alone.
+HOST_CONFIG_DIR="${DUP_DIR}/config"
 APP_CONFIG_DIR="/custom-config"
 mkdir -p "${WATCH_DIR}" "${DUP_DIR}" "${HOST_CONFIG_DIR}"
 

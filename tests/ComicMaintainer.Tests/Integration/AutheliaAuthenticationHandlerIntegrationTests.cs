@@ -7,7 +7,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ComicMaintainer.Tests.Integration;
@@ -274,11 +273,7 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
                 builder.UseSetting("AppSettings:WatchedDirectory", watched);
                 builder.UseSetting("AppSettings:DuplicateDirectory", duplicates);
                 builder.UseSetting("AppSettings:ConfigDirectory", config);
-                builder.ConfigureAppConfiguration((_, configuration) =>
-                    configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        ["CONFIG_DIR"] = config,
-                    }));
+                builder.UseSetting("CONFIG_DIR", config);
                 builder.UseSetting("AutheliaSettings:Enabled", "true");
                 builder.UseSetting("AutheliaSettings:AdminGroups", "admins, operators");
                 builder.UseSetting("AutheliaSettings:TrustedProxies", "172.18.0.0/16");

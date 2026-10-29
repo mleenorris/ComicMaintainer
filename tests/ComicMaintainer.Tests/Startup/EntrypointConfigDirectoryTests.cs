@@ -71,4 +71,21 @@ public class EntrypointConfigDirectoryTests
         Assert.InRange(privatized, 0, gosu);
         Assert.InRange(widened, privatized, gosu);
     }
+
+    [Fact]
+    public void Entrypoint_LeavesConfigDirectoriesOutOfTheLibraryPermissionChange()
+    {
+        var script = ReadEntrypoint();
+
+        // A config directory may be inside /watched_dir or /duplicates, so the find that opens them up prunes both
+        // /Config and CONFIG_DIR; otherwise every restart would make the database and DataProtection keys readable.
+        var listed = script.IndexOf("for config_dir in /Config \"$CONFIG_DIR\"; do", StringComparison.Ordinal);
+        var excluded = script.IndexOf("CONFIG_DIR_EXCLUSIONS+=(-samefile \"$config_dir\" -prune -o)", StringComparison.Ordinal);
+        var widening = script.IndexOf("find /watched_dir /duplicates \"${CONFIG_DIR_EXCLUSIONS[@]}\" ", StringComparison.Ordinal);
+        var widened = script.IndexOf("-exec chmod 755 {} +", StringComparison.Ordinal);
+        Assert.InRange(listed, 0, excluded);
+        Assert.InRange(excluded, listed, widening);
+        Assert.InRange(widening, excluded, widened);
+        Assert.Single(Regex.Matches(script[widening..widened], @"\bfind\b"));
+    }
 }

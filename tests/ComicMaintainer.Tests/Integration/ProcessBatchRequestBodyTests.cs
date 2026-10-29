@@ -76,6 +76,7 @@ public sealed class ProcessBatchRequestBodyTests : IDisposable
             ["AppSettings:WatchedDirectory"] = Path.Join(_root, "watched"),
             ["AppSettings:DuplicateDirectory"] = Path.Join(_root, "duplicates"),
             ["AppSettings:ConfigDirectory"] = Path.Join(_root, "config"),
+            ["CONFIG_DIR"] = Path.Join(_root, "config"),
         };
         foreach (var directory in overrides.Values)
         {

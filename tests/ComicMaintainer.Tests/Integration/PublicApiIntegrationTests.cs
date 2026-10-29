@@ -33,11 +33,7 @@ public class PublicApiIntegrationTests : IClassFixture<PublicApiIntegrationTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.ConfigureAppConfiguration((_, configuration) =>
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["CONFIG_DIR"] = _configDirectory,
-                }));
+            builder.UseSetting("CONFIG_DIR", _configDirectory);
         }
 
         protected override void Dispose(bool disposing)

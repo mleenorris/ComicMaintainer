@@ -91,6 +91,11 @@
             if (oldCached && !oldCached.error && !oldCached.loadingPages?.size
                 && !seriesIssuesCache.has(remapped.id)) {
                 seriesIssuesCache.set(remapped.id, oldCached);
+            } else if (oldCached) {
+                // The issues the dropped list still had to confirm (e.g. while
+                // its reload or 404 lookup is pending) are confirmed by the
+                // list of the new id instead.
+                handSeriesIssuePathsOver(oldCached, remapped.id);
             }
             seriesIssuesCache.delete(currentSeriesDetailId);
             currentSeriesDetailId = remapped.id;
@@ -132,6 +137,13 @@
             // Prime the cache entry so concurrent callers don't fan out.
             let entry = existing;
             if (!entry || entry.error) {
+                let unconfirmedPaths = takeSeriesIssuePathsToConfirm(previous, filterMode);
+                // Paths handed over by the list of the id this series had.
+                const handedOver = seriesIssuePathsHandedOver.get(seriesId);
+                seriesIssuePathsHandedOver.delete(seriesId);
+                if (handedOver && handedOver.filter === filterMode) {
+                    unconfirmedPaths = new Set([...(unconfirmedPaths || []), ...handedOver.paths]);
+                }
                 entry = {
                     issues: [],
                     total: 0,
@@ -145,10 +157,10 @@
                     filter: filterMode,
                     // Issues of the replaced list that this one has to list
                     // again to stay selected (see pruneSeriesIssueSelection).
-                    unconfirmedPaths: takeSeriesIssuePathsToConfirm(previous, filterMode),
+                    unconfirmedPaths,
                     // The series' titles as last loaded, to look it up by if
                     // its id stops resolving (see confirmIssuesOfMissingSeries).
-                    titles: previous ? previous.titles : null
+                    titles: (previous && previous.titles) || (handedOver ? handedOver.titles : null)
                 };
                 seriesIssuesCache.set(seriesId, entry);
             }
@@ -287,6 +299,33 @@
             return paths.size > 0 ? paths : null;
         }
 
+        // Hands the issue paths a list dropped by an id remap still had to
+        // confirm over to the list of the series' new id: to the one cached
+        // under it, or else to the one loaded for it next. The dropped list is
+        // left nothing to prune, so its pending reload or 404 lookup cannot
+        // unselect anything.
+        function handSeriesIssuePathsOver(cached, seriesId) {
+            const paths = cached.unconfirmedPaths;
+            cached.unconfirmedPaths = null;
+            if (!paths || cached.filter !== filterMode) return;
+            const replacement = seriesIssuesCache.get(seriesId);
+            if (!replacement) {
+                seriesIssuePathsHandedOver.set(seriesId, { paths, titles: cached.titles, filter: cached.filter });
+                return;
+            }
+            if (replacement.filter !== filterMode) return;
+            if (replacement.unconfirmedPaths) {
+                // Added in place: a pending 404 lookup of the replacement
+                // still owns the set and confirms these paths too.
+                for (const path of paths) replacement.unconfirmedPaths.add(path);
+            } else {
+                replacement.unconfirmedPaths = paths;
+            }
+            if (pruneSeriesIssueSelection(replacement)) {
+                updateSelectInfo();
+            }
+        }
+
         // Once a reloaded issue list is complete, unselects the issues of the
         // list it replaced that it no longer has — renamed, moved or deleted
         // meanwhile — so the selection stops counting them and no batch action
@@ -344,15 +383,24 @@
                 return response.json();
             };
             const titles = entry.titles || {};
-            const title = titles.canonical_title || titles.title;
+            const keys = seriesTitleKeys(titles);
+            // Every name the series is known by, as each may be all that
+            // survives a change to the others.
+            const names = new Map();
+            for (const name of [titles.canonical_title, titles.title, ...(Array.isArray(titles.aliases) ? titles.aliases : [])]) {
+                const key = normalizeSeriesTitleKey(name);
+                if (key && !names.has(key)) names.set(key, name.trim());
+            }
             let issues = [];
             try {
-                // Searched without the filter, which may hide a series that
-                // still exists.
-                const found = title
-                    ? await getJson(`/api/files/series?per_page=-1&search=${encodeURIComponent(title)}`)
-                    : { series: [] };
-                const series = findSeriesByTitleKeys(seriesTitleKeys(titles), found.series || []);
+                let series = null;
+                for (const name of names.values()) {
+                    // Searched without the filter, which may hide a series
+                    // that still exists.
+                    const found = await getJson(`/api/files/series?per_page=-1&search=${encodeURIComponent(name)}`);
+                    series = findSeriesByTitleKeys(keys, found.series || []);
+                    if (series) break;
+                }
                 if (series) {
                     let path = `/api/files/series/${encodeURIComponent(series.id)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=1`;
                     if (entry.filter !== 'all') {

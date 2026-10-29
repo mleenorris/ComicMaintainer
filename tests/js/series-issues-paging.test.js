@@ -457,6 +457,82 @@ test('a series lookup that answers after a newer reload unselects nothing', asyn
     assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });
 
+// A metadata change can replace a series' title but keep one of its aliases,
+// so the lookup searches each name it is known by.
+test('a reload that 404s finds the series by an alias it kept', async () => {
+    const page = await bootSeries({ series: seriesCard({ aliases: ['Space Opera'] }) });
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+    assert.equal(text(page.$('#selectInfo')), '2 files selected');
+
+    // #1 is deleted, and the series is now listed only by its old alias.
+    const renamed = seriesCard({ id: 'space-opera', title: 'Space Opera', canonical_title: 'Space Opera' });
+    page.route(`GET ${ISSUES}`, 404);
+    routeSeriesLookup(page, call => libraryBody(call.query.search === 'Space Opera' ? [renamed] : []));
+    page.route(`GET ${issuesPath('space-opera')}`, issuesBody(renamed, [issue(2), issue(3)]));
+    page.eventSources.at(-1).emit('message', { type: 'file_processed', data: { filename: '/comics/Saga/Saga 001.cbz', success: true } });
+    await page.settle();
+
+    assert.deepEqual(callsTo(page, '/api/files/series').filter(call => 'search' in call.query).map(call => call.query.search),
+        ['Saga', 'Space Opera']);
+    assert.equal(callsTo(page, issuesPath('space-opera')).length, 1);
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+});
+
+// A library reload can give the series its new id while the lookup is still
+// pending, so the list loaded under that id confirms the issues instead.
+test('a series remapped while its 404 lookup is pending unselects what the new id no longer lists', async () => {
+    const page = await bootSeries();
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+    const lookup = deferred();
+    routeSeriesLookup(page, () => lookup.promise);
+
+    // #1 is deleted, and the series is 'saga-2' now.
+    page.route(`GET ${ISSUES}`, 404);
+    page.route(`GET ${issuesPath('saga-2')}`, issuesBody(seriesCard({ id: 'saga-2' }), [issue(2), issue(3)]));
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+    assert.equal(callsTo(page, '/api/files/series').at(-1).query.search, 'Saga', 'the lookup is pending');
+
+    await reloadLibrary(page, [seriesCard({ id: 'saga-2' })]);
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.deepEqual(paths(page).filter(Boolean), ['/comics/Saga/Saga 002.cbz', '/comics/Saga/Saga 003.cbz']);
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+
+    // The stale lookup changes nothing.
+    lookup.resolve(libraryBody([]));
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+});
+
+// When the new id's list is cached already, it takes the pending issues over.
+test('a series remapped to a cached list while its reload is pending is pruned by that list', async () => {
+    const page = await bootSeries();
+    page.route(`GET ${issuesPath('saga-2')}`, issuesBody(seriesCard({ id: 'saga-2' }), [issue(2), issue(3)]));
+    page.run("loadSeriesIssues('saga-2')");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+
+    const reload = deferred();
+    page.route(`GET ${ISSUES}`, () => reload.promise);
+    page.run("loadSeriesIssues('saga', true)");
+    await page.settle();
+
+    await reloadLibrary(page, [seriesCard({ id: 'saga-2' })]);
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+
+    // The old id's answer arriving afterwards changes nothing.
+    reload.resolve(issuesBody(seriesCard(), []));
+    await page.settle();
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+});
+
 test('a deep link to a series outside the loaded library renders from its issues response', async () => {
     const gate = deferred();
     const lost = seriesCard({ id: 'lost', title: 'Lost Series', canonical_title: 'Lost Series', aliases: ['LS'] });

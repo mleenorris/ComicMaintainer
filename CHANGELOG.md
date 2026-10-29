@@ -348,6 +348,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed with 401 unless signed in through Authelia.
 - **Uploading a series image from the series page works**; the request was sent as JSON instead
   of a file upload and always rejected.
+- **Manage Names no longer loses alias edits.** Adopt as Canonical saved only the chosen name,
+  so the other names it adopted dropped out of the alias list. After a preferred language or
+  series image change the list still showed unsaved edits, but Save stored the earlier aliases
+  and reported "Series names saved". Adopt as Canonical now saves the adopted aliases before the
+  name, and unsaved alias edits survive the modal's other controls until Save stores them.
 - **Series images are revalidated like comic covers.** `GET /api/series-images/{key}` compared
   `If-None-Match` with its ETag as an exact string, so a client sending a weak tag (`W/"…"`), a
   list of tags or `*` without `If-Modified-Since` downloaded the whole image again instead of

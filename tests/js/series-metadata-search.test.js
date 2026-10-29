@@ -374,6 +374,21 @@ test('candidates can still be adopted when the series record failed to load', as
     assert.deepEqual(optionTexts(nameSelect(page)), ['Automatic (use language preference)', 'Saga of the Swamp Thing (your alias)']);
 });
 
+test('aliases added while the series record loads are merged into it, not discarded', async () => {
+    const loading = deferred();
+    const page = await searchedPage(() => loading.promise);
+
+    await onResult(page, 1, 'Add Aliases');
+    loading.resolve(metadataRecord({ user_aliases: ['My Saga'] }));
+    await page.settle();
+
+    assert.deepEqual(userAliases(page), ['My Saga', 'Saga of the Swamp Thing']);
+    page.route(`PUT ${ALIASES}`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Save'));
+    await page.settle();
+    assert.deepEqual(callsTo(page, ALIASES, 'PUT')[0].body, { aliases: ['My Saga', 'Saga of the Swamp Thing'] });
+});
+
 test('Adopt as Canonical without a loaded series record pins the name alone, keeping the stored aliases', async () => {
     const page = await searchedPage(respond(500));
     page.route(`PUT ${NAME}`, call => metadataRecord({

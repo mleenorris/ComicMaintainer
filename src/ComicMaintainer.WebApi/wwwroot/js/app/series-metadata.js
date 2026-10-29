@@ -484,9 +484,8 @@
                     return;
                 }
                 const record = await response.json();
-                manageSeriesState.record = record;
-                manageSeriesState.recordLoaded = true;
-                manageSeriesState.aliasesEdited = false;
+                // Aliases added while the record loaded are merged into it.
+                setManageSeriesRecord(record);
                 const prefSelect = document.getElementById('manageSeriesPreferredLanguage');
                 if (prefSelect) {
                     prefSelect.value = record.preferred_language || '';
@@ -945,7 +944,8 @@
         }
 
         // PUT an alias list as the series' user aliases, replacing the stored
-        // ones. Resolves to whether the server accepted it.
+        // ones. Resolves to whether the server accepted it; rejects when the
+        // request cannot be sent (e.g. a network error).
         async function putManageSeriesUserAliases(seriesTitle, aliases) {
             const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
                 method: 'PUT',

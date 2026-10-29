@@ -35,8 +35,15 @@ public sealed class DocumentedEnvironmentVariablesTests
         ["CORS_ALLOWED_ORIGINS"] = "src/ComicMaintainer.WebApi/Startup/WebServiceCollectionExtensions.cs",
     };
 
-    /// <summary>Prefixes of the variables read by ASP.NET Core, the .NET runtime and the OpenTelemetry SDK.</summary>
-    private static readonly string[] FrameworkPrefixes = ["ASPNETCORE_", "DOTNET_", "OTEL_"];
+    /// <summary>Framework and runtime variables explicitly supported by the app or its documentation.</summary>
+    private static readonly HashSet<string> FrameworkVariables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ASPNETCORE_URLS",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_SERVICE_NAME",
+    };
 
     /// <summary>A value of each shape a setting takes: a path or name, either flag value, and a number.</summary>
     private static readonly string[] ProbeValues = ["/documented/value", "true", "false", "12345"];
@@ -67,13 +74,17 @@ public sealed class DocumentedEnvironmentVariablesTests
         {
             Assert.True(IsRead(row.Variable), $"README.md documents {row.Variable}, which the app does not read");
 
-            var changed = SettingsChangedBy(row.Variable);
-            if (changed.Count > 0)
+            if (ReadElsewhere.ContainsKey(row.Variable))
             {
-                Assert.True(
-                    changed.Contains(row.Setting),
-                    $"README.md documents {row.Variable} as {row.Setting}, but it sets {string.Join(", ", changed)}");
+                Assert.Equal(row.Variable, row.Setting);
+                return;
             }
+
+            var changed = SettingsChangedBy(row.Variable);
+            Assert.NotEmpty(changed);
+            Assert.Contains(
+                row.Setting,
+                changed);
         });
     }
 
@@ -198,7 +209,7 @@ public sealed class DocumentedEnvironmentVariablesTests
             return Regex.IsMatch(File.ReadAllText(Path.Combine(RepositoryRoot, reader)), $@"\b{Regex.Escape(variable)}\b");
         }
 
-        if (FrameworkPrefixes.Any(prefix => variable.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+        if (FrameworkVariables.Contains(variable))
         {
             return true;
         }

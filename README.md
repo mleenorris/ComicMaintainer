@@ -195,7 +195,7 @@ For Windows users who prefer to run without Docker:
    $env:WATCHED_DIR = "C:\Comics\ToProcess"
    $env:DUPLICATE_DIR = "C:\Comics\Duplicates"
    # Optional: listen on another port or on every interface (default: http://localhost:5000)
-   $env:ASPNETCORE_URLS = "http://+:5000"
+   $env:ASPNETCORE_URLS = "http://+:8080"
    ```
 
 4. Run `ComicMaintainer.WebApi.exe` from the same PowerShell window

@@ -13,7 +13,7 @@ public class EntrypointConfigDirectoryTests
         var current = AppContext.BaseDirectory;
         for (var i = 0; i < 10 && current != null; i++)
         {
-            var candidate = Path.Combine(current, "entrypoint.dotnet.sh");
+            var candidate = Path.Join(current, "entrypoint.dotnet.sh");
             if (File.Exists(candidate))
             {
                 return File.ReadAllText(candidate);

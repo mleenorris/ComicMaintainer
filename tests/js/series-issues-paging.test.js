@@ -599,6 +599,27 @@ test('a series remapped to a stale cached list keeps the issues a fresh reload o
     assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz']);
 });
 
+// A fully loaded list has nothing left to confirm, so the issues it lists are
+// handed over instead.
+test('a loaded series remapped to a cached list unselects what a fresh reload of that list no longer has', async () => {
+    const page = await bootSeries();
+    let saga2 = [issue(3)];
+    page.route(`GET ${issuesPath('saga-2')}`, () => issuesBody(seriesCard({ id: 'saga-2' }), saga2));
+    page.run("loadSeriesIssues('saga-2')");
+    await page.settle();
+    tickIssue(page, '/comics/Saga/Saga 001.cbz');
+    tickIssue(page, '/comics/Saga/Saga 002.cbz');
+
+    // #1 is deleted, and #2 moved to 'saga-2' after its list was cached.
+    saga2 = [issue(2), issue(3)];
+    await reloadLibrary(page, [seriesCard({ id: 'saga-2' })]);
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(callsTo(page, issuesPath('saga-2')).length, 2, 'the cached list is reloaded');
+    assert.deepEqual(paths(page).filter(Boolean), ['/comics/Saga/Saga 002.cbz', '/comics/Saga/Saga 003.cbz']);
+    assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
+    assert.equal(text(page.$('#selectInfo')), '1 file selected');
+});
+
 test('a deep link to a series outside the loaded library renders from its issues response', async () => {
     const gate = deferred();
     const lost = seriesCard({ id: 'lost', title: 'Lost Series', canonical_title: 'Lost Series', aliases: ['LS'] });

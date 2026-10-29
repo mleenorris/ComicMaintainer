@@ -88,17 +88,19 @@
             // trigger a fresh fetch. Nor entries still loading: their answer
             // re-renders only the stale id, leaving the new one loading forever.
             const oldCached = seriesIssuesCache.get(currentSeriesDetailId);
+            // Paths still pending under the old id move to the new one first,
+            // so that a reload of the new id's list below confirms them too.
+            transferSeriesIssuePaths(currentSeriesDetailId, remapped.id);
             if (oldCached && !oldCached.error && !oldCached.loadingPages?.size
                 && !seriesIssuesCache.has(remapped.id)) {
                 seriesIssuesCache.set(remapped.id, oldCached);
                 oldCached.seriesId = remapped.id;
             } else if (oldCached) {
-                // The issues the dropped list still had to confirm (e.g. while
-                // its reload or 404 lookup is pending) are confirmed by the
-                // list of the new id instead.
+                // The issues of the dropped list, and those it still had to
+                // confirm (e.g. while its reload or 404 lookup is pending),
+                // are confirmed by the list of the new id instead.
                 handSeriesIssuePathsOver(oldCached, remapped.id);
             }
-            transferSeriesIssuePaths(currentSeriesDetailId, remapped.id);
             seriesIssuesCache.delete(currentSeriesDetailId);
             currentSeriesDetailId = remapped.id;
             return remapped;
@@ -307,24 +309,34 @@
             seriesIssuePathsHandedOver.delete(fromSeriesId);
         }
 
-        // Takes paths represented by the list being replaced. If its filter
-        // differs, keep them pending for a reload that can safely confirm them.
-        function takeSeriesIssuePathsToConfirm(cached, filter, seriesId) {
-            if (!cached) return null;
-            const pending = cached.unconfirmedPaths;
-            cached.unconfirmedPaths = null;
+        // Takes the issue paths a cached list stands for: the issues it lists,
+        // plus any that an unfinished reload of it still has to confirm. Every
+        // path is taken, selected or not: the old cards stay clickable while
+        // the reload is pending, so whether a path is selected is only checked
+        // when pruning. Taking them leaves the list nothing to prune, so a
+        // stale response landing after a newer one cannot unselect anything.
+        function takeSeriesIssuePaths(cached) {
             const paths = new Set();
-            for (const path of pending || []) {
+            for (const path of cached.unconfirmedPaths || []) {
                 if (typeof path === 'string' && path.length > 0) {
                     paths.add(path);
                 }
             }
+            cached.unconfirmedPaths = null;
             for (const issue of cached.issues) {
                 const path = issue && issue.file_path;
                 if (typeof path === 'string' && path.length > 0) {
                     paths.add(path);
                 }
             }
+            return paths;
+        }
+
+        // Takes paths represented by the list being replaced. If its filter
+        // differs, keep them pending for a reload that can safely confirm them.
+        function takeSeriesIssuePathsToConfirm(cached, filter, seriesId) {
+            if (!cached) return null;
+            const paths = takeSeriesIssuePaths(cached);
             if (cached.filter !== filter) {
                 rememberSeriesIssuePaths(seriesId, paths, cached.filter, cached.titles);
                 return null;
@@ -332,18 +344,16 @@
             return paths.size > 0 ? paths : null;
         }
 
-        // Hands the issue paths a list dropped by an id remap still had to
-        // confirm over to the list of the series' new id: to a reload of the
-        // one cached under it, or else to the one loaded for it next. The
-        // dropped list is left nothing to prune, so its pending reload or 404
-        // lookup cannot unselect anything.
+        // Hands the issue paths of a list dropped by an id remap over to the
+        // list of the series' new id: to a reload of the one cached under it,
+        // or else to the one loaded for it next. The dropped list is left
+        // nothing to prune, so its pending reload or 404 lookup cannot
+        // unselect anything.
         function handSeriesIssuePathsOver(cached, seriesId) {
-            const paths = cached.unconfirmedPaths;
-            cached.unconfirmedPaths = null;
-            if (!paths) return;
+            const paths = takeSeriesIssuePaths(cached);
+            if (!paths.size) return;
             rememberSeriesIssuePaths(seriesId, paths, cached.filter, cached.titles);
-            const replacement = seriesIssuesCache.get(seriesId);
-            if (replacement) {
+            if (seriesIssuesCache.has(seriesId)) {
                 // The cached list may predate the change that remapped the series.
                 loadSeriesIssues(seriesId, true);
             }

@@ -123,12 +123,16 @@ const LIBRARY_ACTIONS = [
     }
 ];
 
-// GET /api/jobs/{id} right after the start: one file done, the next one in progress.
+// GET /api/jobs/{id} right after the start: one file done, the next one in
+// progress and the rest still to do.
 const JOB_AFTER_START = h.jobStatus({
     total_items: 4,
     processed_items: 1,
     current_file: 'Comics/Batman/Batman 002.cbz',
-    results: [{ file: 'Comics/Batman/Batman 001.cbz', success: true, error: null }]
+    results: [
+        { file: 'Comics/Batman/Batman 001.cbz', success: true, error: null },
+        ...['002', '003', '004'].map(issue => ({ file: `Comics/Batman/Batman ${issue}.cbz`, success: false, error: null }))
+    ]
 });
 
 for (const action of LIBRARY_ACTIONS) {
@@ -190,6 +194,9 @@ for (const action of LIBRARY_ACTIONS) {
         h.jobUpdate(page, 'running', h.progress(2, 4));
         h.assertProgress(page, { title: action.tracked, text: '2 / 4 files', percent: '50%', succeeded: '2', failed: '0' });
 
+        // The action can start another job once this one has ended.
+        await h.endTrackedJob(t, page);
+
         if (action.force) {
             answer = () => ({ job_id: h.JOB_ID, total_items: 2 });
             h.answerConfirms(page, true, false);
@@ -198,6 +205,7 @@ for (const action of LIBRARY_ACTIONS) {
             assert.deepEqual(h.takeConfirms(page), [action.confirm, action.force]);
             assert.equal(starts().at(-1).url, `${action.path}?forceReprocess=false`, 'Cancel on the force prompt skips handled files');
             assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: action.started(2) }]);
+            await h.endTrackedJob(t, page);
         }
 
         // A server error closes the modal and says the job did not start.

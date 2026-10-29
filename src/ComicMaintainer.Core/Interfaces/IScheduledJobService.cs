@@ -51,6 +51,13 @@ public interface IScheduledJobService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Recompute the next scheduled occurrence without touching the last-run
+    /// fields. Used when a scheduled run is skipped because another run is
+    /// still in progress: that run keeps its status and records its own result.
+    /// </summary>
+    Task AdvanceNextRunAsync(string jobKey, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Notification raised when a job's enabled flag, interval, or options
     /// change, so the hosted service can re-arm timers without restart.
     /// </summary>

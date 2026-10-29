@@ -400,8 +400,10 @@ function cacheKeyForRequest(request) {
 // alongside to refresh the entry if the underlying file changed, or evict it
 // if the session backing it is no longer authorized (401/403). This keeps
 // the fast path but stops it from serving indefinitely-stale or
-// no-longer-authorized content.
-async function serveImageFromCache(request) {
+// no-longer-authorized content. That work outlasts the response, so it is
+// passed to the fetch `event`'s waitUntil(): the browser may stop the worker
+// once the response is delivered, cutting off anything not passed to it.
+async function serveImageFromCache(request, event) {
   const cache = await caches.open(IMAGE_CACHE_NAME);
   const cacheKey = cacheKeyForRequest(request);
   const cached = await cache.match(cacheKey);
@@ -409,12 +411,14 @@ async function serveImageFromCache(request) {
   const networkFetch = fetch(request).then((response) => {
     if (response && response.status === 200) {
       // Only successful, non-opaque responses are worth storing.
-      cache.put(cacheKey, response.clone())
-        .then(() => trimCache(IMAGE_CACHE_NAME, MAX_IMAGE_CACHE_ENTRIES))
-        .catch(() => { /* quota errors are non-fatal */ });
+      event.waitUntil(
+        cache.put(cacheKey, response.clone())
+          .then(() => trimCache(IMAGE_CACHE_NAME, MAX_IMAGE_CACHE_ENTRIES))
+          .catch(() => { /* quota errors are non-fatal */ })
+      );
     } else if (response && (response.status === 401 || response.status === 403)) {
       // No longer authorized for this entry; stop serving it from cache.
-      cache.delete(cacheKey).catch(() => { /* best effort */ });
+      event.waitUntil(cache.delete(cacheKey).catch(() => { /* best effort */ }));
     }
     return response;
   });
@@ -423,7 +427,7 @@ async function serveImageFromCache(request) {
     // Serve the cached copy immediately; let the revalidation above update
     // or evict the entry in the background. A network failure here just
     // means we keep serving the (still the best available) cached copy.
-    networkFetch.catch(() => { /* offline; keep serving the cached entry */ });
+    event.waitUntil(networkFetch.catch(() => { /* offline; keep serving the cached entry */ }));
     return cached;
   }
 
@@ -628,7 +632,7 @@ self.addEventListener('fetch', (event) => {
             return cached;
           }
           if (isCacheableImageRequest(request, url)) {
-            return serveImageFromCache(request).catch(
+            return serveImageFromCache(request, event).catch(
               () => new Response('Offline', { status: 503 })
             );
           }
@@ -644,7 +648,7 @@ self.addEventListener('fetch', (event) => {
   // Comic covers and page images: cache-first with a bounded cache.
   if (isCacheableImageRequest(request, url)) {
     event.respondWith(
-      serveImageFromCache(request).catch(
+      serveImageFromCache(request, event).catch(
         () => new Response('Offline', { status: 503 })
       )
     );
@@ -685,18 +689,21 @@ self.addEventListener('fetch', (event) => {
           const networkFetch = fetch(request)
             .then((networkResponse) => {
               if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
-                cache.put(request, networkResponse.clone())
-                  .then(() => trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES))
-                  .catch((error) => {
-                    console.log('Service Worker: Failed to cache asset', url.pathname, error);
-                  });
+                event.waitUntil(
+                  cache.put(request, networkResponse.clone())
+                    .then(() => trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES))
+                    .catch((error) => {
+                      console.log('Service Worker: Failed to cache asset', url.pathname, error);
+                    })
+                );
               }
               return networkResponse;
             });
           if (cachedResponse) {
             // Serve the cached copy at once; the fetch above refreshes it in
-            // the background, and failing to (offline) changes nothing.
-            networkFetch.catch(() => { /* offline; keep the cached copy */ });
+            // the background (waitUntil keeps the worker running until it is
+            // stored), and failing to (offline) changes nothing.
+            event.waitUntil(networkFetch.catch(() => { /* offline; keep the cached copy */ }));
             return cachedResponse;
           }
           // Nothing cached: wait for the network, and fail as it does offline.
@@ -726,14 +733,17 @@ self.addEventListener('fetch', (event) => {
           // Clone the response (can only be consumed once)
           const responseToCache = response.clone();
           
-          // Cache static assets
+          // Cache static assets (waitUntil: the worker may otherwise be
+          // stopped once the response is delivered, before they are stored)
           if (url.pathname.startsWith('/icons/')) {
-            activeCacheName().then((cacheName) => caches.open(cacheName).then((cache) =>
-              cache.put(request, responseToCache)
-                .then(() => trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES))
-            )).catch((error) => {
-              console.log('Service Worker: Failed to cache asset', url.pathname, error);
-            });
+            event.waitUntil(
+              activeCacheName().then((cacheName) => caches.open(cacheName).then((cache) =>
+                cache.put(request, responseToCache)
+                  .then(() => trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES))
+              )).catch((error) => {
+                console.log('Service Worker: Failed to cache asset', url.pathname, error);
+              })
+            );
           }
           
           return response;

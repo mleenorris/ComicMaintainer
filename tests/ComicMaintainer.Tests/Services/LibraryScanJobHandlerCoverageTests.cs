@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -11,7 +12,7 @@ namespace ComicMaintainer.Tests.Services;
 /// <summary>
 /// Additional coverage for <see cref="LibraryScanJobHandler"/>: unavailable watched directory,
 /// per-file failures that must not abort the scan, queue failures, job outcomes, option
-/// combinations and cancellation while waiting for a spawned job.
+/// combinations and cancellation mid-scan or while waiting for a spawned job.
 /// </summary>
 public class LibraryScanJobHandlerCoverageTests : IDisposable
 {
@@ -50,11 +51,11 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         }
     }
 
-    private LibraryScanJobHandler CreateHandler() => new(
+    private LibraryScanJobHandler CreateHandler(ILogger<LibraryScanJobHandler>? logger = null) => new(
         new TestOptionsMonitor<AppSettings>(_settings),
         _fileStore.Object,
         _processor.Object,
-        NullLogger<LibraryScanJobHandler>.Instance,
+        logger ?? NullLogger<LibraryScanJobHandler>.Instance,
         _cache.Object);
 
     private string WriteComic(string folder, string name)
@@ -211,7 +212,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
             "Library scan: +0 added, -0 removed, 0 stale retagged, 1 modified reprocessed. [modified: 1/1 ok, 0 failed]",
             summary);
         Assert.Equal(new[] { path }, queued);
-        _fileStore.Verify(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _fileStore.Verify(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -257,6 +258,106 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         Assert.Equal(
             "Library scan: +0 added, -0 removed, 0 stale retagged, 1 modified reprocessed. [modified: queue failed]",
             summary);
+        // The change was never handled, so it must stay visible to the next scan (#864).
+        _fileStore.Verify(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ModifiedFileFailsToRenormalize_IsRetriedOnTheNextScan()
+    {
+        // Regression test for #864: a failed re-normalize used to be recorded as handled, so later
+        // scans never retried the file. The store re-syncs a row from disk when asked to refresh it.
+        var path = WriteComic("Series", "c001.cbz");
+        var row = Tracked(path, size: 999);
+        SetupTracked(row);
+        _fileStore.Setup(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, CancellationToken>((paths, _) =>
+            {
+                if (!paths.Contains(path)) return;
+                var info = new FileInfo(path);
+                row.FileSize = info.Length;
+                row.LastModified = info.LastWriteTime;
+            })
+            .ReturnsAsync(1);
+        var queued = new List<List<string>>();
+        var failed = Finished(JobStatus.Completed, 0, 1);
+        failed.Errors[path] = "Normalize failed";
+        SetupNormalizeJob(failed, queued.Add);
+
+        var first = await CreateHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+
+        SetupNormalizeJob(Finished(JobStatus.Completed, 1, 0), queued.Add);
+        var second = await CreateHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+        var third = await CreateHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+
+        Assert.Equal(
+            "Library scan: +0 added, -0 removed, 0 stale retagged, 1 modified reprocessed. [modified: 0/1 ok, 1 failed]",
+            first);
+        Assert.Equal(
+            "Library scan: +0 added, -0 removed, 0 stale retagged, 1 modified reprocessed. [modified: 1/1 ok, 0 failed]",
+            second);
+        // Once the retry succeeds the change is absorbed and later scans leave the file alone.
+        Assert.Equal("Library scan: +0 added, -0 removed, 0 stale retagged, 0 modified reprocessed.", third);
+        Assert.Collection(queued,
+            paths => Assert.Equal(new[] { path }, paths),
+            paths => Assert.Equal(new[] { path }, paths));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SomeModifiedFilesFailToRenormalize_RefreshesOnlyTheOthers()
+    {
+        var failing = WriteComic("Series", "c001.cbz");
+        var renormalized = WriteComic("Series", "c002.cbz");
+        SetupTracked(Tracked(failing, size: 999), Tracked(renormalized, size: 999));
+        var job = Finished(JobStatus.Completed, 1, 1);
+        job.Errors[failing] = "Normalize failed";
+        SetupNormalizeJob(job);
+        List<string>? refreshed = null;
+        _fileStore.Setup(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, CancellationToken>((paths, _) => refreshed = paths.ToList())
+            .ReturnsAsync(1);
+
+        var summary = await CreateHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+
+        Assert.Equal(
+            "Library scan: +0 added, -0 removed, 0 stale retagged, 2 modified reprocessed. [modified: 1/2 ok, 1 failed]",
+            summary);
+        Assert.Equal(new[] { renormalized }, refreshed);
+        _fileStore.Verify(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(JobStatus.Failed)]
+    [InlineData(JobStatus.Cancelled)]
+    public async Task ExecuteAsync_ModifiedFilesJobEndsUnsuccessfully_RefreshesNoStoredStats(JobStatus finalStatus)
+    {
+        var first = WriteComic("Series", "c001.cbz");
+        var second = WriteComic("Series", "c002.cbz");
+        SetupTracked(Tracked(first, size: 999), Tracked(second, size: 999));
+        // One file went through before the job stopped, but the job doesn't say which one.
+        SetupNormalizeJob(Finished(finalStatus, 1, 0));
+
+        var summary = await CreateHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+
+        Assert.Equal(
+            $"Library scan: +0 added, -0 removed, 0 stale retagged, 2 modified reprocessed. [modified: job {finalStatus.ToString().ToLowerInvariant()}, 1/2 ok, 0 failed]",
+            summary);
+        _fileStore.Verify(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ModifiedFilesJobRecordEvicted_RefreshesNoStoredStats()
+    {
+        var path = WriteComic("Series", "c001.cbz");
+        SetupTracked(Tracked(path, size: 999));
+        SetupNormalizeJob(job: null);
+
+        var summary = await CreateHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+
+        Assert.Equal(
+            "Library scan: +0 added, -0 removed, 0 stale retagged, 1 modified reprocessed. [modified: queued (job record evicted)]",
+            summary);
+        _fileStore.Verify(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -269,7 +370,9 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
 
         var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
 
-        Assert.Equal("Library scan: +1 added, -0 removed, 0 stale retagged. [added: 0/1 ok, 1 failed]", summary);
+        Assert.Equal(
+            $"Library scan: +1 added, -0 removed, 0 stale retagged. [added: job {finalStatus.ToString().ToLowerInvariant()}, 0/1 ok, 1 failed]",
+            summary);
     }
 
     [Fact]
@@ -300,6 +403,102 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
 
         _processor.Verify(p => p.GetJob(jobId), Times.Once);
         _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CancelledWhileAddingTheLastNewFile_ThrowsWithoutQueueingIt()
+    {
+        var path = WriteComic("Series", "c001.cbz");
+        using var cts = new CancellationTokenSource();
+        _fileStore.Setup(f => f.AddFileAsync(path, It.IsAny<CancellationToken>()))
+            .Callback(() => cts.Cancel())
+            .Returns(Task.CompletedTask);
+        SetupAddedJob(new ProcessingJob { Status = JobStatus.Running });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CreateHandler().ExecuteAsync(null, cts.Token));
+
+        // A job queued with the cancelled token would just be cancelled straight away.
+        _processor.Verify(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.GetJob(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("add")]
+    [InlineData("remove")]
+    [InlineData("stale")]
+    public async Task ExecuteAsync_CancelledDuringAPass_ThrowsWithoutLoggingAFailureOrQueueingJobs(string pass)
+    {
+        const string allPasses =
+            """{"scanForNew":true,"reconcileDeletions":true,"retagStale":true,"reprocessModified":true}""";
+        var modified = WriteComic("Series", "c001.cbz");
+        WriteComic("Series", "c002.cbz");
+        SetupTracked(Tracked(modified, size: 999), Tracked(Path.Combine(_watchDir, "Ghosts", "gone.cbz")));
+        using var cts = new CancellationTokenSource();
+        var cancelled = new OperationCanceledException(cts.Token);
+        switch (pass)
+        {
+            case "add":
+                _fileStore.Setup(f => f.AddFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .Callback(() => cts.Cancel()).ThrowsAsync(cancelled);
+                break;
+            case "remove":
+                _fileStore.Setup(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .Callback(() => cts.Cancel()).ThrowsAsync(cancelled);
+                break;
+            default:
+                _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .Callback(() => cts.Cancel()).ThrowsAsync(cancelled);
+                break;
+        }
+        var logger = new Mock<ILogger<LibraryScanJobHandler>>();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CreateHandler(logger.Object).ExecuteAsync(allPasses, cts.Token));
+
+        logger.Verify(l => l.Log(
+            LogLevel.Warning,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
+        _processor.Verify(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CancelledWhileRefreshingModifiedFileStats_ThrowsWithoutLoggingAFailure()
+    {
+        var path = WriteComic("Series", "c001.cbz");
+        SetupTracked(Tracked(path, size: 999));
+        SetupNormalizeJob(Finished(JobStatus.Completed, 1, 0));
+        using var cts = new CancellationTokenSource();
+        _fileStore.Setup(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback(() => cts.Cancel()).ThrowsAsync(new OperationCanceledException(cts.Token));
+        var logger = new Mock<ILogger<LibraryScanJobHandler>>();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CreateHandler(logger.Object).ExecuteAsync(ModifiedOnlyOptions, cts.Token));
+
+        logger.Verify(l => l.Log(
+            LogLevel.Warning,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CancelledRightAfterQueueingAJob_ThrowsInsteadOfReportingItEvicted()
+    {
+        WriteComic("Series", "c001.cbz");
+        using var cts = new CancellationTokenSource();
+        SetupAddedJob(new ProcessingJob { Status = JobStatus.Running }, _ => cts.Cancel());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CreateHandler().ExecuteAsync(null, cts.Token));
+
+        _processor.Verify(p => p.GetJob(It.IsAny<Guid>()), Times.Never);
     }
 
     [Theory]

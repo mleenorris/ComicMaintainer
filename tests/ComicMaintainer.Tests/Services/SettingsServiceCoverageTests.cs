@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging;
@@ -53,6 +54,27 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         await _service.UpdateIssueNumberPaddingAsync(0);
 
         Assert.Equal(0, ReadSection()["IssueNumberPadding"].GetInt32());
+    }
+
+    [Theory]
+    [InlineData(11)]
+    [InlineData(1_000_000_000)]
+    [InlineData(int.MaxValue)]
+    public async Task UpdateIssueNumberPaddingAsync_RejectsPaddingAbove10(int padding)
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateIssueNumberPaddingAsync(padding));
+
+        Assert.Equal("padding", ex.ParamName);
+        Assert.StartsWith("Padding must be between 0 and 10", ex.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(_settingsPath));
+    }
+
+    [Fact]
+    public async Task UpdateIssueNumberPaddingAsync_Accepts10()
+    {
+        await _service.UpdateIssueNumberPaddingAsync(10);
+
+        Assert.Equal(10, ReadSection()["IssueNumberPadding"].GetInt32());
     }
 
     [Theory]
@@ -114,6 +136,40 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         Assert.Equal(4096, ReadSection()[settingName].GetInt32());
     }
 
+    [Fact]
+    public async Task UpdateSeriesImageLimitsAsync_PersistsAllThreeLimits()
+    {
+        await _service.UpdateSeriesImageLimitsAsync(4096, 8192, 1600);
+
+        var section = ReadSection();
+        Assert.Equal(3, section.Count);
+        Assert.Equal(4096, section["SeriesImageMaxBytes"].GetInt32());
+        Assert.Equal(8192, section["SeriesImageMaxDownloadBytes"].GetInt32());
+        Assert.Equal(1600, section["SeriesImageMaxDimension"].GetInt32());
+        Assert.Contains("Updated setting SeriesImageMaxDownloadBytes to 8192", _logger.Messages);
+
+        // The download limit may equal the stored limit.
+        await _service.UpdateSeriesImageLimitsAsync(4096, 4096, 1600);
+        Assert.Equal(4096, ReadSection()["SeriesImageMaxDownloadBytes"].GetInt32());
+    }
+
+    [Theory]
+    [InlineData(0, 8192, 1600, "maxBytes")]
+    [InlineData(-1, 8192, 1600, "maxBytes")]
+    [InlineData(4096, 0, 1600, "maxDownloadBytes")]
+    [InlineData(4096, 2048, 1600, "maxDownloadBytes")]
+    [InlineData(4096, 8192, 0, "maxDimension")]
+    [InlineData(4096, 8192, -5, "maxDimension")]
+    public async Task UpdateSeriesImageLimitsAsync_AnInvalidLimitSavesNoneOfThem(
+        int maxBytes, int maxDownloadBytes, int maxDimension, string parameterName)
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateSeriesImageLimitsAsync(maxBytes, maxDownloadBytes, maxDimension));
+
+        Assert.Equal(parameterName, ex.ParamName);
+        Assert.False(File.Exists(_settingsPath));
+    }
+
     [Theory]
     [InlineData("GitHubIssueAssignee")]
     [InlineData("ComicVineBaseUrl")]
@@ -169,6 +225,67 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         var stored = ReadSection()["ComicVineApiKey"];
         Assert.Equal(cleared, stored.ValueKind == JsonValueKind.Null ? null : stored.GetString());
         Assert.Contains("Updated setting ComicVineApiKey (cleared)", _logger.Messages);
+    }
+
+    [Fact]
+    public async Task UpdateExternalSeriesMetadataSettingsAsync_PersistsTrimmedValuesWithoutLoggingTheKey()
+    {
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(
+            enabled: true,
+            comicVineApiKey: "  cv-secret-key-123  ",
+            comicVineBaseUrl: " https://comicvine.example/api ",
+            enableMangaDex: true,
+            mangaDexBaseUrl: " https://mangadex.example ",
+            enableAniList: false,
+            aniListBaseUrl: " https://anilist.example/graphql ");
+
+        var section = ReadSection();
+        Assert.Equal(7, section.Count);
+        Assert.True(section["EnableExternalSeriesMetadata"].GetBoolean());
+        Assert.Equal("cv-secret-key-123", section["ComicVineApiKey"].GetString());
+        Assert.Equal("https://comicvine.example/api", section["ComicVineBaseUrl"].GetString());
+        Assert.True(section["EnableMangaDexMetadata"].GetBoolean());
+        Assert.Equal("https://mangadex.example", section["MangaDexBaseUrl"].GetString());
+        Assert.False(section["EnableAniListMetadata"].GetBoolean());
+        Assert.Equal("https://anilist.example/graphql", section["AniListBaseUrl"].GetString());
+        Assert.Contains("Updated setting ComicVineApiKey (value hidden)", _logger.Messages);
+        Assert.Contains("Updated setting AniListBaseUrl to https://anilist.example/graphql", _logger.Messages);
+        Assert.DoesNotContain(_logger.Messages, m => m.Contains("cv-secret-key-123", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task UpdateExternalSeriesMetadataSettingsAsync_NullKeyKeepsTheStoredKeyAndBlankClearsIt(string blank)
+    {
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(true, "cv-secret-key-123", null, false, null, false, null);
+
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(true, null, null, false, null, false, null);
+        Assert.Equal("cv-secret-key-123", ReadSection()["ComicVineApiKey"].GetString());
+
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(true, blank, null, false, null, false, null);
+        Assert.Equal(JsonValueKind.Null, ReadSection()["ComicVineApiKey"].ValueKind);
+        Assert.Contains("Updated setting ComicVineApiKey (cleared)", _logger.Messages);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task UpdateExternalSeriesMetadataSettingsAsync_BlankBaseUrlsKeepTheStoredOnes(string? blank)
+    {
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(
+            true, null, "https://comicvine.example/api", true, "https://mangadex.example", true, "https://anilist.example/graphql");
+
+        await _service.UpdateExternalSeriesMetadataSettingsAsync(false, null, blank, false, blank, false, blank);
+
+        var section = ReadSection();
+        Assert.False(section["EnableExternalSeriesMetadata"].GetBoolean());
+        Assert.False(section["EnableMangaDexMetadata"].GetBoolean());
+        Assert.False(section["EnableAniListMetadata"].GetBoolean());
+        Assert.Equal("https://comicvine.example/api", section["ComicVineBaseUrl"].GetString());
+        Assert.Equal("https://mangadex.example", section["MangaDexBaseUrl"].GetString());
+        Assert.Equal("https://anilist.example/graphql", section["AniListBaseUrl"].GetString());
     }
 
     [Fact]
@@ -313,6 +430,54 @@ public sealed class SettingsServiceCoverageTests : IDisposable
             "smtp.example.com", 25, null, null, true, false, fromAddress, null, 10));
 
         Assert.Equal("fromAddress", ex.ParamName);
+        Assert.False(File.Exists(_settingsPath));
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettingsAsync_PersistsAllThreeLimits()
+    {
+        await _service.UpdateEmailRateLimitSettingsAsync(maxSendsPerHour: 20, maxSendsPerDay: 200, minSecondsBetweenSends: 30);
+
+        var section = ReadSection();
+        Assert.Equal(20, section["EmailMaxSendsPerHour"].GetInt32());
+        Assert.Equal(200, section["EmailMaxSendsPerDay"].GetInt32());
+        Assert.Equal(30, section["EmailMinSecondsBetweenSends"].GetInt32());
+    }
+
+    [Fact]
+    public async Task UpdateEmailRateLimitSettingsAsync_AcceptsZeroAndTheUpperBounds()
+    {
+        await _service.UpdateEmailRateLimitSettingsAsync(
+            EmailRateLimitBounds.MaxSendsPerHour,
+            EmailRateLimitBounds.MaxSendsPerDay,
+            EmailRateLimitBounds.MaxMinSecondsBetweenSends);
+        await _service.UpdateEmailRateLimitSettingsAsync(0, 0, 0);
+
+        var section = ReadSection();
+        Assert.Equal(0, section["EmailMaxSendsPerHour"].GetInt32());
+        Assert.Equal(0, section["EmailMaxSendsPerDay"].GetInt32());
+        Assert.Equal(0, section["EmailMinSecondsBetweenSends"].GetInt32());
+    }
+
+    [Theory]
+    [InlineData(-1, 0, 0, "maxSendsPerHour", "Maximum emails per hour must be between 0 and 10000")]
+    [InlineData(10_001, 0, 0, "maxSendsPerHour", "Maximum emails per hour must be between 0 and 10000")]
+    [InlineData(0, -1, 0, "maxSendsPerDay", "Maximum emails per day must be between 0 and 100000")]
+    [InlineData(0, 100_001, 0, "maxSendsPerDay", "Maximum emails per day must be between 0 and 100000")]
+    [InlineData(0, 0, -1, "minSecondsBetweenSends", "Minimum seconds between emails must be between 0 and 86400")]
+    [InlineData(0, 0, 86_401, "minSecondsBetweenSends", "Minimum seconds between emails must be between 0 and 86400")]
+    public async Task UpdateEmailRateLimitSettingsAsync_RejectsOutOfRangeValuesWithoutSavingAny(
+        int maxSendsPerHour,
+        int maxSendsPerDay,
+        int minSecondsBetweenSends,
+        string parameterName,
+        string expectedMessage)
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateEmailRateLimitSettingsAsync(
+            maxSendsPerHour, maxSendsPerDay, minSecondsBetweenSends));
+
+        Assert.Equal(parameterName, ex.ParamName);
+        Assert.StartsWith(expectedMessage, ex.Message);
         Assert.False(File.Exists(_settingsPath));
     }
 

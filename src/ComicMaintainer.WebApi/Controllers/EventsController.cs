@@ -36,7 +36,8 @@ public class EventsController : ControllerBase
         try
         {
             // Register this client for event broadcasting
-            _eventBroadcaster.RegisterSseClient(clientId, writer);
+            // A failed or timed-out send aborts the connection so the browser reconnects.
+            _eventBroadcaster.RegisterSseClient(clientId, writer, HttpContext.Abort);
             _logger.LogInformation("SSE client connected: {ClientId}", clientId);
             
             // Keep the connection open
@@ -44,8 +45,11 @@ public class EventsController : ControllerBase
             {
                 // Send a heartbeat comment every 30 seconds to keep the connection alive
                 // SSE comments must be ": " (colon followed by space) per spec
-                await writer.WriteAsync(": heartbeat\n\n");
-                await writer.FlushAsync();
+                // Sent through the broadcaster so it never overlaps an event on the same writer.
+                if (!await _eventBroadcaster.SendToSseClientAsync(clientId, ": heartbeat\n\n"))
+                {
+                    break;
+                }
                 await Task.Delay(30000, HttpContext.RequestAborted);
             }
         }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
@@ -13,11 +14,18 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public class FileWatcherService : IFileWatcherService, IDisposable
 {
+    /// <summary>Wait after the first failed attempt to recreate a failed watcher.</summary>
+    private static readonly TimeSpan RestartInitialDelay = TimeSpan.FromSeconds(1);
+
+    /// <summary>Upper bound on the wait between attempts to recreate a failed watcher.</summary>
+    private static readonly TimeSpan RestartMaxDelay = TimeSpan.FromMinutes(1);
+
     private readonly IOptionsMonitor<AppSettings> _settingsMonitor;
     private readonly ILogger<FileWatcherService> _logger;
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly IEventBroadcaster? _eventBroadcaster;
+    private readonly TimeProvider _timeProvider;
     private FileSystemWatcher? _watcher;
     private bool _enabled;
     private string? _activeWatchedDirectory;
@@ -25,6 +33,29 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     private bool _initialized = false;
     private readonly IDisposable? _settingsChangeSubscription;
     private bool _disposed;
+
+    /// <summary>
+    /// Set while a failed watcher is being recreated (guarded by <see cref="_lock"/>). Stopping
+    /// or disposing the service takes and cancels it, which ends the retries.
+    /// </summary>
+    private CancellationTokenSource? _restartCts;
+
+    /// <summary>
+    /// The watcher whose start (enabling its events) is in progress, written under
+    /// <see cref="_lock"/>. <see cref="OnWatcherError"/> reads it without waiting for the lock to
+    /// tell errors raised synchronously while a watcher starts apart from errors of a running
+    /// watcher.
+    /// </summary>
+    private volatile FileSystemWatcher? _startingWatcher;
+
+    /// <summary>
+    /// The latest queued watcher status broadcast (guarded by <see cref="_statusLock"/>). Each
+    /// broadcast runs after the previous one so clients see statuses in order. Statuses are queued
+    /// under <see cref="_lock"/> together with the change they report, and nothing waits for their
+    /// delivery, so slow clients cannot hold up starting, stopping or recreating the watcher.
+    /// </summary>
+    private Task _statusDelivery = Task.CompletedTask;
+    private readonly object _statusLock = new();
 
     /// <summary>
     /// Pending per-file processing requests, keyed by full path. A burst of file-system events for
@@ -61,13 +92,15 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         ILogger<FileWatcherService> logger,
         IFileStoreService fileStore,
         IComicProcessorService processor,
-        IEventBroadcaster? eventBroadcaster = null)
+        IEventBroadcaster? eventBroadcaster = null,
+        TimeProvider? timeProvider = null)
     {
         _settingsMonitor = settings;
         _logger = logger;
         _fileStore = fileStore;
         _processor = processor;
         _eventBroadcaster = eventBroadcaster;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         // Watcher is enabled if either rename or normalize is enabled
         _enabled = _settings.WatcherEnableRename || _settings.WatcherEnableNormalize;
 
@@ -151,8 +184,12 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         _settingsChangeSubscription?.Dispose();
         CancelAllPending();
 
+        CancellationTokenSource? restart;
         lock (_lock)
         {
+            restart = _restartCts;
+            _restartCts = null;
+
             if (_watcher != null)
             {
                 try
@@ -167,12 +204,13 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 _watcher = null;
             }
         }
+
+        CancelRestart(restart);
     }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         bool shouldInitialize = false;
-        bool watcherStarted = false;
         bool watchedDirectoryExists = Directory.Exists(_settings.WatchedDirectory);
 
         lock (_lock)
@@ -199,26 +237,11 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                         "Automatic processing is disabled (both rename and normalize are off); the watcher will still monitor for new files and keep the file list up to date without renaming or normalizing them."));
                 }
 
-                _watcher = new FileSystemWatcher(_settings.WatchedDirectory)
-                {
-                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
-                    Filter = "*.*",
-                    IncludeSubdirectories = true
-                };
-                // Enlarge the internal buffer so bursts of file-system events (e.g. a large batch of
-                // new files landing at once) are less likely to overflow and be dropped by the OS.
-                _watcher.InternalBufferSize = ClampInternalBufferSize(_settings.WatcherInternalBufferSizeKB);
-                _activeWatchedDirectory = _settings.WatchedDirectory;
+                StartWatcherLocked(_settings.WatchedDirectory);
 
-                _watcher.Created += OnFileCreated;
-                _watcher.Changed += OnFileChanged;
-                _watcher.Renamed += OnFileRenamed;
-                _watcher.Deleted += OnFileDeleted;
-                _watcher.Error += OnWatcherError;
-
-                _watcher.EnableRaisingEvents = true;
-                watcherStarted = true;
-                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher started for directory: {Directory}"), _settings.WatchedDirectory);
+                // Broadcast watcher status change (only when the watcher actually started this
+                // call to avoid spurious status events on repeated StartAsync calls).
+                QueueStatusBroadcast(IsRunning);
             }
 
             // The file store inventory is used by features that don't depend on live watcher
@@ -228,20 +251,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             {
                 shouldInitialize = true;
                 _initialized = true;
-            }
-        }
-
-        // Broadcast watcher status change (only when the watcher actually started this call to
-        // avoid spurious status events on repeated StartAsync calls).
-        if (watcherStarted && _eventBroadcaster != null)
-        {
-            try
-            {
-                await _eventBroadcaster.BroadcastWatcherStatusAsync(IsRunning, _enabled);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to broadcast watcher status change");
             }
         }
 
@@ -255,6 +264,57 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             // disk. Only runs once per process (gated by _initialized).
             _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
         }
+    }
+
+    /// <summary>
+    /// Creates and starts the watcher for <paramref name="directory"/>, replacing any previous
+    /// one. Callers hold <see cref="_lock"/>.
+    /// </summary>
+    private void StartWatcherLocked(string directory)
+    {
+        // A watcher that stopped itself (Windows does so after an error) is replaced, not leaked.
+        // It is retired before the new one is enabled so the two never raise events together.
+        if (_watcher != null)
+        {
+            DisposeWatcher(_watcher);
+            _watcher = null;
+            _activeWatchedDirectory = null;
+        }
+
+        var watcher = new FileSystemWatcher(directory)
+        {
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
+            Filter = "*.*",
+            IncludeSubdirectories = true
+        };
+        // Enlarge the internal buffer so bursts of file-system events (e.g. a large batch of
+        // new files landing at once) are less likely to overflow and be dropped by the OS.
+        watcher.InternalBufferSize = ClampInternalBufferSize(_settings.WatcherInternalBufferSizeKB);
+
+        watcher.Created += OnFileCreated;
+        watcher.Changed += OnFileChanged;
+        watcher.Renamed += OnFileRenamed;
+        watcher.Deleted += OnFileDeleted;
+        watcher.Error += OnWatcherError;
+
+        _startingWatcher = watcher;
+        try
+        {
+            watcher.EnableRaisingEvents = true;
+        }
+        catch
+        {
+            watcher.Dispose();
+            throw;
+        }
+        finally
+        {
+            _startingWatcher = null;
+        }
+
+        _watcher = watcher;
+        _activeWatchedDirectory = directory;
+        _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher started for directory: {Directory}"), directory);
     }
     
     /// <summary>
@@ -359,12 +419,16 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         }
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    public Task StopAsync(CancellationToken cancellationToken = default)
     {
         CancelAllPending();
 
+        CancellationTokenSource? restart;
         lock (_lock)
         {
+            restart = _restartCts;
+            _restartCts = null;
+
             if (_watcher != null)
             {
                 _watcher.EnableRaisingEvents = false;
@@ -373,19 +437,52 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 _activeWatchedDirectory = null;
                 _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher stopped"));
             }
+
+            // Broadcast watcher status change
+            QueueStatusBroadcast(false);
         }
 
-        // Broadcast watcher status change
-        if (_eventBroadcaster != null)
+        CancelRestart(restart);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Queues a watcher status broadcast behind the earlier ones, preserving their order, without
+    /// waiting for its delivery. Callers hold <see cref="_lock"/> so that the order of the queued
+    /// statuses matches the order of the changes they report.
+    /// </summary>
+    private void QueueStatusBroadcast(bool running)
+    {
+        if (_eventBroadcaster == null)
         {
-            try
-            {
-                await _eventBroadcaster.BroadcastWatcherStatusAsync(false, _enabled);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to broadcast watcher status change");
-            }
+            return;
+        }
+
+        lock (_statusLock)
+        {
+            _statusDelivery = _statusDelivery
+                .ContinueWith(_ => BroadcastStatusAsync(running), CancellationToken.None,
+                    TaskContinuationOptions.DenyChildAttach, TaskScheduler.Default)
+                .Unwrap();
+        }
+    }
+
+    private async Task BroadcastStatusAsync(bool running)
+    {
+        if (_eventBroadcaster == null)
+        {
+            return;
+        }
+
+        // The next status is only sent once this one has finished, so a client can never receive
+        // them out of order; the broadcaster bounds how long a stalled client can hold it up.
+        try
+        {
+            await _eventBroadcaster.BroadcastWatcherStatusAsync(running, _enabled);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to broadcast watcher status change");
         }
     }
 
@@ -532,20 +629,224 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     }
 
     /// <summary>
-    /// Handles FileSystemWatcher errors. The most important case is an
-    /// <see cref="InternalBufferOverflowException"/>: when a large number of file-system events
-    /// arrive faster than they can be drained, the OS drops events that we never see. Those files
-    /// would otherwise stay unprocessed until the service is restarted. To recover, we rescan the
-    /// watched directory and re-queue any comic files so the missed ones get picked up.
+    /// Handles FileSystemWatcher errors, after which file-system events may have been missed.
+    /// <para>
+    /// Some errors leave the watcher running. The most important is an
+    /// <see cref="InternalBufferOverflowException"/>: when file-system events arrive faster than
+    /// they can be drained, the OS drops events that we never see. An error raised while a watcher
+    /// is being started concerns a subdirectory that could not be watched (for example for lack of
+    /// permission, or because the inotify watch limit was reached), which a new watcher would hit
+    /// again. Missed files would otherwise stay unprocessed until the service is restarted, so we
+    /// rescan the watched directory and re-queue its comic files.
+    /// </para>
+    /// <para>
+    /// Any other error can leave the watcher dead: on Windows it stops itself when its directory
+    /// becomes unavailable (a network share disconnecting, the folder being removed), and on
+    /// Linux an exception ends its event loop while it still reports itself as running. Such a
+    /// watcher is replaced, see <see cref="RestartFaultedWatcherAsync"/>.
+    /// </para>
     /// </summary>
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
         var ex = e.GetException();
-        _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
-            "File watcher reported an error; some file-system events may have been lost. Triggering a recovery rescan."));
 
-        // Recover off the event thread so we don't block the watcher's notification pipeline.
-        _ = Task.Run(async () => await RecoverFromMissedEventsAsync());
+        // Only an error raised synchronously by enabling the watcher (on the thread that holds
+        // _lock) is a start error; one from the notification thread is a running watcher's.
+        var starting = sender != null && ReferenceEquals(sender, _startingWatcher) && Monitor.IsEntered(_lock);
+        if (starting || ex is InternalBufferOverflowException)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
+                "File watcher reported an error; some file-system events may have been lost. Triggering a recovery rescan."));
+
+            // A watcher started by a restart is rescanned once it runs, so subdirectories it
+            // cannot watch don't each queue another full rescan.
+            if (!starting || Volatile.Read(ref _restartCts) == null)
+            {
+                // Recover off the event thread so we don't block the watcher's notification pipeline.
+                _ = Task.Run(async () => await RecoverFromMissedEventsAsync());
+            }
+
+            return;
+        }
+
+        _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
+            "File watcher reported an error and may have stopped; recreating it and rescanning for missed files."));
+
+        // Never wait for _lock on this thread: the watcher can raise errors while holding an
+        // internal lock that disposing it under _lock also takes.
+        if (sender is FileSystemWatcher faulted)
+        {
+            _ = Task.Run(() => RestartFaultedWatcherAsync(faulted));
+        }
+    }
+
+    /// <summary>
+    /// Disposes a watcher that reported an error and starts a replacement, retrying with
+    /// exponential backoff while the watched directory is unavailable. Once a watcher runs again
+    /// the watched directory is rescanned for files that arrived in the meantime.
+    /// </summary>
+    private async Task RestartFaultedWatcherAsync(FileSystemWatcher faulted)
+    {
+        // Only this method disposes the restart: StopAsync and Dispose just cancel it.
+        using var restart = new CancellationTokenSource();
+        var retrying = false;
+        lock (_lock)
+        {
+            if (!ReferenceEquals(_watcher, faulted))
+            {
+                _logger.LogDebug(LoggingHelper.WithWatcherPrefix(
+                    "Ignoring the error of a file watcher that has already been stopped or replaced"));
+                return;
+            }
+
+            DisposeWatcher(faulted);
+            _watcher = null;
+            _activeWatchedDirectory = null;
+
+            // A restart that is already retrying replaces this watcher too.
+            if (_restartCts == null)
+            {
+                _restartCts = restart;
+                retrying = true;
+            }
+
+            // Queued under the lock so a replacement's "running" status cannot overtake it.
+            QueueStatusBroadcast(false);
+        }
+
+        if (retrying)
+        {
+            await RestartWatcherAsync(restart);
+        }
+    }
+
+    /// <summary>
+    /// Starts a watcher, waiting <see cref="RestartInitialDelay"/> after the first failed attempt
+    /// and twice as long after each further one, up to <see cref="RestartMaxDelay"/>, until a
+    /// watcher runs or StopAsync or Dispose takes <paramref name="restart"/>.
+    /// </summary>
+    private async Task RestartWatcherAsync(CancellationTokenSource restart)
+    {
+        var token = restart.Token;
+        try
+        {
+            var delay = RestartInitialDelay;
+            var attempt = 0;
+            while (true)
+            {
+                var directory = _settings.WatchedDirectory;
+                var available = Directory.Exists(directory);
+                Exception? failure = null;
+
+                lock (_lock)
+                {
+                    if (!ReferenceEquals(_restartCts, restart))
+                    {
+                        _logger.LogDebug(LoggingHelper.WithWatcherPrefix("Stopped trying to recreate the file watcher"));
+                        return;
+                    }
+
+                    // A settings change since the directory was read may have found no watcher
+                    // and queued a start for the new directory only; read it again so the old
+                    // one is not started and left running.
+                    if (!string.Equals(directory, _settings.WatchedDirectory, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (_watcher == null && available)
+                    {
+                        try
+                        {
+                            StartWatcherLocked(directory);
+                            QueueStatusBroadcast(IsRunning);
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or Win32Exception)
+                        {
+                            failure = ex;
+                        }
+                    }
+
+                    // Running again, started here or by a settings change in the meantime.
+                    if (_watcher != null)
+                    {
+                        _restartCts = null;
+                        break;
+                    }
+                }
+
+                attempt++;
+                var level = attempt == 1 ? LogLevel.Warning : LogLevel.Debug;
+                if (failure == null)
+                {
+                    _logger.Log(level, LoggingHelper.WithWatcherPrefix(
+                        "Cannot recreate the file watcher while the watched directory is unavailable: {Directory}. Retrying in {Delay}."),
+                        directory, delay);
+                }
+                else
+                {
+                    _logger.Log(level, failure, LoggingHelper.WithWatcherPrefix(
+                        "Failed to recreate the file watcher for directory: {Directory}. Retrying in {Delay}."),
+                        directory, delay);
+                }
+
+                await Task.Delay(delay, _timeProvider, token);
+                delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, RestartMaxDelay.Ticks));
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            _logger.LogDebug(LoggingHelper.WithWatcherPrefix("Stopped trying to recreate the file watcher"));
+            return;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error recreating the file watcher"));
+            return;
+        }
+        finally
+        {
+            // Release the restart after an unexpected failure so a later error can retry again.
+            lock (_lock)
+            {
+                if (ReferenceEquals(_restartCts, restart))
+                {
+                    _restartCts = null;
+                }
+            }
+        }
+
+        await RecoverFromMissedEventsAsync();
+    }
+
+    /// <summary>
+    /// Ends a restart taken out of <see cref="_restartCts"/>. Call it after releasing
+    /// <see cref="_lock"/>: cancelling can resume the restart loop on this thread.
+    /// </summary>
+    private static void CancelRestart(CancellationTokenSource? restart)
+    {
+        try
+        {
+            restart?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The restart loop already ended and disposed it.
+        }
+    }
+
+    private void DisposeWatcher(FileSystemWatcher watcher)
+    {
+        try
+        {
+            watcher.EnableRaisingEvents = false;
+            watcher.Dispose();
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or Win32Exception)
+        {
+            // Best-effort disposal of a watcher that may already have failed
+            _logger.LogDebug(ex, LoggingHelper.WithWatcherPrefix("Error disposing a file watcher"));
+        }
     }
 
     /// <summary>

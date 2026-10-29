@@ -263,9 +263,7 @@ public class SettingsControllerTests
 
         // Assert
         Assert.IsType<OkObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxBytesAsync(5 * 1048576, It.IsAny<CancellationToken>()), Times.Once);
-        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxDownloadBytesAsync(25 * 1048576, It.IsAny<CancellationToken>()), Times.Once);
-        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxDimensionAsync(2048, It.IsAny<CancellationToken>()), Times.Once);
+        _settingsServiceMock.Verify(s => s.UpdateSeriesImageLimitsAsync(5 * 1048576, 25 * 1048576, 2048, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -284,7 +282,7 @@ public class SettingsControllerTests
 
         // Assert
         Assert.IsType<BadRequestObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxBytesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        _settingsServiceMock.Verify(s => s.UpdateSeriesImageLimitsAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -303,7 +301,7 @@ public class SettingsControllerTests
 
         // Assert
         Assert.IsType<BadRequestObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxBytesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        _settingsServiceMock.Verify(s => s.UpdateSeriesImageLimitsAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // UpdateWatcherEnabled removed - use UpdateWatcherEnableRename and UpdateWatcherEnableNormalize instead

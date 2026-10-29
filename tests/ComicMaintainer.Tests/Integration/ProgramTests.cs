@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using ComicMaintainer.Core.Configuration;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -22,6 +23,8 @@ namespace ComicMaintainer.Tests.Integration;
 public sealed class ProgramTests : IDisposable
 {
     private const string WatcherStatusTemplate = "Watcher Status: {Status} (Rename: {Rename}, Normalize: {Normalize})";
+    private const string PaddingOutOfRangeTemplate =
+        "IssueNumberPadding {Padding} is outside the supported range 0-{MaxPadding}; using {EffectivePadding} instead";
 
     private readonly string _root = Path.Join(Path.GetTempPath(), "ComicMaintainer.Tests", "Program-" + Guid.NewGuid().ToString("N"));
     private readonly CapturingLoggerProvider _logs = new();
@@ -87,6 +90,34 @@ public sealed class ProgramTests : IDisposable
         Assert.Single(_logs.ProgramEntries("Server started successfully"));
         var watched = Assert.Single(_logs.ProgramEntries("Watched Directory: {WatchedDir}"));
         Assert.Equal(WatchedDirectory, watched.Values["WatchedDir"]);
+    }
+
+    // user-settings.json and the environment bypass the settings API's range check.
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(1_000_000_000, 10)]
+    public async Task Startup_WarnsWhenTheConfiguredIssueNumberPaddingIsOutOfRange(int padding, int effectivePadding)
+    {
+        await StartAsync(
+            settings => Assert.Equal(effectivePadding, settings.IssueNumberPadding),
+            ("AppSettings:IssueNumberPadding", padding.ToString(CultureInfo.InvariantCulture)));
+
+        var warning = Assert.Single(_logs.ProgramEntries(PaddingOutOfRangeTemplate));
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Equal(padding, warning.Values["Padding"]);
+        Assert.Equal(10, warning.Values["MaxPadding"]);
+        Assert.Equal(effectivePadding, warning.Values["EffectivePadding"]);
+    }
+
+    [Fact]
+    public async Task Startup_DoesNotWarnAboutAnIssueNumberPaddingInRange()
+    {
+        await StartAsync(
+            settings => Assert.Equal(10, settings.IssueNumberPadding),
+            ("AppSettings:IssueNumberPadding", "10"));
+
+        Assert.Single(_logs.ProgramEntries("Server started successfully"));
+        Assert.Empty(_logs.ProgramEntries(PaddingOutOfRangeTemplate));
     }
 
     private async Task StartAsync(Action<AppSettings> assertSettings, params (string Key, string Value)[] settings)

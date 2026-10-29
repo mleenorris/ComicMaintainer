@@ -13,7 +13,7 @@ ComicMaintainer is a service that automatically watches a directory for new or c
 - **File Watching**: Automatically monitors directories for comic file changes
 - **Comic Processing**: Processes `.cbz` and `.cbr` files
 - **Web Interface**: Full-featured web UI for managing comics
-- **Scheduled Jobs**: Manage recurring background jobs (interval, enable/disable, options, run now) from the **Scheduled Jobs** page (`#/jobs`, in the sidebar and ⋮ menu; administrators only). Ships with a *Metadata Audit* job that walks every tracked file and reports any with a missing chapter/issue number or a series tag that doesn't match the expected resolved series name, plus a *Library Scan* job (`library-scan`) that reconciles additions/deletions and re-normalizes files whose series-metadata stamp is stale (opt-in `reprocessModified` also re-normalizes files changed on disk by other tools; see [Performance Tuning](docs/PERFORMANCE_TUNING.md#incremental-library-scans)). New jobs can be added by registering a class that implements `IScheduledJobHandler`.
+- **Scheduled Jobs**: Manage recurring background jobs (interval, enable/disable, options, run now) from the **Scheduled Jobs** page (`#/jobs`, in the sidebar and ⋮ menu; administrators only). Ships with a *Metadata Audit* job that walks every tracked file and reports any with a missing chapter/issue number or a series tag that doesn't match the expected resolved series name, plus a *Library Scan* job (`library-scan`) that reconciles additions/deletions and re-normalizes files whose series-metadata stamp is stale (opt-in `reprocessModified` also re-normalizes files changed on disk by other tools; see [Performance Tuning](docs/PERFORMANCE_TUNING.md#incremental-library-scans)), and a *Suwayomi Download Import* job (`suwayomi-download-import`) that moves chapters Suwayomi saved as `source/series/chapter.cbz` into the library as `series/chapter.cbz` once a Suwayomi downloads folder is set in Settings (see [API docs](docs/API.md#importing-suwayomi-downloads)). New jobs can be added by registering a class that implements `IScheduledJobHandler`.
 - **Batch Processing**: Process multiple files at once
 - **Metadata Management**: View and edit comic metadata
 - **Series Library View**: Browse comics as cover-based series cards and drill into issue lists
@@ -247,11 +247,23 @@ Settings are read from these sources; a later source overrides an earlier one:
 | WatchedDirectory | WATCHED_DIR | /watched_dir | Directory to watch for comic files |
 | DuplicateDirectory | DUPLICATE_DIR | /duplicates | Directory for duplicate files |
 | ConfigDirectory | CONFIG_DIR | /Config | Directory for configuration data |
+<<<<<<< HEAD
 | PUID | PUID | 99 | User ID for file permissions (Docker image only) |
 | PGID | PGID | 100 | Group ID for file permissions (Docker image only) |
+=======
+| FilenameFormat | FILENAME_FORMAT | {series} - Chapter {issue} | Template for file naming |
+| IssueNumberPadding | ISSUE_NUMBER_PADDING | 4 | Number of digits for issue numbers (0–10) |
+| MaxWorkers | MAX_WORKERS | 4 | Maximum concurrent processing jobs |
+| WatcherEnabled | WATCHER_ENABLED | true | Enable/disable file watcher |
+| WebPort | WEB_PORT | 5000 | Web server port |
+| PUID | PUID | 99 | User ID for file permissions |
+| PGID | PGID | 100 | Group ID for file permissions |
+>>>>>>> origin/dotnet
 | EnableExternalSeriesMetadata | ENABLE_EXTERNAL_SERIES_METADATA | false | Enable ComicVine alias lookups for series grouping |
 | ComicVineApiKey | COMICVINE_API_KEY | _(empty)_ | ComicVine API key used for external series alias enrichment |
 | ComicVineBaseUrl | COMICVINE_BASE_URL | https://comicvine.gamespot.com/api | Override the ComicVine API base URL if needed |
+| ReverseProxySettings:TrustedProxies | TRUSTED_PROXIES | _(empty)_ | Comma-separated IP addresses and CIDR ranges of your reverse proxies; requests from them are rate-limited using `X-Forwarded-For` (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)) |
+| ReverseProxySettings:ForwardedHopLimit | TRUSTED_PROXY_HOPS | 1 | Number of right-most trusted `X-Forwarded-For` entries to follow; keep at 1 unless every additional proxy reliably appends its actual peer address (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)) |
 
 ### Settings Without a Dedicated Environment Variable
 
@@ -300,6 +312,9 @@ For a complete, ready-to-use API collection with all endpoints, see:
 - `POST /api/email/send` - Queue specific files for delivery
 - `POST /api/email/send-series` - Queue every issue of a series
 - `GET|PUT /api/email/subscriptions` - Manage automatic per-series delivery
+- `GET /api/email/deliveries` - Page through the delivery history (`limit`, `offset`)
+- `POST /api/email/deliveries/{id}/cancel` / `POST /api/email/deliveries/cancel-pending` - Cancel deliveries that have not been sent yet
+- `PUT /api/settings/email-rate-limit` - Limit how many comic emails are sent per hour or day, and how far apart
 
 See [Email to E-Reader](docs/EMAIL_DELIVERY.md) for the full endpoint list and configuration.
 
@@ -483,6 +498,7 @@ landmark.
 - **Secrets Management**: Environment-based configuration for sensitive data
 - **JWT Security**: HMAC SHA256 signing with configurable expiration
 - **Authelia Header Trust**: With Authelia enabled, the forward-auth headers are only accepted from the reverse proxies listed in the required `AUTHELIA_TRUSTED_PROXIES` (see [AUTHELIA.md](docs/AUTHELIA.md#choosing-authelia_trusted_proxies))
+- **Per-Client Rate Limiting**: Signed-out requests are limited per client address; behind a reverse proxy, set `TRUSTED_PROXIES` so that each client is counted by the address the proxy forwards rather than all of them sharing the proxy's (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting))
 
 See [SECURITY_FIXES_DOTNET.md](docs/archive/SECURITY_FIXES_DOTNET.md) for complete security documentation.
 

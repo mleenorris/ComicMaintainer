@@ -501,11 +501,13 @@ Whether processing renames files, or normalizes their metadata.
 ### PUT /api/settings/watcher-enable-rename
 ### PUT /api/settings/watcher-enable-normalize
 
-Turn renaming or normalizing on or off. Despite the names, these settings apply to every
-processing run, including files processed on request and processing jobs, not only to
-the watcher: with a step off, processing skips it but still marks the file as renamed or
-normalized. With both off, the watcher still tracks files but processes none of them
-automatically.
+Turn renaming or normalizing on or off in the full processing pipeline. Despite the
+names, these settings apply to processing runs on request and processing jobs, not only
+to the watcher: with a step off, the pipeline skips it but still marks the file as
+renamed or normalized. Rename-only (`/api/jobs/rename-selected`) and normalize-only
+(`/api/jobs/normalize-selected`) jobs are exceptions and perform their operation even
+when the corresponding setting is off. With both settings off, the watcher still tracks
+files but processes none of them automatically.
 
 **Request Body:**
 ```json

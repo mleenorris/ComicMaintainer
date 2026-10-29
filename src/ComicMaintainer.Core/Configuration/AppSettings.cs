@@ -26,9 +26,7 @@ public class AppSettings
     public int IssueNumberPadding { get; set; } = 4;
     public int MaxWorkers { get; set; } = 4;
     public int LogMaxBytes { get; set; } = 10485760; // 10MB
-    public int DbCacheSizeMB { get; set; } = 64;
     public string? BasePath { get; set; }
-    public int WebPort { get; set; } = 5000;
     
     // User/Group settings for Docker
     public int PUID { get; set; } = 99;

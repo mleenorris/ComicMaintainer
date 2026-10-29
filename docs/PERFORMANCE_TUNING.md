@@ -3,19 +3,21 @@
 This guide provides recommendations for optimizing ComicMaintainer's performance based on your specific use case and system resources.
 
 ## Table of Contents
-- [Environment Variables](#environment-variables)
+- [Settings](#settings)
 - [Database Performance](#database-performance)
 - [File Processing Performance](#file-processing-performance)
 - [Web Interface Performance](#web-interface-performance)
 - [System Resource Optimization](#system-resource-optimization)
 - [Monitoring Performance](#monitoring-performance)
 
-## Environment Variables
+## Settings
+
+The Python version's `MAX_WORKERS`, `GUNICORN_WORKERS`, `DB_CACHE_SIZE_MB` and `LOG_MAX_BYTES` environment variables are not read by the .NET version. Use the settings below instead.
 
 ### Core Performance Settings
 
-#### `MAX_WORKERS`
-Number of concurrent worker threads for file processing.
+#### `MaxWorkers`
+Maximum number of files processed at the same time.
 
 **Default:** `4`
 
@@ -25,60 +27,30 @@ Number of concurrent worker threads for file processing.
 - **Systems with slow storage (HDD/Network):** 2-4 workers
 - **Low memory systems:** 2-3 workers
 
-**Example:**
-```bash
-docker run -e MAX_WORKERS=6 ...
-```
-
-#### `GUNICORN_WORKERS`
-Number of Gunicorn worker processes for the web interface.
-
-**Default:** `2`
-
-**Recommendations:**
-- **Single user:** 1-2 workers
-- **Multiple concurrent users:** 2-4 workers
-- **High traffic:** 4-8 workers (2 × CPU cores)
+It is not on the Settings page: set the `AppSettings__MaxWorkers` environment variable. The value is read at startup.
 
 **Example:**
 ```bash
-docker run -e GUNICORN_WORKERS=4 ...
+docker run -e AppSettings__MaxWorkers=6 ...
 ```
 
-#### `DB_CACHE_SIZE_MB`
-SQLite cache size in megabytes.
+#### Web server workers
+The .NET version serves the web interface from a single process, so there is no web worker count to tune.
 
-**Default:** `64` (64MB)
-
-**Recommendations:**
-- **Small libraries (<1000 files):** 32MB
-- **Medium libraries (1000-5000 files):** 64MB (default)
-- **Large libraries (5000-20000 files):** 128MB
-- **Very large libraries (>20000 files):** 256MB
-
-**Example:**
-```bash
-docker run -e DB_CACHE_SIZE_MB=128 ...
-```
-
-**Note:** Higher cache sizes improve read performance but use more RAM.
+#### Database cache
+The SQLite page cache is fixed at 64MB per connection and cannot be changed.
 
 ### Log Settings
 
-#### `LOG_MAX_BYTES`
-Maximum log file size in bytes before rotation.
+#### Maximum log file size
+Size a log file reaches before it is rotated. Set it under **Settings → Log Rotation**; it is applied when the service restarts.
 
-**Default:** `5242880` (5MB)
+**Default:** 10MB
 
 **Recommendations:**
 - **Production systems:** 5-10MB
 - **Debug/troubleshooting:** 10-20MB
 - **Storage-constrained systems:** 1-5MB
-
-**Example:**
-```bash
-docker run -e LOG_MAX_BYTES=10485760 ...  # 10MB
-```
 
 ## Database Performance
 
@@ -90,7 +62,7 @@ The application automatically configures SQLite with optimal settings:
 2. **Synchronous Mode:** NORMAL (balanced performance/safety with WAL)
 3. **Memory-Mapped I/O:** 256MB for faster reads
 4. **Temp Store:** In-memory for temporary tables
-5. **Cache Size:** Configurable via `DB_CACHE_SIZE_MB`
+5. **Cache Size:** 64MB page cache per connection (fixed)
 
 ### Database Maintenance
 
@@ -132,15 +104,10 @@ For processing thousands of files:
 
 1. **Increase worker count:**
    ```bash
-   docker run -e MAX_WORKERS=8 ...
+   docker run -e AppSettings__MaxWorkers=8 ...
    ```
 
-2. **Increase database cache:**
-   ```bash
-   docker run -e DB_CACHE_SIZE_MB=128 ...
-   ```
-
-3. **Use async job processing:**
+2. **Use async job processing:**
    - Use the web interface "Process All Files" button
    - Jobs are persistent and survive page refreshes
    - Real-time progress updates via SSE
@@ -224,7 +191,7 @@ For best performance:
 **Typical memory usage:**
 - Base application: ~100-200MB
 - Per worker thread: ~50-100MB
-- Database cache: Configured via `DB_CACHE_SIZE_MB`
+- Database cache: up to 64MB per database connection
 
 **Total RAM recommendation:**
 - Minimum: 512MB
@@ -241,9 +208,9 @@ For best performance:
 ### Storage Performance
 
 **Storage recommendations:**
-- **SSD/NVMe:** Optimal performance, use higher `MAX_WORKERS` (6-8)
-- **HDD:** Lower `MAX_WORKERS` (2-4) to avoid disk thrashing
-- **Network storage:** Lower `MAX_WORKERS` (2-3), increase stability checks if needed
+- **SSD/NVMe:** Optimal performance, use higher `MaxWorkers` (6-8)
+- **HDD:** Lower `MaxWorkers` (2-4) to avoid disk thrashing
+- **Network storage:** Lower `MaxWorkers` (2-3), increase stability checks if needed
 
 ### Docker Resource Limits
 
@@ -310,7 +277,7 @@ Useful series (Prometheus names):
 | Metric | What it tells you |
 | --- | --- |
 | `comicmaintainer_files_processed_total{operation,outcome}` | Processing throughput and failure rate |
-| `comicmaintainer_processing_job_duration_seconds{operation,status}` | Batch job duration — compare against `MAX_WORKERS` changes |
+| `comicmaintainer_processing_job_duration_seconds{operation,status}` | Batch job duration — compare against `MaxWorkers` changes |
 | `comicmaintainer_scheduled_job_runs_total{job,outcome}` / `comicmaintainer_scheduled_job_duration_seconds` | Scheduled job health (library scan, audits, backups) |
 | `comicmaintainer_metadata_provider_requests_total{provider,outcome}` | External metadata lookups |
 | `comicmaintainer_metadata_provider_rate_limit_waits_total{provider,kind}` | Time lost to provider throttling (`kind=client` local limiter, `kind=server` HTTP 429) — lower `MANGADEX_REQUESTS_PER_SECOND` / `ANILIST_REQUESTS_PER_MINUTE` if `server` waits climb |
@@ -365,7 +332,7 @@ docker run -e DEBUG_MODE=true ...
 
 **Solutions:**
 1. Check storage speed (HDD vs SSD)
-2. Reduce `MAX_WORKERS` if CPU/disk is saturated
+2. Reduce `MaxWorkers` if CPU/disk is saturated
 3. Check if files are actually being modified or skipped (normalized)
 4. Enable debug logging to identify bottlenecks
 
@@ -374,29 +341,25 @@ docker run -e DEBUG_MODE=true ...
 **Symptoms:** Web UI is sluggish or unresponsive
 
 **Solutions:**
-1. Increase `GUNICORN_WORKERS`
-2. Increase `DB_CACHE_SIZE_MB`
-3. Reduce pagination size (if customized)
-4. Check browser console for JavaScript errors
-5. Clear browser cache
+1. Reduce pagination size (if customized)
+2. Check browser console for JavaScript errors
+3. Clear browser cache
 
 ### High Memory Usage
 
 **Symptoms:** Container uses excessive RAM
 
 **Solutions:**
-1. Reduce `MAX_WORKERS`
-2. Reduce `DB_CACHE_SIZE_MB`
-3. Reduce `GUNICORN_WORKERS`
-4. Set Docker memory limits
-5. Vacuum database to reclaim space
+1. Reduce `MaxWorkers`
+2. Set Docker memory limits
+3. Vacuum database to reclaim space
 
 ### High CPU Usage
 
 **Symptoms:** CPU constantly at 100%
 
 **Solutions:**
-1. Reduce `MAX_WORKERS`
+1. Reduce `MaxWorkers`
 2. Check for stuck jobs (cancel and retry)
 3. Ensure watcher is not processing same files repeatedly
 4. Check if files are already normalized (should skip processing)
@@ -406,41 +369,34 @@ docker run -e DEBUG_MODE=true ...
 ### For Small Libraries (<1000 files)
 ```bash
 docker run \
-  -e MAX_WORKERS=2 \
-  -e GUNICORN_WORKERS=2 \
-  -e DB_CACHE_SIZE_MB=32 \
+  -e AppSettings__MaxWorkers=2 \
   ...
 ```
 
 ### For Medium Libraries (1000-5000 files)
 ```bash
 docker run \
-  -e MAX_WORKERS=4 \
-  -e GUNICORN_WORKERS=2 \
-  -e DB_CACHE_SIZE_MB=64 \
+  -e AppSettings__MaxWorkers=4 \
   ...
 ```
 
 ### For Large Libraries (>5000 files)
 ```bash
 docker run \
-  -e MAX_WORKERS=6 \
-  -e GUNICORN_WORKERS=4 \
-  -e DB_CACHE_SIZE_MB=128 \
+  -e AppSettings__MaxWorkers=6 \
   ...
 ```
 
 ### For Production Systems
 ```bash
 docker run \
-  -e MAX_WORKERS=4 \
-  -e GUNICORN_WORKERS=4 \
-  -e DB_CACHE_SIZE_MB=64 \
-  -e LOG_MAX_BYTES=10485760 \
+  -e AppSettings__MaxWorkers=4 \
   --memory=2g \
   --cpus=4 \
   ...
 ```
+
+Set the maximum log file size (for example 10MB) under **Settings → Log Rotation**.
 
 ## Summary
 

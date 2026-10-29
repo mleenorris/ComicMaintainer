@@ -190,16 +190,17 @@ For Windows users who prefer to run without Docker:
 
 2. Extract to a folder (e.g., `C:\ComicMaintainer`)
 
-3. Create a `.env` file with your configuration:
-   ```
-   WATCHED_DIR=C:\Comics\ToProcess
-   DUPLICATE_DIR=C:\Comics\Duplicates
-   WEB_PORT=5000
+3. Set your configuration as environment variables (the app does not read a `.env` file), for example in PowerShell:
+   ```powershell
+   $env:WATCHED_DIR = "C:\Comics\ToProcess"
+   $env:DUPLICATE_DIR = "C:\Comics\Duplicates"
+   # Optional: listen on another port or on every interface (default: http://localhost:5000)
+   $env:ASPNETCORE_URLS = "http://+:8080"
    ```
 
-4. Run `ComicMaintainer.WebApi.exe`
+4. Run `ComicMaintainer.WebApi.exe` from the same PowerShell window
 
-5. Access the web interface at `http://localhost:5000`
+5. Access the web interface at `http://localhost:8080` (or `http://localhost:5000` if you omitted the optional `ASPNETCORE_URLS` override)
 
 **Running as a Windows Service:**
 Use [NSSM](https://nssm.cc/) to run ComicMaintainer as a Windows service that starts automatically:
@@ -232,10 +233,12 @@ The .NET MAUI Android app allows you to manage your comics from your mobile devi
 
 ## Configuration
 
-Configuration can be set via:
+Settings are read from these sources; a later source overrides an earlier one:
 
-1. **appsettings.json** (for local development)
-2. **Environment variables** (for Docker/production)
+1. **appsettings.json**, `AppSettings` section (the shipped defaults)
+2. **`AppSettings__<Setting>` environment variables**, e.g. `AppSettings__MaxWorkers=2` (standard ASP.NET Core configuration)
+3. **The Settings page** in the web UI, which saves to `user-settings.json` in the config directory
+4. **The environment variables in the table below**, which always win
 
 ### Configuration Options
 
@@ -244,18 +247,27 @@ Configuration can be set via:
 | WatchedDirectory | WATCHED_DIR | /watched_dir | Directory to watch for comic files |
 | DuplicateDirectory | DUPLICATE_DIR | /duplicates | Directory for duplicate files |
 | ConfigDirectory | CONFIG_DIR | /Config | Directory for configuration data |
-| FilenameFormat | FILENAME_FORMAT | {series} - Chapter {issue} | Template for file naming |
-| IssueNumberPadding | ISSUE_NUMBER_PADDING | 4 | Number of digits for issue numbers (0–10) |
-| MaxWorkers | MAX_WORKERS | 4 | Maximum concurrent processing jobs |
-| WatcherEnabled | WATCHER_ENABLED | true | Enable/disable file watcher |
-| WebPort | WEB_PORT | 5000 | Web server port |
-| PUID | PUID | 99 | User ID for file permissions |
-| PGID | PGID | 100 | Group ID for file permissions |
+| PUID | PUID | 99 | User ID for file permissions (Docker image only) |
+| PGID | PGID | 100 | Group ID for file permissions (Docker image only) |
 | EnableExternalSeriesMetadata | ENABLE_EXTERNAL_SERIES_METADATA | false | Enable ComicVine alias lookups for series grouping |
 | ComicVineApiKey | COMICVINE_API_KEY | _(empty)_ | ComicVine API key used for external series alias enrichment |
 | ComicVineBaseUrl | COMICVINE_BASE_URL | https://comicvine.gamespot.com/api | Override the ComicVine API base URL if needed |
 | ReverseProxySettings:TrustedProxies | TRUSTED_PROXIES | _(empty)_ | Comma-separated IP addresses and CIDR ranges of your reverse proxies; requests from them are rate-limited using `X-Forwarded-For` (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)) |
 | ReverseProxySettings:ForwardedHopLimit | TRUSTED_PROXY_HOPS | 1 | Number of right-most trusted `X-Forwarded-For` entries to follow; keep at 1 unless every additional proxy reliably appends its actual peer address (see [REVERSE_PROXY.md](docs/REVERSE_PROXY.md#trusted-proxies-and-rate-limiting)) |
+
+### Settings Without a Dedicated Environment Variable
+
+| Setting | Default | How to change it |
+|---------|---------|------------------|
+| FilenameFormat | `{series} - Chapter {issue}` | **Settings → Filename Format**, or `AppSettings__FilenameFormat` |
+| IssueNumberPadding | `4` | **Settings → Issue Number Padding**, or `AppSettings__IssueNumberPadding` |
+| WatcherEnableRename, WatcherEnableNormalize | `true` | **Settings → Watcher**, or `AppSettings__WatcherEnableRename` / `AppSettings__WatcherEnableNormalize`. Each turns its step (rename, metadata normalize) on or off for automatic processing and the Process actions; the explicit Rename/Normalize actions ignore them. New files are processed automatically while either is on; turn both off to stop automatic processing |
+| MaxWorkers | `4` | `AppSettings__MaxWorkers` (files processed in parallel). Read at startup, so restart after changing it |
+| Web server port | `5000` | Docker: publish a different host port, e.g. `-p 8080:5000`. Without Docker: `ASPNETCORE_URLS=http://+:8080` |
+
+An `AppSettings__<Setting>` variable only sets the starting value: once a setting is saved on the Settings page, the saved value wins.
+
+`MAX_WORKERS`, `WEB_PORT`, `FILENAME_FORMAT`, `ISSUE_NUMBER_PADDING`, `WATCHER_ENABLED`, `DB_CACHE_SIZE_MB` and `GUNICORN_WORKERS`, left over from the Python version, are not read by this version; use the settings above instead. The SQLite page cache is fixed at 64 MB per connection.
 
 ## API Endpoints
 
@@ -281,7 +293,7 @@ For a complete, ready-to-use API collection with all endpoints, see:
 ### Watcher API
 
 - `GET /api/watcher/status` - Get watcher status
-- `POST /api/watcher/enable` - Enable/disable watcher
+- `PUT /api/settings/watcher-enable-rename`, `PUT /api/settings/watcher-enable-normalize` - Turn automatic rename / metadata normalize on or off (the deprecated `POST /api/watcher/enable` does nothing)
 
 ### Email API
 
@@ -452,12 +464,12 @@ replacement exists:
 
 ### Settings That Require a Restart
 
-A few settings are only read at startup and are flagged with a **Restart
-required** badge in the Settings modal. After changing them, use **Restart
-Service** to apply them immediately:
+A few settings are only read at startup:
 
-- Maximum log file size (`LOG_MAX_BYTES`)
-- `MaxWorkers`
+- Maximum log file size (**Settings → Log Rotation**), flagged with a **Restart
+  required** badge. After changing it, use **Restart Service** to apply it immediately.
+- `MaxWorkers` (`AppSettings__MaxWorkers`), which is not on the Settings page.
+  Restart the app or container after changing it.
 
 ### Accessibility
 

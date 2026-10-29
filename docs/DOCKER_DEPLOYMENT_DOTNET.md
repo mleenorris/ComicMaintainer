@@ -70,14 +70,13 @@ docker run -d \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ASPNETCORE_URLS` | http://+:5000 | Server URLs |
+| `ASPNETCORE_URLS` | http://+:5000 | Server URLs. To use another port, change the host side of the port mapping (`-p 8080:5000`) instead; the container health check probes port 5000 |
 | `WATCHED_DIR` | /watched_dir | Directory to watch for comics |
 | `DUPLICATE_DIR` | /duplicates | Directory for duplicate files |
 | `CONFIG_DIR` | /Config | Configuration and database directory |
 | `PUID` | 99 | User ID for file operations (dynamically created) |
 | `PGID` | 100 | Group ID for file operations (dynamically created) |
-| `MAX_WORKERS` | 4 | Maximum concurrent workers |
-| `DB_CACHE_SIZE_MB` | 64 | Database cache size |
+| `AppSettings__MaxWorkers` | 4 | Files processed in parallel (read at startup) |
 | `JWT_SECRET` | *generated* | JWT signing key (32+ chars). When unset or still set to a published placeholder, a random key is generated on first start and kept in `/Config/jwt-secret.key` |
 | `JWT_SECRET_FILE` | | File holding `JWT_SECRET`, such as a Docker secret. Set only one of the two |
 | `ADMIN_USERNAME` | admin | Default admin username |

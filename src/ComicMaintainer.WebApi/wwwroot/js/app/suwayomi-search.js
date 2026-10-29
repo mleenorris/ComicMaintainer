@@ -480,5 +480,10 @@
                 item.dataset.inLibrary = 'true';
                 const badge = item.querySelector('.suwayomi-search-badge');
                 if (badge) badge.hidden = false;
+                // A disabled button has a request of its own under way and
+                // sets its label once that request settles.
+                const button = item.querySelector('button');
+                const label = item.querySelector('.suwayomi-search-action');
+                if (label && !(button && button.disabled)) label.textContent = suwayomiAddActionLabel(true);
             });
         }

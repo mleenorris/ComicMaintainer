@@ -11,11 +11,16 @@ namespace ComicMaintainer.Tests.Services;
 /// are left out of the downloads, and a failure after the add says that the
 /// add went through.
 /// </summary>
-public sealed class SuwayomiSeriesAddServiceTests
+public sealed class SuwayomiSeriesAddServiceTests : IDisposable
 {
     private readonly Mock<ISuwayomiService> _suwayomi = new(MockBehavior.Strict);
     private readonly Mock<ISeriesLibraryService> _library = new(MockBehavior.Strict);
-    private readonly CancellationToken _token = new CancellationTokenSource().Token;
+    private readonly CancellationTokenSource _cancellation = new();
+    private readonly CancellationToken _token;
+
+    public SuwayomiSeriesAddServiceTests() => _token = _cancellation.Token;
+
+    public void Dispose() => _cancellation.Dispose();
 
     private SuwayomiSeriesAddService CreateService() =>
         new(_suwayomi.Object, _library.Object, NullLogger<SuwayomiSeriesAddService>.Instance);

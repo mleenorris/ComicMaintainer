@@ -439,15 +439,10 @@ public class SuwayomiService : ISuwayomiService
             throw new SuwayomiException(UnexpectedResponseMessage);
         }
 
-        var found = new List<SuwayomiSeries>();
-        foreach (var node in mangas.EnumerateArray())
-        {
-            var series = ReadSeries(node);
-            if (series is not null)
-            {
-                found.Add(series);
-            }
-        }
+        var found = mangas.EnumerateArray()
+            .Select(ReadSeries)
+            .OfType<SuwayomiSeries>()
+            .ToList();
 
         // Sources order their results by their own notion of relevance, which
         // often buries the exact title; OrderByDescending is stable, so the
@@ -521,14 +516,10 @@ public class SuwayomiService : ISuwayomiService
             throw new SuwayomiException($"Suwayomi has no series with id {seriesId}.");
         }
 
-        var owned = new HashSet<double>();
-        foreach (var text in ownedIssueNumbers ?? Enumerable.Empty<string?>())
-        {
-            if (TryParseIssueNumber(text, out var number))
-            {
-                owned.Add(ChapterKey(number));
-            }
-        }
+        var owned = (ownedIssueNumbers ?? Enumerable.Empty<string?>())
+            .Select(text => TryParseIssueNumber(text, out var number) ? ChapterKey(number) : default(float?))
+            .OfType<float>()
+            .ToHashSet();
 
         var chapters = await FetchChaptersAsync(seriesId, cancellationToken);
         var result = new SuwayomiSeriesDownloadResult { ChapterCount = chapters.Count };
@@ -699,9 +690,10 @@ public class SuwayomiService : ISuwayomiService
 
     /// <summary>
     /// Suwayomi stores chapter numbers as 32-bit floats, so 10.1 arrives as
-    /// 10.100000381…; rounding lets it equal the local "10.1".
+    /// 10.100000381…; narrowing both sides to that precision lets it equal
+    /// the local "10.1" while keeping 10.001 and 10.002 apart.
     /// </summary>
-    private static double ChapterKey(double number) => Math.Round(number, 2, MidpointRounding.AwayFromZero);
+    private static float ChapterKey(double number) => (float)number;
 
     private static async Task<byte[]> ReadCappedAsync(Stream source, int maxBytes, CancellationToken cancellationToken)
     {

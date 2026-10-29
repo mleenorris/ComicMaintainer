@@ -596,6 +596,36 @@ test('adding a series puts it in the Suwayomi library and queues the issues the 
     assert.equal(item(page, 2).querySelector('.suwayomi-search-badge').hidden, false);
 });
 
+test('a series listed again while its add is pending shows the outcome on the new row too', async () => {
+    const first = deferred();
+    const answers = [first.promise, new Promise(() => {})];
+    const page = await bootSearch({
+        found: { 102: [series(2, 'Saga')] },
+        routes: { 'POST /api/suwayomi/series/2/add': () => answers.shift() }
+    });
+    await search(page, 'Saga');
+    page.click(addButton(page, 2));
+    await page.settle();
+
+    await search(page, 'Saga');
+    assert.equal(text(addButton(page, 2)), 'Add & download');
+    first.resolve(addResult({ chapterCount: 2, queued: 2 }));
+    await page.settle();
+    assert.equal(item(page, 2).dataset.inLibrary, 'true');
+    assert.equal(text(addButton(page, 2)), 'Download missing');
+
+    // A row with its own add under way keeps its in-progress label.
+    const rival = deferred();
+    answers.unshift(rival.promise);
+    await search(page, 'Saga');
+    const pending = addButton(page, 2);
+    page.click(pending);
+    await page.settle();
+    assert.equal(text(pending), 'Adding...');
+    page.evaluate('markSuwayomiSeriesInLibrary(2)');
+    assert.equal(text(pending), 'Adding...');
+});
+
 test('a series already in the Suwayomi library only has its missing chapters queued', async () => {
     const answer = deferred();
     const page = await bootSearch({

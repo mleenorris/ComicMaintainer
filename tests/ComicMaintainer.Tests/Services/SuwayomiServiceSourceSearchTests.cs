@@ -86,7 +86,7 @@ public sealed class SuwayomiServiceSourceSearchTests
         """{"data":{"fetchSourceManga":{"mangas":""" + mangas + ""","hasNextPage":""" + hasNextPage + "}}}";
 
     private static string Manga(int id, string title, bool inLibrary) =>
-        JsonSerializer.Serialize(new { data = new { manga = new { id, title, inLibrary, thumbnailUrl = (string?)null } } });
+        JsonSerializer.Serialize(new { data = new { manga = new { id, title, inLibrary, thumbnailUrl = default(string) } } });
 
     private static string FetchedChapters(string chapters) =>
         """{"data":{"fetchChapters":{"chapters":""" + chapters + "}}}";
@@ -396,6 +396,30 @@ public sealed class SuwayomiServiceSourceSearchTests
         var info = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Information, info.Level);
         Assert.Equal("Queued 3 Suwayomi chapter download(s) for series 5", info.Message);
+    }
+
+    [Fact]
+    public async Task QueueSeriesDownloadsAsync_DistinctFractionalNumbers_AreQueuedSeparately()
+    {
+        // 10.001 and 10.002 as 32-bit floats; neither is the local issue 10.
+        var handler = Server(
+            ("FetchChapters", FetchedChapters("""
+                [
+                  {"id":100,"name":"Chapter 10","chapterNumber":10,"isDownloaded":false},
+                  {"id":1001,"name":"Chapter 10.001","chapterNumber":10.00100040435791,"isDownloaded":false},
+                  {"id":1002,"name":"Chapter 10.002","chapterNumber":10.001999855041504,"isDownloaded":false}
+                ]
+                """)),
+            ("Enqueue", Enqueued));
+
+        var result = await CreateService(handler).QueueSeriesDownloadsAsync(5, new[] { "10" });
+
+        Assert.Equal(new[] { 1001, 1002 }, result.QueuedChapters.Select(c => c.Id));
+        Assert.Equal(1, result.AlreadyInLocalLibraryCount);
+        Assert.Equal(0, result.DuplicateChapterCount);
+        Assert.Equal(
+            new[] { 1001, 1002 },
+            handler.Requests[1].Variables.GetProperty("ids").EnumerateArray().Select(id => id.GetInt32()));
     }
 
     [Fact]

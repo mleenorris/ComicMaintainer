@@ -13,7 +13,7 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
-public class FileStoreServiceTests
+public class FileStoreServiceTests : IDisposable
 {
     private readonly FileStoreService _service;
     private readonly string _testDirectory;
@@ -45,6 +45,24 @@ public class FileStoreServiceTests
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         // Read state is per-user, so the service under test needs a user in scope.
         _service = new FileStoreService(options, logger, dbContextFactory, userContext: _userContext);
+    }
+
+    public void Dispose()
+    {
+        TestIO.TryDeleteDirectory(_testDirectory);
+    }
+
+    [Fact]
+    public void Dispose_DeletesTheTestDirectory()
+    {
+        // Regression test for #876: every test used to leave its directory (and archives) behind.
+        File.WriteAllText(Path.Combine(_testDirectory, "test.cbz"), "test content");
+
+        // xUnit only disposes test classes that implement IDisposable.
+        Assert.IsAssignableFrom<IDisposable>(this);
+        Dispose();
+
+        Assert.False(Directory.Exists(_testDirectory));
     }
 
     [Fact]

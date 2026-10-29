@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { bootApp, deferred } = require('./support/app');
+const { bootApp, deferred, addReadOnlyGate, isDisplayed } = require('./support/app');
 const { respond } = require('./support/dom');
 const {
     seriesCard, issue, issuesBody, libraryBody, issuesPath, bootSeries, callsTo, text, issueCards, readerUrl
@@ -384,4 +384,52 @@ test('read-only users get the page without its write controls', async () => {
     // Reading stays available.
     page.click('#seriesDetailPanel .series-detail-actions .btn-primary');
     assert.equal(page.navigations.at(-1).url, readerUrl('/comics/Saga/Saga 001.cbz'));
+});
+
+test('read-only users are offered only the read actions of an issue and no Series Actions', async () => {
+    const boot = user => bootSeries({
+        user,
+        issues: [issue(1), issue(2, { read: true }), issue(3, { duplicate: true })],
+        beforeScripts: addReadOnlyGate
+    });
+    // What each issue's menu shows once opened (menus.js then moves it to
+    // <body>, out of its card); a divider reads as '—'.
+    const issueMenus = async page => {
+        const menus = [];
+        for (const card of issueCards(page)) {
+            page.click(card.querySelector('.series-issue-actions-toggle'));
+            await page.waitFor(() => page.$('body > .dropdown-menu.show'));
+            menus.push([...page.$('body > .dropdown-menu.show').children]
+                .filter(isDisplayed)
+                .map(item => (item.classList.contains('dropdown-divider') ? '—' : text(item))));
+            page.run('closeAllDropdowns()');
+            await page.settle();
+        }
+        return menus;
+    };
+    const seriesActions = page => page.$('#seriesDetailPanel .series-actions-dropdown');
+    const seriesActionItems = page => [...seriesActions(page).querySelectorAll('.dropdown-item')];
+
+    const readOnly = await boot({ canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] });
+    assert.ok(readOnly.document.body.classList.contains('user-read-only'));
+    assert.deepEqual(await issueMenus(readOnly), [
+        ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Read'],
+        ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Unread'],
+        ['Info', 'View/Edit', 'Read Comic', 'Review Duplicate', '—', 'Mark Read']
+    ]);
+    // Every series action changes the library or sends mail, so the menu is
+    // hidden, and each item is marked too for when it is open in <body>.
+    assert.equal(isDisplayed(seriesActions(readOnly)), false);
+    assert.deepEqual(seriesActionItems(readOnly).filter(item => !item.hasAttribute('data-requires-write')).map(text), []);
+
+    const admin = await boot({});
+    assert.deepEqual((await issueMenus(admin))[0], [
+        'Info', 'View/Edit', 'Read Comic', 'Email to Ereader…', '—', 'Mark Read',
+        '—', 'Process', 'Rename', 'Normalize', 'Remove Metadata', '—', 'Delete'
+    ]);
+    assert.ok(isDisplayed(seriesActions(admin)));
+    assert.deepEqual(seriesActionItems(admin).filter(isDisplayed).map(text), [
+        'Manage Names', 'Manage Folders', 'Refresh Metadata', 'Refresh Folder', 'Update Covers',
+        'Email All Issues', 'Auto-send New Issues', 'Reset Processed Status'
+    ]);
 });

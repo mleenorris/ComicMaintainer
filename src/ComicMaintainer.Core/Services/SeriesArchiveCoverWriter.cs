@@ -7,7 +7,6 @@ using Microsoft.Extensions.Options;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Zip;
 using SharpCompress.Common;
-using SharpCompress.Writers;
 using SharpCompress.Writers.Zip;
 
 namespace ComicMaintainer.Core.Services;
@@ -235,10 +234,11 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
     ///
     /// The rewrite is skipped entirely when the archive already matches the
     /// desired state, making repeated calls idempotent. Non-cover entries are
-    /// always preserved. The new archive is written to a sibling temp file and
-    /// atomically moved into place.
+    /// always preserved and are streamed one at a time, so memory use does not
+    /// grow with entry or archive size. The new archive is written to a sibling
+    /// temp file and atomically moved into place.
     /// </summary>
-    private static void RewriteArchive(
+    internal static void RewriteArchive(
         string archivePath,
         string? coverEntryName,
         byte[]? coverBytes,
@@ -271,10 +271,9 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         var tempFile = archivePath + ".cover.tmp";
         try
         {
-            using (var newArchive = ZipArchive.CreateArchive())
+            using (var destination = File.Create(tempFile))
+            using (var writer = new ZipWriter(destination, new ZipWriterOptions(CompressionType.Deflate)))
             {
-                var entryStreams = new List<MemoryStream>();
-
                 // Copy every non-managed-cover entry verbatim.
                 foreach (var entry in source.Entries.Where(e => !e.IsDirectory))
                 {
@@ -284,33 +283,13 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
                     }
 
                     using var entryStream = entry.OpenEntryStream();
-                    var memStream = new MemoryStream();
-                    entryStream.CopyTo(memStream);
-                    memStream.Position = 0;
-                    entryStreams.Add(memStream);
-
-                    newArchive.AddEntry(entry.Key ?? "unknown", memStream, false, memStream.Length, entry.LastModifiedTime ?? DateTime.Now);
+                    writer.Write(entry.Key ?? "unknown", entryStream, entry.LastModifiedTime ?? DateTime.Now);
                 }
 
-                MemoryStream? coverStream = null;
                 if (coverBytes is not null && !string.IsNullOrEmpty(coverEntryName))
                 {
-                    coverStream = new MemoryStream(coverBytes);
-                    newArchive.AddEntry(coverEntryName, coverStream, false, coverBytes.Length, DateTime.Now);
-                }
-
-                using (var fileStream = File.Create(tempFile))
-                {
-                    newArchive.SaveTo(fileStream, new ZipWriterOptions(CompressionType.Deflate)
-                    {
-                        LeaveStreamOpen = false
-                    });
-                }
-
-                coverStream?.Dispose();
-                foreach (var stream in entryStreams)
-                {
-                    stream.Dispose();
+                    using var coverStream = new MemoryStream(coverBytes, writable: false);
+                    writer.Write(coverEntryName, coverStream, DateTime.Now);
                 }
             }
 

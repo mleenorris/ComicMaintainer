@@ -19,6 +19,7 @@ public class MetadataController : ControllerBase
     private readonly IComicProcessorService? _processor;
     private readonly IFileStoreService? _fileStore;
     private readonly ISeriesLanguagePreferenceRetagService? _languageRetag;
+    private readonly IHostApplicationLifetime? _applicationLifetime;
     private readonly ILogger<MetadataController> _logger;
 
     public MetadataController(
@@ -29,7 +30,8 @@ public class MetadataController : ControllerBase
         ILogger<MetadataController> logger,
         IComicProcessorService? processor = null,
         IFileStoreService? fileStore = null,
-        ISeriesLanguagePreferenceRetagService? languageRetag = null)
+        ISeriesLanguagePreferenceRetagService? languageRetag = null,
+        IHostApplicationLifetime? applicationLifetime = null)
     {
         _library = library;
         _cache = cache;
@@ -39,7 +41,18 @@ public class MetadataController : ControllerBase
         _processor = processor;
         _fileStore = fileStore;
         _languageRetag = languageRetag;
+        _applicationLifetime = applicationLifetime;
     }
+
+    /// <summary>
+    /// The token a queued refresh job runs under: it stops the job only when the
+    /// application shuts down. A job outlives the request that queues it, so it
+    /// must not get the request's token — Kestrel reuses that for later requests
+    /// on the same connection and cancels it when the connection closes, which
+    /// would end the job as cancelled partway and skip re-tagging the files.
+    /// </summary>
+    private CancellationToken RefreshJobCancellationToken =>
+        _applicationLifetime?.ApplicationStopping ?? CancellationToken.None;
 
     /// <summary>Queue an external metadata refresh for every series in the library.</summary>
     [HttpPost("refresh-all")]
@@ -54,7 +67,7 @@ public class MetadataController : ControllerBase
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var jobId = await _refreshJobs.StartAsync(titles, cancellationToken);
+            var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata refresh-all queued for {Count} series (job {JobId})"), titles.Count, jobId);
             return Ok(new { jobId, totalSeries = titles.Count });
         }
@@ -93,7 +106,7 @@ public class MetadataController : ControllerBase
                 return Ok(new { jobId = (Guid?)null, totalSeries = 0 });
             }
 
-            var jobId = await _refreshJobs.StartAsync(titles, cancellationToken);
+            var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata match-unmatched queued for {Count} series (job {JobId})"), titles.Count, jobId);
             return Ok(new { jobId, totalSeries = titles.Count });
         }
@@ -106,7 +119,7 @@ public class MetadataController : ControllerBase
 
     /// <summary>Queue an external metadata refresh for a specific set of series titles.</summary>
     [HttpPost("refresh-selected")]
-    public async Task<ActionResult<object>> RefreshSelected([FromBody] RefreshSelectedRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<object>> RefreshSelected([FromBody] RefreshSelectedRequest request)
     {
         if (request?.Series == null || request.Series.Count == 0)
         {
@@ -115,7 +128,7 @@ public class MetadataController : ControllerBase
 
         try
         {
-            var jobId = await _refreshJobs.StartAsync(request.Series, cancellationToken);
+            var jobId = await _refreshJobs.StartAsync(request.Series, RefreshJobCancellationToken);
             return Ok(new { jobId, totalSeries = request.Series.Count });
         }
         catch (Exception ex)
@@ -147,7 +160,7 @@ public class MetadataController : ControllerBase
         {
             if (queue)
             {
-                var jobId = await _refreshJobs.StartAsync(new[] { seriesTitle }, cancellationToken);
+                var jobId = await _refreshJobs.StartAsync(new[] { seriesTitle }, RefreshJobCancellationToken);
                 return Accepted(new { jobId, totalSeries = 1 });
             }
 
@@ -202,7 +215,7 @@ public class MetadataController : ControllerBase
                 return NotFound(new { error = "Series not found" });
             }
 
-            var jobId = await _refreshJobs.StartAsync(titles, cancellationToken);
+            var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
             return Accepted(new { jobId, totalSeries = titles.Count, titles });
         }
         catch (Exception ex)
@@ -241,7 +254,8 @@ public class MetadataController : ControllerBase
             }
             return Ok(new { providers = MergeAniListProviders(providers) });
         }
-        catch (Exception ex)
+        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a health error.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error retrieving provider health"));
             return StatusCode(500, new { error = "Error retrieving provider health" });

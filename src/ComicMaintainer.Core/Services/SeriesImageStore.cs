@@ -381,6 +381,11 @@ public class SeriesImageStore : ISeriesImageStore
         {
             addresses = await Dns.GetHostAddressesAsync(uri.Host, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The request was cancelled or timed out; the host isn't unresolvable.
+            throw;
+        }
         catch (Exception ex)
         {
             throw new InvalidOperationException($"Cannot resolve image host: {ex.Message}", ex);

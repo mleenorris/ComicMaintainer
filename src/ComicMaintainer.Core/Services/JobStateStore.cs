@@ -168,7 +168,16 @@ public class JobStateStore : IJobStateStore
         return new ProcessingJob
         {
             JobId = entity.JobId,
-            Status = Enum.TryParse<JobStatus>(entity.Status, out var status) ? status : JobStatus.Interrupted,
+            // Only the exact names Apply writes are valid. Enum.TryParse alone also accepts
+            // numbers, whitespace and comma-separated names, so "1" would restore as a Running job
+            // and "42" as an undefined status: MarkInterruptedAsync matches exact names and never
+            // sweeps them, leaving a job that can be neither deleted nor cancelled. Enum.IsDefined
+            // with a string matches declared names exactly (ordinal, case-sensitive) and nothing else.
+            Status = entity.Status is not null
+                && Enum.IsDefined(typeof(JobStatus), entity.Status)
+                && Enum.TryParse<JobStatus>(entity.Status, out var status)
+                ? status
+                : JobStatus.Interrupted,
             OperationName = entity.OperationName,
             Files = Deserialize<List<string>>(entity.FilesJson, entity.JobId, nameof(entity.FilesJson)) ?? new List<string>(),
             Errors = Deserialize<Dictionary<string, string>>(entity.ErrorsJson, entity.JobId, nameof(entity.ErrorsJson)) ?? new Dictionary<string, string>(),

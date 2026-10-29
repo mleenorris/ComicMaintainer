@@ -181,6 +181,10 @@ public class SeriesNameResolver : ISeriesNameResolver
                     {
                         persisted = await _cache.PersistExternalLookupAsync(candidate, external, cancellationToken);
                     }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex,
@@ -330,6 +334,12 @@ public class SeriesNameResolver : ISeriesNameResolver
                 ? record
                 : null;
         }
+        // A cancelled caller must not fall back to the folder or existing
+        // <Series> name: the rename pipeline would move the file to it.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to consult cache for user-selected name {SeriesName}",
@@ -353,6 +363,10 @@ public class SeriesNameResolver : ISeriesNameResolver
                 || string.Equals(status, "manual", StringComparison.OrdinalIgnoreCase);
             return isMatched ? record : null;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to consult cache for matched title {SeriesName}",
@@ -367,6 +381,10 @@ public class SeriesNameResolver : ISeriesNameResolver
         try
         {
             return await _externalMetadata.LookupSeriesAsync(seriesName, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -399,6 +417,10 @@ public class SeriesNameResolver : ISeriesNameResolver
                 {
                     return true;
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -459,6 +481,10 @@ public class SeriesNameResolver : ISeriesNameResolver
                 "Added folder name '{Folder}' as user alias for series '{Series}'",
                 LoggingHelper.SanitizeForLog(folderSeriesName),
                 LoggingHelper.SanitizeForLog(resolvedSeries));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

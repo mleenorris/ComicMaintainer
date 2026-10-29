@@ -224,12 +224,13 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
-    public async Task AddFileAsync_StatusReadFails_KeepsMetadataFromSnapshot()
+    public async Task AddFileAsync_StatusReadFails_KeepsStateAndMetadataFromSnapshot()
     {
         var path = WriteComic(_library, "Saga 003.cbz");
         var edited = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc);
-        await SeedAsync(Row(path, configure: e =>
+        await SeedAsync(Row(path, renamed: true, normalized: true, configure: e =>
         {
+            e.CreatedAt = Jan2020;
             e.Metadata = new ComicMetadata { Series = "Saga", Issue = "3" };
             e.SeriesMetadataVersion = 5;
             e.MetadataVersion = 4;
@@ -245,6 +246,15 @@ public sealed class FileStoreServiceWritesTests : IDisposable
 
         Assert.True(_logger.Contains(LogLevel.Error, "Error reading file status from database"));
         var file = Assert.Single(await service.GetAllFilesAsync());
+        // Regression: only metadata was taken from the snapshot, so the file came back as
+        // unprocessed (and was reprocessed) and its series jumped to the top of Series Updates.
+        Assert.True(file.IsRenamed);
+        Assert.True(file.IsNormalized);
+        Assert.True(file.IsProcessed);
+        Assert.False(file.IsDuplicate);
+        Assert.Equal(Jan2020, file.CreatedAt);
+        Assert.True(await service.IsFileProcessedAsync(path));
+        Assert.Empty(await service.GetFilteredFilesAsync("unprocessed"));
         Assert.Equal("Saga", file.Metadata?.Series);
         Assert.Equal("3", file.Metadata?.Issue);
         Assert.Equal(5, file.SeriesMetadataVersion);
@@ -253,6 +263,27 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         Assert.Equal(FileMetadataSource.UserEdit, file.MetadataSource);
         Assert.Equal(edited, file.LastDbEditAt);
         Assert.Equal("Saga", (await FindRowAsync(path))!.Metadata?.Series);
+    }
+
+    [Fact]
+    public async Task AddFileAsync_StatusReadFails_KeepsTheSnapshotsDuplicateFlagInMemoryAndInTheDatabase()
+    {
+        // Tracked by AddFileAsync rather than InitializeFromDatabaseAsync (the startup scan does
+        // this when the initial load failed), so the duplicate flag is on the snapshot but not
+        // in the separate duplicate index.
+        var path = WriteComic(_library, "Saga 003 (2).cbz");
+        await SeedAsync(Row(path, duplicate: true));
+        var service = CreateService();
+        await service.AddFileAsync(path);
+        _factory.FailNth(1); // the status read fails; the write that follows succeeds
+
+        await service.AddFileAsync(path);
+
+        Assert.True(_logger.Contains(LogLevel.Error, "Error reading file status from database"));
+        // Regression: the flag came from that index instead, which cleared it in memory and,
+        // through the write that follows, in the database too.
+        Assert.True(Assert.Single(await service.GetAllFilesAsync()).IsDuplicate);
+        Assert.True((await FindRowAsync(path))!.IsDuplicate);
     }
 
     [Fact]
@@ -529,6 +560,32 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_StubRowAtTarget_RefreshesPartialFileMetadata()
+    {
+        var oldPath = Path.Combine(_library, "Chapter 7.cbz");
+        var newPath = WriteComic(_library, "Saga - Chapter 007.cbz");
+        var expectedModified = new DateTime(2024, 3, 4, 5, 6, 8, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(newPath, expectedModified);
+        var expectedFile = new FileInfo(newPath);
+        var partialModified = new DateTime(2020, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        await SeedAsync(
+            Row(oldPath, renamed: true),
+            Row(newPath, configure: e =>
+            {
+                e.FileSize = 1;
+                e.LastModified = partialModified;
+            }));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+
+        await service.UpdateFilePathAsync(oldPath, newPath);
+
+        var row = Assert.Single(await AllRowsAsync());
+        Assert.Equal(expectedFile.Length, row.FileSize);
+        Assert.Equal(expectedFile.LastWriteTime, row.LastModified);
+    }
+
+    [Fact]
     public async Task UpdateFilePathAsync_TargetRowAlreadyComplete_KeepsTheTargetsState()
     {
         var oldPath = Path.Combine(_library, "Chapter 8.cbz");
@@ -605,6 +662,28 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         Assert.False(await service.FileExistsAsync(oldPath));
         Assert.True(await service.FileExistsAsync(newPath));
         _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_OldPathMissingFromDatabase_KeepsTheMovedFilesStateInMemory()
+    {
+        // The watcher can see a move as a delete plus a create and drop the old row before the
+        // move reaches the database, so the moved entry is re-added from the in-memory snapshot.
+        var oldPath = Path.Join(_library, "Old.cbz");
+        await SeedAsync(Row(oldPath, renamed: true, normalized: true, configure: e => e.CreatedAt = Jan2020));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+        await DeleteRowAsync(oldPath);
+        var newPath = WriteComic(_library, "New.cbz");
+
+        await service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Regression: the re-add rebuilt it as unprocessed, with CreatedAt moved to now.
+        var file = Assert.Single(await service.GetAllFilesAsync());
+        Assert.Equal(newPath, file.FilePath);
+        Assert.True(file.IsProcessed);
+        Assert.Equal(Jan2020, file.CreatedAt);
+        Assert.Empty(await service.GetFilteredFilesAsync("unprocessed"));
     }
 
     [Fact]

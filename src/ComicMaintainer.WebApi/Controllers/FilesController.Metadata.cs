@@ -84,7 +84,8 @@ public partial class FilesController
                     && string.Equals(metadata!.Series, resolution.ResolvedSeries, StringComparison.OrdinalIgnoreCase)
             });
         }
-        catch (Exception ex)
+        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a resolution error.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, "Error resolving series for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, "Error resolving series");
@@ -177,7 +178,9 @@ public partial class FilesController
 
             if (_scheduledJobsHostedService is not null)
             {
-                _ = _scheduledJobsHostedService.RunNowAsync(MetadataBackfillJobHandler.Key, CancellationToken.None);
+                // A backfill that is already running read its batch before this
+                // edit, so ask for one more run after it instead of being dropped.
+                _ = _scheduledJobsHostedService.RunNowOrAfterCurrentRunAsync(MetadataBackfillJobHandler.Key, CancellationToken.None);
             }
 
             var updated = await _fileStore.GetFileAsync(filePath, ct);

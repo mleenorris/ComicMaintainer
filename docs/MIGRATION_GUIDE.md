@@ -135,17 +135,20 @@ python migrate_data.py
 
 ### Environment Variables
 
-Most environment variables remain the same:
+Some environment variables remain the same; others are replaced by settings (see [Configuration](../README.md#configuration)):
 
 | Python | .NET | Notes |
 |--------|------|-------|
 | WATCHED_DIR | WATCHED_DIR | ✅ Same |
 | DUPLICATE_DIR | DUPLICATE_DIR | ✅ Same |
 | PROCESS_SCRIPT | N/A | Not needed in .NET |
-| WEB_PORT | WEB_PORT | ✅ Same (default 5000) |
-| FILENAME_FORMAT | FILENAME_FORMAT | ✅ Same |
-| WATCHER_ENABLED | WATCHER_ENABLED | ✅ Same |
-| MAX_WORKERS | MAX_WORKERS | ✅ Same |
+| WEB_PORT | N/A | Change the host side of the port mapping (`-p 8080:5000`), or set `ASPNETCORE_URLS` outside Docker (default 5000) |
+| FILENAME_FORMAT | `AppSettings__FilenameFormat` | Or **Settings → Filename Format** in the web UI |
+| ISSUE_NUMBER_PADDING | `AppSettings__IssueNumberPadding` | Or **Settings → Issue Number Padding** in the web UI |
+| WATCHER_ENABLED | `AppSettings__WatcherEnableRename`, `AppSettings__WatcherEnableNormalize` | Or **Settings → Watcher**; turn both off to stop automatic processing |
+| MAX_WORKERS | `AppSettings__MaxWorkers` | Read at startup |
+| GUNICORN_WORKERS | N/A | Single process, nothing to tune |
+| DB_CACHE_SIZE_MB | N/A | SQLite page cache fixed at 64 MB per connection |
 | PUID | PUID | ✅ Same |
 | PGID | PGID | ✅ Same |
 | BASE_PATH | BASE_PATH | ✅ Same |
@@ -168,7 +171,8 @@ Python version uses `config.json`, .NET version uses `appsettings.json`:
 {
   "AppSettings": {
     "FilenameFormat": "{series} - Chapter {issue}",
-    "WatcherEnabled": true
+    "WatcherEnableRename": true,
+    "WatcherEnableNormalize": true
   }
 }
 ```

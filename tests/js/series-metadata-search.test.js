@@ -18,6 +18,7 @@ const MODAL = '#manageSeriesNamesModal';
 const SEARCH = '/api/metadata/search';
 const APPLY = '/api/metadata/series/Saga/apply-match';
 const NAME = '/api/metadata/series/Saga/name';
+const ALIASES = '/api/metadata/series/Saga/aliases';
 const NO_MATCHES = 'No matches found. Check that external metadata providers are enabled in Settings.';
 const offline = () => { throw new TypeError('Failed to fetch'); };
 
@@ -222,15 +223,25 @@ test('Add Aliases starts the alias list of a series that has no user aliases', a
     assert.equal(optionTexts(nameSelect(page)).at(-1), 'Saga of the Swamp Thing (your alias)');
 });
 
-test('Adopt as Canonical adds the candidate names as aliases and pins the candidate title as the series name', async () => {
+test('Adopt as Canonical adds the candidate names as aliases, saves them and pins the candidate title as the series name', async () => {
     const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'] }));
+    const adopted = ['My Saga', 'Saga', 'Saga (Image Comics)', 'サーガ', 'Saga Deluxe'];
+    const savingAliases = deferred();
     const pending = deferred();
+    page.route(`PUT ${ALIASES}`, () => savingAliases.promise);
     page.route(`PUT ${NAME}`, () => pending.promise);
 
     await onResult(page, 0, 'Adopt as Canonical');
 
-    assert.deepEqual(userAliases(page), ['My Saga', 'Saga', 'Saga (Image Comics)', 'サーガ', 'Saga Deluxe']);
+    assert.deepEqual(userAliases(page), adopted);
     assert.equal(nameSelect(page).value, 'Saga (Image Comics)');
+    // Pinning the name saves it straight away, so the adopted aliases are
+    // saved first rather than left for Save (#848).
+    assert.deepEqual(callsTo(page, ALIASES, 'PUT').map(call => call.body), [{ aliases: adopted }]);
+    assert.equal(callsTo(page, NAME).length, 0, 'the name waits for the aliases');
+
+    savingAliases.resolve(metadataRecord({ user_aliases: adopted }));
+    await page.settle();
     const [put] = callsTo(page, NAME, 'PUT');
     assert.deepEqual(put.body, { name: 'Saga (Image Comics)' });
 
@@ -243,11 +254,18 @@ test('Adopt as Canonical adds the candidate names as aliases and pins the candid
     assert.deepEqual(lastMessage(page), { text: 'Series name set to "Saga (Image Comics)"', type: 'success' });
     assert.equal(nameSelect(page).value, 'Saga (Image Comics)');
     assert.equal(text(page.$('#manageSeriesResolvedName')), 'Using your selected name: "Saga (Image Comics)".');
+    assert.deepEqual(userAliases(page), adopted, 'a name response listing fewer aliases does not drop the adopted ones');
+
+    page.route(`PUT ${ALIASES}`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Save'));
+    await page.settle();
+    assert.deepEqual(callsTo(page, ALIASES, 'PUT').map(call => call.body), [{ aliases: adopted }, { aliases: adopted }]);
 });
 
 test('Adopt as Canonical selects a title that only differs in case and skips candidates without one', async () => {
     const page = await searchedPage();
     const pending = deferred();
+    page.route(`PUT ${ALIASES}`, call => metadataRecord({ user_aliases: call.body.aliases }));
     page.route(`PUT ${NAME}`, () => pending.promise);
 
     await onResult(page, 2, 'Adopt as Canonical');
@@ -255,6 +273,7 @@ test('Adopt as Canonical selects a title that only differs in case and skips can
     assert.deepEqual(userAliases(page), ['Saga']);
     assert.equal(nameSelect(page).value, 'SAGA');
     assert.equal(optionTexts(nameSelect(page)).at(-1), 'SAGA', 'the candidate spelling is offered as its own choice');
+    assert.deepEqual(callsTo(page, ALIASES, 'PUT').map(call => call.body), [{ aliases: ['Saga'] }]);
     assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'SAGA' }]);
 
     // The server matches the name case-insensitively and pins the known spelling.
@@ -265,7 +284,170 @@ test('Adopt as Canonical selects a title that only differs in case and skips can
 
     await onResult(page, 3, 'Adopt as Canonical');
     assert.deepEqual(userAliases(page), ['Saga', 'Untitled Saga']);
+    assert.equal(callsTo(page, ALIASES, 'PUT').length, 1, 'no title, so the aliases wait for Save');
     assert.equal(callsTo(page, NAME, 'PUT').length, 1, 'no title, so the series name is not changed');
+});
+
+test('Adopt as Canonical keeps the stored name when the adopted aliases cannot be saved (#848)', async () => {
+    const page = await searchedPage(metadataRecord({
+        user_aliases: ['My Saga'],
+        series_name: 'My Saga',
+        resolved_series_name: 'My Saga'
+    }));
+    const adopted = ['My Saga', 'Saga', 'Saga (Image Comics)', 'サーガ', 'Saga Deluxe'];
+
+    for (const handler of [respond(500, 'Error updating aliases'), offline]) {
+        page.route(`PUT ${ALIASES}`, handler);
+        await onResult(page, 0, 'Adopt as Canonical');
+
+        assert.deepEqual(lastMessage(page), { text: 'Failed to save series names', type: 'error' });
+        assert.equal(nameSelect(page).value, 'My Saga', 'the stored name is selected again');
+        assert.deepEqual(userAliases(page), adopted, 'the adopted aliases stay listed for Save');
+    }
+    assert.equal(callsTo(page, ALIASES, 'PUT').length, 2);
+    assert.equal(callsTo(page, NAME).length, 0, 'the name is not pinned without its aliases');
+    assert.ok(logged(page, 'saveAdoptedSeriesNames failed'));
+
+    page.route(`PUT ${ALIASES}`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Save'));
+    await page.settle();
+    assert.deepEqual(callsTo(page, ALIASES, 'PUT').at(-1).body, { aliases: adopted });
+    assert.deepEqual(lastMessage(page), { text: 'Series names saved', type: 'success' });
+});
+
+test('Adopt as Canonical leaves the series name alone once Manage Names is closed', async () => {
+    const page = await searchedPage(metadataRecord({ series_name: 'Saga' }));
+    const savingAliases = deferred();
+    page.route(`PUT ${ALIASES}`, () => savingAliases.promise);
+    await onResult(page, 0, 'Adopt as Canonical');
+
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Close'));
+    const loading = deferred();
+    await openManageNames(page, () => loading.promise);
+    savingAliases.resolve(metadataRecord());
+    await page.settle();
+
+    assert.equal(callsTo(page, NAME).length, 0, 'the reopened modal, still loading, does not save its name');
+    loading.resolve(metadataRecord({ series_name: 'Saga' }));
+    await page.settle();
+    assert.equal(nameSelect(page).value, 'Saga');
+});
+
+test('Adopt as Canonical still pins the adopted title when the aliases are edited while they save', async () => {
+    const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'], series_name: 'My Saga' }));
+    const savingAliases = deferred();
+    page.route(`PUT ${ALIASES}`, () => savingAliases.promise);
+    page.route(`PUT ${NAME}`, metadataRecord({ series_name: 'Saga (Image Comics)' }));
+    await onResult(page, 0, 'Adopt as Canonical');
+
+    page.run('removeManageSeriesAlias(\'Saga Deluxe\')');
+    assert.equal(nameSelect(page).value, 'My Saga', 'removing an alias rebuilds the select');
+    savingAliases.resolve(metadataRecord());
+    await page.settle();
+
+    assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga (Image Comics)' }]);
+    assert.deepEqual(lastMessage(page), { text: 'Series name set to "Saga (Image Comics)"', type: 'success' });
+});
+
+test('Adopt as Canonical keeps a series name the user picks while the aliases save', async () => {
+    const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'], series_name: 'My Saga' }));
+    const savingAliases = deferred();
+    page.route(`PUT ${ALIASES}`, () => savingAliases.promise);
+    page.route(`PUT ${NAME}`, call => metadataRecord({ series_name: call.body.name }));
+    await onResult(page, 0, 'Adopt as Canonical');
+
+    page.input('#manageSeriesName', 'Saga Deluxe');
+    await page.settle();
+    savingAliases.resolve(metadataRecord());
+    await page.settle();
+
+    assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga Deluxe' }]);
+    assert.equal(nameSelect(page).value, 'Saga Deluxe');
+});
+
+test('Adopt as Canonical pins the title adopted last, whichever adoption\'s aliases save first', async () => {
+    const earlierAliases = ['My Saga', 'Saga', 'Saga (Image Comics)', 'サーガ', 'Saga Deluxe'];
+    const laterAliases = [...earlierAliases, 'Saga of the Swamp Thing'];
+    for (const order of [['later', 'earlier'], ['earlier', 'later']]) {
+        const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'], series_name: 'My Saga' }));
+        const saving = { earlier: deferred(), later: deferred() };
+        // Each PUT replaces the stored aliases once its response is sent.
+        let stored = ['My Saga'];
+        const commitOn = adoption => call => saving[adoption].promise.then(response => {
+            stored = call.body.aliases;
+            return response;
+        });
+        page.route(`PUT ${NAME}`, call => metadataRecord({ series_name: call.body.name }));
+        page.route(`PUT ${ALIASES}`, commitOn('earlier'));
+        await onResult(page, 0, 'Adopt as Canonical');
+        page.route(`PUT ${ALIASES}`, commitOn('later'));
+        await onResult(page, 1, 'Adopt as Canonical');
+        assert.deepEqual(callsTo(page, ALIASES, 'PUT').map(call => call.body), [{ aliases: earlierAliases }],
+            'the later aliases wait for the earlier PUT');
+
+        for (const adoption of order) {
+            saving[adoption].resolve(metadataRecord());
+            await page.settle();
+        }
+
+        const message = `${order.join(' then ')} aliases saved`;
+        assert.deepEqual(callsTo(page, ALIASES, 'PUT').map(call => call.body),
+            [{ aliases: earlierAliases }, { aliases: laterAliases }], message);
+        assert.deepEqual(stored, laterAliases, `${message}: the later aliases are the ones persisted`);
+        assert.deepEqual(userAliases(page), laterAliases, message);
+        assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga of the Swamp Thing' }], message);
+        assert.equal(nameSelect(page).value, 'Saga of the Swamp Thing', message);
+        assert.deepEqual(lastMessage(page), { text: 'Series name set to "Saga of the Swamp Thing"', type: 'success' }, message);
+    }
+});
+
+test('Save waits for the aliases Adopt as Canonical is still saving, so its list is the one kept', async () => {
+    const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'], series_name: 'My Saga' }));
+    const adopted = ['My Saga', 'Saga', 'Saga (Image Comics)', 'サーガ', 'Saga Deluxe'];
+    const savingAdopted = deferred();
+    let stored = ['My Saga'];
+    page.route(`PUT ${NAME}`, call => metadataRecord({ series_name: call.body.name }));
+    page.route(`PUT ${ALIASES}`, call => savingAdopted.promise.then(response => {
+        stored = call.body.aliases;
+        return response;
+    }));
+    await onResult(page, 0, 'Adopt as Canonical');
+    page.run('removeManageSeriesAlias(\'Saga Deluxe\')');
+
+    page.route(`PUT ${ALIASES}`, call => {
+        stored = call.body.aliases;
+        return metadataRecord({ user_aliases: call.body.aliases });
+    });
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Save'));
+    await page.settle();
+    assert.equal(callsTo(page, ALIASES, 'PUT').length, 1, 'Save waits for the adopted aliases');
+
+    savingAdopted.resolve(metadataRecord());
+    await page.settle();
+    const edited = adopted.filter(alias => alias !== 'Saga Deluxe');
+    assert.deepEqual(callsTo(page, ALIASES, 'PUT').map(call => call.body), [{ aliases: adopted }, { aliases: edited }]);
+    assert.deepEqual(stored, edited);
+});
+
+test('Adopt as Canonical leaves a title adopted after it selected when its own aliases fail to save', async () => {
+    const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'], series_name: 'My Saga' }));
+    const earlier = deferred();
+    const later = deferred();
+    page.route(`PUT ${NAME}`, call => metadataRecord({ series_name: call.body.name }));
+    page.route(`PUT ${ALIASES}`, () => earlier.promise);
+    await onResult(page, 0, 'Adopt as Canonical');
+    page.route(`PUT ${ALIASES}`, () => later.promise);
+    await onResult(page, 1, 'Adopt as Canonical');
+
+    earlier.resolve(respond(500, 'Error updating aliases'));
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { text: 'Failed to save series names', type: 'error' });
+    assert.equal(nameSelect(page).value, 'Saga of the Swamp Thing', 'the stored name is not selected over the later title');
+
+    later.resolve(metadataRecord());
+    await page.settle();
+    assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga of the Swamp Thing' }]);
+    assert.equal(nameSelect(page).value, 'Saga of the Swamp Thing');
 });
 
 test('candidates can still be adopted when the series record failed to load', async () => {
@@ -275,6 +457,58 @@ test('candidates can still be adopted when the series record failed to load', as
 
     assert.deepEqual(userAliases(page), ['Saga of the Swamp Thing']);
     assert.deepEqual(optionTexts(nameSelect(page)), ['Automatic (use language preference)', 'Saga of the Swamp Thing (your alias)']);
+});
+
+test('aliases added while the series record loads are merged into it, not discarded', async () => {
+    const loading = deferred();
+    const page = await searchedPage(() => loading.promise);
+
+    await onResult(page, 1, 'Add Aliases');
+    loading.resolve(metadataRecord({ user_aliases: ['My Saga'] }));
+    await page.settle();
+
+    assert.deepEqual(userAliases(page), ['My Saga', 'Saga of the Swamp Thing']);
+    page.route(`PUT ${ALIASES}`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Save'));
+    await page.settle();
+    assert.deepEqual(callsTo(page, ALIASES, 'PUT')[0].body, { aliases: ['My Saga', 'Saga of the Swamp Thing'] });
+});
+
+test('Adopt as Canonical without a loaded series record pins the name alone, keeping the stored aliases', async () => {
+    const page = await searchedPage(respond(500));
+    page.route(`PUT ${NAME}`, call => metadataRecord({
+        user_aliases: ['Stored Saga', call.body.name],
+        series_name: call.body.name,
+        resolved_series_name: call.body.name
+    }));
+
+    await onResult(page, 0, 'Adopt as Canonical');
+
+    // The adopted list lacks the stored aliases, so saving it would replace them.
+    assert.equal(callsTo(page, ALIASES).length, 0);
+    assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga (Image Comics)' }]);
+    assert.deepEqual(lastMessage(page), { text: 'Series name set to "Saga (Image Comics)"', type: 'success' });
+    const listed = ['Stored Saga', 'Saga (Image Comics)', 'Saga', 'サーガ', 'Saga Deluxe'];
+    assert.deepEqual(userAliases(page), listed, 'the other adopted names join the stored aliases');
+
+    page.route(`PUT ${ALIASES}`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Save'));
+    await page.settle();
+    assert.deepEqual(callsTo(page, ALIASES, 'PUT')[0].body, { aliases: listed });
+});
+
+test('a record from a later response does not count as the loaded one for Adopt as Canonical', async () => {
+    const page = await searchedPage(respond(500));
+    page.route('POST /api/metadata/refresh/Saga', metadataRecord({ user_aliases: ['Stored Saga'] }));
+    page.route(`PUT ${NAME}`, call => metadataRecord({ user_aliases: ['Stored Saga'], series_name: call.body.name }));
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Refresh from Provider'));
+    await page.settle();
+
+    await onResult(page, 0, 'Adopt as Canonical');
+
+    assert.equal(callsTo(page, ALIASES).length, 0, 'the adopted aliases still wait for Save');
+    assert.deepEqual(callsTo(page, NAME, 'PUT').map(call => call.body), [{ name: 'Saga (Image Comics)' }]);
+    assert.deepEqual(userAliases(page), ['Stored Saga', 'Saga', 'Saga (Image Comics)', 'サーガ', 'Saga Deluxe']);
 });
 
 test('Use This Match asks first, then replaces the cached provider metadata', async () => {
@@ -374,4 +608,26 @@ test('a rejected match is reported with the server message when it sends one', a
     }
     assert.ok(logged(page, 'applySearchResultAsMatch failed'));
     assert.equal(libraryRefreshes(page), refreshes);
+});
+
+test('Use This Match keeps the aliases added from a candidate for Save (#848)', async () => {
+    const page = await searchedPage(metadataRecord({ user_aliases: ['My Saga'] }));
+    answerConfirm(page, true);
+    page.route(`POST ${APPLY}`, call => metadataRecord({
+        aliases: call.body.aliases,
+        user_aliases: ['My Saga'],
+        lookup_status: 'manual_match'
+    }));
+
+    await onResult(page, 1, 'Add Aliases');
+    await onResult(page, 0, 'Use This Match');
+
+    assert.deepEqual(lastMessage(page), { text: 'Match applied', type: 'success' });
+    assert.deepEqual(userAliases(page), ['My Saga', 'Saga of the Swamp Thing']);
+    assert.equal(optionTexts(nameSelect(page)).at(-1), 'Saga of the Swamp Thing (your alias)');
+
+    page.route(`PUT ${ALIASES}`, call => metadataRecord({ user_aliases: call.body.aliases }));
+    page.click(buttonIn(page, `${MODAL} .modal-footer`, 'Save'));
+    await page.settle();
+    assert.deepEqual(callsTo(page, ALIASES, 'PUT')[0].body, { aliases: ['My Saga', 'Saga of the Swamp Thing'] });
 });

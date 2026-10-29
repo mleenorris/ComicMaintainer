@@ -27,16 +27,9 @@ internal static class CoreServiceCollectionExtensions
         services.Configure<AppSettings>(configuration.GetSection("AppSettings"));
         services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<AppSettings>, AppSettingsEnvironmentPostConfigure>();
 
-        // Configure JWT settings
-        services.Configure<JwtSettings>(options =>
-        {
-            configuration.GetSection("JwtSettings").Bind(options);
-            
-            // Override with environment variable if present
-            var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
-            if (!string.IsNullOrEmpty(jwtSecret))
-                options.Secret = jwtSecret;
-        });
+        // Configure JWT settings from the section and JWT_SECRET. AddComicMaintainerAuth also resolves JWT_SECRET_FILE
+        // and generated keys, then applies the resolved signing secret to these options.
+        services.Configure<JwtSettings>(options => JwtSettingsBinder.Bind(configuration, options));
 
         // Configure Authelia settings (configuration section + AUTHELIA_* environment variables)
         services.Configure<AutheliaSettings>(options => AutheliaSettingsBinder.Bind(configuration, options));
@@ -47,7 +40,7 @@ internal static class CoreServiceCollectionExtensions
     public static IServiceCollection AddComicMaintainerData(this IServiceCollection services, IConfiguration configuration)
     {
         // Configure database
-        var configDirectory = configuration["AppSettings:ConfigDirectory"] ?? "/Config";
+        var configDirectory = ResolveConfigDirectory(configuration);
         var rawConnectionString = configuration.GetConnectionString("DefaultConnection")
             ?? $"Data Source={Path.Combine(configDirectory, "comicmaintainer.db")}";
         // Normalize the connection string (pooling, shared cache, default timeout) once so
@@ -108,6 +101,13 @@ internal static class CoreServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// The directory that holds the database, the Data Protection keys and the generated JWT signing key
+    /// (<c>AppSettings:ConfigDirectory</c>, by default /Config).
+    /// </summary>
+    internal static string ResolveConfigDirectory(IConfiguration configuration) =>
+        configuration["AppSettings:ConfigDirectory"] ?? "/Config";
 
     /// <summary>
     /// Absolute path of the SQLite database file named by <paramref name="connectionString"/>
@@ -290,6 +290,7 @@ internal static class CoreServiceCollectionExtensions
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
             });
         services.AddSingleton<ISuwayomiService, SuwayomiService>();
+        services.AddSingleton<ISuwayomiDownloadImportService, SuwayomiDownloadImportService>();
         services.AddSingleton<ComicVineSeriesMetadataService>();
         services.AddSingleton<MangaDexSeriesMetadataService>();
         services.AddSingleton<AniListManhwaSeriesMetadataService>();
@@ -392,6 +393,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IScheduledJobHandler, LibraryScanJobHandler>();
         services.AddSingleton<IScheduledJobHandler, MetadataBackfillJobHandler>();
         services.AddSingleton<IScheduledJobHandler, MissingIssuesCheckJobHandler>();
+        services.AddSingleton<IScheduledJobHandler, SuwayomiDownloadImportJobHandler>();
         // Only registered when the database is a file (see AddComicMaintainerData).
         if (services.Any(d => d.ServiceType == typeof(IDatabaseBackupService)))
         {

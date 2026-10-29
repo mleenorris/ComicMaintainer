@@ -224,16 +224,26 @@ public class ScheduledJobService : IScheduledJobService
         row.LastStatus = status.ToString();
         row.LastMessage = Truncate(message, 1024);
         row.UpdatedAt = now;
-        if (row.Enabled && row.IntervalMinutes > 0)
-        {
-            row.NextRunUtc = now.AddMinutes(row.IntervalMinutes);
-        }
-        else
-        {
-            row.NextRunUtc = null;
-        }
+        row.NextRunUtc = NextRunAfter(row, now);
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task AdvanceNextRunAsync(string jobKey, CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var row = await db.ScheduledJobs.FirstOrDefaultAsync(j => j.JobKey == jobKey, cancellationToken);
+        if (row is null)
+        {
+            return;
+        }
+        var now = DateTime.UtcNow;
+        row.UpdatedAt = now;
+        row.NextRunUtc = NextRunAfter(row, now);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static DateTime? NextRunAfter(ScheduledJobEntity row, DateTime now) =>
+        row.Enabled && row.IntervalMinutes > 0 ? now.AddMinutes(row.IntervalMinutes) : null;
 
     private static ScheduledJobView MapToView(ScheduledJobEntity row, string displayName, string description)
     {

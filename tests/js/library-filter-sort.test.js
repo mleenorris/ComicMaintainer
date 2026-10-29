@@ -19,6 +19,8 @@ const {
 } = require('./support/library-helpers');
 
 const activeItems = (page, menu) => page.$$(`${menu} .header-dropdown-item.active`).map(item => item.dataset.filter || item.dataset.sort);
+// What the page's live regions currently announce to screen readers.
+const announcements = page => page.$$('[aria-live]').map(region => region.textContent).join(' ');
 
 test('choosing a filter saves it, relabels the menu and reloads the series with it', async () => {
     const page = await bootLibrary({ series: makeSeriesList(2) });
@@ -99,7 +101,13 @@ test('sorting by the same field flips the direction; a new field starts ascendin
     assert.equal(page.$('#headerSortLabel').textContent, 'Name ↑');
     assert.deepEqual(seriesCalls(page).at(-1).query, { offset: '0', limit: '60' });
 
-    assert.deepEqual(savedPreferences(page), [{ sortMode: 'date' }, { sortMode: 'date' }, { sortMode: 'date' }, { sortMode: 'size' }, { sortMode: 'name' }]);
+    assert.deepEqual(savedPreferences(page), [
+        { sortMode: 'date', sortDirection: 'asc' },
+        { sortMode: 'date', sortDirection: 'desc' },
+        { sortMode: 'date', sortDirection: 'asc' },
+        { sortMode: 'size', sortDirection: 'asc' },
+        { sortMode: 'name', sortDirection: 'asc' }
+    ], 'the direction is saved with the field');
 });
 
 test('an unknown sort mode falls back to the "Name" label', async () => {
@@ -209,8 +217,9 @@ test('on a phone the filter applies to the series list, which stays in series mo
 
     assert.equal(page.evaluate('libraryViewMode'), 'series');
     assert.equal(seriesCalls(page).at(-1).query.filter, 'missing');
-    // Only the filter is saved.
+    // Only the filter is saved, and no view change is announced.
     assert.deepEqual(savedPreferences(page), [{ filterMode: 'missing' }]);
+    assert.doesNotMatch(announcements(page), /view selected/i);
     assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
 });
 
@@ -221,11 +230,12 @@ const ISSUES = [
     { file_path: 'Series 001/Series 001 #002.cbz', file_name: 'Series 001 #002.cbz', issue: '2' }
 ];
 
-async function bootSeriesPage(options = {}) {
+/** Boot onto Series 001's page; `issues` answers its issue requests, other options go to bootLibrary(). */
+async function bootSeriesPage({ issues = { issues: ISSUES, issue_count: 2 }, ...options } = {}) {
     const page = await bootLibrary({
         hash: '#/series/series-1',
         series: makeSeriesList(2),
-        routes: { 'GET /api/files/series/series-1/issues': { issues: ISSUES, issue_count: 2 } },
+        routes: { 'GET /api/files/series/series-1/issues': issues },
         ...options
     });
     assert.ok(page.$('#seriesDetailPanel .series-issues-grid'), 'the series page is open');
@@ -250,10 +260,14 @@ test('a filter change on a series page re-fetches its issues and refreshes the l
     assert.equal(page.$('#fileList .series-grid--compact'), null);
 });
 
-test('on a phone a filter change on a series page also keeps the user on it', async () => {
-    // Phones used to switch to the retired Files view here, which closed the
-    // series before its issues could be re-fetched.
-    const page = await bootSeriesPage({ media: { [MOBILE_QUERY]: true } });
+test('on a phone a filter change, or "Clear filter", on a series page also keeps the user on it', async () => {
+    // Phones used to also switch to the retired Files view here, which closed
+    // the series before its issues were re-fetched and announced the switch.
+    const page = await bootSeriesPage({
+        media: { [MOBILE_QUERY]: true },
+        // Every filter hides both issues, so the page offers "Clear filter".
+        issues: call => (call.query.filter ? { issues: [], issue_count: 0 } : { issues: ISSUES, issue_count: 2 })
+    });
     const issuesBefore = issueCalls(page).length;
 
     page.click('#headerFilterMenu [data-filter="unread"]');
@@ -261,10 +275,23 @@ test('on a phone a filter change on a series page also keeps the user on it', as
 
     assert.equal(issueCalls(page).length, issuesBefore + 1);
     assert.equal(issueCalls(page).at(-1).query.filter, 'unread');
+    assert.deepEqual(seriesCalls(page).at(-1).query, { offset: '0', limit: '60', refresh: 'true', filter: 'unread' });
     assert.equal(page.window.location.hash, '#/series/series-1');
     assert.equal(page.evaluate('currentSeriesDetailId'), 'series-1');
-    assert.ok(page.$('#seriesDetailPanel .series-issues-grid'));
-    assert.deepEqual(savedPreferences(page), [{ filterMode: 'unread' }]);
+    assert.deepEqual(renderedTitles(page), [], 'the library list does not replace the series page');
+    const clearFilter = page.$('#seriesDetailPanel .empty-state button');
+    assert.equal(clearFilter.textContent, 'Clear filter');
+
+    page.click(clearFilter);
+    await page.settle();
+
+    assert.equal(issueCalls(page).length, issuesBefore + 2);
+    assert.equal(issueCalls(page).at(-1).query.filter, undefined);
+    assert.equal(page.$$('#seriesDetailPanel .series-issues-grid > .series-issue-card').length, 2);
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'series-1');
+    // Only the filter is saved, and no view change is announced.
+    assert.deepEqual(savedPreferences(page), [{ filterMode: 'unread' }, { filterMode: 'all' }]);
+    assert.doesNotMatch(announcements(page), /view selected/i);
 });
 
 test('a search on a series page re-fetches its issues and refreshes the library behind it', async () => {

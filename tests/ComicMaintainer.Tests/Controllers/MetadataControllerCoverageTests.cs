@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Newtonsoft.Json.Linq;
@@ -14,6 +15,7 @@ namespace ComicMaintainer.Tests.Controllers;
 public sealed class MetadataControllerCoverageTests : IDisposable
 {
     private static readonly DateTime T0 = new(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
 
     private readonly Mock<ISeriesLibraryService> _library = new();
     private readonly Mock<ISeriesMetadataCacheService> _cache = new();
@@ -37,16 +39,19 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         IExternalSeriesMetadataService? external = null,
         bool withProcessor = false,
         bool withFileStore = false,
-        bool withRetag = false) =>
+        bool withRetag = false,
+        ISeriesMetadataRefreshJobService? refreshJobs = null,
+        IHostApplicationLifetime? lifetime = null) =>
         new(
             _library.Object,
             _cache.Object,
-            _refreshJobs.Object,
+            refreshJobs ?? _refreshJobs.Object,
             external ?? _external.Object,
             NullLogger<MetadataController>.Instance,
             withProcessor ? _processor.Object : null,
             withFileStore ? _fileStore.Object : null,
-            withRetag ? _retag.Object : null)
+            withRetag ? _retag.Object : null,
+            lifetime)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -115,7 +120,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     [Fact]
     public async Task RefreshSelected_NullBody_ReturnsBadRequest()
     {
-        var result = await CreateController().RefreshSelected(null!, CancellationToken.None);
+        var result = await CreateController().RefreshSelected(null!);
 
         AssertBadRequest(result.Result, "No series specified");
     }
@@ -124,7 +129,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     public async Task RefreshSelected_NullSeriesList_ReturnsBadRequest()
     {
         var result = await CreateController().RefreshSelected(
-            new MetadataController.RefreshSelectedRequest { Series = null! }, CancellationToken.None);
+            new MetadataController.RefreshSelectedRequest { Series = null! });
 
         AssertBadRequest(result.Result, "No series specified");
         _refreshJobs.VerifyNoOtherCalls();
@@ -135,10 +140,10 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     {
         var jobId = Guid.NewGuid();
         var series = new List<string> { "Batman", "Saga" };
-        _refreshJobs.Setup(r => r.StartAsync(series, _cts.Token)).ReturnsAsync(jobId);
+        _refreshJobs.Setup(r => r.StartAsync(series, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
 
         var result = await CreateController().RefreshSelected(
-            new MetadataController.RefreshSelectedRequest { Series = series }, _cts.Token);
+            new MetadataController.RefreshSelectedRequest { Series = series });
 
         var json = Json(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal(jobId, json["jobId"]!.ToObject<Guid>());
@@ -151,7 +156,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         SetupStartThrows();
 
         var result = await CreateController().RefreshSelected(
-            new MetadataController.RefreshSelectedRequest { Series = new() { "Batman" } }, CancellationToken.None);
+            new MetadataController.RefreshSelectedRequest { Series = new() { "Batman" } });
 
         Assert500(result.Result, "Error queuing metadata refresh");
     }
@@ -282,6 +287,122 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         Assert500(result.Result, "Error queuing metadata refresh");
     }
 
+    // ---- Refresh job lifetime -----------------------------------------------------------
+
+    [Fact]
+    public async Task RefreshAll_Issue842_RequestTokenCancelledWhileTheJobRuns_JobStillCompletesAndRetags()
+    {
+        // Regression test for issue #842. Kestrel reuses a request's abort token for later
+        // requests on the same keep-alive connection and cancels it when that connection closes.
+        // A job queued on that token stopped after its in-flight title, ended Cancelled and
+        // skipped re-tagging the files, although nobody had cancelled it.
+        SetupLibrary(
+            new SeriesLibraryDto { Title = "Alpha", CanonicalTitle = "Alpha" },
+            new SeriesLibraryDto { Title = "Beta", CanonicalTitle = "Beta" },
+            new SeriesLibraryDto { Title = "Gamma", CanonicalTitle = "Gamma" });
+        var alphaStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishAlpha = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _cache.Setup(c => c.RefreshAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>(async (title, _) =>
+            {
+                if (title == "Alpha")
+                {
+                    alphaStarted.TrySetResult();
+                    await finishAlpha.Task;
+                }
+                return new SeriesMetadataCacheRecord { CanonicalTitle = title, LookupStatus = "success" };
+            });
+        var jobEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _cache.Setup(c => c.CleanupStaleSiblingRecordsAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => jobEnded.TrySetResult())
+            .ReturnsAsync(0);
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new ComicFile { FilePath = "/library/Alpha/c001.cbz", Metadata = new ComicMetadata { Series = "Alpha" } },
+                new ComicFile { FilePath = "/library/Gamma/c001.cbz", Metadata = new ComicMetadata { Series = "Gamma" } },
+            });
+        var retagged = new TaskCompletionSource<List<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => retagged.TrySetResult(paths.ToList()))
+            .ReturnsAsync(Guid.NewGuid());
+        var jobs = new SeriesMetadataRefreshJobService(
+            _cache.Object,
+            NullLogger<SeriesMetadataRefreshJobService>.Instance,
+            fileStore: _fileStore.Object,
+            processor: _processor.Object);
+
+        var result = await CreateController(refreshJobs: jobs).RefreshAll(_cts.Token);
+        var jobId = Json(Assert.IsType<OkObjectResult>(result.Result).Value)["jobId"]!.ToObject<Guid>();
+        await alphaStarted.Task.WaitAsync(WaitTimeout);
+
+        // The browser or a reverse proxy closes the connection the POST came in on.
+        _cts.Cancel();
+        finishAlpha.SetResult();
+
+        await jobEnded.Task.WaitAsync(WaitTimeout);
+        var job = jobs.GetJob(jobId)!;
+        Assert.Equal(JobStatus.Completed, job.Status);
+        Assert.Equal(3, job.ProcessedSeries);
+        Assert.Equal(3, job.Successes);
+        Assert.Equal(
+            new[] { "/library/Alpha/c001.cbz", "/library/Gamma/c001.cbz" },
+            await retagged.Task.WaitAsync(WaitTimeout));
+    }
+
+    [Theory]
+    [InlineData("refresh-all")]
+    [InlineData("match-unmatched")]
+    [InlineData("refresh-selected")]
+    [InlineData("refresh-one-queued")]
+    [InlineData("refresh-folder")]
+    public async Task QueuedRefresh_Issue842_JobRunsUntilAppShutdownNotUntilTheRequestEnds(string endpoint)
+    {
+        SetupLibrary(new SeriesLibraryDto { Title = "Batman", CanonicalTitle = "Batman" });
+        _library.Setup(l => l.GetTitlesForSeriesIdAsync("batman", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string> { "Batman" });
+        var jobTokens = new List<CancellationToken>();
+        _refreshJobs.Setup(r => r.StartAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, CancellationToken>((_, token) => jobTokens.Add(token))
+            .ReturnsAsync(Guid.NewGuid());
+        using var stopping = new CancellationTokenSource();
+        var lifetime = new Mock<IHostApplicationLifetime>();
+        lifetime.SetupGet(l => l.ApplicationStopping).Returns(stopping.Token);
+        var controller = CreateController(lifetime: lifetime.Object);
+
+        _ = endpoint switch
+        {
+            "refresh-all" => await controller.RefreshAll(_cts.Token),
+            "match-unmatched" => await controller.MatchUnmatched(_cts.Token),
+            "refresh-selected" => await controller.RefreshSelected(
+                new MetadataController.RefreshSelectedRequest { Series = new() { "Batman" } }),
+            "refresh-one-queued" => await controller.RefreshOne("Batman", queue: true, _cts.Token),
+            "refresh-folder" => await controller.RefreshFolder(
+                new MetadataController.RefreshFolderRequest { SeriesId = "batman" }, _cts.Token),
+            _ => throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, null),
+        };
+
+        var jobToken = Assert.Single(jobTokens);
+        _cts.Cancel();
+        Assert.False(jobToken.IsCancellationRequested);
+        stopping.Cancel();
+        Assert.True(jobToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task QueuedRefresh_WithoutApplicationLifetime_JobIsNotCancelledWithTheRequest()
+    {
+        var jobTokens = new List<CancellationToken>();
+        _refreshJobs.Setup(r => r.StartAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, CancellationToken>((_, token) => jobTokens.Add(token))
+            .ReturnsAsync(Guid.NewGuid());
+
+        await CreateController().RefreshOne("Batman", queue: true, _cts.Token);
+        _cts.Cancel();
+
+        Assert.False(Assert.Single(jobTokens).CanBeCanceled);
+    }
+
     // ---- GetJob -------------------------------------------------------------------------
 
     [Fact]
@@ -354,6 +475,28 @@ public sealed class MetadataControllerCoverageTests : IDisposable
             .ThrowsAsync(new HttpRequestException("dns failure"));
 
         var result = await CreateController().GetProviders(CancellationToken.None);
+
+        Assert500(result.Result, "Error retrieving provider health");
+    }
+
+    [Fact]
+    public async Task GetProviders_CallerCancelled_LetsTheCancellationThrough()
+    {
+        _cts.Cancel();
+        _external.Setup(e => e.CheckHealthAsync(_cts.Token))
+            .ThrowsAsync(new OperationCanceledException(_cts.Token));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CreateController().GetProviders(_cts.Token));
+    }
+
+    [Fact]
+    public async Task GetProviders_CancellationTheCallerDidNotAskFor_Returns500()
+    {
+        _external.Setup(e => e.CheckHealthAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("timed out"));
+
+        var result = await CreateController().GetProviders(_cts.Token);
 
         Assert500(result.Result, "Error retrieving provider health");
     }

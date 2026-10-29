@@ -145,6 +145,26 @@ test('a renamed series is recognised by its title and refetched when its issues 
     assert.equal(page.evaluate("seriesIssuesCache.has('saga')"), false);
 });
 
+test('a renamed series whose issues are still loading fetches them under the new id', async () => {
+    const gate = deferred();
+    const page = await bootSeries({ routes: { [`GET ${ISSUES}`]: () => gate.promise } });
+    assert.equal(text(page.$('#seriesDetailPanel .loading')), 'Loading issues...');
+    const renamed = seriesCard({ id: 'saga-2' });
+    page.route(`GET ${issuesPath('saga-2')}`, issuesBody(renamed, [issue(1), issue(2)]));
+
+    await reloadLibrary(page, [renamed]);
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(callsTo(page, issuesPath('saga-2')).length, 1, 'the unfinished load is not carried over');
+    assert.equal(issueCards(page).length, 2);
+
+    // The old id's answer arriving afterwards changes nothing.
+    gate.resolve(issuesBody(seriesCard(), [issue(1), issue(2), issue(3)]));
+    await page.settle();
+    assert.equal(issueCards(page).length, 2);
+    assert.equal(page.evaluate("seriesIssuesCache.has('saga')"), false);
+});
+
 test('a series the reloaded library no longer lists stays open from its last snapshot', async () => {
     const page = await bootSeries({ series: seriesCard({ aliases: ['Saga Comic'] }) });
 
@@ -186,4 +206,27 @@ test('there is no series id to remap while the library grid is showing', async (
 
     assert.equal(page.$('#seriesDetailPanel'), null);
     assert.equal(page.evaluate('remapCurrentSeriesDetailId()'), null);
+});
+
+test('an unfiltered answer arriving after a filter change leaves the filtered series summary alone', async () => {
+    const unfiltered = deferred();
+    const filtered = deferred();
+    const page = await bootSeries({
+        library: [seriesCard({ id: 'other', title: 'Other', canonical_title: 'Other' })],
+        routes: { [`GET ${ISSUES}`]: call => (call.query.filter ? filtered.promise : unfiltered.promise) }
+    });
+    page.run("filterMode = 'duplicates'; loadSeriesIssues('saga')");
+    await page.settle();
+    assert.equal(callsTo(page, ISSUES).length, 2);
+
+    unfiltered.resolve(issuesBody(seriesCard(), [issue(1), issue(2), issue(3)]));
+    await page.settle();
+    assert.equal(page.evaluate('currentSeriesDetailSeries.issue_count'), 0, 'the superseded answer does not update the snapshot');
+    assert.equal(page.evaluate('currentSeriesDetailSeries.total_size'), 0);
+    assert.equal(text(page.$('#seriesDetailPanel .loading')), 'Loading issues...');
+
+    filtered.resolve(issuesBody(seriesCard(), [issue(1, { duplicate: true })]));
+    await page.settle();
+    assert.deepEqual(paths(page), ['/comics/Saga/Saga 001.cbz']);
+    assert.equal(text(page.$('#seriesDetailPanel .series-detail-summary .series-detail-meta')), '1 issue · 1.0 MB');
 });

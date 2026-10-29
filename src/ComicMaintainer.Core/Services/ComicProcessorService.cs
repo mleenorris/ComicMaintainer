@@ -103,7 +103,7 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         {
             foreach (var cancellationTokenSource in _jobCancellationTokens.Values)
             {
-                cancellationTokenSource.Cancel();
+                TryCancel(cancellationTokenSource);
             }
 
             _processingSemaphore.Dispose();

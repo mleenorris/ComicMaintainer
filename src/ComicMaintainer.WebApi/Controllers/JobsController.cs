@@ -1,8 +1,10 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
@@ -11,18 +13,26 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public class JobsController : ControllerBase
 {
+    /// <summary>
+    /// The error returned when a batch request names a file outside the watched and duplicate directories.
+    /// </summary>
+    public const string OutsideAllowedDirectoryError = "One or more file paths are outside the allowed directory";
+
     private readonly IComicProcessorService _processor;
     private readonly IFileStoreService _fileStore;
     private readonly ILogger<JobsController> _logger;
+    private readonly IOptionsMonitor<AppSettings> _settings;
 
     public JobsController(
         IComicProcessorService processor,
         IFileStoreService fileStore,
-        ILogger<JobsController> logger)
+        ILogger<JobsController> logger,
+        IOptionsMonitor<AppSettings> settings)
     {
         _processor = processor;
         _fileStore = fileStore;
         _logger = logger;
+        _settings = settings;
     }
 
     [HttpGet("{jobId}")]
@@ -466,6 +476,22 @@ public class JobsController : ControllerBase
             if (request?.Files == null || request.Files.Count == 0)
             {
                 return BadRequest(new { error = "No files specified" });
+            }
+
+            // Validate every path the delete job would act on (it skips blank entries itself),
+            // with the job's own checks, so a path it would refuse rejects the whole request
+            // before anything is deleted.
+            var settings = _settings.CurrentValue;
+            foreach (var filePath in request.Files)
+            {
+                if (!string.IsNullOrWhiteSpace(filePath) &&
+                    !LibraryPathValidator.TryResolveEntryWithin(filePath, out _, settings.WatchedDirectory, settings.DuplicateDirectory))
+                {
+                    _logger.LogWarning(
+                        LoggingHelper.WithWebsitePrefix("DeleteSelected: attempt to delete a file outside the allowed directories: {FilePath}"),
+                        LoggingHelper.SanitizePathForLog(filePath));
+                    return BadRequest(new { error = OutsideAllowedDirectoryError });
+                }
             }
 
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("DeleteSelected: starting delete-selected job for {Count} file(s)"), request.Files.Count);

@@ -18,11 +18,6 @@ public static class LibraryPathValidator
 
     private static readonly char[] Separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
 
-    // Case-insensitive on Windows and case-sensitive elsewhere.
-    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
-        ? StringComparison.OrdinalIgnoreCase
-        : StringComparison.Ordinal;
-
     /// <summary>
     /// Resolves <paramref name="path"/> to its physical location and verifies it
     /// is inside one of <paramref name="allowedDirectories"/> (themselves resolved).
@@ -56,12 +51,58 @@ public static class LibraryPathValidator
     }
 
     /// <summary>
+    /// Like <see cref="TryResolveWithin"/>, but for an operation on the directory entry
+    /// <paramref name="path"/> names, such as deleting it: both what the entry leads to and
+    /// the directory holding it must be inside one of <paramref name="allowedDirectories"/>.
+    /// <paramref name="entryPath"/> is the entry in that resolved directory, so acting on it
+    /// affects a link rather than the file the link points to. A path ending in a directory
+    /// separator or "." is rejected, since the OS would follow a link it ends in, and so is
+    /// any ".." segment: the OS applies it after following links, so normalizing it away
+    /// first could name a different entry.
+    /// </summary>
+    public static bool TryResolveEntryWithin(string? path, out string entryPath, params string?[] allowedDirectories)
+    {
+        entryPath = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(path) ||
+            Path.EndsInDirectorySeparator(path) ||
+            Path.GetFileName(path) == "." ||
+            path.Split(Separators).Contains(".."))
+            return false;
+
+        if (!TryResolveWithin(path, out _, allowedDirectories))
+            return false;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var name = Path.GetFileName(fullPath);
+            if (string.IsNullOrEmpty(name) ||
+                !TryResolveWithin(Path.GetDirectoryName(fullPath), out var directory, allowedDirectories))
+                return false;
+
+            entryPath = Path.Join(directory, name);
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Returns true when the already resolved <paramref name="fullPath"/> is the
     /// resolved <paramref name="directory"/> itself or lives beneath it.
     /// </summary>
+    /// <remarks>
+    /// The paths are compared exactly, on every platform. Resolved paths, and the paths the
+    /// OS reports for an opened directory, are spelled as the file system stores them, so a
+    /// differently cased request on a case-insensitive volume still matches, while a distinct
+    /// "LIBRARY" next to "library" in a case-sensitive directory does not.
+    /// </remarks>
     public static bool IsWithin(string fullPath, string? directory) =>
         !string.IsNullOrWhiteSpace(directory)
-        && IsSameOrUnder(fullPath, ResolveRealPath(Path.GetFullPath(directory)));
+        && IsSameOrUnder(fullPath, ResolveRealPath(Path.GetFullPath(directory)), StringComparison.Ordinal);
 
     /// <summary>
     /// Lexical counterpart of <see cref="TryResolveWithin"/>: normalizes
@@ -93,36 +134,46 @@ public static class LibraryPathValidator
     /// <summary>
     /// The containment rule shared by every check: true when the normalized
     /// <paramref name="fullPath"/> is the normalized <paramref name="directory"/>
-    /// itself or lives beneath it. Trailing separators are ignored, a sibling that
+    /// itself or lives beneath it. Trailing separators are ignored, and a sibling that
     /// merely shares the directory's name as a prefix (<c>/comics2</c> next to
-    /// <c>/comics</c>) is outside, and case is ignored only on Windows. A file
-    /// system root (the Unix <c>/</c>, a Windows drive root such as <c>C:\</c>, or a
-    /// UNC share root) contains nothing: allowing it would make the check
-    /// meaningless, so it fails closed.
+    /// <c>/comics</c>) is outside. A directory made only of separators, such as the
+    /// Unix root <c>/</c>, contains nothing: allowing it would make the check
+    /// meaningless, so it fails closed. A Windows drive root such as <c>D:\</c> or a
+    /// UNC share such as <c>\\server\comics</c> is a usable library root and contains
+    /// its paths.
     /// </summary>
-    public static bool IsSameOrUnder(string fullPath, string directory)
+    /// <remarks>
+    /// These paths are compared with <see cref="PathComparison"/>, since they need not be
+    /// spelled as the file system stores them. <see cref="IsWithin"/> applies the same rule
+    /// to resolved paths, which it compares exactly.
+    /// </remarks>
+    public static bool IsSameOrUnder(string fullPath, string directory) =>
+        IsSameOrUnder(fullPath, directory, PathComparison);
+
+    private static bool IsSameOrUnder(string fullPath, string directory, StringComparison comparison)
     {
         var root = directory.TrimEnd(Separators);
-        if (root.Length == 0 || IsFileSystemRoot(directory, root))
+        if (root.Length == 0)
             return false;
 
-        return string.Equals(fullPath.TrimEnd(Separators), root, PathComparison)
-            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, PathComparison);
+        return string.Equals(fullPath.TrimEnd(Separators), root, comparison)
+            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, comparison);
     }
 
-    private static bool IsFileSystemRoot(string directory, string trimmedDirectory)
-    {
-        var pathRoot = Path.GetPathRoot(directory);
-        return !string.IsNullOrEmpty(pathRoot)
-            && string.Equals(trimmedDirectory, pathRoot.TrimEnd(Separators), PathComparison);
-    }
+    /// <summary>
+    /// How library paths that are not spelled as the file system stores them are compared:
+    /// ignoring case on Windows, ordinally elsewhere.
+    /// </summary>
+    public static StringComparison PathComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     /// <summary>
     /// Returns the physical path a (possibly linked) path ultimately refers to,
     /// resolving each path segment from the root down. A link is replaced by its
     /// target, which is resolved the same way (links in its directories, chained
     /// links, and ".." applied to where the link really leads), as the OS does.
-    /// Segments that do not exist, or are not links, are kept verbatim.
+    /// Segments that do not exist, or are not links, are kept verbatim, except that on
+    /// Windows and macOS the existing directories are spelled as the file system stores them.
     /// </summary>
     /// <exception cref="IOException">
     /// More than 40 links have to be followed, e.g. because of a link loop.
@@ -170,7 +221,27 @@ public static class LibraryPathValidator
             PushSegments(pending, target);
         }
 
-        return resolved;
+        return ToStoredSpelling(resolved);
+    }
+
+    // On Windows and macOS a path may be spelled in any case the volume ignores, so the
+    // deepest existing directory is replaced by the path the OS reports for it once opened.
+    // That is the spelling on disk, which a containment check can compare exactly.
+    private static string ToStoredSpelling(string path)
+    {
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
+            return path;
+
+        var existing = path;
+        while (!Directory.Exists(existing))
+        {
+            existing = Path.GetDirectoryName(existing);
+            if (existing is null)
+                return path;
+        }
+
+        var stored = NativeFileSystem.TryReadDirectorySpelling(existing);
+        return stored is null ? path : Path.Join(stored, path.AsSpan(existing.Length));
     }
 
     private static void PushSegments(Stack<string> pending, string relativePath)

@@ -67,24 +67,40 @@ public partial class FilesController
     {
         try
         {
+            // A body without "files" (such as the old {"file", "tags"} format) binds to an empty
+            // list; reject it instead of answering 200 having updated nothing
+            if (request.Files is null || request.Files.Count == 0)
+                return BadRequest("No files provided");
+
             // Validate every path before updating any file, so a rejected path fails the whole request
             foreach (var file in request.Files)
             {
-                if (!string.IsNullOrEmpty(file) && !IsPathSafe(file))
+                if (!string.IsNullOrWhiteSpace(file) && !IsPathSafe(file))
                 {
                     _logger.LogWarning("Attempt to update tags for file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(file)));
                     return BadRequest("One or more file paths are outside the allowed directory");
                 }
             }
 
+            var attempted = 0;
+            var failed = new List<string>();
             foreach (var file in request.Files)
             {
-                if (!string.IsNullOrEmpty(file))
+                if (!string.IsNullOrWhiteSpace(file))
                 {
-                    await _processor.UpdateMetadataAsync(file, request.Metadata);
+                    attempted++;
+                    if (!await _processor.UpdateMetadataAsync(file, request.Metadata))
+                        failed.Add(file);
                 }
             }
-            return Ok();
+
+            // The processor answers false, having logged why, for a file it could not
+            // write: missing, not a comic archive, or unreadable.
+            if (failed.Count == 0)
+                return Ok();
+            if (failed.Count == attempted)
+                return BadRequest(new { error = "Failed to update tags", failed });
+            return StatusCode(StatusCodes.Status207MultiStatus, new { failed });
         }
         catch (Exception ex)
         {

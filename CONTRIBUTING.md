@@ -58,10 +58,11 @@ sudo chmod 777 /Config
 ```bash
 # Set required environment variables
 export WATCHED_DIR=/path/to/test/comics
-export WEB_PORT=5000
 
-# Start the web application
-python src/web_app.py
+# Start the web application on http://localhost:5072 (see
+# src/ComicMaintainer.WebApi/Properties/launchSettings.json);
+# append "-- --urls http://localhost:5000" to listen elsewhere
+dotnet run --project src/ComicMaintainer.WebApi
 ```
 
 ## Making Changes

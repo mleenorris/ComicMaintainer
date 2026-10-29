@@ -6,9 +6,9 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
-        async function loadActiveLibraryView(_page = 1, refresh = false) {
+        async function loadActiveLibraryView({ refresh = false, keepLoaded = false } = {}) {
             if (libraryViewMode === 'series') {
-                return loadSeriesLibrary({ refresh });
+                return loadSeriesLibrary({ refresh, keepLoaded });
             }
 
             return loadFolders({ refresh });
@@ -103,7 +103,7 @@
             updateLibraryViewButtons();
             updateLibraryViewLayout();
             await setPreferences({ libraryViewMode: mode });
-            await loadActiveLibraryView(1, true);
+            await loadActiveLibraryView({ refresh: true });
         }
 
         function promptForForceReprocess(actionDescription, statusDescription) {
@@ -130,9 +130,16 @@
             // ?refresh=true query, and re-trigger library-health stats.
             let append = false;
             let refresh = false;
+            // keepLoaded: a same-query refresh re-fetches every series already
+            // loaded (not just the first page), so series selected further
+            // down the list stay selected and the list keeps its length.
+            let keepLoaded = false;
+            let keepCount = 0;
             if (typeof opts === 'object' && opts !== null) {
                 append = !!opts.append;
                 refresh = !!opts.refresh;
+                keepLoaded = !!opts.keepLoaded;
+                keepCount = Number(opts.keepCount) || 0;
             } else if (typeof opts === 'boolean') {
                 refresh = opts;
             } else if (typeof opts === 'number') {
@@ -148,12 +155,23 @@
                 // (label updated, content stale) until a manual page refresh.
                 if (!append) {
                     seriesReloadPending = true;
+                    // The load in flight may have emptied the list already,
+                    // so keep the count it was fetching too; overlapping
+                    // keepLoaded refreshes keep the largest count.
+                    seriesReloadKeepCount = keepLoaded
+                        ? Math.max(seriesReloadKeepCount, keepCount, seriesLibrary.length, seriesLoadingCount)
+                        : 0;
                     if (seriesLoadController) {
                         seriesLoadController.abort();
                     }
+                    return new Promise(resolve => seriesReloadWaiters.push(resolve));
                 }
                 return;
             }
+
+            const limit = (keepLoaded && !append)
+                ? Math.max(SERIES_PAGE_SIZE, seriesLibrary.length, keepCount)
+                : SERIES_PAGE_SIZE;
 
             if (refresh || !append) {
                 seriesLibrary = [];
@@ -166,6 +184,9 @@
             // even if the underlying API call is slow on large libraries.
             const fileListEl = document.getElementById('fileList');
             if (!append && fileListEl && !currentSeriesDetailId) {
+                // Restore/close any open action menu (which may be portaled to
+                // <body>) before the list's DOM is replaced below.
+                closeActionDropdowns();
                 renderHtml(fileListEl, html`
                     <div class="loading">
                         <div class="spinner"></div>
@@ -175,10 +196,11 @@
             }
 
             seriesLoading = true;
+            seriesLoadingCount = append ? 0 : limit;
             const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
             seriesLoadController = controller;
             try {
-                let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${SERIES_PAGE_SIZE}`);
+                let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${limit}`);
                 if (refresh) {
                     url += '&refresh=true';
                 }
@@ -201,7 +223,7 @@
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
 
                 const data = await response.json();
@@ -229,19 +251,25 @@
                 // Superseded by a newer reload (see seriesLoadController); the
                 // pending reload below fetches the current selection.
                 if (!isAbortError(error)) {
-                    showMessage('Failed to load series: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to load series: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 if (seriesLoadController === controller) {
                     seriesLoadController = null;
                 }
                 seriesLoading = false;
+                seriesLoadingCount = 0;
                 if (seriesReloadPending) {
                     // A filter/search/sort change arrived while this load was in
                     // flight. Re-run with the latest selection so the displayed
                     // series match the current filter without a page refresh.
                     seriesReloadPending = false;
-                    loadSeriesLibrary({ refresh: false });
+                    const waiters = seriesReloadWaiters;
+                    seriesReloadWaiters = [];
+                    const reloadKeepCount = seriesReloadKeepCount;
+                    seriesReloadKeepCount = 0;
+                    const reload = loadSeriesLibrary({ refresh: false, keepLoaded: reloadKeepCount > 0, keepCount: reloadKeepCount });
+                    waiters.forEach(resolve => resolve(reload));
                 }
             }
         }
@@ -311,7 +339,7 @@
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 const data = await response.json();
 
@@ -350,6 +378,7 @@
                 if (rootArrived) {
                     ensureFolderLoaded('', true).catch(() => {});
                 }
+                reloadStaleOpenFolders(newFolders).catch(() => {});
                 updateButtonVisibility();
                 ensureScrollObserver();
                 if (refresh) {
@@ -357,7 +386,7 @@
                 }
             } catch (error) {
                 if (!isAbortError(error)) {
-                    showMessage('Failed to load files: ' + error.message, 'error', { reference: true });
+                    showMessage('Failed to load files: ' + error.message, 'error', { reference: error });
                 }
             } finally {
                 if (folderLoadController === controller) {
@@ -418,15 +447,17 @@
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId); // re-render to show loading state
                 loadSeriesIssues(detailId, true);
-                loadActiveLibraryView(1, true);
+                loadActiveLibraryView({ refresh: true });
                 return;
             }
             // Reload from page 1 with new search query
             currentSeriesDetailTitleKeys = null;
-            loadActiveLibraryView(1);
+            loadActiveLibraryView();
         }
         
         let sortMode = 'name'; // 'name', 'date', 'size'
+        // Mirrors the API's accepted sort directions (ValidSortDirections).
+        const VALID_SORT_DIRECTIONS = ['asc', 'desc'];
         let sortDirection = 'asc'; // 'asc', 'desc'
 
         // Syncs the sort dropdown label and active item with the current
@@ -491,13 +522,13 @@
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId);
                 loadSeriesIssues(detailId, true);
-                loadActiveLibraryView(1, true);
+                loadActiveLibraryView({ refresh: true });
                 return;
             }
 
             // Reload from page 1 with new filter
             currentSeriesDetailTitleKeys = null;
-            loadActiveLibraryView(1);
+            loadActiveLibraryView();
         }
         
         function setSort(mode) {
@@ -515,20 +546,20 @@
             document.getElementById('headerSortMenu').classList.remove('show');
 
             // Persist the chosen sort so it survives a refresh / other devices
-            setPreferences({ sortMode: sortMode });
+            setPreferences({ sortMode: sortMode, sortDirection: sortDirection });
 
             // If a series detail is open, keep the user inside it. Sorting
             // does not apply to issues within a series (issues are ordered by
             // their number), so we just refresh the underlying series library
             // in the background and stay on the current series.
             if (currentSeriesDetailId) {
-                loadActiveLibraryView(1, true);
+                loadActiveLibraryView({ refresh: true });
                 return;
             }
 
             // Reload from page 1 with new sort order
             currentSeriesDetailTitleKeys = null;
-            loadActiveLibraryView(1);
+            loadActiveLibraryView();
         }
         
         function toggleHeaderFilterDropdown(event) {
@@ -663,6 +694,41 @@
             }, { rootMargin: '400px 0px' })
             : null;
 
+        // A cover that failed to load is watched again after a pause that
+        // doubles with each failure, so it is fetched once more when it is
+        // next near the viewport (at once if it still is) — e.g. after a
+        // short outage or a burst of rate-limited (429) requests. Watching it
+        // again straight away would refetch it in a loop while it stays in
+        // view; after the last retry it waits for the list to be re-rendered.
+        const PROTECTED_IMAGE_RETRY_DELAY_MS = 2000;   // First pause; doubled after each failure
+        const PROTECTED_IMAGE_MAX_RETRIES = 5;          // Pauses of 2, 4, 8, 16 and 32 seconds
+        const protectedImageFailures = new WeakMap();   // image element -> failed loads so far
+        const protectedImageRetryTimers = new WeakMap(); // image element -> pending retry timeout id
+
+        function retryProtectedImageLater(image) {
+            if (!PROTECTED_IMAGE_OBSERVER) return;
+            // A retry is already pending: another failure before it is due
+            // (from another hydration) must not schedule a sooner one.
+            if (protectedImageRetryTimers.has(image)) return;
+            const failures = protectedImageFailures.get(image) || 0;
+            if (failures >= PROTECTED_IMAGE_MAX_RETRIES) return;
+            protectedImageFailures.set(image, failures + 1);
+            protectedImageRetryTimers.set(image, setTimeout(() => {
+                protectedImageRetryTimers.delete(image);
+                // Not for a cover since removed from the page (the list was
+                // re-rendered) or loaded, or loading, by another hydration.
+                if (!image.isConnected || image.dataset.protectedImageLoaded === '1') return;
+                PROTECTED_IMAGE_OBSERVER.observe(image);
+            }, PROTECTED_IMAGE_RETRY_DELAY_MS * 2 ** failures));
+        }
+
+        function cancelProtectedImageRetry(image) {
+            const timer = protectedImageRetryTimers.get(image);
+            if (timer === undefined) return;
+            clearTimeout(timer);
+            protectedImageRetryTimers.delete(image);
+        }
+
         async function hydrateOneProtectedImage(image) {
             const primary = image.dataset.protectedImage;
             const fallback = image.dataset.protectedImageFallback;
@@ -729,12 +795,16 @@
             };
 
             const primaryResult = await tryLoad(primary);
-            if (primaryResult === 'missing' && fallback && fallback !== primary) {
-                await tryLoad(fallback);
-            } else if (primaryResult === 'failed') {
+            const result = (primaryResult === 'missing' && fallback && fallback !== primary)
+                ? await tryLoad(fallback)
+                : primaryResult;
+            if (result === 'failed') {
                 // Allow a future hydration attempt (e.g. when the element
                 // scrolls back into view after a transient network failure).
                 delete image.dataset.protectedImageLoaded;
+                retryProtectedImageLater(image);
+            } else {
+                cancelProtectedImageRetry(image);
             }
         }
 
@@ -777,6 +847,10 @@
 
         function renderSeriesLibrary() {
             const fileList = document.getElementById('fileList');
+
+            // Restore/close any open action menu (which may be portaled to
+            // <body>) before the list's DOM is rebuilt below.
+            closeActionDropdowns();
 
             // Drop any selected series that are no longer present in the
             // currently loaded library list (e.g. after a filter change) so
@@ -958,7 +1032,7 @@
 
         // Clear only the series-selection bookkeeping. Used by code paths that
         // already clear `selectedFiles` wholesale (job completion, DB reset,
-        // bulk delete) so stale series highlights don't linger.
+        // clearSelection()) so stale series highlights don't linger.
         function resetSeriesSelectionState() {
             selectedSeries.clear();
             selectedSeriesFilePaths.clear();

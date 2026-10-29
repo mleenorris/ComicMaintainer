@@ -197,6 +197,56 @@ public class ScheduledJobServiceTests
     }
 
     [Fact]
+    public async Task AdvanceNextRunAsync_MovesTheNextRunOnWithoutTouchingTheRunInProgress()
+    {
+        var (service, _) = BuildService(new FakeHandler("alpha"));
+        await service.SeedDefaultsAsync();
+        await service.UpdateAsync("alpha", enabled: true, intervalMinutes: 10, optionsJson: null);
+        await service.RecordCompletionAsync("alpha", ScheduledJobStatus.Success, "done", durationMs: 42);
+        await service.MarkRunningAsync("alpha");
+        var running = await service.GetAsync("alpha");
+
+        var before = DateTime.UtcNow;
+        await service.AdvanceNextRunAsync("alpha");
+        var job = await service.GetAsync("alpha");
+
+        Assert.NotNull(job);
+        Assert.Equal(ScheduledJobStatus.Running, job!.LastStatus);
+        Assert.Null(job.LastMessage);
+        Assert.Equal(running!.LastRunUtc, job.LastRunUtc);
+        Assert.Equal(42, job.LastDurationMs);
+        Assert.InRange(job.NextRunUtc!.Value, before.AddMinutes(10), DateTime.UtcNow.AddMinutes(10));
+    }
+
+    [Fact]
+    public async Task AdvanceNextRunAsync_WhenDisabled_LeavesTheJobUnscheduled()
+    {
+        var (service, _) = BuildService(new FakeHandler("alpha"));
+        await service.SeedDefaultsAsync();
+        // alpha defaults disabled
+
+        await service.AdvanceNextRunAsync("alpha");
+
+        var job = await service.GetAsync("alpha");
+        Assert.NotNull(job);
+        Assert.Null(job!.NextRunUtc);
+        Assert.Equal(ScheduledJobStatus.NeverRun, job.LastStatus);
+        Assert.Null(job.LastRunUtc);
+    }
+
+    [Fact]
+    public async Task AdvanceNextRunAsync_IgnoresUnknownJobs()
+    {
+        var (service, _) = BuildService(new FakeHandler("alpha", enabled: true, interval: 5));
+        await service.SeedDefaultsAsync();
+        var seeded = await service.GetAsync("alpha");
+
+        await service.AdvanceNextRunAsync("missing");
+
+        Assert.Equal(seeded!.NextRunUtc, (await service.GetAsync("alpha"))!.NextRunUtc);
+    }
+
+    [Fact]
     public void Constructor_RejectsDuplicateJobKeys()
     {
         Assert.Throws<InvalidOperationException>(() =>

@@ -242,9 +242,9 @@ public sealed class AutheliaHealthMonitor : BackgroundService
     {
         if (!string.IsNullOrWhiteSpace(_settings.Url))
         {
+            // The value is left out because it may hold credentials or a token, which the checked URL never keeps.
             _logger.LogWarning(
-                "AUTHELIA_URL {AutheliaUrl} is not an http:// or https:// URL, such as http://authelia:9091, so Authelia outages will not be logged",
-                LoggingHelper.SanitizeForLog(_settings.Url));
+                "AUTHELIA_URL is not an http:// or https:// URL, such as http://authelia:9091, so Authelia outages will not be logged");
         }
         else if (_settings.Enabled)
         {

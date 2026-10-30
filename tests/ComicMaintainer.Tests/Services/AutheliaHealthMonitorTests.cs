@@ -36,7 +36,7 @@ public sealed class AutheliaHealthMonitorTests
     private readonly ListLogger _logger = new();
     private readonly ConcurrentQueue<RecordedRequest> _requests = new();
     private readonly SemaphoreSlim _requestReceived = new(0);
-    private Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _respond = (_, _) => Respond(HttpStatusCode.OK);
+    private Func<HttpRequestMessage, CancellationToken, Task<HttpStatusCode>> _respond = (_, _) => Respond(HttpStatusCode.OK);
 
     [Theory]
     [InlineData("http://authelia:9091", HealthCheckUrl)]
@@ -152,7 +152,7 @@ public sealed class AutheliaHealthMonitorTests
     {
         // Authelia may be starting at the same time as ComicMaintainer, after a reboot for example.
         var monitor = CreateMonitor();
-        _respond = (_, _) => Task.FromException<HttpResponseMessage>(new HttpRequestException("Connection refused (authelia:9091)"));
+        _respond = (_, _) => Task.FromException<HttpStatusCode>(new HttpRequestException("Connection refused (authelia:9091)"));
 
         await monitor.CheckAsync(CancellationToken.None);
 
@@ -170,7 +170,7 @@ public sealed class AutheliaHealthMonitorTests
     public async Task AutheliaUnreachableFromTheStart_IsWarnedAboutOnTheSecondCheck()
     {
         var monitor = CreateMonitor();
-        _respond = (_, _) => Task.FromException<HttpResponseMessage>(new HttpRequestException("Connection refused (authelia:9091)"));
+        _respond = (_, _) => Task.FromException<HttpStatusCode>(new HttpRequestException("Connection refused (authelia:9091)"));
 
         await monitor.CheckAsync(CancellationToken.None);
         await CheckAgainAsync(monitor);
@@ -203,12 +203,12 @@ public sealed class AutheliaHealthMonitorTests
         {
             "not-found" => Respond(HttpStatusCode.NotFound),
             // The inner exception repeats the message, so it is left out.
-            "refused" => Task.FromException<HttpResponseMessage>(new HttpRequestException(
+            "refused" => Task.FromException<HttpStatusCode>(new HttpRequestException(
                 "Connection refused (authelia:9091)", new IOException("Connection refused"))),
-            "tls" => Task.FromException<HttpResponseMessage>(new HttpRequestException(
+            "tls" => Task.FromException<HttpStatusCode>(new HttpRequestException(
                 "The SSL connection could not be established, see inner exception.",
                 new AuthenticationException("The remote certificate is invalid because of errors in the certificate chain: UntrustedRoot"))),
-            "multi-line" => Task.FromException<HttpResponseMessage>(new InvalidOperationException("first line\nsecond line")),
+            "multi-line" => Task.FromException<HttpStatusCode>(new InvalidOperationException("first line\nsecond line")),
             _ => throw new UnreachableException(),
         };
 
@@ -292,7 +292,10 @@ public sealed class AutheliaHealthMonitorTests
     [Theory]
     [InlineData("authelia:9091")]
     [InlineData("ftp://authelia")]
-    public async Task WithAnInvalidUrl_NothingIsChecked_AndTheUrlIsWarnedAbout(string url)
+    // The value is not logged, as it may hold credentials or a token.
+    [InlineData("monitor@authelia:9091/?token=do-not-log")]
+    [InlineData("ftp://monitor@authelia:9091/?token=do-not-log")]
+    public async Task WithAnInvalidUrl_NothingIsChecked_AndAWarningLeavesTheUrlOut(string url)
     {
         using var monitor = CreateMonitor(url, autheliaEnabled: false);
 
@@ -302,9 +305,31 @@ public sealed class AutheliaHealthMonitorTests
         var warning = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
         Assert.Equal(
-            $"AUTHELIA_URL {url} is not an http:// or https:// URL, such as http://authelia:9091, so Authelia outages will not be logged",
+            "AUTHELIA_URL is not an http:// or https:// URL, such as http://authelia:9091, so Authelia outages will not be logged",
             warning.Message);
         Assert.Empty(_requests);
+    }
+
+    [Fact]
+    public async Task CredentialsInTheUrl_AreNeitherSentNorLogged()
+    {
+        var monitor = CreateMonitor("http://monitor@authelia:9091/?token=do-not-log");
+        await monitor.CheckAsync(CancellationToken.None);
+        _respond = (_, _) => Task.FromException<HttpStatusCode>(new HttpRequestException("Connection refused (authelia:9091)"));
+        await CheckAgainAsync(monitor, times: 2);
+        _respond = (_, _) => Respond(HttpStatusCode.OK);
+        await CheckAgainAsync(monitor);
+
+        Assert.Equal(
+            new[] { LogLevel.Information, LogLevel.Warning, LogLevel.Information },
+            _logger.Entries.Select(e => e.Level));
+        Assert.All(_logger.Entries, e =>
+        {
+            Assert.Contains(HealthCheckUrl, e.Message);
+            Assert.DoesNotContain("monitor@", e.Message);
+            Assert.DoesNotContain("do-not-log", e.Message);
+        });
+        Assert.All(_requests, request => Assert.Equal(HealthCheckUrl, request.Uri));
     }
 
     [Fact]
@@ -395,13 +420,13 @@ public sealed class AutheliaHealthMonitorTests
         Assert.All(_logger.Entries, e => Assert.Null(e.Exception));
     }
 
-    private static Task<HttpResponseMessage> Respond(HttpStatusCode status) => Task.FromResult(new HttpResponseMessage(status));
+    private static Task<HttpStatusCode> Respond(HttpStatusCode status) => Task.FromResult(status);
 
     private sealed record RecordedRequest(HttpMethod Method, string? Uri, bool IsHealthCheck, string UserAgent);
 
     private sealed class StubHandler(AutheliaHealthMonitorTests test) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             test._requests.Enqueue(new RecordedRequest(
                 request.Method,
@@ -409,7 +434,7 @@ public sealed class AutheliaHealthMonitorTests
                 AutheliaHealthMonitor.IsHealthCheck(request),
                 request.Headers.UserAgent.ToString()));
             test._requestReceived.Release();
-            return test._respond(request, cancellationToken);
+            return new HttpResponseMessage(await test._respond(request, cancellationToken));
         }
     }
 

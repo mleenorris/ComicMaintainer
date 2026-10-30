@@ -407,10 +407,39 @@ environment before enabling it.
 
 ### Pull New Image
 
+When the service uses the published image (`image: iceburn1/comicmaintainer:dotnet` rather than
+`build:`):
+
 ```bash
 docker-compose -f docker-compose.dotnet.yml pull
 docker-compose -f docker-compose.dotnet.yml up -d
 ```
+
+### Pin or Roll Back to a Version
+
+Every release is also published as `iceburn1/comicmaintainer:X.Y.Z`, while `:dotnet` always
+points at the newest release. The web interface shows the version as `X.Y.Z.0`. To stay on a
+release, or to go back to one after an upgrade, use its tag instead of `:dotnet`:
+
+```yaml
+services:
+  comicmaintainer-dotnet:
+    image: iceburn1/comicmaintainer:2.0.404
+```
+
+```bash
+docker-compose -f docker-compose.dotnet.yml up -d
+```
+
+The available versions are listed on
+[Docker Hub](https://hub.docker.com/r/iceburn1/comicmaintainer/tags). Releases published before
+version tags were introduced have no tag until they are backfilled (see
+[Backfilling a version tag](GITHUB_ACTIONS_DOTNET.md#backfilling-a-version-tag)).
+
+Each start applies the release's new database migrations to `/Config/comicmaintainer.db`. An
+older release does not undo them and may not work with the newer schema, so
+[back up the database](#backup-database) before upgrading. When rolling back past a release that
+changed the database, [restore](#restore-database) the backup taken before that upgrade.
 
 ### Rebuild from Source
 

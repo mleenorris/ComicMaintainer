@@ -15,19 +15,30 @@ on:
   pull_request:
     branches: 
       - dotnet
-  # Republishes the selected branch (run it on dotnet), e.g. after a failed push to Docker Hub.
+  # Without a version, republishes the selected branch (run it on dotnet), e.g. after a failed push
+  # to Docker Hub. With a version, rebuilds that release from its vX.Y.Z git tag and pushes only the
+  # matching version tag, e.g. for a release published before version tags existed.
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release to rebuild and tag, such as 2.0.399. Leave empty to republish the branch.'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
 
-# Publishing runs share one group, and a newer run cancels an older one that is still in
-# progress, so a stale build can never finish last and overwrite the :dotnet tag. Every other run
-# (pull request builds, which never push, and runs whose job is skipped below) gets a group of its
-# own, so it can never cancel a publish.
+# Runs that publish :dotnet share one group and queue instead of cancelling each other, because a
+# cancelled publish would never push its release's version tag. A group holds at most one waiting
+# run and a newer one replaces it, so the newest build is still the last to push :dotnet. When
+# several releases land while a publish is running, the ones in between are therefore skipped;
+# backfill them with the version input. Every other run gets a group of its own: pull request
+# builds, which never push, backfills, which never touch :dotnet, and runs whose job is skipped
+# below.
 concurrency:
-  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push') && 'publish' || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ ((github.event_name == 'workflow_dispatch' && inputs.version == '') || github.event.workflow_run.event == 'push') && 'publish' || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   build-and-push-dotnet:
@@ -36,9 +47,25 @@ jobs:
     # dotnet, and that run must not start a privileged publish.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
+    env:
+      IMAGE_BASE: iceburn1/comicmaintainer
+      # Set only by a manual run that backfills a release. Scripts read it from the environment
+      # rather than having it expanded into them, so the input can never run as shell code.
+      REQUESTED_VERSION: ${{ inputs.version }}
     steps:
+      - name: Validate requested version
+        if: inputs.version != ''
+        run: |
+          if [[ ! "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The version input must be a release number such as 2.0.399, without a 'v' prefix or a fourth '.0' part."
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # A backfill builds the release's own source, which the version bump tagged vX.Y.Z.
+          ref: ${{ inputs.version != '' && format('refs/tags/v{0}', inputs.version) || '' }}
       
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
@@ -48,27 +75,64 @@ jobs:
       - name: Get version from .NET project
         id: get_version
         run: |
-          # Extract version from ComicMaintainer.WebApi.csproj
-          VERSION=$(grep -oP '<Version>\K[^<]+' src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj || echo "1.0.0")
+          VERSION=$(grep -m 1 -oP '<Version>\K[^<]+' src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj || true)
+          # A missing or malformed version would be published as a meaningless tag.
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Could not read an X.Y.Z <Version> from src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj"
+            exit 1
+          fi
+          if [[ -n "$REQUESTED_VERSION" && "$VERSION" != "$REQUESTED_VERSION" ]]; then
+            echo "::error::Tag v$REQUESTED_VERSION contains version $VERSION, so it cannot be published as $REQUESTED_VERSION."
+            exit 1
+          fi
           echo "Version: $VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       
-      - name: Determine Docker tags
+      - name: Determine Docker tags and platforms
         id: docker_tags
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
-          echo "Building from branch: $BRANCH_NAME"
-          
-          # Use the same image repository as Python version, but with dotnet tag
-          IMAGE_BASE="iceburn1/comicmaintainer"
-          
-          # For dotnet branch, tag as dotnet
-          TAGS="${IMAGE_BASE}:dotnet"
-          
-          # Output tags in a format that can be used by docker/build-push-action
-          echo "tags<<EOF" >> $GITHUB_OUTPUT
-          echo "$TAGS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          PLATFORMS="linux/amd64,linux/arm64"
+          if [[ -n "$REQUESTED_VERSION" ]]; then
+            # A backfill never moves :dotnet, which must stay on the newest release.
+            TAGS="${IMAGE_BASE}:${VERSION}"
+            # Rebuild a release for the platforms it was published for. Releases before 2.0.288
+            # were amd64 only: their Dockerfile can build arm64 only by running the whole .NET SDK
+            # under emulation.
+            if ! grep -q 'linux/arm64' .github/workflows/docker-publish-dotnet.yml; then
+              PLATFORMS="linux/amd64"
+            fi
+          else
+            # Pull request builds get the tag too, but are never pushed.
+            TAGS="${IMAGE_BASE}:dotnet"
+            if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+              # Only the commit the version bump tagged vX.Y.Z is that release. A later commit, such
+              # as a merge whose bump was skipped, still carries the previous version number, and
+              # tagging it would replace that release's image with different code.
+              REFS=$(git ls-remote origin "refs/tags/v${VERSION}" "refs/tags/v${VERSION}^{}")
+              # The bump creates an annotated tag, whose commit is listed on the peeled "^{}" line;
+              # a lightweight tag points at its commit directly.
+              RELEASE_COMMIT=$(awk -v ref="refs/tags/v${VERSION}^{}" '$2 == ref { print $1 }' <<< "$REFS")
+              if [[ -z "$RELEASE_COMMIT" ]]; then
+                RELEASE_COMMIT=$(awk -v ref="refs/tags/v${VERSION}" '$2 == ref { print $1 }' <<< "$REFS")
+              fi
+              if [[ "$RELEASE_COMMIT" == "$(git rev-parse HEAD)" ]]; then
+                TAGS="${TAGS}"$'\n'"${IMAGE_BASE}:${VERSION}"
+              else
+                echo "::notice::This commit is not the v${VERSION} release, so only :dotnet is published."
+              fi
+            fi
+          fi
+          echo "Tags:"
+          echo "$TAGS"
+          echo "Platforms: $PLATFORMS"
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+            echo "platforms=$PLATFORMS"
+          } >> "$GITHUB_OUTPUT"
         
       - name: Cache Docker layers
         uses: actions/cache@v6
@@ -95,6 +159,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push .NET Docker image
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -103,10 +168,25 @@ jobs:
           tags: ${{ steps.docker_tags.outputs.tags }}
           cache-from: type=local,src=/tmp/.buildx-cache-dotnet
           cache-to: type=local,dest=/tmp/.buildx-cache-dotnet
-          # arm64 covers Apple Silicon and common NAS/SBC hosts. The build stage compiles
-          # natively for the runner and cross-targets, so this does not require emulation.
-          platforms: linux/amd64,linux/arm64
+          # linux/amd64 and linux/arm64, except for backfills of releases that predate arm64 images.
+          # arm64 covers Apple Silicon and common NAS/SBC hosts. The build stage compiles natively
+          # for the runner and cross-targets, so this does not require emulation.
+          platforms: ${{ steps.docker_tags.outputs.platforms }}
           
       - name: Image digest
         if: github.event_name != 'pull_request'
-        run: echo "Image pushed with tags ${{ steps.docker_tags.outputs.tags }}"
+        env:
+          TAGS: ${{ steps.docker_tags.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "Pushed $DIGEST with tags:"
+          echo "$TAGS"
+          {
+            echo "### Published image"
+            echo
+            echo "Digest: \`$DIGEST\`"
+            echo
+            while IFS= read -r tag; do
+              echo "- \`$tag\`"
+            done <<< "$TAGS"
+          } >> "$GITHUB_STEP_SUMMARY"

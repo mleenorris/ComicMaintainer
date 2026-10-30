@@ -1,10 +1,12 @@
 using System.Reflection;
+using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OpenTelemetry;
 using OpenTelemetry.Instrumentation.AspNetCore;
+using OpenTelemetry.Instrumentation.Http;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
@@ -67,6 +69,21 @@ public sealed class TelemetryExtensionsTests
 
         Assert.NotNull(filter);
         Assert.Equal(traced, filter(context));
+    }
+
+    // AutheliaHealthMonitor checks Authelia every 30 seconds when AUTHELIA_URL is set.
+    [Fact]
+    public void WithAnOtlpEndpoint_TracesOutgoingRequestsExceptAutheliaHealthChecks()
+    {
+        using var provider = Register(("OTEL_EXPORTER_OTLP_ENDPOINT", OtlpEndpoint)).BuildServiceProvider();
+        var filter = provider.GetRequiredService<IOptionsMonitor<HttpClientTraceInstrumentationOptions>>().CurrentValue.FilterHttpRequestMessage;
+        var healthEndpoint = new Uri("http://authelia:9091/api/health");
+        using var healthCheck = AutheliaHealthMonitor.CreateHealthCheckRequest(healthEndpoint);
+        using var otherRequest = new HttpRequestMessage(HttpMethod.Get, healthEndpoint);
+
+        Assert.NotNull(filter);
+        Assert.False(filter(healthCheck));
+        Assert.True(filter(otherRequest));
     }
 
     [Theory]

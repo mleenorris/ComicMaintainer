@@ -89,6 +89,7 @@ services:
       - WATCHED_DIR=/watched_dir
       - AUTHELIA_ENABLED=true  # Enable Authelia authentication
       - AUTHELIA_TRUSTED_PROXIES=172.18.0.0/16  # Required: subnet of swag-network (docker network inspect swag-network)
+      - AUTHELIA_URL=http://authelia:9091  # Optional: log Authelia outages
       - PUID=1000
       - PGID=1000
     volumes:
@@ -104,6 +105,9 @@ networks:
   swag-network:
     external: true
 ```
+
+`AUTHELIA_URL` is optional: it has ComicMaintainer log when Authelia goes down, which otherwise leaves no trace in
+its logs (see [Logging Authelia Outages](#logging-authelia-outages)).
 
 ### Step 3: Configure Role Mapping (Optional)
 
@@ -138,6 +142,7 @@ ComicMaintainer supports the following Authelia-related environment variables:
 | `AUTHELIA_GROUPS_HEADER` | `Remote-Groups` | Header containing groups |
 | `AUTHELIA_DEFAULT_ROLE` | `User` | Default role (User, Admin, ReadOnly) |
 | `AUTHELIA_ADMIN_GROUPS` | _(empty)_ | Comma-separated list of Authelia groups (case-insensitive) whose members get the Admin role. Without admin groups, every signed-in user who is not ReadOnly can administer ComicMaintainer; see [Role Mapping](#role-mapping) |
+| `AUTHELIA_URL` | _(none)_ | Address at which the ComicMaintainer container can reach Authelia, such as `http://authelia:9091`, including the path Authelia is served under, if any. When set, Authelia's health endpoint is checked every 30 seconds and outages are logged as warnings. Works whether or not `AUTHELIA_ENABLED` is set. See [Logging Authelia Outages](#logging-authelia-outages) |
 
 ## Security Considerations
 
@@ -277,7 +282,71 @@ When a user successfully authenticates via Authelia:
 - **User**: Standard access to view and manage comics
 - **ReadOnly**: View-only access (no modifications)
 
+## Logging Authelia Outages
+
+The reverse proxy asks Authelia about every request before passing it on. While Authelia is down, the proxy rejects
+every request itself, with **HTTP 500** (nginx, including SWAG, and Traefik) or **502** (Caddy). The requests never
+reach ComicMaintainer, so its logs show nothing wrong. To have such outages logged, set `AUTHELIA_URL` to an address
+at which the ComicMaintainer container can reach Authelia:
+
+```yaml
+environment:
+  - AUTHELIA_URL=http://authelia:9091
+```
+
+ComicMaintainer then requests Authelia's health endpoint (here `http://authelia:9091/api/health`) every 30 seconds
+and logs each change, in the container log and in `app.log` in the config directory. To see them, run
+`docker logs comicmaintainer 2>&1 | grep -i authelia`:
+
+```text
+[INF] Checking Authelia at http://authelia:9091/api/health every 30 seconds
+[INF] Authelia is reachable at http://authelia:9091/api/health
+[WRN] Authelia stopped responding at http://authelia:9091/api/health: Name or service not known (authelia:9091). Until it recovers, the reverse proxy rejects requests to ComicMaintainer, usually with HTTP 500 or 502; ComicMaintainer itself is still running
+[WRN] Authelia has not been reachable at http://authelia:9091/api/health for 5 minutes: Name or service not known (authelia:9091)
+[INF] Authelia is reachable again at http://authelia:9091/api/health; it was unreachable for 7 minutes
+```
+
+- A check fails when Authelia does not answer within 10 seconds or answers with an error status. The outage is logged
+  at the first failed check, again every 5 minutes while it lasts, and with its length when Authelia recovers.
+- If the first check after ComicMaintainer starts fails, the warning waits for the next check, as Authelia may still
+  be starting.
+- Outages are warnings, not errors, so they are not sent as
+  [automated error reports](DEBUG_LOGGING_GUIDE.md#automated-error-report).
+- The check works whether or not `AUTHELIA_ENABLED` is set, for example when Authelia guards ComicMaintainer at the
+  proxy while users sign in with ComicMaintainer accounts. Without `AUTHELIA_URL`, nothing is checked.
+
+The warning gives the reason:
+
+- `Name or service not known` or `Resource temporarily unavailable`: the name does not resolve. Docker no longer
+  resolves the name of a stopped container, so Authelia's container is stopped or restarting. If it is running,
+  ComicMaintainer is not on a Docker network that Authelia is on: connect it to one, or use another address.
+- `Connection refused`: Authelia is not listening, for example because it is still starting or has crashed.
+- `no response within 10 seconds`: Authelia, or the network on the way to it, is not responding.
+- `HTTP` and a status, such as `HTTP 404 Not Found`: something answered that is not a healthy Authelia. Check the
+  address, including the path.
+
+**Choosing the address:** `http://authelia:9091` works when the Authelia container is named `authelia` and shares a
+Docker network with ComicMaintainer, as in the [complete example](#example-complete-setup). If Authelia is served
+under a path (its `server.address` ends in one, such as `/authelia`), include the path:
+`http://authelia:9091/authelia`. The public address of the Authelia portal, such as `https://auth.yourdomain.com`,
+works too, but then the checks go through the reverse proxy. To test an address, run
+`docker exec comicmaintainer curl -fsS http://authelia:9091/api/health`, which prints `{"status":"OK"}`.
+
 ## Troubleshooting
+
+### Issue: Every Page Returns HTTP 500 (or 502), but the ComicMaintainer Logs Show Nothing Wrong
+
+The reverse proxy could not reach Authelia, so it rejected the requests before they reached ComicMaintainer. The
+browser's developer tools may show the status as coming "from service worker": the ComicMaintainer service worker
+fetches pages from the network and passed on the proxy's answer.
+
+**Solution:**
+1. Check that Authelia is running: `docker ps -a | grep authelia` and `docker logs authelia`
+2. Check the proxy's log. With SWAG, `/config/log/nginx/error.log` shows `auth request unexpected status: 502` while
+   Authelia is down
+3. Once Authelia is running again, reload the page
+4. To have outages logged by ComicMaintainer, set `AUTHELIA_URL` (see
+   [Logging Authelia Outages](#logging-authelia-outages))
 
 ### Issue: Users Not Being Authenticated
 
@@ -431,6 +500,7 @@ services:
       - AUTHELIA_ENABLED=true
       - AUTHELIA_TRUSTED_PROXIES=172.30.0.10  # Only SWAG may send the Authelia headers
       - AUTHELIA_ADMIN_GROUPS=admins
+      - AUTHELIA_URL=http://authelia:9091  # Logs Authelia outages (optional)
       - PUID=1000
       - PGID=1000
     volumes:

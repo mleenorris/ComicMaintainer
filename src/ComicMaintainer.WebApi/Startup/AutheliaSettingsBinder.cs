@@ -15,6 +15,7 @@ internal static class AutheliaSettingsBinder
     [
         ("AUTHELIA_ENABLED", (settings, value) => settings.Enabled = value.Equals("true", StringComparison.OrdinalIgnoreCase)),
         (TrustedProxyAllowlist.EnvironmentVariable, (settings, value) => settings.TrustedProxies = value),
+        ("AUTHELIA_URL", (settings, value) => settings.Url = value),
         ("AUTHELIA_USER_HEADER", (settings, value) => settings.UserHeader = value),
         ("AUTHELIA_EMAIL_HEADER", (settings, value) => settings.EmailHeader = value),
         ("AUTHELIA_NAME_HEADER", (settings, value) => settings.NameHeader = value),

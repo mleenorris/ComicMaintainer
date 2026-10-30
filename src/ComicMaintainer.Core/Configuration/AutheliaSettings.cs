@@ -18,6 +18,14 @@ public class AutheliaSettings
     /// headers are ignored on requests from any other address. Hostnames are not supported.
     /// </summary>
     public string? TrustedProxies { get; set; }
+
+    /// <summary>
+    /// Address at which ComicMaintainer can reach Authelia directly, including Authelia's server path if it has one,
+    /// e.g. "http://authelia:9091" (environment variable AUTHELIA_URL). When set, Authelia's health endpoint is checked
+    /// in the background and its outages are logged: while Authelia is down the reverse proxy rejects every request
+    /// before it reaches ComicMaintainer, so nothing else would be logged. Independent of <see cref="Enabled"/>.
+    /// </summary>
+    public string? Url { get; set; }
     
     /// <summary>
     /// Header name for the authenticated username (default: Remote-User)

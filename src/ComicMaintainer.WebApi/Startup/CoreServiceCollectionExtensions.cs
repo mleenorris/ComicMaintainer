@@ -406,6 +406,16 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ScheduledJobsHostedService>();
         services.AddHostedService(sp => sp.GetRequiredService<ScheduledJobsHostedService>());
 
+        // Logs Authelia outages when AUTHELIA_URL is set; does nothing otherwise. The client's request logging is
+        // removed because it would add four Information lines to the log for every check.
+        services.AddHttpClient(AutheliaHealthMonitor.HttpClientName)
+            .ConfigureHttpClient(client =>
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+            })
+            .RemoveAllLoggers();
+        services.AddHostedService<AutheliaHealthMonitor>();
+
         return services;
     }
 }

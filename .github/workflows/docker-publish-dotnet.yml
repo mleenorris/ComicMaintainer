@@ -5,8 +5,7 @@ on:
   # used the merge commit, which still carries the previous version, and the bump commit cannot
   # start a build of its own because it is pushed with GITHUB_TOKEN. The published image was
   # therefore always one version behind the newest release. A workflow_run build checks out the
-  # newest commit on the default branch (dotnet), which already contains the bump. It runs
-  # whatever the bump's outcome, so a merge whose bump was skipped is still published.
+  # release commit from an artifact when the bump ran, or the branch tip when it was skipped.
   workflow_run:
     workflows: ["Automatic Version Bump"]
     types: [completed]
@@ -27,6 +26,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 # Runs that publish :dotnet share one group and queue instead of cancelling each other, because a
@@ -61,11 +61,35 @@ jobs:
             exit 1
           fi
 
+      - name: Download release commit
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          name: release-commit
+          path: release-commit
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Resolve release commit
+        id: release_ref
+        if: github.event_name == 'workflow_run'
+        run: |
+          if [[ -f release-commit/release-commit.txt ]]; then
+            RELEASE_COMMIT=$(cat release-commit/release-commit.txt)
+            if [[ ! "$RELEASE_COMMIT" =~ ^([[:xdigit:]]{40}|[[:xdigit:]]{64})$ ]]; then
+              echo "::error::The release workflow produced an invalid commit SHA."
+              exit 1
+            fi
+            echo "ref=$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          # A backfill builds the release's own source, which the version bump tagged vX.Y.Z.
-          ref: ${{ inputs.version != '' && format('refs/tags/v{0}', inputs.version) || '' }}
+          # Backfills use their version tag; automatic runs use the bump commit when available.
+          # An empty ref retains branch-tip checkout for PRs, republishing, and skipped bumps.
+          ref: ${{ inputs.version != '' && format('refs/tags/v{0}', inputs.version) || steps.release_ref.outputs.ref || '' }}
       
       - name: Set up .NET
         uses: actions/setup-dotnet@v6

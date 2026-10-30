@@ -135,6 +135,16 @@ jobs:
           
           git tag -a "v${NEW_VERSION}" -m "Release version ${NEW_VERSION}"
           git push origin "v${NEW_VERSION}"
+
+      - name: Save release commit
+        run: git rev-parse HEAD > release-commit.txt
+
+      - name: Upload release commit
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-commit
+          path: release-commit.txt
+          if-no-files-found: error
       
       - name: Create GitHub Release
         uses: actions/create-release@v1

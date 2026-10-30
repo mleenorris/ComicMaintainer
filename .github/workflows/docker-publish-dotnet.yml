@@ -18,13 +18,14 @@ on:
   pull_request:
     branches: 
       - dotnet
-  # Without a version, republishes the selected branch (run it on dotnet), e.g. after a failed push
-  # to Docker Hub. With a version, rebuilds that release from its vX.Y.Z git tag and pushes only the
-  # matching version tag, e.g. for a release published before version tags existed.
+  # Without a version, republishes the newest commit on dotnet, e.g. after a failed push to Docker
+  # Hub; run it on dotnet, because :dotnet takes no other commit. With a version, rebuilds that
+  # release from its vX.Y.Z git tag and pushes only the matching version tag, e.g. for a release
+  # published before version tags existed.
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release to rebuild and tag, such as 2.0.399. Leave empty to republish the branch.'
+        description: 'Release to rebuild and tag, such as 2.0.399. Leave empty to republish dotnet.'
         required: false
         default: ''
         type: string
@@ -84,7 +85,7 @@ jobs:
         run: |
           RECORD="$RUNNER_TEMP/release-commit/release-commit.txt"
           if [[ ! -f "$RECORD" ]]; then
-            echo "The version bump recorded no release, so the newest commit on dotnet is published."
+            echo "The version bump recorded no release, so the newest commit on dotnet is built."
             exit 0
           fi
           COMMIT=$(< "$RECORD")
@@ -131,6 +132,8 @@ jobs:
           BUMP_COMMIT: ${{ steps.release.outputs.commit }}
         run: |
           PLATFORMS="linux/amd64,linux/arm64"
+          # Set when the run has nothing to publish, which skips the build.
+          SKIP=false
           if [[ -n "$REQUESTED_VERSION" ]]; then
             # A backfill never moves :dotnet, which must stay on the newest release.
             TAGS="${IMAGE_BASE}:${VERSION}"
@@ -155,21 +158,32 @@ jobs:
               if [[ -z "$RELEASE_COMMIT" ]]; then
                 RELEASE_COMMIT=$(awk -v ref="refs/tags/v${VERSION}" '$2 == ref { print $1 }' <<< "$REFS")
               fi
-              if [[ "$RELEASE_COMMIT" == "$HEAD_COMMIT" ]]; then
-                TAGS="${TAGS}"$'\n'"${IMAGE_BASE}:${VERSION}"
-              elif [[ -n "$BUMP_COMMIT" ]]; then
+              if [[ -n "$BUMP_COMMIT" && "$RELEASE_COMMIT" != "$HEAD_COMMIT" ]]; then
                 echo "::error::The version bump released ${BUMP_COMMIT}, but v${VERSION} is not tagged on it."
                 exit 1
-              else
-                echo "::notice::This commit is not the v${VERSION} release, so only :dotnet is published."
               fi
-              # Once dotnet has moved past a release, :dotnet is left to the publish of the newer
-              # commits, which may already have run, e.g. when this run is a re-run. :dotnet then
-              # never goes back to an older build.
+              # :dotnet takes only the newest commit on dotnet, so that it never goes back to an
+              # older build. A run that dotnet has moved past, because it waited for another
+              # publish or is a re-run, which builds its original commit again, leaves :dotnet to
+              # the publish of the newer commits.
               DOTNET_TIP=$(awk '$2 == "refs/heads/dotnet" { print $1 }' <<< "$REFS")
-              if [[ -n "$BUMP_COMMIT" && "$DOTNET_TIP" != "$HEAD_COMMIT" ]]; then
+              if [[ -z "$DOTNET_TIP" ]]; then
+                echo "::error::The dotnet branch was not found on origin."
+                exit 1
+              fi
+              if [[ "$DOTNET_TIP" == "$HEAD_COMMIT" ]]; then
+                if [[ "$RELEASE_COMMIT" == "$HEAD_COMMIT" ]]; then
+                  TAGS="${TAGS}"$'\n'"${IMAGE_BASE}:${VERSION}"
+                else
+                  echo "::notice::This commit is not the v${VERSION} release, so only :dotnet is published."
+                fi
+              elif [[ "$RELEASE_COMMIT" == "$HEAD_COMMIT" ]]; then
                 TAGS="${IMAGE_BASE}:${VERSION}"
                 echo "::notice::dotnet has moved on since v${VERSION}, so only :${VERSION} is published. The publish of the newer commits moves :dotnet."
+              else
+                TAGS=""
+                SKIP=true
+                echo "::notice::Nothing is published, because this commit is neither the newest on dotnet nor the v${VERSION} release. To publish the newest commit, start a new run on dotnet; a re-run builds the same commit again."
               fi
             fi
           fi
@@ -181,9 +195,13 @@ jobs:
             echo "$TAGS"
             echo "EOF"
             echo "platforms=$PLATFORMS"
+            echo "skip=$SKIP"
           } >> "$GITHUB_OUTPUT"
         
+      # The remaining steps build and push the image, so they are skipped when there is nothing to
+      # publish.
       - name: Cache Docker layers
+        if: steps.docker_tags.outputs.skip != 'true'
         uses: actions/cache@v6
         with:
           path: /tmp/.buildx-cache-dotnet
@@ -195,13 +213,15 @@ jobs:
       # image stage installs system packages with apt-get, which runs under the target
       # architecture; without this the arm64 build fails with "exec format error".
       - name: Set up QEMU
+        if: steps.docker_tags.outputs.skip != 'true'
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
 
       - name: Set up Docker Buildx
+        if: steps.docker_tags.outputs.skip != 'true'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && steps.docker_tags.outputs.skip != 'true'
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -209,6 +229,7 @@ jobs:
 
       - name: Build and push .NET Docker image
         id: build
+        if: steps.docker_tags.outputs.skip != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -223,7 +244,7 @@ jobs:
           platforms: ${{ steps.docker_tags.outputs.platforms }}
           
       - name: Image digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && steps.docker_tags.outputs.skip != 'true'
         env:
           TAGS: ${{ steps.docker_tags.outputs.tags }}
           DIGEST: ${{ steps.build.outputs.digest }}

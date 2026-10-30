@@ -24,8 +24,9 @@ The workflow is triggered on:
   - `dotnet`
 
 - **Manual run** (`workflow_dispatch`), run on `dotnet`:
-  - With **version** empty, it republishes the newest commit of the selected branch, e.g. after a
-    failed push to Docker Hub.
+  - With **version** empty, it republishes the newest commit on `dotnet`, e.g. after a failed push
+    to Docker Hub. Start a new run rather than re-running an old one: a re-run builds the commit
+    its first attempt built, which `dotnet` may have moved past.
   - With **version** set, it rebuilds that release and pushes only its version tag. See
     [Backfilling a version tag](#backfilling-a-version-tag).
 
@@ -47,7 +48,7 @@ Images are pushed to `iceburn1/comicmaintainer` on Docker Hub with these tags:
 
 | Tag | Image | Moves |
 |-----|-------|-------|
-| `dotnet` | The newest build of the `dotnet` branch | On every publish, unless `dotnet` has moved past the release being published |
+| `dotnet` | The newest build of the `dotnet` branch | On every publish of the newest commit on `dotnet` |
 | `X.Y.Z`, e.g. `2.0.404` | That release | Never, except when the release is republished or backfilled |
 
 The version tag is the three-part `<Version>` from `ComicMaintainer.WebApi.csproj`. The web
@@ -61,9 +62,17 @@ each version tag on the code of its release.
 
 A release is built from the commit its version bump tagged even when more commits have reached
 `dotnet` since, for example because another pull request was merged while the bump was
-finishing. Its build then pushes only the version tag and shows the notice "dotnet has moved on
-since vX.Y.Z, so only :X.Y.Z is published". The build of the newer commits moves `dotnet`
-instead, so `dotnet` never goes back to an older release, even when an old build is re-run.
+finishing.
+
+The `dotnet` tag only takes the newest commit on the `dotnet` branch, so it never goes back to an
+older build, even when an old run is re-run. A re-run builds the same commit as its first
+attempt. A publish that the branch has moved past leaves the tag to the publish of the newer
+commits:
+
+- For a release, it pushes only the version tag and shows the notice "dotnet has moved on since
+  vX.Y.Z, so only :X.Y.Z is published".
+- For any other commit, it skips the build and shows the notice "Nothing is published, because
+  this commit is neither the newest on dotnet nor the vX.Y.Z release".
 
 Version tags started with the release that added them. Earlier releases have no tag until they
 are backfilled.
@@ -107,9 +116,10 @@ docker buildx imagetools create -t iceburn1/comicmaintainer:2.0.399 \
 5. **Set up .NET** - Installs .NET 10.0 SDK
 6. **Get version** - Reads `<Version>` from `ComicMaintainer.WebApi.csproj`. Fails if it is
    missing or malformed, or for a backfill, if it is not the requested version
-7. **Determine Docker tags and platforms** - `dotnet`, plus `X.Y.Z` if the commit is that
-   release's tagged commit. Only `X.Y.Z` for a backfill, or for a release that `dotnet` has moved
-   past. Fails if a recorded release commit is not tagged with its version
+7. **Determine Docker tags and platforms** - `dotnet` if the commit is still the newest on the
+   `dotnet` branch, and `X.Y.Z` if it is that release's tagged commit; a backfill gets only
+   `X.Y.Z`. A commit that gets neither skips the remaining steps. Fails if a recorded release
+   commit is not tagged with its version
 8. **Cache Docker layers** - Caches build layers for faster subsequent builds
 9. **Set up QEMU** - Lets the runner execute the arm64 image's package installation
 10. **Set up Docker Buildx** - Configures Docker for multi-platform builds
@@ -198,8 +208,10 @@ To monitor build status:
   succeeded, then pull the image again
 - If no run started, run the workflow manually on `dotnet` (Actions → "Build and Push .NET
   Docker Image" → Run workflow)
-- A run that shows "dotnet has moved on since vX.Y.Z" published only that release's version tag.
-  The run for the newer commit moves `dotnet`
+- A run that shows "dotnet has moved on since vX.Y.Z" published only that release's version tag,
+  and one that shows "Nothing is published" published nothing, because `dotnet` had moved on.
+  The run for the newer commit moves `dotnet`. Re-running the old run does not help, because it
+  builds the same commit again
 - Verify the version in `ComicMaintainer.WebApi.csproj` is correct
 - Check that the grep command in the workflow successfully extracts the version
 

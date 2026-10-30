@@ -1,6 +1,7 @@
 name: Automatic Version Bump
 # docker-publish-dotnet.yml publishes the image when this workflow completes and refers to it by
-# the name above, so rename both together.
+# the name above, so rename both together. It builds the commit recorded in the "release-commit"
+# artifact uploaded below, so keep that name in step too.
 
 on:
   push:
@@ -135,16 +136,30 @@ jobs:
           
           git tag -a "v${NEW_VERSION}" -m "Release version ${NEW_VERSION}"
           git push origin "v${NEW_VERSION}"
-
-      - name: Save release commit
-        run: git rev-parse HEAD > release-commit.txt
-
-      - name: Upload release commit
+      
+      # The image is built from the commit recorded here rather than from the tip of the branch,
+      # which is a later commit when another merge lands before this run completes. That commit
+      # still carries this version without being the release, so the release would never get its
+      # version tag. Recorded before the GitHub release is created, so that the tagged release is
+      # published even if that step fails.
+      - name: Record the release commit
+        env:
+          NEW_VERSION: ${{ steps.bump_version.outputs.new_version }}
+        run: |
+          git rev-parse "v${NEW_VERSION}^{commit}" > "$RUNNER_TEMP/release-commit.txt"
+          echo "Release commit: $(< "$RUNNER_TEMP/release-commit.txt")"
+      
+      - name: Upload the release record
         uses: actions/upload-artifact@v7
+        # Without the record, the image is built from the tip of the branch, which is this release
+        # unless another merge has landed meanwhile. That is no reason to stop the GitHub release.
+        continue-on-error: true
         with:
           name: release-commit
-          path: release-commit.txt
+          path: ${{ runner.temp }}/release-commit.txt
           if-no-files-found: error
+          # As long as the publish it triggers can be re-run, so that a re-run builds the release too.
+          retention-days: 30
       
       - name: Create GitHub Release
         uses: actions/create-release@v1

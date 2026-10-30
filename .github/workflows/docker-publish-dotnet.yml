@@ -5,7 +5,11 @@ on:
   # used the merge commit, which still carries the previous version, and the bump commit cannot
   # start a build of its own because it is pushed with GITHUB_TOKEN. The published image was
   # therefore always one version behind the newest release. A workflow_run build checks out the
-  # release commit from an artifact when the bump ran, or the branch tip when it was skipped.
+  # commit the bump tagged as the release, which the bump records in its "release-commit" artifact.
+  # It does not take the newest commit on dotnet, which is a later merge if one lands before the
+  # bump completes: that merge still carries the release's version without being the release. The
+  # build runs whatever the bump's outcome, so a merge whose bump was skipped is still published;
+  # with no release recorded, it checks out the newest commit on the default branch (dotnet).
   workflow_run:
     workflows: ["Automatic Version Bump"]
     types: [completed]
@@ -26,6 +30,7 @@ on:
         type: string
 
 permissions:
+  # Downloads the release record from the version bump run that started the publish.
   actions: read
   contents: read
 
@@ -61,35 +66,41 @@ jobs:
             exit 1
           fi
 
-      - name: Download release commit
+      # Matching the record by pattern rather than by name downloads nothing, instead of failing,
+      # when the bump recorded no release because it was skipped or failed before tagging. The
+      # directory is outside the workspace, which the checkout clears.
+      - name: Download release record
         if: github.event_name == 'workflow_run'
-        uses: actions/download-artifact@v7
-        continue-on-error: true
+        uses: actions/download-artifact@v8
         with:
-          name: release-commit
-          path: release-commit
-          github-token: ${{ github.token }}
+          pattern: release-commit
+          path: ${{ runner.temp }}/release-commit
           run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
 
-      - name: Resolve release commit
-        id: release_ref
+      - name: Read release record
+        id: release
         if: github.event_name == 'workflow_run'
         run: |
-          if [[ -f release-commit/release-commit.txt ]]; then
-            RELEASE_COMMIT=$(cat release-commit/release-commit.txt)
-            if [[ ! "$RELEASE_COMMIT" =~ ^([[:xdigit:]]{40}|[[:xdigit:]]{64})$ ]]; then
-              echo "::error::The release workflow produced an invalid commit SHA."
-              exit 1
-            fi
-            echo "ref=$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
+          RECORD="$RUNNER_TEMP/release-commit/release-commit.txt"
+          if [[ ! -f "$RECORD" ]]; then
+            echo "The version bump recorded no release, so the newest commit on dotnet is published."
+            exit 0
           fi
+          COMMIT=$(< "$RECORD")
+          if [[ ! "$COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The version bump's release record does not hold a commit hash."
+            exit 1
+          fi
+          echo "Release commit: $COMMIT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          # Backfills use their version tag; automatic runs use the bump commit when available.
-          # An empty ref retains branch-tip checkout for PRs, republishing, and skipped bumps.
-          ref: ${{ inputs.version != '' && format('refs/tags/v{0}', inputs.version) || steps.release_ref.outputs.ref || '' }}
+          # A backfill builds the release's own source, which the version bump tagged vX.Y.Z, and a
+          # publish after a version bump builds the commit the bump released.
+          ref: ${{ inputs.version != '' && format('refs/tags/v{0}', inputs.version) || steps.release.outputs.commit || '' }}
       
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
@@ -116,6 +127,8 @@ jobs:
         id: docker_tags
         env:
           VERSION: ${{ steps.get_version.outputs.version }}
+          # The commit the version bump released, when the bump that started the publish made one.
+          BUMP_COMMIT: ${{ steps.release.outputs.commit }}
         run: |
           PLATFORMS="linux/amd64,linux/arm64"
           if [[ -n "$REQUESTED_VERSION" ]]; then
@@ -131,20 +144,32 @@ jobs:
             # Pull request builds get the tag too, but are never pushed.
             TAGS="${IMAGE_BASE}:dotnet"
             if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+              HEAD_COMMIT=$(git rev-parse HEAD)
               # Only the commit the version bump tagged vX.Y.Z is that release. A later commit, such
               # as a merge whose bump was skipped, still carries the previous version number, and
               # tagging it would replace that release's image with different code.
-              REFS=$(git ls-remote origin "refs/tags/v${VERSION}" "refs/tags/v${VERSION}^{}")
+              REFS=$(git ls-remote origin "refs/tags/v${VERSION}" "refs/tags/v${VERSION}^{}" refs/heads/dotnet)
               # The bump creates an annotated tag, whose commit is listed on the peeled "^{}" line;
               # a lightweight tag points at its commit directly.
               RELEASE_COMMIT=$(awk -v ref="refs/tags/v${VERSION}^{}" '$2 == ref { print $1 }' <<< "$REFS")
               if [[ -z "$RELEASE_COMMIT" ]]; then
                 RELEASE_COMMIT=$(awk -v ref="refs/tags/v${VERSION}" '$2 == ref { print $1 }' <<< "$REFS")
               fi
-              if [[ "$RELEASE_COMMIT" == "$(git rev-parse HEAD)" ]]; then
+              if [[ "$RELEASE_COMMIT" == "$HEAD_COMMIT" ]]; then
                 TAGS="${TAGS}"$'\n'"${IMAGE_BASE}:${VERSION}"
+              elif [[ -n "$BUMP_COMMIT" ]]; then
+                echo "::error::The version bump released ${BUMP_COMMIT}, but v${VERSION} is not tagged on it."
+                exit 1
               else
                 echo "::notice::This commit is not the v${VERSION} release, so only :dotnet is published."
+              fi
+              # Once dotnet has moved past a release, :dotnet is left to the publish of the newer
+              # commits, which may already have run, e.g. when this run is a re-run. :dotnet then
+              # never goes back to an older build.
+              DOTNET_TIP=$(awk '$2 == "refs/heads/dotnet" { print $1 }' <<< "$REFS")
+              if [[ -n "$BUMP_COMMIT" && "$DOTNET_TIP" != "$HEAD_COMMIT" ]]; then
+                TAGS="${IMAGE_BASE}:${VERSION}"
+                echo "::notice::dotnet has moved on since v${VERSION}, so only :${VERSION} is published. The publish of the newer commits moves :dotnet."
               fi
             fi
           fi

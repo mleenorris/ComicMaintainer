@@ -13,10 +13,12 @@ The workflow is triggered on:
 - **Completion of the "Automatic Version Bump" workflow** (`workflow_run`) on the `dotnet` branch:
   - A merge to `dotnet` starts `.github/workflows/version-bump.yml`, which commits the next
     version to `ComicMaintainer.WebApi.csproj`, tags it and creates the GitHub release.
-  - The image is built only after that run finishes, from the newest commit on `dotnet`, so it
-    carries the version of that release.
-  - It is built whatever the outcome of the bump, including when the bump was skipped with
-    `[skip-version-bump]`.
+  - The image is built only after that run finishes, from the commit the bump tagged as the
+    release, so it carries the version of that release. The bump records that commit in a
+    `release-commit` artifact, because `dotnet` already holds a later commit when another merge
+    lands before the bump finishes.
+  - It is built whatever the outcome of the bump. When the bump recorded no release, for example
+    because it was skipped with `[skip-version-bump]`, the newest commit on `dotnet` is built.
 
 - **Pull Request** to branch:
   - `dotnet`
@@ -45,7 +47,7 @@ Images are pushed to `iceburn1/comicmaintainer` on Docker Hub with these tags:
 
 | Tag | Image | Moves |
 |-----|-------|-------|
-| `dotnet` | The newest build of the `dotnet` branch | On every publish |
+| `dotnet` | The newest build of the `dotnet` branch | On every publish, unless `dotnet` has moved past the release being published |
 | `X.Y.Z`, e.g. `2.0.404` | That release | Never, except when the release is republished or backfilled |
 
 The version tag is the three-part `<Version>` from `ComicMaintainer.WebApi.csproj`. The web
@@ -56,6 +58,12 @@ A version tag is pushed only when the commit being built is the one the version 
 still carries the previous version number, so its build updates `dotnet` only and the run shows
 the notice "This commit is not the vX.Y.Z release, so only :dotnet is published". This keeps
 each version tag on the code of its release.
+
+A release is built from the commit its version bump tagged even when more commits have reached
+`dotnet` since, for example because another pull request was merged while the bump was
+finishing. Its build then pushes only the version tag and shows the notice "dotnet has moved on
+since vX.Y.Z, so only :X.Y.Z is published". The build of the newer commits moves `dotnet`
+instead, so `dotnet` never goes back to an older release, even when an old build is re-run.
 
 Version tags started with the release that added them. Earlier releases have no tag until they
 are backfilled.
@@ -90,18 +98,24 @@ docker buildx imagetools create -t iceburn1/comicmaintainer:2.0.399 \
 ## Workflow Steps
 
 1. **Validate requested version** - Manual backfills only: checks that **version** looks like `2.0.399`
-2. **Checkout code** - Retrieves the repository code, or the release's `vX.Y.Z` tag for a backfill
-3. **Set up .NET** - Installs .NET 10.0 SDK
-4. **Get version** - Reads `<Version>` from `ComicMaintainer.WebApi.csproj`. Fails if it is
+2. **Download release record** - After a version bump only: downloads the bump's
+   `release-commit` artifact, which holds the commit it tagged. A bump that recorded no release
+   leaves none
+3. **Read release record** - Checks that the record holds a commit hash
+4. **Checkout code** - Retrieves the release's `vX.Y.Z` tag for a backfill, the recorded release
+   commit after a version bump, and otherwise the newest commit of the branch
+5. **Set up .NET** - Installs .NET 10.0 SDK
+6. **Get version** - Reads `<Version>` from `ComicMaintainer.WebApi.csproj`. Fails if it is
    missing or malformed, or for a backfill, if it is not the requested version
-5. **Determine Docker tags and platforms** - `dotnet`, plus `X.Y.Z` if the commit is that
-   release's tagged commit. Only `X.Y.Z` for a backfill
-6. **Cache Docker layers** - Caches build layers for faster subsequent builds
-7. **Set up QEMU** - Lets the runner execute the arm64 image's package installation
-8. **Set up Docker Buildx** - Configures Docker for multi-platform builds
-9. **Log in to Docker Hub** - Authenticates with Docker Hub (not for pull requests)
-10. **Build and push** - Builds the Docker image using `Dockerfile.dotnet` and pushes to Docker Hub
-11. **Image digest** - Lists the pushed digest and tags in the run summary
+7. **Determine Docker tags and platforms** - `dotnet`, plus `X.Y.Z` if the commit is that
+   release's tagged commit. Only `X.Y.Z` for a backfill, or for a release that `dotnet` has moved
+   past. Fails if a recorded release commit is not tagged with its version
+8. **Cache Docker layers** - Caches build layers for faster subsequent builds
+9. **Set up QEMU** - Lets the runner execute the arm64 image's package installation
+10. **Set up Docker Buildx** - Configures Docker for multi-platform builds
+11. **Log in to Docker Hub** - Authenticates with Docker Hub (not for pull requests)
+12. **Build and push** - Builds the Docker image using `Dockerfile.dotnet` and pushes to Docker Hub
+13. **Image digest** - Lists the pushed digest and tags in the run summary
 
 ## Required Secrets
 
@@ -184,6 +198,8 @@ To monitor build status:
   succeeded, then pull the image again
 - If no run started, run the workflow manually on `dotnet` (Actions → "Build and Push .NET
   Docker Image" → Run workflow)
+- A run that shows "dotnet has moved on since vX.Y.Z" published only that release's version tag.
+  The run for the newer commit moves `dotnet`
 - Verify the version in `ComicMaintainer.WebApi.csproj` is correct
 - Check that the grep command in the workflow successfully extracts the version
 

@@ -60,6 +60,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   import. Hidden from read-only accounts. API: `GET /api/suwayomi/sources`,
   `GET /api/suwayomi/sources/{sourceId}/series`, `GET /api/suwayomi/series/{id}/thumbnail` and
   `POST /api/suwayomi/series/{id}/add`; see [Suwayomi Downloads](docs/API.md#suwayomi-downloads).
+- **Authelia outages are logged.** While Authelia is down, the reverse proxy rejects every
+  request, usually with HTTP 500 or 502, before it reaches ComicMaintainer, so the
+  ComicMaintainer logs showed nothing wrong. Set the new `AUTHELIA_URL` to an address at which
+  the container can reach Authelia, such as `http://authelia:9091`, and Authelia's health
+  endpoint is checked every 30 seconds. The container log and `app.log` get a warning with the
+  reason, such as `Connection refused`, when Authelia stops responding, a reminder every
+  5 minutes while it is down, and the length of the outage when it recovers. The check works
+  whether or not `AUTHELIA_ENABLED` is set; without `AUTHELIA_URL`, nothing is checked. See
+  [Logging Authelia Outages](docs/AUTHELIA.md#logging-authelia-outages).
 - **Pending email deliveries can be cancelled.** Email Delivery History gives every pending
   delivery a **Cancel** button and adds **Cancel All Pending**, which covers every page. A
   delivery still in the queue is cancelled at once; one being prepared (converted to EPUB/AZW3

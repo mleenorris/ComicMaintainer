@@ -34,7 +34,7 @@ public sealed class AutheliaSettingsBinderTests : IDisposable
     private static readonly string[] AutheliaVariables =
     [
         "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES", "AUTHELIA_USER_HEADER", "AUTHELIA_EMAIL_HEADER",
-        "AUTHELIA_NAME_HEADER", "AUTHELIA_GROUPS_HEADER", "AUTHELIA_DEFAULT_ROLE", "AUTHELIA_ADMIN_GROUPS",
+        "AUTHELIA_NAME_HEADER", "AUTHELIA_GROUPS_HEADER", "AUTHELIA_DEFAULT_ROLE", "AUTHELIA_ADMIN_GROUPS", "AUTHELIA_URL",
     ];
 
     // The startup extension classes are internal to the WebApi assembly (no InternalsVisibleTo).
@@ -87,6 +87,7 @@ public sealed class AutheliaSettingsBinderTests : IDisposable
     [InlineData("AUTHELIA_GROUPS_HEADER", nameof(AutheliaSettings.GroupsHeader))]
     [InlineData("AUTHELIA_DEFAULT_ROLE", nameof(AutheliaSettings.DefaultRole))]
     [InlineData("AUTHELIA_ADMIN_GROUPS", nameof(AutheliaSettings.AdminGroups))]
+    [InlineData("AUTHELIA_URL", nameof(AutheliaSettings.Url))]
     public void EachDocumentedVariable_OverridesItsConfiguredSetting(string variable, string setting)
     {
         _environment.Set(variable, "from-environment");
@@ -119,7 +120,8 @@ public sealed class AutheliaSettingsBinderTests : IDisposable
             ("AutheliaSettings:NameHeader", "X-Name"),
             ("AutheliaSettings:GroupsHeader", "X-Groups"),
             ("AutheliaSettings:DefaultRole", "ReadOnly"),
-            ("AutheliaSettings:AdminGroups", "admins"));
+            ("AutheliaSettings:AdminGroups", "admins"),
+            ("AutheliaSettings:Url", "http://authelia:9091"));
 
         Assert.True(settings.Enabled);
         Assert.Equal("10.0.0.5", settings.TrustedProxies);
@@ -129,6 +131,7 @@ public sealed class AutheliaSettingsBinderTests : IDisposable
         Assert.Equal("X-Groups", settings.GroupsHeader);
         Assert.Equal("ReadOnly", settings.DefaultRole);
         Assert.Equal("admins", settings.AdminGroups);
+        Assert.Equal("http://authelia:9091", settings.Url);
     }
 
     [Theory]

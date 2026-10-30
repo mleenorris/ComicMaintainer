@@ -294,8 +294,9 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         Assert.Contains(typeof(FileWatcherHostedService), hostedServiceTypes);
         Assert.Contains(typeof(DatabaseCleanupHostedService), hostedServiceTypes);
         Assert.Contains(typeof(JobStateReconciliationHostedService), hostedServiceTypes);
+        Assert.Contains(typeof(AutheliaHealthMonitor), hostedServiceTypes);
         // The scheduled-jobs runner is registered through a factory so it is a single instance.
-        Assert.Equal(6, hostedServiceTypes.Count);
+        Assert.Equal(7, hostedServiceTypes.Count);
     }
 
     private static IConfiguration BuildConfiguration(params (string Key, string? Value)[] settings)

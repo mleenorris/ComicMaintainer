@@ -581,6 +581,32 @@ public sealed class SuwayomiServiceSourceSearchTests
     }
 
     [Fact]
+    public async Task DownloadMissingIssuesAsync_ContinuesAfterAPartialLibraryChapterReadFailure()
+    {
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("""[{"id":4,"title":"Solo Leveling Alpha","inLibrary":true}]""")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" => Json(SearchResults("""[{"id":8,"title":"Solo Leveling Alpha","inLibrary":false}]""")),
+            "Chapters" when request.Variables.GetProperty("id").GetInt32() == 4 =>
+                Json("""{"errors":[{"message":"library unavailable","path":["chapters"]}],"data":{"chapters":null}}"""),
+            "FetchChapters" => Json(FetchedChapters("""
+                [{"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]
+                """)),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync(
+            "Solo Leveling", new[] { 2 });
+
+        Assert.Equal(new[] { 82 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        var failure = Assert.Single(result.DiscoveryFailures);
+        Assert.Equal("Library: Solo Leveling Alpha", failure.Target);
+        Assert.Contains("library unavailable", failure.Error);
+    }
+
+    [Fact]
     public async Task RequestsThatMakeSuwayomiAskTheSourcesSite_WaitLongerThanTheClientDefault()
     {
         var service = CreateService(Server(

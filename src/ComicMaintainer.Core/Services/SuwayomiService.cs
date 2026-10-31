@@ -501,12 +501,23 @@ public class SuwayomiService : ISuwayomiService
                 }
 
                 firstMatchedSeries ??= series;
-                CollectMissingChapters(
-                    series,
-                    await GetChaptersAsync(series.Id, cancellationToken),
-                    unresolved,
-                    chapterIds,
-                    result);
+                try
+                {
+                    if (CollectMissingChapters(
+                            series,
+                            await GetChaptersAsync(series.Id, cancellationToken),
+                            unresolved,
+                            chapterIds,
+                            result))
+                    {
+                        result.Series ??= series;
+                    }
+                }
+                catch (SuwayomiException ex)
+                {
+                    AddDiscoveryFailure(result, $"Library: {series.Title}", ex);
+                }
+
                 if (unresolved.Count == 0)
                 {
                     return new SourceDiscoveryResult(firstMatchedSeries);

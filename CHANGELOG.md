@@ -47,6 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [Use Docker Secrets](docs/DOCKER_DEPLOYMENT_DOTNET.md#2-use-docker-secrets-recommended-for-production).
 
 ### Added
+- **Versioned Docker images.** Each release is now also published as
+  `iceburn1/comicmaintainer:X.Y.Z`, the version the web interface shows as `X.Y.Z.0`, so a
+  deployment can pin a release or roll back to one. `:dotnet` still points at the newest
+  release. The version tag is pushed only for the commit the version bump tagged `vX.Y.Z`, so a
+  later build that still carries the previous version number cannot replace it. The release is
+  built from that commit even when another merge lands while its version bump is finishing.
+  Publishes now wait for each other instead of cancelling, so that a release's version tag is
+  not lost when the next release is merged during its build. To backfill an earlier release, run
+  "Build and Push .NET Docker Image" by hand with **version** set. It rebuilds the release from
+  its git tag and pushes only its version tag. See
+  [Docker Image Tags](docs/GITHUB_ACTIONS_DOTNET.md#docker-image-tags) and
+  [Pin or Roll Back to a Version](docs/DOCKER_DEPLOYMENT_DOTNET.md#pin-or-roll-back-to-a-version).
 - **Find a series on Suwayomi and add it.** When the Suwayomi integration is enabled, a library
   search that finds no series offers **Search Suwayomi for "…"**, and **Find on Suwayomi** in the
   sidebar and the ⋮ menu opens the same dialog. It looks the title up in the Suwayomi library and

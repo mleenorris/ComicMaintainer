@@ -636,9 +636,9 @@ Queue downloads for the issue numbers a series is missing locally.
 }
 ```
 
-`suwayomiSeriesId` is optional; when omitted the series is resolved by matching `seriesTitle` against the Suwayomi library.
+`suwayomiSeriesId` is optional. When supplied, only that Suwayomi library entry is checked. When omitted, matching entries in the Suwayomi library are checked first; any requested issue numbers they do not contain are then sought across every installed catalogue source. Source-search results are refreshed and can supply downloads without being added to the Suwayomi library.
 
-`alternateTitles` is optional too: the series' other titles (the web UI sends its canonical title and aliases), for when Suwayomi lists the series under a different name. Without `suwayomiSeriesId` the series is resolved by, in order, an exact match on `seriesTitle`, an exact match on each of `alternateTitles` in the order given, and a prefix/substring match on `seriesTitle`. Matching ignores punctuation and case, and `alternateTitles` are never matched partially. Both title fields are ignored when `suwayomiSeriesId` is given.
+`alternateTitles` is optional too: the series' other titles (the web UI sends its canonical title and aliases), for when Suwayomi lists the series under a different name. Each installed source is searched with `seriesTitle` first; if that source returns no exact match, `alternateTitles` are searched in order until one does. Candidates are ranked by an exact match on `seriesTitle`, an exact match on each alternate title in the order given, and then a prefix/substring match on `seriesTitle`. Matching ignores punctuation and case, and alternate titles are never matched partially. Both title fields are ignored when `suwayomiSeriesId` is given.
 
 **Response:**
 ```json
@@ -648,11 +648,12 @@ Queue downloads for the issue numbers a series is missing locally.
     { "id": 42, "name": "Chapter 2", "chapterNumber": 2, "isDownloaded": false }
   ],
   "unmatchedIssueNumbers": [3],
-  "alreadyDownloadedIssueNumbers": []
+  "alreadyDownloadedIssueNumbers": [],
+  "discoveryFailures": []
 }
 ```
 
-Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable, or no matching series is in the Suwayomi library.
+At most four source searches run concurrently. A source that fails does not prevent another source from supplying a chapter; each non-fatal failure is returned as `{ "target": "...", "error": "..." }` in `discoveryFailures`. Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable before any matching entry can be checked, or no matching series is found in the Suwayomi library or installed sources.
 
 ### GET /api/suwayomi/sources
 

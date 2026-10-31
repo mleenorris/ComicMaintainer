@@ -102,7 +102,7 @@ test('downloading asks Suwayomi for the missing issues of the freshly loaded lis
     assert.match(call.headers.authorization, /^Bearer /);
     assert.deepEqual(messages(page), [
         { text: 'Asking Suwayomi for 2 missing issues...', type: 'info' },
-        { text: 'Queued 2 chapters on Suwayomi.', type: 'success' }
+        { text: 'Queued 2 chapters on Suwayomi from MangaDex.', type: 'success' }
     ]);
 });
 
@@ -139,6 +139,23 @@ test('nothing queued is reported as information, with the unmatched issues count
     page.route(DOWNLOAD, {});
     await download(page);
     assert.deepEqual(lastMessage(page), { text: 'Nothing was queued on Suwayomi.', type: 'info' });
+});
+
+test('partial source failures are reported without hiding successful downloads', async () => {
+    const page = await bootMissing();
+    page.route(DOWNLOAD, {
+        series: { id: 8, title: 'Saga', inLibrary: false, source: 'Working (EN)' },
+        queuedChapters: [chapter(2)],
+        unmatchedIssueNumbers: [3],
+        discoveryFailures: [{ target: 'Broken (EN)', error: 'site unavailable' }]
+    });
+
+    await download(page);
+
+    assert.deepEqual(lastMessage(page), {
+        text: 'Queued 1 chapter on Suwayomi from Working (EN). 1 issue has no matching chapter. 1 source check failed. First failure: Broken (EN): site unavailable',
+        type: 'success'
+    });
 });
 
 test('a series that has no missing issues any more asks for nothing', async () => {

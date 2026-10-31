@@ -70,9 +70,11 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
     [InlineData("api/Email/send")]
     [InlineData("api/Email/send-series")]
     // Suwayomi asks the source's site, and adding a series refreshes its
-    // chapter list from the site too.
+    // chapter list from the site too. Missing-issue downloads may search every
+    // installed source.
     [InlineData("api/suwayomi/sources/{sourceId:long:min(1)}/series")]
     [InlineData("api/suwayomi/series/{seriesId:int:min(1)}/add")]
+    [InlineData("api/suwayomi/download-missing")]
     public void BulkEndpointsRunUnderTheLongRunningPolicy(string routePattern)
     {
         var endpoint = FindEndpoint(routePattern);

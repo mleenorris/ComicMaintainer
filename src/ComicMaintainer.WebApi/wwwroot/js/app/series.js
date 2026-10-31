@@ -657,19 +657,27 @@
                 const result = await response.json();
                 const queued = (result.queuedChapters || result.queued_chapters || []).length;
                 const unmatched = (result.unmatchedIssueNumbers || result.unmatched_issue_numbers || []).length;
+                const failures = result.discoveryFailures || result.discovery_failures || [];
                 // Name the Suwayomi series when it goes by another title, so a
                 // match made through one of the other titles is visible.
                 const matchedTitle = result.series && typeof result.series.title === 'string' ? result.series.title : '';
+                const matchedSource = result.series && typeof result.series.source === 'string' ? result.series.source : '';
                 const listedAs = matchedTitle && normalizeSeriesTitleKey(matchedTitle) !== normalizeSeriesTitleKey(titles[0])
                     ? ` (listed there as "${matchedTitle}")`
                     : '';
+                const source = matchedSource ? ` from ${matchedSource}` : '';
                 let message = queued
-                    ? `Queued ${queued} chapter${queued === 1 ? '' : 's'} on Suwayomi${listedAs}.`
-                    : `Nothing was queued on Suwayomi${listedAs}.`;
+                    ? `Queued ${queued} chapter${queued === 1 ? '' : 's'} on Suwayomi${source}${listedAs}.`
+                    : `Nothing was queued on Suwayomi${source}${listedAs}.`;
                 if (unmatched) {
                     message += ` ${unmatched} issue${unmatched === 1 ? ' has' : 's have'} no matching chapter.`;
                 }
-                showMessage(message, queued ? 'success' : 'info');
+                if (failures.length) {
+                    const first = failures[0] || {};
+                    const detail = first.target && first.error ? ` First failure: ${first.target}: ${first.error}` : '';
+                    message += ` ${failures.length} source check${failures.length === 1 ? '' : 's'} failed.${detail}`;
+                }
+                showMessage(message, queued ? 'success' : failures.length ? 'error' : 'info');
             } catch (err) {
                 console.error('Suwayomi download failed', err);
                 showMessage('Suwayomi download failed.', 'error');

@@ -95,7 +95,11 @@ public class SuwayomiServiceTests
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             requests?.Add(body);
-            return Json(body.Contains("mangas(") ? libraryResponse : """{"data":{"chapters":{"nodes":[]}}}""");
+            return Json(body.Contains("mangas(")
+                ? libraryResponse
+                : body.Contains("query Sources")
+                    ? """{"data":{"sources":{"nodes":[]}}}"""
+                    : """{"data":{"chapters":{"nodes":[]}}}""");
         });
     }
 
@@ -439,6 +443,11 @@ public class SuwayomiServiceTests
                 return Json("""{"data":{"chapters":{"nodes":[]}}}""");
             }
 
+            if (body.Contains("query Sources"))
+            {
+                return Json("""{"data":{"sources":{"nodes":[]}}}""");
+            }
+
             throw new InvalidOperationException("The download mutation should not be sent.");
         });
 
@@ -448,7 +457,7 @@ public class SuwayomiServiceTests
 
         Assert.Empty(result.QueuedChapters);
         Assert.Equal(new[] { 1 }, result.UnmatchedIssueNumbers.ToArray());
-        Assert.Equal(2, requestCount);
+        Assert.Equal(3, requestCount);
     }
 
     [Fact]
@@ -538,13 +547,13 @@ public class SuwayomiServiceTests
             "Solo Leveling", new[] { 1 }, library);
 
         Assert.Equal(1, result.Series!.Id);
-        Assert.Single(requests);
-        Assert.DoesNotContain("mangas(", requests[0]);
+        Assert.Equal(2, requests.Count);
+        Assert.DoesNotContain(requests, body => body.Contains("mangas("));
     }
 
     [Theory]
-    [InlineData(new[] { "SL" }, "No series matching 'Solo Leveling' or its other title 'SL' was found in the Suwayomi library.")]
-    [InlineData(new[] { "SL", " sl ", "Na Honjaman Level Up" }, "No series matching 'Solo Leveling' or any of its 2 other titles was found in the Suwayomi library.")]
+    [InlineData(new[] { "SL" }, "No series matching 'Solo Leveling' or its other title 'SL' was found in the Suwayomi library or installed sources.")]
+    [InlineData(new[] { "SL", " sl ", "Na Honjaman Level Up" }, "No series matching 'Solo Leveling' or any of its 2 other titles was found in the Suwayomi library or installed sources.")]
     public async Task DownloadMissingIssuesAsync_DoesNotMatchTheOtherTitlesPartially(string[] alternateTitles, string expectedMessage)
     {
         // Short titles such as acronyms are part of many others ("SL" of

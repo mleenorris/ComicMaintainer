@@ -55,6 +55,8 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
     [InlineData("api/Email/condense-builds/{buildId:guid}/download")]
     // Open for as long as the page is.
     [InlineData("api/Events/stream")]
+    // Searches every installed source, title alias and result page.
+    [InlineData("api/suwayomi/download-missing")]
     public void UnboundedEndpointsOptOutOfTheRequestTimeout(string routePattern)
     {
         var endpoint = FindEndpoint(routePattern);
@@ -70,11 +72,9 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
     [InlineData("api/Email/send")]
     [InlineData("api/Email/send-series")]
     // Suwayomi asks the source's site, and adding a series refreshes its
-    // chapter list from the site too. Missing-issue downloads may search every
-    // installed source.
+    // chapter list from the site too.
     [InlineData("api/suwayomi/sources/{sourceId:long:min(1)}/series")]
     [InlineData("api/suwayomi/series/{seriesId:int:min(1)}/add")]
-    [InlineData("api/suwayomi/download-missing")]
     public void BulkEndpointsRunUnderTheLongRunningPolicy(string routePattern)
     {
         var endpoint = FindEndpoint(routePattern);

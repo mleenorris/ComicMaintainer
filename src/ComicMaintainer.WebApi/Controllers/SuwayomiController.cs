@@ -184,7 +184,7 @@ public class SuwayomiController : ControllerBase
     /// watcher picks the new files up.
     /// </summary>
     [HttpPost("download-missing")]
-    [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
+    [DisableRequestTimeout]
     public async Task<ActionResult<SuwayomiDownloadResult>> DownloadMissing(
         [FromBody] DownloadMissingRequest request,
         CancellationToken cancellationToken)

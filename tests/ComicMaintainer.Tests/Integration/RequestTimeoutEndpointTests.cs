@@ -55,6 +55,8 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
     [InlineData("api/Email/condense-builds/{buildId:guid}/download")]
     // Open for as long as the page is.
     [InlineData("api/Events/stream")]
+    // Searches every installed source, title alias and result page.
+    [InlineData("api/suwayomi/download-missing")]
     public void UnboundedEndpointsOptOutOfTheRequestTimeout(string routePattern)
     {
         var endpoint = FindEndpoint(routePattern);

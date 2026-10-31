@@ -178,11 +178,13 @@ public class SuwayomiController : ControllerBase
 
     /// <summary>
     /// Asks the Suwayomi server to download the given (missing) issue numbers
-    /// of a series. Suwayomi stores them in its own download directory, which
-    /// is expected to be visible to this service so the watcher picks the new
-    /// files up.
+    /// of a series, searching installed sources when matching library entries
+    /// do not contain them. Suwayomi stores downloads in its own download
+    /// directory, which is expected to be visible to this service so the
+    /// watcher picks the new files up.
     /// </summary>
     [HttpPost("download-missing")]
+    [DisableRequestTimeout]
     public async Task<ActionResult<SuwayomiDownloadResult>> DownloadMissing(
         [FromBody] DownloadMissingRequest request,
         CancellationToken cancellationToken)
@@ -207,10 +209,11 @@ public class SuwayomiController : ControllerBase
                 cancellationToken);
 
             _logger.LogInformation(
-                "Suwayomi download requested for {Title}: {Queued} chapter(s) queued, {Unmatched} issue(s) unmatched",
+                "Suwayomi download requested for {Title}: {Queued} chapter(s) queued, {Unmatched} issue(s) unmatched, {Failures} source check(s) failed",
                 LoggingHelper.SanitizeForLog(request.SeriesTitle ?? string.Empty),
                 result.QueuedChapters.Count,
-                result.UnmatchedIssueNumbers.Count);
+                result.UnmatchedIssueNumbers.Count,
+                result.DiscoveryFailures.Count);
 
             return Ok(result);
         }

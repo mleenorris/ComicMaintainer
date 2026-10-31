@@ -131,7 +131,11 @@ public class MissingIssuesCheckJobHandlerTests
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SuwayomiDownloadResult
             {
-                QueuedChapters = new List<SuwayomiChapter> { new(), new() }
+                QueuedChapters = new List<SuwayomiChapter> { new(), new() },
+                DiscoveryFailures = new List<SuwayomiDownloadFailure>
+                {
+                    new() { Target = "Broken source", Error = "Unavailable" }
+                }
             });
 
         var summary = await BuildHandler().ExecuteAsync("""{"autoDownload":true}""", CancellationToken.None);
@@ -143,7 +147,8 @@ public class MissingIssuesCheckJobHandlerTests
             It.IsAny<SuwayomiLibrarySnapshot>(),
             It.Is<IEnumerable<string>?>(t => t != null && t.Contains("Alpha Alias") && !t.Contains("Alpha")),
             It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Contains("Queued 2 chapter(s) on Suwayomi.", summary);
+        Assert.Contains("Queued 2 chapter(s) on Suwayomi", summary);
+        Assert.Contains("1 Suwayomi source check(s) failed.", summary);
     }
 
     [Fact]

@@ -18,17 +18,19 @@ namespace ComicMaintainer.Core.Services;
 /// server's sources and add them to its library.
 /// </summary>
 /// <remarks>
-/// Downloads for a local series' missing issues only consider series that are
-/// already in the Suwayomi library: Suwayomi only keeps a chapter list (and
-/// therefore downloadable chapters) for library entries, and adding a series
-/// to the library is the user's decision. A series found by searching a source
-/// is only added when the user asks for it (<see cref="AddToLibraryAsync"/>).
+/// Missing-issue downloads prefer matching entries already in the Suwayomi
+/// library. If those entries do not contain every requested issue, installed
+/// sources are searched too. Source-search results can have their chapters
+/// refreshed and downloaded without marking the series as followed; adding a
+/// series to the library remains an explicit user action
+/// (<see cref="AddToLibraryAsync"/>).
 /// </remarks>
 public class SuwayomiService : ISuwayomiService
 {
     public const string HttpClientName = "Suwayomi";
 
     private const int MaxLibraryPageSize = 500;
+    private const int SourceSearchConcurrency = 4;
     private const string LocalSourceId = "0";
     private const int MaxThumbnailBytes = 10 * 1024 * 1024;
     private const string UnexpectedResponseMessage = "The Suwayomi server returned an unexpected response.";
@@ -264,14 +266,133 @@ public class SuwayomiService : ISuwayomiService
             throw new SuwayomiException("No missing issue numbers were supplied.");
         }
 
-        var series = await ResolveSeriesAsync(
-            seriesTitle, alternateTitles, seriesId, librarySnapshot, cancellationToken);
-        var chapters = await GetChaptersAsync(series.Id, cancellationToken);
+        var result = new SuwayomiDownloadResult();
+        var unresolved = requested.ToHashSet();
+        var chapterIds = new HashSet<int>();
+        var checkedSeriesIds = new HashSet<int>();
+        SuwayomiSeries? firstMatchedSeries = null;
 
-        var result = new SuwayomiDownloadResult { Series = series };
-        var chapterIds = new List<int>();
+        if (seriesId is > 0)
+        {
+            var series = await ResolveSeriesAsync(
+                seriesTitle, alternateTitles, seriesId, librarySnapshot, cancellationToken);
+            checkedSeriesIds.Add(series.Id);
+            firstMatchedSeries = series;
+            result.Series = series;
+            CollectMissingChapters(
+                series,
+                await GetChaptersAsync(series.Id, cancellationToken),
+                unresolved,
+                chapterIds,
+                result);
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(seriesTitle))
+            {
+                throw new SuwayomiException("A series title or Suwayomi series id is required.");
+            }
 
-        foreach (var issueNumber in requested)
+            var normalizedTitle = Normalize(seriesTitle);
+            var searchTitles = BuildSearchTitles(seriesTitle, alternateTitles);
+            librarySnapshot ??= await GetLibrarySeriesAsync(cancellationToken);
+            var libraryCandidates = FindLibraryCandidates(librarySnapshot, normalizedTitle, searchTitles);
+            var hasExactLibraryMatch = libraryCandidates.Any(series =>
+                ExactTitlePriority(Normalize(series.Title), searchTitles) >= 0);
+
+            foreach (var series in libraryCandidates.Where(series =>
+                         ExactTitlePriority(Normalize(series.Title), searchTitles) >= 0))
+            {
+                if (!checkedSeriesIds.Add(series.Id))
+                {
+                    continue;
+                }
+
+                firstMatchedSeries ??= series;
+                try
+                {
+                    if (CollectMissingChapters(
+                            series,
+                            await GetChaptersAsync(series.Id, cancellationToken),
+                            unresolved,
+                            chapterIds,
+                            result))
+                    {
+                        result.Series ??= series;
+                    }
+                }
+                catch (SuwayomiException ex)
+                {
+                    AddDiscoveryFailure(result, $"Library: {series.Title}", ex);
+                }
+
+                if (unresolved.Count == 0)
+                {
+                    break;
+                }
+            }
+
+            if (unresolved.Count > 0 && searchTitles.Count > 0)
+            {
+                var discovery = await DiscoverSourceCandidatesAsync(
+                    normalizedTitle,
+                    searchTitles,
+                    !hasExactLibraryMatch,
+                    libraryCandidates,
+                    librarySnapshot,
+                    checkedSeriesIds,
+                    unresolved,
+                    chapterIds,
+                    result,
+                    cancellationToken);
+                firstMatchedSeries ??= discovery.FirstMatchedSeries;
+            }
+
+            if (firstMatchedSeries is null)
+            {
+                var searched = DescribeSearchedTitles(
+                    seriesTitle,
+                    searchTitles
+                        .Where(title => title.Key != normalizedTitle)
+                        .Select(title => title.Title));
+                var message = $"No series matching {searched} was found in the Suwayomi library or installed sources.";
+                if (result.DiscoveryFailures.Count > 0)
+                {
+                    var firstFailure = result.DiscoveryFailures[0];
+                    message += $" {result.DiscoveryFailures.Count} source check(s) failed; "
+                               + $"{firstFailure.Target}: {firstFailure.Error}";
+                }
+
+                throw new SuwayomiException(message);
+            }
+        }
+
+        result.Series ??= firstMatchedSeries;
+        result.UnmatchedIssueNumbers.AddRange(unresolved.OrderBy(number => number));
+        result.AlreadyDownloadedIssueNumbers.Sort();
+
+        if (chapterIds.Count > 0)
+        {
+            await EnqueueChapterDownloadsAsync(chapterIds.ToList(), cancellationToken);
+            _logger.LogInformation(
+                "Queued {Count} Suwayomi chapter download(s) for {SeriesTitle} after checking {SeriesCount} matching series",
+                chapterIds.Count,
+                LoggingHelper.SanitizeForLog(seriesTitle ?? result.Series?.Title ?? string.Empty),
+                checkedSeriesIds.Count);
+        }
+
+        return result;
+    }
+
+    private static bool CollectMissingChapters(
+        SuwayomiSeries series,
+        IReadOnlyList<SuwayomiChapter> chapters,
+        HashSet<int> unresolved,
+        HashSet<int> chapterIds,
+        SuwayomiDownloadResult result)
+    {
+        var matchedAny = false;
+        foreach (var issueNumber in unresolved.OrderBy(number => number).ToList())
         {
             // A chapter covers an issue number when its (floored) chapter
             // number matches, which mirrors how the library treats decimal
@@ -279,47 +400,359 @@ public class SuwayomiService : ISuwayomiService
             var candidates = chapters
                 .Where(c => c.ChapterNumber >= 0 && (int)Math.Floor(c.ChapterNumber) == issueNumber)
                 .ToList();
-
             if (candidates.Count == 0)
             {
-                result.UnmatchedIssueNumbers.Add(issueNumber);
                 continue;
             }
 
+            matchedAny = true;
+            result.Series ??= series;
             var pending = candidates.Where(c => !c.IsDownloaded).ToList();
             if (pending.Count == 0)
             {
                 result.AlreadyDownloadedIssueNumbers.Add(issueNumber);
-                continue;
+            }
+            else
+            {
+                foreach (var chapter in pending)
+                {
+                    if (chapterIds.Add(chapter.Id))
+                    {
+                        result.QueuedChapters.Add(chapter);
+                    }
+                }
             }
 
-            foreach (var chapter in pending)
+            unresolved.Remove(issueNumber);
+        }
+
+        return matchedAny;
+    }
+
+    private async Task<SourceDiscoveryResult> DiscoverSourceCandidatesAsync(
+        string normalizedTitle,
+        IReadOnlyList<(string Title, string Key)> searchTitles,
+        bool allowPartialMatches,
+        IReadOnlyList<SuwayomiSeries> libraryCandidates,
+        SuwayomiLibrarySnapshot librarySnapshot,
+        HashSet<int> checkedSeriesIds,
+        HashSet<int> unresolved,
+        HashSet<int> chapterIds,
+        SuwayomiDownloadResult result,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<SuwayomiSource> sources;
+        try
+        {
+            sources = librarySnapshot.Sources ??= await GetSourcesAsync(cancellationToken);
+        }
+        catch (SuwayomiException ex)
+        {
+            AddDiscoveryFailure(result, "Installed Suwayomi sources", ex);
+            sources = Array.Empty<SuwayomiSource>();
+        }
+
+        var outcomes = new SourceSearchOutcome[sources.Count];
+        for (var offset = 0; offset < sources.Count; offset += SourceSearchConcurrency)
+        {
+            var count = Math.Min(SourceSearchConcurrency, sources.Count - offset);
+            await Task.WhenAll(Enumerable.Range(offset, count).Select(async index =>
             {
-                if (chapterIds.Contains(chapter.Id))
+                outcomes[index] = await SearchSourceForCandidatesAsync(
+                    sources[index],
+                    index,
+                    normalizedTitle,
+                    searchTitles,
+                    cancellationToken);
+            }));
+        }
+
+        foreach (var outcome in outcomes)
+        {
+            if (outcome.Error is not null)
+            {
+                AddDiscoveryFailure(result, outcome.Source.DisplayName, outcome.Error);
+            }
+        }
+
+        var found = outcomes
+            .SelectMany(outcome => outcome.Candidates)
+            .ToList();
+        var exact = found.Where(candidate => candidate.ExactTitlePriority >= 0).ToList();
+        var exactFound = found.Any(candidate => candidate.ExactTitlePriority >= 0);
+        var partialTitle = exactFound || !allowPartialMatches
+            ? null
+            : libraryCandidates
+                .Select(series => (Series: series, Score: MatchScore(Normalize(series.Title), normalizedTitle)))
+                .Concat(found.Where(candidate => candidate.PartialScore > 0)
+                    .Select(candidate => (candidate.Series, Score: candidate.PartialScore)))
+                .OrderByDescending(candidate => candidate.Score)
+                .Select(candidate => Normalize(candidate.Series.Title))
+                .FirstOrDefault();
+
+        SuwayomiSeries? firstMatchedSeries = null;
+        if (partialTitle is not null)
+        {
+            foreach (var series in libraryCandidates.Where(series => Normalize(series.Title) == partialTitle))
+            {
+                if (!checkedSeriesIds.Add(series.Id))
                 {
                     continue;
                 }
 
-                chapterIds.Add(chapter.Id);
-                result.QueuedChapters.Add(chapter);
+                firstMatchedSeries ??= series;
+                try
+                {
+                    if (CollectMissingChapters(
+                            series,
+                            await GetChaptersAsync(series.Id, cancellationToken),
+                            unresolved,
+                            chapterIds,
+                            result))
+                    {
+                        result.Series ??= series;
+                    }
+                }
+                catch (SuwayomiException ex)
+                {
+                    AddDiscoveryFailure(result, $"Library: {series.Title}", ex);
+                }
+
+                if (unresolved.Count == 0)
+                {
+                    return new SourceDiscoveryResult(firstMatchedSeries);
+                }
             }
         }
 
-        if (chapterIds.Count == 0)
+        var selected = exactFound || !allowPartialMatches
+            ? exact
+                .OrderBy(candidate => candidate.ExactTitlePriority)
+                .ThenBy(candidate => candidate.SourceIndex)
+                .ThenBy(candidate => candidate.ResultIndex)
+            : found
+                .Where(candidate => candidate.PartialScore > 0 && Normalize(candidate.Series.Title) == partialTitle)
+                .OrderByDescending(candidate => candidate.PartialScore)
+                .ThenBy(candidate => candidate.SourceIndex)
+                .ThenBy(candidate => candidate.ResultIndex);
+
+        foreach (var candidate in selected.DistinctBy(candidate => candidate.Series.Id))
         {
-            return result;
+            checkedSeriesIds.Add(candidate.Series.Id);
+
+            firstMatchedSeries ??= candidate.Series;
+            IReadOnlyList<SuwayomiChapter> chapters;
+            try
+            {
+                chapters = await FetchChaptersAsync(candidate.Series.Id, cancellationToken);
+            }
+            catch (SuwayomiException ex)
+            {
+                AddDiscoveryFailure(
+                    result,
+                    $"{candidate.Source.DisplayName}: {candidate.Series.Title}",
+                    ex);
+                continue;
+            }
+
+            if (CollectMissingChapters(
+                    candidate.Series,
+                    chapters,
+                    unresolved,
+                    chapterIds,
+                    result))
+            {
+                result.Series ??= candidate.Series;
+            }
+
+            if (unresolved.Count == 0)
+            {
+                break;
+            }
         }
 
-        await EnqueueChapterDownloadsAsync(chapterIds, cancellationToken);
-
-        _logger.LogInformation(
-            "Queued {Count} Suwayomi chapter download(s) for series {SeriesId} ({SeriesTitle})",
-            chapterIds.Count,
-            series.Id,
-            LoggingHelper.SanitizeForLog(series.Title));
-
-        return result;
+        return new SourceDiscoveryResult(firstMatchedSeries);
     }
+
+    private async Task<SourceSearchOutcome> SearchSourceForCandidatesAsync(
+        SuwayomiSource source,
+        int sourceIndex,
+        string normalizedTitle,
+        IReadOnlyList<(string Title, string Key)> searchTitles,
+        CancellationToken cancellationToken)
+    {
+        if (!long.TryParse(source.Id, NumberStyles.None, CultureInfo.InvariantCulture, out var sourceId))
+        {
+            return new SourceSearchOutcome(source, new List<SourceSeriesCandidate>(), "The source id is invalid.");
+        }
+
+        var candidates = new List<SourceSeriesCandidate>();
+        var resultIndex = 0;
+        for (var queryIndex = 0; queryIndex < searchTitles.Count; queryIndex++)
+        {
+            var page = 1;
+            SuwayomiSourceSearchResult search;
+            var foundExactForQuery = false;
+            do
+            {
+                try
+                {
+                    search = await SearchSourceAsync(
+                        sourceId,
+                        searchTitles[queryIndex].Title,
+                        page++,
+                        cancellationToken);
+                }
+                catch (SuwayomiException ex)
+                {
+                    return new SourceSearchOutcome(source, candidates, ex.Message);
+                }
+
+                foreach (var series in search.Series)
+                {
+                    series.Source = source.DisplayName;
+                    var key = Normalize(series.Title);
+                    var exactTitlePriority = ExactTitlePriority(key, searchTitles);
+                    var partialScore = queryIndex == 0 ? MatchScore(key, normalizedTitle) : 0;
+                    foundExactForQuery |= exactTitlePriority == queryIndex;
+                    if (exactTitlePriority >= 0 || partialScore > 0)
+                    {
+                        candidates.Add(new SourceSeriesCandidate(
+                            source,
+                            sourceIndex,
+                            resultIndex++,
+                            series,
+                            exactTitlePriority,
+                            partialScore));
+                    }
+                }
+            } while (search.HasNextPage && !foundExactForQuery);
+
+            // Search aliases in order. A lower-priority alias found while
+            // searching the primary title must not skip higher-priority aliases.
+            if (foundExactForQuery)
+            {
+                break;
+            }
+        }
+
+        return new SourceSearchOutcome(source, candidates, null);
+    }
+
+    private void AddDiscoveryFailure(
+        SuwayomiDownloadResult result,
+        string target,
+        SuwayomiException exception)
+        => AddDiscoveryFailure(result, target, exception.Message);
+
+    private void AddDiscoveryFailure(
+        SuwayomiDownloadResult result,
+        string target,
+        string error)
+    {
+        result.DiscoveryFailures.Add(new SuwayomiDownloadFailure
+        {
+            Target = target,
+            Error = error
+        });
+        _logger.LogWarning(
+            "Suwayomi missing-issue discovery could not check {Target}: {Message}",
+            LoggingHelper.SanitizeForLog(target),
+            LoggingHelper.SanitizeForLog(error));
+    }
+
+    private static List<SuwayomiSeries> FindLibraryCandidates(
+        SuwayomiLibrarySnapshot library,
+        string normalizedTitle,
+        IReadOnlyList<(string Title, string Key)> searchTitles)
+    {
+        var exact = searchTitles
+            .SelectMany(title => library.NormalizedSeries
+                .Where(item => item.NormalizedTitle == title.Key)
+                .OrderBy(item => item.Series.Title, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Series.Id)
+                .Select(item => item.Series))
+            .DistinctBy(series => series.Id)
+            .ToList();
+        if (exact.Count > 0)
+        {
+            return exact;
+        }
+
+        return normalizedTitle.Length == 0
+            ? new List<SuwayomiSeries>()
+            : RankMatches(library, normalizedTitle).ToList();
+    }
+
+    private static List<(string Title, string Key)> BuildSearchTitles(
+        string seriesTitle,
+        IEnumerable<string>? alternateTitles)
+    {
+        var titles = new List<(string Title, string Key)>();
+        Add(seriesTitle);
+        foreach (var title in alternateTitles ?? Enumerable.Empty<string>())
+        {
+            Add(title);
+        }
+
+        return titles;
+
+        void Add(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return;
+            }
+
+            var trimmed = title.Trim();
+            var key = Normalize(trimmed);
+            if (key.Length > 0 && titles.All(existing => existing.Key != key))
+            {
+                titles.Add((trimmed, key));
+            }
+        }
+    }
+
+    private static int ExactTitlePriority(
+        string candidate,
+        IReadOnlyList<(string Title, string Key)> searchTitles)
+    {
+        for (var index = 0; index < searchTitles.Count; index++)
+        {
+            if (candidate == searchTitles[index].Key)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string DescribeSearchedTitles(string seriesTitle, IEnumerable<string> alternateTitles)
+    {
+        var others = alternateTitles.ToList();
+        return others.Count switch
+        {
+            0 => $"'{seriesTitle}'",
+            1 => $"'{seriesTitle}' or its other title '{others[0]}'",
+            _ => $"'{seriesTitle}' or any of its {others.Count} other titles"
+        };
+    }
+
+    private sealed record SourceDiscoveryResult(SuwayomiSeries? FirstMatchedSeries);
+
+    private sealed record SourceSearchOutcome(
+        SuwayomiSource Source,
+        List<SourceSeriesCandidate> Candidates,
+        string? Error);
+
+    private sealed record SourceSeriesCandidate(
+        SuwayomiSource Source,
+        int SourceIndex,
+        int ResultIndex,
+        SuwayomiSeries Series,
+        int ExactTitlePriority,
+        int PartialScore);
 
     private async Task EnqueueChapterDownloadsAsync(List<int> chapterIds, CancellationToken cancellationToken)
     {
@@ -647,7 +1080,8 @@ public class SuwayomiService : ISuwayomiService
     {
         // Unlike the chapters query, which only reads what Suwayomi has
         // stored, this refreshes the list from the source: a series that was
-        // just added has none stored yet. It answers in the source's order.
+        // just found or added may have none stored yet. It answers in the
+        // source's order.
         const string mutation = """
             mutation FetchChapters($id: Int!) {
               fetchChapters(input: { mangaId: $id }) {

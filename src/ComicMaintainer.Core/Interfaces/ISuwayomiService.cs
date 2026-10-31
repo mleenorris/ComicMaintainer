@@ -42,7 +42,9 @@ public interface ISuwayomiService
     /// a series. When <paramref name="seriesId"/> is null the series is
     /// resolved by matching the Suwayomi library against
     /// <paramref name="seriesTitle"/> and, because Suwayomi may list the
-    /// series under another name, <paramref name="alternateTitles"/>.
+    /// series under another name, <paramref name="alternateTitles"/>. Issues
+    /// absent from matching library entries are then sought across the
+    /// installed sources without following the source results.
     /// </summary>
     /// <param name="seriesTitle">Local series title, used to match a Suwayomi library entry.</param>
     /// <param name="issueNumbers">Whole issue/chapter numbers that are missing locally.</param>
@@ -51,7 +53,8 @@ public interface ISuwayomiService
     /// Other titles of the local series (canonical title, aliases). They only
     /// count when one equals a Suwayomi title, ignoring case and punctuation,
     /// and such an exact match wins over a partial match on
-    /// <paramref name="seriesTitle"/>.
+    /// <paramref name="seriesTitle"/>. Each installed source is searched by
+    /// the main title first, then by these titles in order until one matches.
     /// </param>
     Task<SuwayomiDownloadResult> DownloadMissingIssuesAsync(
         string? seriesTitle,
@@ -62,7 +65,9 @@ public interface ISuwayomiService
 
     /// <summary>
     /// Queues downloads using a previously fetched library snapshot, avoiding
-    /// a fresh paginated library request for each series in a batch.
+    /// a fresh paginated library request for each series in a batch. The
+    /// installed source list is also reused across calls with the same
+    /// snapshot.
     /// </summary>
     Task<SuwayomiDownloadResult> DownloadMissingIssuesFromSnapshotAsync(
         string? seriesTitle,

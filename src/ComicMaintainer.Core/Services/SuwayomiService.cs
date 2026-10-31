@@ -614,7 +614,7 @@ public class SuwayomiService : ISuwayomiService
                     var key = Normalize(series.Title);
                     var exactTitlePriority = ExactTitlePriority(key, searchTitles);
                     var partialScore = queryIndex == 0 ? MatchScore(key, normalizedTitle) : 0;
-                    foundExactForQuery |= exactTitlePriority == queryIndex;
+                    foundExactForQuery |= exactTitlePriority >= 0 && exactTitlePriority <= queryIndex;
                     if (exactTitlePriority >= 0 || partialScore > 0)
                     {
                         candidates.Add(new SourceSeriesCandidate(

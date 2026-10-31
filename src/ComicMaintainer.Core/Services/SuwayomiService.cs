@@ -592,6 +592,7 @@ public class SuwayomiService : ISuwayomiService
         {
             var page = 1;
             SuwayomiSourceSearchResult search;
+            var foundExactForQuery = false;
             do
             {
                 try
@@ -613,6 +614,7 @@ public class SuwayomiService : ISuwayomiService
                     var key = Normalize(series.Title);
                     var exactTitlePriority = ExactTitlePriority(key, searchTitles);
                     var partialScore = queryIndex == 0 ? MatchScore(key, normalizedTitle) : 0;
+                    foundExactForQuery |= exactTitlePriority == queryIndex;
                     if (exactTitlePriority >= 0 || partialScore > 0)
                     {
                         candidates.Add(new SourceSeriesCandidate(
@@ -624,13 +626,11 @@ public class SuwayomiService : ISuwayomiService
                             partialScore));
                     }
                 }
-            } while (search.HasNextPage && !candidates.Any(candidate =>
-                         candidate.ExactTitlePriority == queryIndex));
+            } while (search.HasNextPage && !foundExactForQuery);
 
-            // A source that matched any known title does not need to query the
-            // lower-priority aliases. Search every primary-title page first,
-            // though, because it may contain a better primary match.
-            if (candidates.Any(candidate => candidate.ExactTitlePriority >= 0))
+            // Search aliases in order. A lower-priority alias found while
+            // searching the primary title must not skip higher-priority aliases.
+            if (foundExactForQuery)
             {
                 break;
             }

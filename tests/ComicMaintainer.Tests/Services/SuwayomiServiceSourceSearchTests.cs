@@ -474,6 +474,35 @@ public sealed class SuwayomiServiceSourceSearchTests
     }
 
     [Fact]
+    public async Task DownloadMissingIssuesAsync_SearchesHigherPriorityAliasAfterLowerPriorityAliasHit()
+    {
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("[]")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" when request.Variables.GetProperty("query").GetString() == "Solo Leveling" =>
+                Json(SearchResults("""[{"id":7,"title":"Alias 2"}]""")),
+            "SearchSource" when request.Variables.GetProperty("query").GetString() == "Alias 1" =>
+                Json(SearchResults("""[{"id":8,"title":"Alias 1"}]""")),
+            "FetchChapters" when request.Variables.GetProperty("id").GetInt32() == 8 =>
+                Json(FetchedChapters("""[{"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]""")),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("A lower-priority alias must not end the search.")
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync(
+            "Solo Leveling", new[] { 2 }, alternateTitles: new[] { "Alias 1", "Alias 2" });
+
+        Assert.Equal(8, result.Series!.Id);
+        Assert.Equal(new[] { 82 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        Assert.Equal(
+            new[] { "Solo Leveling", "Alias 1" },
+            handler.Requests
+                .Where(request => request.Operation == "SearchSource")
+                .Select(request => request.Variables.GetProperty("query").GetString()));
+    }
+
+    [Fact]
     public async Task DownloadMissingIssuesAsync_SearchesAllPagesBeforeMovingToNextAlias()
     {
         var handler = new SuwayomiHandler(request => request.Operation switch

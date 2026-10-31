@@ -271,6 +271,8 @@ public sealed class SuwayomiServiceSourceSearchTests
             "SearchSource" => Json(SearchResults("""
                 [{"id":8,"title":"Solo Leveling","inLibrary":false}]
                 """)),
+            "FetchChapters" when request.Variables.GetProperty("id").GetInt32() == 4 =>
+                Json(FetchedChapters("[]")),
             "FetchChapters" => Json(FetchedChapters("""
                 [
                   {"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false},
@@ -397,6 +399,8 @@ public sealed class SuwayomiServiceSourceSearchTests
                   {"id":8,"title":"Solo Leveling: Ragnarok","inLibrary":false}
                 ]
                 """)),
+            "FetchChapters" when request.Variables.GetProperty("id").GetInt32() == 4 =>
+                Json(FetchedChapters("[]")),
             _ => throw new InvalidOperationException("A sequel must not be fetched or queued.")
         });
 
@@ -406,8 +410,110 @@ public sealed class SuwayomiServiceSourceSearchTests
 
         Assert.Equal(4, result.Series!.Id);
         Assert.Equal(new[] { 2 }, result.UnmatchedIssueNumbers);
-        Assert.DoesNotContain(handler.Requests, request => request.Operation == "FetchChapters");
+        Assert.Single(handler.Requests, request => request.Operation == "FetchChapters");
         Assert.DoesNotContain(handler.Requests, request => request.Operation == "Enqueue");
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_PrefersLaterExactSourcePageToPartialLibraryAndAlias()
+    {
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("""[{"id":4,"title":"Solo Leveling: Ragnarok","inLibrary":true}]""")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" when request.Variables.GetProperty("query").GetString() == "Solo Leveling"
+                                && request.Variables.GetProperty("page").GetInt32() == 1 =>
+                Json(SearchResults("""[{"id":4,"title":"Solo Leveling: Ragnarok"}]""", "true")),
+            "SearchSource" when request.Variables.GetProperty("query").GetString() == "Solo Leveling"
+                                && request.Variables.GetProperty("page").GetInt32() == 2 =>
+                Json(SearchResults("""[{"id":8,"title":"Solo Leveling"}]""")),
+            "FetchChapters" when request.Variables.GetProperty("id").GetInt32() == 8 =>
+                Json(FetchedChapters("""[{"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]""")),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("Partial library chapters or alias should not be checked.")
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync(
+            "Solo Leveling", new[] { 2 }, alternateTitles: new[] { "Alias" });
+
+        Assert.Equal(8, result.Series!.Id);
+        Assert.Equal(new[] { 82 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        Assert.Equal(new[] { 1, 2 }, handler.Requests.Where(request => request.Operation == "SearchSource")
+            .Select(request => request.Variables.GetProperty("page").GetInt32()));
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_SearchesAllPagesBeforeMovingToNextAlias()
+    {
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("[]")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" when request.Variables.GetProperty("page").GetInt32() == 1 =>
+                Json(SearchResults("[]", "true")),
+            "SearchSource" when request.Variables.GetProperty("query").GetString() == "Alias" =>
+                Json(SearchResults("""[{"id":8,"title":"Alias"}]""")),
+            "SearchSource" => Json(SearchResults("[]")),
+            "FetchChapters" => Json(FetchedChapters("""[{"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]""")),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync(
+            "Solo Leveling", new[] { 2 }, alternateTitles: new[] { "Alias", "Unused" });
+
+        Assert.Equal(new[] { 82 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        Assert.Equal(new[] { ("Solo Leveling", 1), ("Solo Leveling", 2), ("Alias", 1), ("Alias", 2) },
+            handler.Requests.Where(request => request.Operation == "SearchSource")
+                .Select(request => (request.Variables.GetProperty("query").GetString()!,
+                    request.Variables.GetProperty("page").GetInt32())));
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_DoesNotCombineDifferentPartialTitles()
+    {
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("""
+                [{"id":4,"title":"Solo Leveling Alpha","inLibrary":true},
+                 {"id":5,"title":"Solo Leveling Beta","inLibrary":true}]
+                """)),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" => Json(SearchResults("""[{"id":6,"title":"Solo Leveling Beta"}]""")),
+            "Chapters" when request.Variables.GetProperty("id").GetInt32() == 4 =>
+                Json("""{"data":{"chapters":{"nodes":[{"id":41,"name":"Chapter 1","chapterNumber":1,"isDownloaded":false}]}}}"""),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("Different partial titles must not be checked.")
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync("Solo Leveling", new[] { 1, 2 });
+
+        Assert.Equal(4, result.Series!.Id);
+        Assert.Equal(new[] { 41 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        Assert.Equal(new[] { 2 }, result.UnmatchedIssueNumbers);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_RefreshesPreviouslyCheckedLibrarySourceOnce()
+    {
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("""[{"id":4,"title":"Solo Leveling","inLibrary":true}]""")),
+            "Chapters" => Json("""{"data":{"chapters":{"nodes":[]}}}"""),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" => Json(SearchResults("""
+                [{"id":4,"title":"Solo Leveling","inLibrary":true},{"id":4,"title":"Solo Leveling","inLibrary":true}]
+                """)),
+            "FetchChapters" => Json(FetchedChapters("""[{"id":42,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]""")),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 });
+
+        Assert.Equal(new[] { 42 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        Assert.Empty(result.UnmatchedIssueNumbers);
+        Assert.Single(handler.Requests, request => request.Operation == "FetchChapters");
     }
 
     [Fact]

@@ -636,9 +636,9 @@ Queue downloads for the issue numbers a series is missing locally.
 }
 ```
 
-`suwayomiSeriesId` is optional. When supplied, only that Suwayomi library entry is checked. When omitted, matching entries in the Suwayomi library are checked first; any requested issue numbers they do not contain are then sought across every installed catalogue source. Source-search results are refreshed and can supply downloads without being added to the Suwayomi library.
+`suwayomiSeriesId` is optional. When supplied, only that Suwayomi library entry is checked. When omitted, exact matches in the Suwayomi library are checked first; any requested issue numbers they do not contain are then sought across every installed catalogue source. Source-search results, including previously checked library entries, are refreshed and can supply downloads without being added to the Suwayomi library.
 
-`alternateTitles` is optional too: the series' other titles (the web UI sends its canonical title and aliases), for when Suwayomi lists the series under a different name. Each installed source is searched with `seriesTitle` first; if that source returns no exact match, `alternateTitles` are searched in order until one does. Candidates are ranked by an exact match on `seriesTitle`, an exact match on each alternate title in the order given, and then a prefix/substring match on `seriesTitle`. Matching ignores punctuation and case, and alternate titles are never matched partially. Both title fields are ignored when `suwayomiSeriesId` is given.
+`alternateTitles` is optional too: the series' other titles (the web UI sends its canonical title and aliases), for when Suwayomi lists the series under a different name. Each installed source is searched with `seriesTitle` first, across pages until an exact match is found or results are exhausted; if there is no exact match, `alternateTitles` are searched in order the same way. Candidates are ranked by an exact match on `seriesTitle`, an exact match on each alternate title in the order given, and then a prefix/substring match on `seriesTitle`. Partial matches are used only when no exact match was found, and only for one normalized title. Matching ignores punctuation and case, and alternate titles are never matched partially. Both title fields are ignored when `suwayomiSeriesId` is given.
 
 **Response:**
 ```json

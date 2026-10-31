@@ -663,12 +663,13 @@
                 const matchedTitle = result.series && typeof result.series.title === 'string' ? result.series.title : '';
                 const matchedSource = result.series && typeof result.series.source === 'string' ? result.series.source : '';
                 const listedAs = matchedTitle && normalizeSeriesTitleKey(matchedTitle) !== normalizeSeriesTitleKey(titles[0])
-                    ? ` (listed there as "${matchedTitle}")`
+                    ? `"${matchedTitle}"` : '';
+                const firstMatch = listedAs || matchedSource
+                    ? ` (first match: ${listedAs}${listedAs && matchedSource ? ' on ' : ''}${matchedSource})`
                     : '';
-                const source = matchedSource ? ` from ${matchedSource}` : '';
                 let message = queued
-                    ? `Queued ${queued} chapter${queued === 1 ? '' : 's'} on Suwayomi${source}${listedAs}.`
-                    : `Nothing was queued on Suwayomi${source}${listedAs}.`;
+                    ? `Queued ${queued} chapter${queued === 1 ? '' : 's'} on Suwayomi${firstMatch}.`
+                    : `Nothing was queued on Suwayomi${firstMatch}.`;
                 if (unmatched) {
                     message += ` ${unmatched} issue${unmatched === 1 ? ' has' : 's have'} no matching chapter.`;
                 }

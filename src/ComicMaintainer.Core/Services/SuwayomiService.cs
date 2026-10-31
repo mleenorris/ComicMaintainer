@@ -300,7 +300,8 @@ public class SuwayomiService : ISuwayomiService
             var hasExactLibraryMatch = libraryCandidates.Any(series =>
                 ExactTitlePriority(Normalize(series.Title), searchTitles) >= 0);
 
-            foreach (var series in libraryCandidates)
+            foreach (var series in libraryCandidates.Where(series =>
+                         ExactTitlePriority(Normalize(series.Title), searchTitles) >= 0))
             {
                 if (!checkedSeriesIds.Add(series.Id))
                 {
@@ -330,6 +331,7 @@ public class SuwayomiService : ISuwayomiService
                     normalizedTitle,
                     searchTitles,
                     !hasExactLibraryMatch,
+                    libraryCandidates,
                     librarySnapshot,
                     checkedSeriesIds,
                     unresolved,
@@ -424,6 +426,7 @@ public class SuwayomiService : ISuwayomiService
         string normalizedTitle,
         IReadOnlyList<(string Title, string Key)> searchTitles,
         bool allowPartialMatches,
+        IReadOnlyList<SuwayomiSeries> libraryCandidates,
         SuwayomiLibrarySnapshot librarySnapshot,
         HashSet<int> checkedSeriesIds,
         HashSet<int> unresolved,
@@ -439,12 +442,7 @@ public class SuwayomiService : ISuwayomiService
         catch (SuwayomiException ex)
         {
             AddDiscoveryFailure(result, "Installed Suwayomi sources", ex);
-            return new SourceDiscoveryResult(null);
-        }
-
-        if (sources.Count == 0)
-        {
-            return new SourceDiscoveryResult(null);
+            sources = Array.Empty<SuwayomiSource>();
         }
 
         var outcomes = new SourceSearchOutcome[sources.Count];
@@ -473,29 +471,56 @@ public class SuwayomiService : ISuwayomiService
         var found = outcomes
             .SelectMany(outcome => outcome.Candidates)
             .ToList();
-        var available = found
-            .Where(candidate => !checkedSeriesIds.Contains(candidate.Series.Id))
-            .ToList();
-        var exact = available.Where(candidate => candidate.ExactTitlePriority >= 0).ToList();
+        var exact = found.Where(candidate => candidate.ExactTitlePriority >= 0).ToList();
         var exactFound = found.Any(candidate => candidate.ExactTitlePriority >= 0);
+        var partialTitle = exactFound || !allowPartialMatches
+            ? null
+            : libraryCandidates
+                .Select(series => (Series: series, Score: MatchScore(Normalize(series.Title), normalizedTitle)))
+                .Concat(found.Where(candidate => candidate.PartialScore > 0)
+                    .Select(candidate => (candidate.Series, Score: candidate.PartialScore)))
+                .OrderByDescending(candidate => candidate.Score)
+                .Select(candidate => Normalize(candidate.Series.Title))
+                .FirstOrDefault();
+
+        SuwayomiSeries? firstMatchedSeries = null;
+        if (partialTitle is not null)
+        {
+            foreach (var series in libraryCandidates.Where(series => Normalize(series.Title) == partialTitle))
+            {
+                if (!checkedSeriesIds.Add(series.Id))
+                {
+                    continue;
+                }
+
+                firstMatchedSeries ??= series;
+                CollectMissingChapters(
+                    series,
+                    await GetChaptersAsync(series.Id, cancellationToken),
+                    unresolved,
+                    chapterIds,
+                    result);
+                if (unresolved.Count == 0)
+                {
+                    return new SourceDiscoveryResult(firstMatchedSeries);
+                }
+            }
+        }
+
         var selected = exactFound || !allowPartialMatches
             ? exact
                 .OrderBy(candidate => candidate.ExactTitlePriority)
                 .ThenBy(candidate => candidate.SourceIndex)
                 .ThenBy(candidate => candidate.ResultIndex)
-            : available
-                .Where(candidate => candidate.PartialScore > 0)
+            : found
+                .Where(candidate => candidate.PartialScore > 0 && Normalize(candidate.Series.Title) == partialTitle)
                 .OrderByDescending(candidate => candidate.PartialScore)
                 .ThenBy(candidate => candidate.SourceIndex)
                 .ThenBy(candidate => candidate.ResultIndex);
 
-        SuwayomiSeries? firstMatchedSeries = null;
         foreach (var candidate in selected.DistinctBy(candidate => candidate.Series.Id))
         {
-            if (!checkedSeriesIds.Add(candidate.Series.Id))
-            {
-                continue;
-            }
+            checkedSeriesIds.Add(candidate.Series.Id);
 
             firstMatchedSeries ??= candidate.Series;
             IReadOnlyList<SuwayomiChapter> chapters;
@@ -547,36 +572,41 @@ public class SuwayomiService : ISuwayomiService
         var resultIndex = 0;
         for (var queryIndex = 0; queryIndex < searchTitles.Count; queryIndex++)
         {
+            var page = 1;
             SuwayomiSourceSearchResult search;
-            try
+            do
             {
-                search = await SearchSourceAsync(
-                    sourceId,
-                    searchTitles[queryIndex].Title,
-                    cancellationToken: cancellationToken);
-            }
-            catch (SuwayomiException ex)
-            {
-                return new SourceSearchOutcome(source, candidates, ex.Message);
-            }
-
-            foreach (var series in search.Series)
-            {
-                series.Source = source.DisplayName;
-                var key = Normalize(series.Title);
-                var exactTitlePriority = ExactTitlePriority(key, searchTitles);
-                var partialScore = queryIndex == 0 ? MatchScore(key, normalizedTitle) : 0;
-                if (exactTitlePriority >= 0 || partialScore > 0)
+                try
                 {
-                    candidates.Add(new SourceSeriesCandidate(
-                        source,
-                        sourceIndex,
-                        resultIndex++,
-                        series,
-                        exactTitlePriority,
-                        partialScore));
+                    search = await SearchSourceAsync(
+                        sourceId,
+                        searchTitles[queryIndex].Title,
+                        page++,
+                        cancellationToken);
                 }
-            }
+                catch (SuwayomiException ex)
+                {
+                    return new SourceSearchOutcome(source, candidates, ex.Message);
+                }
+
+                foreach (var series in search.Series)
+                {
+                    series.Source = source.DisplayName;
+                    var key = Normalize(series.Title);
+                    var exactTitlePriority = ExactTitlePriority(key, searchTitles);
+                    var partialScore = queryIndex == 0 ? MatchScore(key, normalizedTitle) : 0;
+                    if (exactTitlePriority >= 0 || partialScore > 0)
+                    {
+                        candidates.Add(new SourceSeriesCandidate(
+                            source,
+                            sourceIndex,
+                            resultIndex++,
+                            series,
+                            exactTitlePriority,
+                            partialScore));
+                    }
+                }
+            } while (search.HasNextPage && !candidates.Any(candidate => candidate.ExactTitlePriority >= 0));
 
             // A source that matched any known title does not need the lower
             // priority aliases. Otherwise try each alias in the supplied order.

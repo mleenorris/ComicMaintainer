@@ -102,7 +102,7 @@ test('downloading asks Suwayomi for the missing issues of the freshly loaded lis
     assert.match(call.headers.authorization, /^Bearer /);
     assert.deepEqual(messages(page), [
         { text: 'Asking Suwayomi for 2 missing issues...', type: 'info' },
-        { text: 'Queued 2 chapters on Suwayomi from MangaDex.', type: 'success' }
+        { text: 'Queued 2 chapters on Suwayomi (first match: MangaDex).', type: 'success' }
     ]);
 });
 
@@ -113,7 +113,7 @@ test('every distinct title of the series is offered, and a match under another t
         { ...series, title: ' saga ', aliases: ['SAGA COMIC', ' Saga (2012) ', '', null] },
         [issue(1), issue(3)]
     ));
-    page.route(DOWNLOAD, { series: { id: 9, title: 'Saga (2012)' }, queued_chapters: [chapter(2)], unmatched_issue_numbers: [7] });
+    page.route(DOWNLOAD, { series: { id: 9, title: 'Saga (2012)', source: 'MangaDex' }, queued_chapters: [chapter(2)], unmatched_issue_numbers: [7] });
 
     await download(page);
 
@@ -123,7 +123,7 @@ test('every distinct title of the series is offered, and a match under another t
         issueNumbers: [2]
     });
     assert.deepEqual(lastMessage(page), {
-        text: 'Queued 1 chapter on Suwayomi (listed there as "Saga (2012)"). 1 issue has no matching chapter.',
+        text: 'Queued 1 chapter on Suwayomi (first match: "Saga (2012)" on MangaDex). 1 issue has no matching chapter.',
         type: 'success'
     });
     assert.equal(messages(page)[0].text, 'Asking Suwayomi for 1 missing issue...');
@@ -153,7 +153,7 @@ test('partial source failures are reported without hiding successful downloads',
     await download(page);
 
     assert.deepEqual(lastMessage(page), {
-        text: 'Queued 1 chapter on Suwayomi from Working (EN). 1 issue has no matching chapter. 1 source check failed. First failure: Broken (EN): site unavailable',
+        text: 'Queued 1 chapter on Suwayomi (first match: Working (EN)). 1 issue has no matching chapter. 1 source check failed. First failure: Broken (EN): site unavailable',
         type: 'success'
     });
 });

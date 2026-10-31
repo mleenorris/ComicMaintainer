@@ -443,6 +443,37 @@ public sealed class SuwayomiServiceSourceSearchTests
     }
 
     [Fact]
+    public async Task DownloadMissingIssuesAsync_SearchesPrimaryTitlePagesPastAnAliasMatch()
+    {
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("[]")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" when request.Variables.GetProperty("query").GetString() == "Solo Leveling"
+                                && request.Variables.GetProperty("page").GetInt32() == 1 =>
+                Json(SearchResults("""[{"id":7,"title":"Ore dake Level Up na Ken"}]""", "true")),
+            "SearchSource" when request.Variables.GetProperty("query").GetString() == "Solo Leveling"
+                                && request.Variables.GetProperty("page").GetInt32() == 2 =>
+                Json(SearchResults("""[{"id":8,"title":"Solo Leveling"}]""")),
+            "FetchChapters" => Json(FetchedChapters("""
+                [{"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]
+                """)),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync(
+            "Solo Leveling", new[] { 2 }, alternateTitles: new[] { "Ore dake Level Up na Ken" });
+
+        Assert.Equal(8, result.Series!.Id);
+        Assert.Equal(new[] { 82 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        Assert.Equal(new[] { ("Solo Leveling", 1), ("Solo Leveling", 2) },
+            handler.Requests.Where(request => request.Operation == "SearchSource")
+                .Select(request => (request.Variables.GetProperty("query").GetString()!,
+                    request.Variables.GetProperty("page").GetInt32())));
+    }
+
+    [Fact]
     public async Task DownloadMissingIssuesAsync_SearchesAllPagesBeforeMovingToNextAlias()
     {
         var handler = new SuwayomiHandler(request => request.Operation switch
@@ -514,6 +545,39 @@ public sealed class SuwayomiServiceSourceSearchTests
         Assert.Equal(new[] { 42 }, result.QueuedChapters.Select(chapter => chapter.Id));
         Assert.Empty(result.UnmatchedIssueNumbers);
         Assert.Single(handler.Requests, request => request.Operation == "FetchChapters");
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_ContinuesAfterALibraryChapterReadFailure()
+    {
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("""
+                [
+                  {"id":4,"title":"Solo Leveling","inLibrary":true},
+                  {"id":5,"title":"Ore dake Level Up na Ken","inLibrary":true}
+                ]
+                """)),
+            "Chapters" when request.Variables.GetProperty("id").GetInt32() == 4 =>
+                Json("""{"data":{"chapters":{"nodes":[{"id":41,"chapterNumber":1,"isDownloaded":false}]}}}"""),
+            "Chapters" when request.Variables.GetProperty("id").GetInt32() == 5 =>
+                Json("""{"errors":[{"message":"site unavailable","path":["chapters"]}],"data":{"chapters":null}}"""),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" => Json(SearchResults("""[{"id":8,"title":"Solo Leveling"}]""")),
+            "FetchChapters" => Json(FetchedChapters("""
+                [{"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]
+                """)),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync(
+            "Solo Leveling", new[] { 1, 2 }, alternateTitles: new[] { "Ore dake Level Up na Ken" });
+
+        Assert.Equal(new[] { 41, 82 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        var failure = Assert.Single(result.DiscoveryFailures);
+        Assert.Equal("Library: Ore dake Level Up na Ken", failure.Target);
+        Assert.Contains("site unavailable", failure.Error);
     }
 
     [Fact]

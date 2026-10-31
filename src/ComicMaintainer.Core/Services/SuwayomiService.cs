@@ -309,14 +309,21 @@ public class SuwayomiService : ISuwayomiService
                 }
 
                 firstMatchedSeries ??= series;
-                if (CollectMissingChapters(
-                        series,
-                        await GetChaptersAsync(series.Id, cancellationToken),
-                        unresolved,
-                        chapterIds,
-                        result))
+                try
                 {
-                    result.Series ??= series;
+                    if (CollectMissingChapters(
+                            series,
+                            await GetChaptersAsync(series.Id, cancellationToken),
+                            unresolved,
+                            chapterIds,
+                            result))
+                    {
+                        result.Series ??= series;
+                    }
+                }
+                catch (SuwayomiException ex)
+                {
+                    AddDiscoveryFailure(result, $"Library: {series.Title}", ex);
                 }
 
                 if (unresolved.Count == 0)
@@ -606,10 +613,12 @@ public class SuwayomiService : ISuwayomiService
                             partialScore));
                     }
                 }
-            } while (search.HasNextPage && !candidates.Any(candidate => candidate.ExactTitlePriority >= 0));
+            } while (search.HasNextPage && !candidates.Any(candidate =>
+                         candidate.ExactTitlePriority == queryIndex));
 
-            // A source that matched any known title does not need the lower
-            // priority aliases. Otherwise try each alias in the supplied order.
+            // A source that matched any known title does not need to query the
+            // lower-priority aliases. Search every primary-title page first,
+            // though, because it may contain a better primary match.
             if (candidates.Any(candidate => candidate.ExactTitlePriority >= 0))
             {
                 break;

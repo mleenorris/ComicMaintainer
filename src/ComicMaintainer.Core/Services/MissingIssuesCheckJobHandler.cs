@@ -45,7 +45,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
     public string JobKey => Key;
     public string DisplayName => "Missing Issues Check";
     public string Description =>
-        "Scans the library for series with gaps in their issue numbering (e.g. it has #1, #2 and #4 but not #3). The check is report-only unless autoDownload is enabled, in which case the missing issues are queued on the configured Suwayomi server.";
+        "Scans the library for series with gaps in their issue numbering (e.g. it has #1, #2 and #4 but not #3). The check is report-only unless autoDownload is enabled, in which case matching chapters are sought across the configured Suwayomi server's installed sources and queued.";
 
     // Default: disabled (so it doesn't run unprompted on existing installs) and daily when enabled.
     public ScheduledJobDefaults Defaults =>
@@ -71,6 +71,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
         var skippedOversizedSeries = 0;
         var queuedChapters = 0;
         var downloadFailures = 0;
+        var sourceCheckFailures = 0;
         var downloadEnabled = options.AutoDownload && _suwayomi.IsConfigured;
 
         foreach (var series in candidates.Series)
@@ -143,6 +144,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
                             alternateTitles: series.AlternateTitles,
                             cancellationToken: cancellationToken);
                         queuedChapters += result.QueuedChapters.Count;
+                        sourceCheckFailures += result.DiscoveryFailures.Count;
                     }
                     catch (SuwayomiException ex)
                     {
@@ -166,7 +168,8 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
             options.AutoDownload,
             downloadEnabled,
             queuedChapters,
-            downloadFailures);
+            downloadFailures,
+            sourceCheckFailures);
     }
 
     /// <summary>
@@ -240,7 +243,8 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
         bool autoDownloadRequested,
         bool downloadEnabled,
         int queuedChapters,
-        int downloadFailures)
+        int downloadFailures,
+        int sourceCheckFailures)
     {
         var outcomes = new List<string>();
         if (downloadEnabled && seriesWithGaps.Count > 0)
@@ -249,6 +253,10 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
             if (downloadFailures > 0)
             {
                 outcomes.Add($"{downloadFailures} series could not be downloaded");
+            }
+            if (sourceCheckFailures > 0)
+            {
+                outcomes.Add($"{sourceCheckFailures} Suwayomi source check(s) failed");
             }
         }
         else if (autoDownloadRequested && !downloadEnabled)

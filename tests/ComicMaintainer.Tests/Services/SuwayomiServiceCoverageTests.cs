@@ -50,13 +50,15 @@ public sealed class SuwayomiServiceCoverageTests
         string? library = null,
         string? chapters = null,
         string? manga = null,
-        string? enqueue = null)
+        string? enqueue = null,
+        string? sources = null)
         => new(body =>
         {
             var json = body.Contains("mangas(", StringComparison.Ordinal) ? library
                 : body.Contains("chapters(", StringComparison.Ordinal) ? chapters
                 : body.Contains("manga(", StringComparison.Ordinal) ? manga
                 : body.Contains("enqueueChapterDownloads", StringComparison.Ordinal) ? enqueue
+                : body.Contains("sources", StringComparison.Ordinal) ? sources
                 : null;
             return Json(json ?? throw new InvalidOperationException("Unexpected GraphQL document: " + body));
         });
@@ -314,20 +316,26 @@ public sealed class SuwayomiServiceCoverageTests
     }
 
     [Fact]
-    public async Task DownloadMissingIssuesFromSnapshotAsync_MalformedChapterList_ThrowsWithoutQueueing()
+    public async Task DownloadMissingIssuesFromSnapshotAsync_MalformedChapterList_ReportsFailureWithoutQueueing()
     {
         // Regression: a null "chapters" threw an InvalidOperationException, which the Missing
         // Issues check does not catch, so one series' bad answer failed the whole check.
         var handler = Server(
             library: Library("""[{"id":4,"title":"Solo Leveling","inLibrary":true}]"""),
-            chapters: """{"data":{"chapters":null}}""");
+            chapters: """{"data":{"chapters":null}}""",
+            sources: """{"data":{"sources":{"nodes":[]}}}""");
         var service = CreateService(handler);
         var snapshot = await service.GetLibrarySeriesAsync();
 
-        var exception = await Assert.ThrowsAsync<SuwayomiException>(
-            () => service.DownloadMissingIssuesFromSnapshotAsync("Solo Leveling", new[] { 1 }, snapshot));
+        var result = await service.DownloadMissingIssuesFromSnapshotAsync(
+            "Solo Leveling", new[] { 1 }, snapshot);
 
-        Assert.Equal(UnexpectedChapterListResponse, exception.Message);
+        var failure = Assert.Single(result.DiscoveryFailures);
+        Assert.Equal("Library: Solo Leveling", failure.Target);
+        Assert.Equal(UnexpectedChapterListResponse, failure.Error);
+        Assert.Equal(4, result.Series?.Id);
+        Assert.Empty(result.QueuedChapters);
+        Assert.Equal(new[] { 1 }, result.UnmatchedIssueNumbers);
         Assert.DoesNotContain(handler.Requests, r => r.Body.Contains("enqueueChapterDownloads", StringComparison.Ordinal));
     }
 

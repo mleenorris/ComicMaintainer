@@ -20,7 +20,7 @@ ComicMaintainer is a service that automatically watches a directory for new or c
 - **External Alias Grouping**: Optionally enrich series grouping with ComicVine aliases so alternate titles collapse into one series
 - **Duplicate Detection**: Automatically identifies and handles duplicate files
 - **Email to E-Reader**: Email individual issues, a whole series or a selection to saved e-reader addresses, optionally converted to EPUB, and subscribe a series so new issues are delivered automatically. See [Email to E-Reader](docs/EMAIL_DELIVERY.md).
-- **Suwayomi Downloads**: With a [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server connected in Settings, download the issues a series is missing, or find a series that is not in the library yet (**Find on Suwayomi**, or the empty result of a library search), add it to the Suwayomi library and download the chapters you do not have. See [Suwayomi Downloads](docs/API.md#suwayomi-downloads).
+- **Suwayomi Downloads**: With a [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server connected in Settings, download the issues a series is missing by checking its followed entry and then the other installed sources, without following fallback results. You can also find a series that is not in the library yet (**Find on Suwayomi**, or the empty result of a library search), add it to the Suwayomi library and download the chapters you do not have. See [Suwayomi Downloads](docs/API.md#suwayomi-downloads).
 - **RESTful API**: Clean API for integration with other tools
 - **Cross-Platform**: Runs on Windows, Linux, macOS
 - **Docker Support**: Easy deployment with Docker

@@ -32,7 +32,10 @@ public class SuwayomiSeries
     public int Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public bool InLibrary { get; set; }
+
+    /// <summary>Source display name when the series came from a source search.</summary>
     public string? Source { get; set; }
+
     public string? ThumbnailUrl { get; set; }
 }
 
@@ -52,7 +55,10 @@ public class SuwayomiChapter
 /// </summary>
 public class SuwayomiDownloadResult
 {
-    /// <summary>The Suwayomi series the issues were matched against.</summary>
+    /// <summary>
+    /// The first Suwayomi series that supplied a matching chapter, or the
+    /// first matching series found when no requested issue was available.
+    /// </summary>
     public SuwayomiSeries? Series { get; set; }
 
     /// <summary>Chapters that were added to the Suwayomi download queue.</summary>
@@ -69,6 +75,25 @@ public class SuwayomiDownloadResult
     /// Suwayomi side (so it was not queued again).
     /// </summary>
     public List<int> AlreadyDownloadedIssueNumbers { get; set; } = new();
+
+    /// <summary>
+    /// Installed sources or matching source entries that could not be checked.
+    /// Other sources may still have supplied downloads.
+    /// </summary>
+    public List<SuwayomiDownloadFailure> DiscoveryFailures { get; set; } = new();
+}
+
+/// <summary>
+/// One non-fatal failure while looking across Suwayomi's installed sources
+/// for a missing issue.
+/// </summary>
+public class SuwayomiDownloadFailure
+{
+    /// <summary>Source or series that could not be checked.</summary>
+    public string Target { get; set; } = string.Empty;
+
+    /// <summary>Human-readable reason the check failed.</summary>
+    public string Error { get; set; } = string.Empty;
 }
 
 /// <summary>

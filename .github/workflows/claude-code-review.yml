@@ -42,10 +42,49 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
+          # A custom prompt is used instead of the code-review plugin because the
+          # plugin stops when Claude has already commented on a PR (or the PR is
+          # a draft / looks trivial), which skips reviews of later pushes.
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+            HEAD SHA: ${{ github.event.pull_request.head.sha }}
+            EVENT: ${{ github.event.action }}
+            PREVIOUS HEAD SHA (only set for new pushes): ${{ github.event.before }}
+
+            Review this pull request. Always complete the review. Do not skip it
+            because the PR is a draft, looks trivial, or because Claude has
+            already reviewed or commented on it before.
+
+            1. Read the PR title, description and full diff
+               (`gh pr view` / `gh pr diff`). Use the checked-out repository to
+               read surrounding code when you need context to confirm an issue.
+               Follow the conventions in `.github/copilot-instructions.md` and
+               any CLAUDE.md files.
+            2. If EVENT is "synchronize", this run was triggered by a new push.
+               Review the whole PR as it is now, but pay particular attention to
+               what changed since PREVIOUS HEAD SHA
+               (`gh api repos/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.event.pull_request.head.sha }}`).
+               If that SHA no longer exists because of a force-push, review the
+               full diff instead.
+            3. Fetch existing review comments
+               (`gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments`)
+               and do NOT re-post an issue that has already been raised on the
+               same code.
+            4. Only report HIGH SIGNAL issues: bugs, incorrect logic, security
+               problems, code that will not compile, or clear violations of the
+               repo's written conventions. Do not flag style nits, subjective
+               preferences, or pre-existing issues in unchanged code. If you are
+               not confident an issue is real, leave it out.
+            5. Post each issue as an inline comment on the relevant line with
+               `mcp__github_inline_comment__create_inline_comment` (include a
+               suggestion block only when it fully fixes the issue).
+            6. Finish by posting one summary comment with `gh pr comment`,
+               headed "## Claude code review (<short HEAD SHA>)", listing the
+               issues found, or saying "No new issues found." if there are none.
+          # gh api is limited to the two read-only endpoints the prompt needs.
+          claude_args: >-
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh api repos/${{ github.repository }}/compare/:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments:*)"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 

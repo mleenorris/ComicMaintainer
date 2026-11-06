@@ -414,12 +414,12 @@ public class SuwayomiService : ISuwayomiService
             }
             else
             {
-                foreach (var chapter in pending)
+                // Where is evaluated lazily, so a chapter id added in an earlier
+                // iteration is already excluded when a duplicate is reached.
+                foreach (var chapter in pending.Where(c => !chapterIds.Contains(c.Id)))
                 {
-                    if (chapterIds.Add(chapter.Id))
-                    {
-                        result.QueuedChapters.Add(chapter);
-                    }
+                    chapterIds.Add(chapter.Id);
+                    result.QueuedChapters.Add(chapter);
                 }
             }
 
@@ -467,12 +467,9 @@ public class SuwayomiService : ISuwayomiService
             }));
         }
 
-        foreach (var outcome in outcomes)
+        foreach (var outcome in outcomes.Where(o => o.Error is not null))
         {
-            if (outcome.Error is not null)
-            {
-                AddDiscoveryFailure(result, outcome.Source.DisplayName, outcome.Error);
-            }
+            AddDiscoveryFailure(result, outcome.Source.DisplayName, outcome.Error!);
         }
 
         var found = outcomes

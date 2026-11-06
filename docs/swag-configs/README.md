@@ -207,6 +207,7 @@ environment:
   - AUTHELIA_TRUSTED_PROXIES=172.18.0.0/16  # Required: SWAG's address or its Docker network subnet
   - AUTHELIA_DEFAULT_ROLE=User         # Default role for users
   - AUTHELIA_ADMIN_GROUPS=admins,admin # Groups that get Admin role
+  - AUTHELIA_URL=http://authelia:9091  # Optional: log Authelia outages
 ```
 
 **Important**: When using Authelia, ComicMaintainer will:
@@ -215,6 +216,8 @@ environment:
 - Automatically create user accounts on first login
 - Synchronize user information (email, display name) from Authelia
 - Map Authelia groups to application roles
+- Log Authelia outages, which SWAG answers with HTTP 500, when `AUTHELIA_URL` is set (see
+  [Logging Authelia Outages](../AUTHELIA.md#logging-authelia-outages))
 
 For detailed setup instructions, see the [Authelia Integration Guide](../AUTHELIA.md).
 

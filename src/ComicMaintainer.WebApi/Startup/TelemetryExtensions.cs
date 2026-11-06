@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using ComicMaintainer.Core.Telemetry;
+using ComicMaintainer.WebApi.Services;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -50,6 +51,7 @@ internal static class TelemetryExtensions
                 metrics
                     .AddMeter(ComicMaintainerMetrics.MeterName)
                     .AddAspNetCoreInstrumentation()
+                    // Authelia health checks are recorded on AutheliaHealthMonitor.UnobservedMeterName, not added here.
                     .AddHttpClientInstrumentation()
                     .AddRuntimeInstrumentation();
 
@@ -76,7 +78,11 @@ internal static class TelemetryExtensions
                         !context.Request.Path.StartsWithSegments(MetricsPath) &&
                         !context.Request.Path.StartsWithSegments("/hubs");
                 })
-                .AddHttpClientInstrumentation()
+                .AddHttpClientInstrumentation(options =>
+                {
+                    // Authelia's health is checked every 30 seconds when AUTHELIA_URL is set.
+                    options.FilterHttpRequestMessage = request => !AutheliaHealthMonitor.IsHealthCheck(request);
+                })
                 .AddOtlpExporter());
         }
 

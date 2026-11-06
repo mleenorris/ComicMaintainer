@@ -1,8 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Authentication;
+using System.Text;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -86,14 +89,16 @@ public sealed class AutheliaHealthMonitorTests
     }
 
     [Fact]
-    public async Task Outage_IsWarnedAboutAtOnce_ThenEveryFiveMinutes_AndItsLengthIsLoggedOnRecovery()
+    public async Task Outage_IsWarnedAboutAtTheSecondFailedCheck_ThenEveryFiveMinutes_AndItsLengthIsLoggedOnRecovery()
     {
         var monitor = CreateMonitor();
         await monitor.CheckAsync(CancellationToken.None);
         _respond = (_, _) => Respond(HttpStatusCode.ServiceUnavailable);
 
         await CheckAgainAsync(monitor);
+        Assert.DoesNotContain(_logger.Entries, e => e.Level >= LogLevel.Warning);
 
+        await CheckAgainAsync(monitor);
         var outage = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Warning);
         Assert.Equal(
             $"Authelia stopped responding at {HealthCheckUrl}: HTTP 503 Service Unavailable. Until it recovers, the reverse proxy rejects requests to ComicMaintainer, usually with HTTP 500 or 502; ComicMaintainer itself is still running",
@@ -103,14 +108,15 @@ public sealed class AutheliaHealthMonitorTests
         await CheckAgainAsync(monitor, times: 9);
         Assert.Single(_logger.Entries, e => e.Level == LogLevel.Warning);
 
+        // The downtime counts from the last successful check, six minutes before the reminder.
         await CheckAgainAsync(monitor);
         Assert.Equal(
-            (LogLevel.Warning, $"Authelia has not been reachable at {HealthCheckUrl} for 5 minutes: HTTP 503 Service Unavailable"),
+            (LogLevel.Warning, $"Authelia has not been reachable at {HealthCheckUrl} for 6 minutes: HTTP 503 Service Unavailable"),
             LastEntry());
 
         await CheckAgainAsync(monitor, times: 10);
         Assert.Equal(
-            (LogLevel.Warning, $"Authelia has not been reachable at {HealthCheckUrl} for 10 minutes: HTTP 503 Service Unavailable"),
+            (LogLevel.Warning, $"Authelia has not been reachable at {HealthCheckUrl} for 11 minutes: HTTP 503 Service Unavailable"),
             LastEntry());
 
         _respond = (_, _) => Respond(HttpStatusCode.OK);
@@ -121,30 +127,78 @@ public sealed class AutheliaHealthMonitorTests
             {
                 (LogLevel.Information, $"Authelia is reachable at {HealthCheckUrl}"),
                 (LogLevel.Warning, outage.Message),
-                (LogLevel.Warning, $"Authelia has not been reachable at {HealthCheckUrl} for 5 minutes: HTTP 503 Service Unavailable"),
-                (LogLevel.Warning, $"Authelia has not been reachable at {HealthCheckUrl} for 10 minutes: HTTP 503 Service Unavailable"),
-                (LogLevel.Information, $"Authelia is reachable again at {HealthCheckUrl}; it was unreachable for 10 minutes"),
+                (LogLevel.Warning, $"Authelia has not been reachable at {HealthCheckUrl} for 6 minutes: HTTP 503 Service Unavailable"),
+                (LogLevel.Warning, $"Authelia has not been reachable at {HealthCheckUrl} for 11 minutes: HTTP 503 Service Unavailable"),
+                (LogLevel.Information, $"Authelia is reachable again at {HealthCheckUrl}; it was unreachable for 11 minutes"),
             },
-            _logger.Entries.Select(e => (e.Level, e.Message)));
+            _logger.Entries.Where(e => e.Level >= LogLevel.Information).Select(e => (e.Level, e.Message)));
         AssertNoErrorsOrStackTraces();
     }
 
     [Fact]
-    public async Task ShortOutage_IsLoggedWithItsLengthInSeconds()
+    public async Task SingleFailedCheck_IsNotWarnedAbout()
     {
+        // Authelia restarting, or a dropped packet, fails one check.
         var monitor = CreateMonitor();
         await monitor.CheckAsync(CancellationToken.None);
+        _respond = (_, _) => Task.FromException<HttpStatusCode>(new HttpRequestException("Connection refused (authelia:9091)"));
+        await CheckAgainAsync(monitor);
+        _respond = (_, _) => Respond(HttpStatusCode.OK);
+        await CheckAgainAsync(monitor);
+
+        // Every other check failing is not warned about either.
+        for (var i = 0; i < 5; i++)
+        {
+            _respond = (_, _) => Respond(HttpStatusCode.BadGateway);
+            await CheckAgainAsync(monitor);
+            _respond = (_, _) => Respond(HttpStatusCode.OK);
+            await CheckAgainAsync(monitor);
+        }
+
+        Assert.Equal(
+            new[] { (LogLevel.Information, $"Authelia is reachable at {HealthCheckUrl}") },
+            _logger.Entries.Where(e => e.Level >= LogLevel.Information).Select(e => (e.Level, e.Message)));
+        Assert.Equal(
+            $"Authelia did not answer at {HealthCheckUrl}: Connection refused (authelia:9091). Checking again in 30 seconds",
+            _logger.Entries[1].Message);
+        Assert.Equal(LogLevel.Debug, _logger.Entries[1].Level);
+    }
+
+    [Fact]
+    public async Task ShortestOutage_IsLoggedAsAMinute_WhenTheTimerTicksEarly()
+    {
+        var monitor = CreateMonitor();
         _respond = (_, _) => Respond(HttpStatusCode.BadGateway);
+        await monitor.CheckAsync(CancellationToken.None);
         await CheckAgainAsync(monitor);
         _respond = (_, _) => Respond(HttpStatusCode.OK);
 
-        // The timer ticks a few milliseconds early or late.
+        // The timer ticks a few milliseconds early or late: 59.995 seconds is reported as the minute it stands for.
         _clock.Advance(AutheliaHealthMonitor.CheckInterval - TimeSpan.FromMilliseconds(5));
         await monitor.CheckAsync(CancellationToken.None);
 
         Assert.Equal(
-            (LogLevel.Information, $"Authelia is reachable again at {HealthCheckUrl}; it was unreachable for 30 seconds"),
+            (LogLevel.Information, $"Authelia is reachable again at {HealthCheckUrl}; it was unreachable for 1 minute"),
             LastEntry());
+    }
+
+    [Fact]
+    public async Task Reminder_IsNotPutOff_WhenTheCheckThatWarnedStartedLate()
+    {
+        var monitor = CreateMonitor();
+        await monitor.CheckAsync(CancellationToken.None);
+        _respond = (_, _) => Respond(HttpStatusCode.ServiceUnavailable);
+        await CheckAgainAsync(monitor);
+
+        // The check that warns starts 20 ms after its tick, the tenth one after it on time: 4:59.98 later.
+        _clock.Advance(AutheliaHealthMonitor.CheckInterval + TimeSpan.FromMilliseconds(20));
+        await monitor.CheckAsync(CancellationToken.None);
+        _clock.Advance(AutheliaHealthMonitor.CheckInterval - TimeSpan.FromMilliseconds(20));
+        await monitor.CheckAsync(CancellationToken.None);
+        await CheckAgainAsync(monitor, times: 9);
+
+        Assert.Equal(2, _logger.Entries.Count(e => e.Level == LogLevel.Warning));
+        Assert.StartsWith($"Authelia has not been reachable at {HealthCheckUrl} for 6 minutes", LastEntry().Message);
     }
 
     [Fact]
@@ -212,7 +266,7 @@ public sealed class AutheliaHealthMonitorTests
             _ => throw new UnreachableException(),
         };
 
-        await CheckAgainAsync(monitor);
+        await CheckAgainAsync(monitor, times: AutheliaHealthMonitor.FailedChecksBeforeWarning);
 
         var warning = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Warning);
         Assert.StartsWith($"Authelia stopped responding at {HealthCheckUrl}: {reason}. Until it recovers", warning.Message);
@@ -224,19 +278,23 @@ public sealed class AutheliaHealthMonitorTests
     {
         var monitor = CreateMonitor();
         await monitor.CheckAsync(CancellationToken.None);
-        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _respond = async (_, cancellationToken) =>
-        {
-            sent.TrySetResult();
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-            throw new UnreachableException();
-        };
-        _clock.Advance(AutheliaHealthMonitor.CheckInterval);
 
-        var check = monitor.CheckAsync(CancellationToken.None);
-        await sent.Task.WaitAsync(WaitLimit);
-        _clock.Advance(AutheliaHealthMonitor.RequestTimeout);
-        await check.WaitAsync(WaitLimit);
+        for (var i = 0; i < AutheliaHealthMonitor.FailedChecksBeforeWarning; i++)
+        {
+            var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _respond = async (_, cancellationToken) =>
+            {
+                sent.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new UnreachableException();
+            };
+            _clock.Advance(AutheliaHealthMonitor.CheckInterval - AutheliaHealthMonitor.RequestTimeout);
+
+            var check = monitor.CheckAsync(CancellationToken.None);
+            await sent.Task.WaitAsync(WaitLimit);
+            _clock.Advance(AutheliaHealthMonitor.RequestTimeout);
+            await check.WaitAsync(WaitLimit);
+        }
 
         var warning = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Warning);
         Assert.StartsWith($"Authelia stopped responding at {HealthCheckUrl}: no response within 10 seconds. Until it recovers", warning.Message);
@@ -266,14 +324,15 @@ public sealed class AutheliaHealthMonitorTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("  ")]
-    public async Task WithoutAnUrl_NothingIsChecked_AndEnabledAutheliaGetsAHint(string? url)
+    public async Task WithoutAnUrl_NothingIsChecked_AndEnabledAutheliaGetsADebugHint(string? url)
     {
         using var monitor = CreateMonitor(url, autheliaEnabled: true);
 
         await RunUntilFinishedAsync(monitor);
 
+        // Debug, so it stays out of the container log and app.log of every deployment that does not set AUTHELIA_URL.
         var hint = Assert.Single(_logger.Entries);
-        Assert.Equal(LogLevel.Information, hint.Level);
+        Assert.Equal(LogLevel.Debug, hint.Level);
         Assert.StartsWith("Set AUTHELIA_URL to Authelia's address, such as http://authelia:9091, to have Authelia outages logged", hint.Message);
         Assert.Empty(_requests);
     }
@@ -321,7 +380,7 @@ public sealed class AutheliaHealthMonitorTests
         await CheckAgainAsync(monitor);
 
         Assert.Equal(
-            new[] { LogLevel.Information, LogLevel.Warning, LogLevel.Information },
+            new[] { LogLevel.Information, LogLevel.Debug, LogLevel.Warning, LogLevel.Information },
             _logger.Entries.Select(e => e.Level));
         Assert.All(_logger.Entries, e =>
         {
@@ -375,6 +434,88 @@ public sealed class AutheliaHealthMonitorTests
         Assert.Equal("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)", _requests.First().UserAgent);
         Assert.Contains(logs.Categories, c => c.StartsWith("System.Net.Http.HttpClient.Control.", StringComparison.Ordinal));
         Assert.DoesNotContain(logs.Categories, c => c.StartsWith($"System.Net.Http.HttpClient.{AutheliaHealthMonitor.HttpClientName}.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Registration_KeepsTheChecksOutOfTheHttpClientMetrics()
+    {
+        // Real handlers, as the metrics are recorded inside SocketsHttpHandler; each server answers one request.
+        using var checkServer = StartServer(out var checkPort, out var checkServed);
+        using var controlServer = StartServer(out var controlPort, out var controlServed);
+        var measurements = new ConcurrentQueue<(string Meter, int? Port)>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name is "System.Net.Http" or AutheliaHealthMonitor.UnobservedMeterName)
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, _, tags, _) => measurements.Enqueue((instrument.Meter.Name, PortOf(tags))));
+        listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) => measurements.Enqueue((instrument.Meter.Name, PortOf(tags))));
+        listener.Start();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddMetrics();
+        AddComicMaintainerHostedServices(services);
+        await using var provider = services.BuildServiceProvider();
+        var clients = provider.GetRequiredService<IHttpClientFactory>();
+
+        using (var check = await clients.CreateClient(AutheliaHealthMonitor.HttpClientName).GetAsync($"http://127.0.0.1:{checkPort}/api/health"))
+        using (var control = await clients.CreateClient().GetAsync($"http://127.0.0.1:{controlPort}/api/health"))
+        {
+            Assert.Equal(HttpStatusCode.OK, check.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, control.StatusCode);
+        }
+
+        await Task.WhenAll(checkServed, controlServed).WaitAsync(WaitLimit);
+        Assert.Contains(measurements, m => m == ("System.Net.Http", controlPort));
+        Assert.Contains(measurements, m => m == (AutheliaHealthMonitor.UnobservedMeterName, checkPort));
+        Assert.DoesNotContain(measurements, m => m == ("System.Net.Http", checkPort));
+    }
+
+    private static int? PortOf(ReadOnlySpan<KeyValuePair<string, object?>> tags)
+    {
+        foreach (var tag in tags)
+        {
+            if (tag.Key == "server.port" && tag.Value is int port)
+            {
+                return port;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>A loopback HTTP server that answers one request with an empty 200.</summary>
+    private static TcpListener StartServer(out int port, out Task served)
+    {
+        var server = new TcpListener(IPAddress.Loopback, 0);
+        server.Start();
+        port = ((IPEndPoint)server.LocalEndpoint).Port;
+        served = ServeOneAsync(server);
+        return server;
+
+        static async Task ServeOneAsync(TcpListener server)
+        {
+            using var client = await server.AcceptTcpClientAsync();
+            await using var stream = client.GetStream();
+            var received = new StringBuilder();
+            var buffer = new byte[4096];
+            while (!received.ToString().Contains("\r\n\r\n", StringComparison.Ordinal))
+            {
+                var read = await stream.ReadAsync(buffer);
+                if (read == 0)
+                {
+                    return;
+                }
+
+                received.Append(Encoding.ASCII.GetString(buffer, 0, read));
+            }
+
+            await stream.WriteAsync("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray());
+        }
     }
 
     private AutheliaHealthMonitor CreateMonitor(string? url = AutheliaUrl, bool autheliaEnabled = true)

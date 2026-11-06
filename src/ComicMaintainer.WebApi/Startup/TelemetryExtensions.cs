@@ -51,6 +51,7 @@ internal static class TelemetryExtensions
                 metrics
                     .AddMeter(ComicMaintainerMetrics.MeterName)
                     .AddAspNetCoreInstrumentation()
+                    // Authelia health checks are recorded on AutheliaHealthMonitor.UnobservedMeterName, not added here.
                     .AddHttpClientInstrumentation()
                     .AddRuntimeInstrumentation();
 

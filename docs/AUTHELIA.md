@@ -302,14 +302,18 @@ and logs each change, in the container log and in `app.log` in the config direct
 [INF] Checking Authelia at http://authelia:9091/api/health every 30 seconds
 [INF] Authelia is reachable at http://authelia:9091/api/health
 [WRN] Authelia stopped responding at http://authelia:9091/api/health: Name or service not known (authelia:9091). Until it recovers, the reverse proxy rejects requests to ComicMaintainer, usually with HTTP 500 or 502; ComicMaintainer itself is still running
-[WRN] Authelia has not been reachable at http://authelia:9091/api/health for 5 minutes: Name or service not known (authelia:9091)
-[INF] Authelia is reachable again at http://authelia:9091/api/health; it was unreachable for 7 minutes
+[WRN] Authelia has not been reachable at http://authelia:9091/api/health for 6 minutes: Name or service not known (authelia:9091)
+[INF] Authelia is reachable again at http://authelia:9091/api/health; it was unreachable for 8 minutes
 ```
 
 - A check fails when Authelia does not answer within 10 seconds or answers with an error status. The outage is logged
-  at the first failed check, again every 5 minutes while it lasts, and with its length when Authelia recovers.
-- If the first check after ComicMaintainer starts fails, the warning waits for the next check, as Authelia may still
-  be starting.
+  when two checks in a row have failed, again every 5 minutes while it lasts, and with its length when Authelia
+  recovers. A single failed check, such as while Authelia restarts or is still starting alongside ComicMaintainer,
+  is only written to `debug.log`.
+- The length of an outage is counted from the last check Authelia answered, so it may be up to 30 seconds longer
+  than the outage was.
+- The checks are left out of the OpenTelemetry HTTP client traces and metrics, which would otherwise get a request
+  every 30 seconds.
 - Outages are warnings, not errors, so they are not sent as
   [automated error reports](DEBUG_LOGGING_GUIDE.md#automated-error-report).
 - The check works whether or not `AUTHELIA_ENABLED` is set, for example when Authelia guards ComicMaintainer at the

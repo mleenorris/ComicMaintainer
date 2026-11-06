@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ComicMaintainer logs showed nothing wrong. Set the new `AUTHELIA_URL` to an address at which
   the container can reach Authelia, such as `http://authelia:9091`, and Authelia's health
   endpoint is checked every 30 seconds. The container log and `app.log` get a warning with the
-  reason, such as `Connection refused`, when Authelia stops responding, a reminder every
+  reason, such as `Connection refused`, when two checks in a row have failed, a reminder every
   5 minutes while it is down, and the length of the outage when it recovers. The check works
   whether or not `AUTHELIA_ENABLED` is set; without `AUTHELIA_URL`, nothing is checked. See
   [Logging Authelia Outages](docs/AUTHELIA.md#logging-authelia-outages).

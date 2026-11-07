@@ -8,8 +8,8 @@ using Microsoft.Extensions.Options;
 namespace ComicMaintainer.WebApi.Services;
 
 /// <summary>
-/// Hosted service that periodically cleans up stale database entries and refreshes the
-/// SQLite query-planner statistics.
+/// Hosted service that periodically cleans up stale database entries, prunes the processing
+/// history to its retention settings and refreshes the SQLite query-planner statistics.
 /// </summary>
 /// <remarks>
 /// The stale-entry cleanup is guarded by the file store (see
@@ -29,6 +29,7 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<DatabaseCleanupHostedService> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
+    private readonly IProcessingHistoryService? _historyService;
     private readonly TimeSpan _startupDelay;
     private Timer? _timer;
     private readonly SemaphoreSlim _cleanupLock = new(1, 1);
@@ -44,12 +45,14 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
         IOptionsMonitor<AppSettings> appSettings,
         ILogger<DatabaseCleanupHostedService> logger,
         IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
-        TimeSpan? startupDelay = null)
+        TimeSpan? startupDelay = null,
+        IProcessingHistoryService? historyService = null)
     {
         _fileStore = fileStore;
         _appSettings = appSettings;
         _logger = logger;
         _dbContextFactory = dbContextFactory;
+        _historyService = historyService;
         _startupDelay = startupDelay is { } delay
             ? (delay > TimeSpan.Zero ? delay : TimeSpan.Zero)
             : DefaultStartupDelay;
@@ -222,6 +225,7 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
                     break;
             }
 
+            await PruneProcessingHistoryAsync(cancellationToken);
             await RefreshPlannerStatisticsAsync(cancellationToken);
         }
         catch (OperationCanceledException)
@@ -242,6 +246,42 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
             {
                 // Disposed while a timer run was finishing; nothing waits on the lock any more.
             }
+        }
+    }
+
+    /// <summary>
+    /// Prunes processing history to <see cref="AppSettings.ProcessingHistoryRetentionDays"/> and
+    /// <see cref="AppSettings.ProcessingHistoryMaxEntries"/>. Failures are logged and never fail
+    /// the cleanup run.
+    /// </summary>
+    private async Task PruneProcessingHistoryAsync(CancellationToken cancellationToken)
+    {
+        if (_historyService is null)
+        {
+            return;
+        }
+
+        var settings = _appSettings.CurrentValue;
+        try
+        {
+            var pruned = await _historyService.PruneAsync(
+                settings.ProcessingHistoryRetentionDays,
+                settings.ProcessingHistoryMaxEntries,
+                cancellationToken);
+            if (pruned > 0)
+            {
+                _logger.LogInformation(
+                    "Pruned {Count} processing history entries (keeping {Days} day(s), at most {MaxEntries} entries)",
+                    pruned, settings.ProcessingHistoryRetentionDays, settings.ProcessingHistoryMaxEntries);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Failed to prune processing history");
         }
     }
 

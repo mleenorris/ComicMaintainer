@@ -203,6 +203,57 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ScheduledRun_PrunesProcessingHistoryToTheRetentionSettings()
+    {
+        _mockOptions.Setup(x => x.CurrentValue).Returns(new AppSettings
+        {
+            DatabaseCleanupIntervalHours = 12,
+            ProcessingHistoryRetentionDays = 30,
+            ProcessingHistoryMaxEntries = 1000,
+        });
+        var history = new Mock<IProcessingHistoryService>();
+        history.Setup(h => h.PruneAsync(30, 1000, It.IsAny<CancellationToken>())).ReturnsAsync(250);
+        using var service = new DatabaseCleanupHostedService(
+            _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
+            startupDelay: TimeSpan.Zero, historyService: history.Object);
+
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
+
+        history.Verify(h => h.PruneAsync(30, 1000, It.IsAny<CancellationToken>()), Times.Once);
+        VerifyLog(LogLevel.Information, "Pruned 250 processing history entries", Times.Once());
+    }
+
+    [Fact]
+    public async Task ScheduledRun_PrunesHistoryEvenWhenTheStaleCleanupWasGuarded()
+    {
+        SetupCleanup(new StaleCleanupResult { Status = StaleCleanupStatus.WatchedDirectoryEmpty, Message = "unmounted" });
+        var history = new Mock<IProcessingHistoryService>();
+        using var service = new DatabaseCleanupHostedService(
+            _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
+            startupDelay: TimeSpan.Zero, historyService: history.Object);
+
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
+
+        history.Verify(h => h.PruneAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ScheduledRun_HistoryPruneFailure_IsLoggedAndDoesNotFailTheRun()
+    {
+        var history = new Mock<IProcessingHistoryService>();
+        history.Setup(h => h.PruneAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        using var service = new DatabaseCleanupHostedService(
+            _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
+            startupDelay: TimeSpan.Zero, historyService: history.Object);
+
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
+
+        VerifyLog(LogLevel.Warning, "Failed to prune processing history", Times.Once());
+        VerifyLog(LogLevel.Error, "Error during scheduled database cleanup", Times.Never());
+    }
+
+    [Fact]
     public async Task StopAsync_LogsStoppingMessage()
     {
         // Arrange

@@ -732,6 +732,8 @@ test("a Combine Folders start waiting for the server isn't released by the auto-
         routes: {
             ...job.routes,
             ...nextJobRoutes(),
+            // Combine asks the server for its plan before it asks the user.
+            'POST /api/files/combine-folders/preview': { moves: [] },
             'POST /api/files/combine-folders': () => combine.promise,
             'GET /api/files/combinable-folders': { groups: [] }
         }
@@ -778,6 +780,8 @@ test("closing an ended job's dialog doesn't release a pending Combine Folders st
         routes: {
             ...job.routes,
             ...nextJobRoutes(),
+            // Combine asks the server for its plan before it asks the user.
+            'POST /api/files/combine-folders/preview': { moves: [] },
             'POST /api/files/combine-folders': () => combine.promise,
             'GET /api/files/combinable-folders': { groups: [] }
         }
@@ -809,6 +813,46 @@ test("closing an ended job's dialog doesn't release a pending Combine Folders st
     await page.settle();
     h.assertProgress(page, { open: true, title: 'Combining 3 file(s)...', cancelVisible: true, closeVisible: false });
     assert.equal(page.run('currentJobId'), h.OTHER_JOB_ID);
+    assert.deepEqual(page.errors, []);
+});
+
+test("a job started while Combine Folders fetches its plan stops the Combine before it asks", async (t) => {
+    // Combine fetches the server's plan before it asks; a job started
+    // meanwhile must not be taken over by the Combine's start.
+    const job = h.trackedJob();
+    const preview = deferred();
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            ...job.routes,
+            'POST /api/files/combine-folders/preview': () => preview.promise,
+            'POST /api/files/combine-folders': { jobId: h.OTHER_JOB_ID, totalItems: 3, skipped: 0 },
+            'GET /api/files/combinable-folders': { groups: [] }
+        }
+    });
+    page.run(`
+        combineFolderGroups = [{ groupKey: 'batman', totalFileCount: 2, folders: [
+            { directory: 'Batman', fileCount: 1, totalSize: 1 },
+            { directory: 'Batman (2016)', fileCount: 1, totalSize: 1 }
+        ] }];
+        combineFolderIndex = 0;
+        combineFolderSelectedDestination = 'Batman (2016)';
+    `);
+    page.run('confirmCombineFolders()');
+    await page.settle();
+    assert.equal(h.requests(page, 'POST', '/api/files/combine-folders/preview').length, 1);
+
+    await h.startTrackedJob(page);
+    assert.equal(page.run('currentJobId'), JOB_ID);
+
+    preview.resolve({ moves: [], foldersToRemove: [{ directory: 'Batman', disposableFiles: [], disposableFileCount: 0 }] });
+    await page.settle();
+
+    assert.deepEqual(h.takeConfirms(page), [], 'the Combine is not asked');
+    assert.deepEqual(h.takeMessages(page), [REFUSED]);
+    assert.equal(h.requests(page, 'POST', '/api/files/combine-folders').length, 0);
+    assert.equal(page.run('currentJobId'), JOB_ID, 'the started job is still followed');
+    assert.match(page.$('#combineFoldersPreview').textContent, /Folders removed after the move \(1\)/);
+    assert.equal(page.$('#combineFoldersConfirmBtn').disabled, false);
     assert.deepEqual(page.errors, []);
 });
 

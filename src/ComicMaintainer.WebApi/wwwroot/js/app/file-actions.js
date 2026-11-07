@@ -746,6 +746,12 @@
             }
             combineFolderActionInFlight = false;
             if (!plan) return;
+            // Another job may have started while the preview was on its way;
+            // say so (canStartJob does) and leave the plan on screen.
+            if (!jobProgress.canStartJob()) {
+                showCombinePreview(body, renderCombinePreviewContent(plan));
+                return;
+            }
             if (!confirm(buildCombineConfirmMessage(sourceCount, destination, plan))) {
                 // Leave the plan on screen, so the user can look at it again.
                 showCombinePreview(body, renderCombinePreviewContent(plan));

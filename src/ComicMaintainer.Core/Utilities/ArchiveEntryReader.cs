@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Compression;
 using SharpCompress.Archives;
@@ -14,15 +15,16 @@ namespace ComicMaintainer.Core.Utilities;
 /// <remarks>
 /// Every read is checked twice: first against the sizes the archive declares
 /// (so an honest oversized entry is refused before anything is decompressed),
-/// then while copying, because declared sizes can lie. The limits are far above
-/// anything a real comic needs: page images are typically well under 20 MiB and
-/// even 2,000-page omnibus editions stay an order of magnitude under the entry
-/// cap.
+/// then while copying, because declared sizes can lie. Entry counts are checked
+/// before the entry list is built (<see cref="OpenZip"/> for ZIP; a running
+/// count for lazily enumerated RAR headers). The limits are far above anything
+/// a real comic needs: page images are typically well under 20 MiB and even
+/// 2,000-page omnibus editions stay an order of magnitude under the entry cap.
 /// </remarks>
 public static class ArchiveEntryReader
 {
-    /// <summary>Largest page image, uncompressed, that is read into memory: 128 MiB.</summary>
-    public const long MaxPageBytes = 128L * 1024 * 1024;
+    /// <summary>Largest page image, uncompressed, that is read into memory: 100 MiB.</summary>
+    public const long MaxPageBytes = 100L * 1024 * 1024;
 
     /// <summary>Most entries (files and directories) an archive may list: 20,000.</summary>
     public const int MaxEntries = 20_000;
@@ -43,6 +45,16 @@ public static class ArchiveEntryReader
 
     private const int CopyBufferBytes = 81920;
 
+    // ZIP record signatures and sizes (APPNOTE.TXT 4.3.12-4.3.16).
+    private const uint ZipCentralHeaderSignature = 0x02014b50;
+    private const int ZipCentralHeaderLength = 46;
+    private const uint ZipEndOfCentralDirectorySignature = 0x06054b50;
+    private const int ZipEndOfCentralDirectoryLength = 22;
+    private const uint Zip64LocatorSignature = 0x07064b50;
+    private const int Zip64LocatorLength = 20;
+    private const uint Zip64EndOfCentralDirectorySignature = 0x06064b50;
+    private const int Zip64EndOfCentralDirectoryLength = 56;
+
     /// <summary>
     /// Refuses an archive that lists more than <see cref="MaxEntries"/> entries.
     /// </summary>
@@ -57,6 +69,149 @@ public static class ArchiveEntryReader
                 CultureInfo.InvariantCulture,
                 $"'{archiveName}' has more than {MaxEntries:N0} entries, which is over the limit for a comic archive."));
         }
+    }
+
+    /// <summary>
+    /// Opens a ZIP (CBZ) archive for reading, refusing it when its central
+    /// directory lists more than <see cref="MaxEntries"/> entries.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ZipArchive"/> builds an object for every central-directory
+    /// record the first time <see cref="ZipArchive.Entries"/> is read, and keeps
+    /// reading records until one does not start with the record signature,
+    /// whatever count the archive declares. So the records are counted here,
+    /// the same way and without allocating per record, before
+    /// <see cref="ZipArchive"/> sees them. The file is opened once and shared
+    /// the way <see cref="ZipFile.OpenRead"/> shares it.
+    /// </remarks>
+    /// <exception cref="ArchiveLimitExceededException">The archive has too many entries.</exception>
+    public static ZipArchive OpenZip(string filePath)
+    {
+        var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096);
+        try
+        {
+            EnsureZipEntryCountWithinLimit(stream, Path.GetFileName(filePath));
+            stream.Position = 0;
+            return new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Counts the central-directory records of the ZIP archive in
+    /// <paramref name="stream"/>, stopping with an error once there are more than
+    /// <see cref="MaxEntries"/>. A stream without a recognisable end-of-central-
+    /// directory record is left for <see cref="ZipArchive"/> to reject.
+    /// </summary>
+    /// <exception cref="ArchiveLimitExceededException">The archive has too many entries.</exception>
+    internal static void EnsureZipEntryCountWithinLimit(Stream stream, string archiveName)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        var directoryStart = TryLocateZipCentralDirectory(stream);
+        if (directoryStart is null || directoryStart.Value < 0 || directoryStart.Value >= stream.Length)
+        {
+            return;
+        }
+
+        stream.Position = directoryStart.Value;
+        Span<byte> header = stackalloc byte[ZipCentralHeaderLength];
+        long count = 0;
+        while (stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) == header.Length
+            && BinaryPrimitives.ReadUInt32LittleEndian(header) == ZipCentralHeaderSignature)
+        {
+            EnsureEntryCountWithinLimit(++count, archiveName);
+            // Skip the variable part: file name, extra field and comment.
+            var variableLength = BinaryPrimitives.ReadUInt16LittleEndian(header[28..])
+                + BinaryPrimitives.ReadUInt16LittleEndian(header[30..])
+                + BinaryPrimitives.ReadUInt16LittleEndian(header[32..]);
+            stream.Seek(variableLength, SeekOrigin.Current);
+        }
+    }
+
+    /// <summary>
+    /// Finds where the central directory starts, from the end-of-central-
+    /// directory record (searched backwards from the end of the file, like
+    /// <see cref="ZipArchive"/> does) or, when that record defers to it, the
+    /// ZIP64 record. Returns <c>null</c> when there is no such record.
+    /// </summary>
+    private static long? TryLocateZipCentralDirectory(Stream stream)
+    {
+        var length = stream.Length;
+        if (length < ZipEndOfCentralDirectoryLength)
+        {
+            return null;
+        }
+
+        // The record ends the file, followed only by a comment of up to 64 KiB.
+        var tailLength = (int)Math.Min(length, ZipEndOfCentralDirectoryLength + ushort.MaxValue);
+        var tail = new byte[tailLength];
+        stream.Position = length - tailLength;
+        stream.ReadExactly(tail);
+
+        for (var i = tailLength - ZipEndOfCentralDirectoryLength; i >= 0; i--)
+        {
+            var record = tail.AsSpan(i);
+            if (BinaryPrimitives.ReadUInt32LittleEndian(record) != ZipEndOfCentralDirectorySignature)
+            {
+                continue;
+            }
+
+            var recordStart = length - tailLength + i;
+            var disk = BinaryPrimitives.ReadUInt16LittleEndian(record[4..]);
+            var entries = BinaryPrimitives.ReadUInt16LittleEndian(record[10..]);
+            var directoryOffset = BinaryPrimitives.ReadUInt32LittleEndian(record[16..]);
+            if (disk == ushort.MaxValue || entries == ushort.MaxValue || directoryOffset == uint.MaxValue)
+            {
+                return TryReadZip64DirectoryStart(stream, recordStart) ?? directoryOffset;
+            }
+
+            return directoryOffset;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the central-directory offset from the ZIP64 end-of-central-directory
+    /// record that the locator just before <paramref name="recordStart"/> points to.
+    /// Returns <c>null</c> when either is missing, as <see cref="ZipArchive"/>
+    /// then also falls back to the classic record.
+    /// </summary>
+    private static long? TryReadZip64DirectoryStart(Stream stream, long recordStart)
+    {
+        if (recordStart < Zip64LocatorLength)
+        {
+            return null;
+        }
+
+        Span<byte> locator = stackalloc byte[Zip64LocatorLength];
+        stream.Position = recordStart - Zip64LocatorLength;
+        stream.ReadExactly(locator);
+        if (BinaryPrimitives.ReadUInt32LittleEndian(locator) != Zip64LocatorSignature)
+        {
+            return null;
+        }
+
+        var zip64RecordStart = BinaryPrimitives.ReadUInt64LittleEndian(locator[8..]);
+        if (zip64RecordStart > (ulong)(stream.Length - Zip64EndOfCentralDirectoryLength))
+        {
+            return null;
+        }
+
+        Span<byte> zip64Record = stackalloc byte[Zip64EndOfCentralDirectoryLength];
+        stream.Position = (long)zip64RecordStart;
+        stream.ReadExactly(zip64Record);
+        if (BinaryPrimitives.ReadUInt32LittleEndian(zip64Record) != Zip64EndOfCentralDirectorySignature)
+        {
+            return null;
+        }
+
+        var directoryOffset = BinaryPrimitives.ReadUInt64LittleEndian(zip64Record[48..]);
+        return directoryOffset > long.MaxValue ? null : (long)directoryOffset;
     }
 
     /// <summary>

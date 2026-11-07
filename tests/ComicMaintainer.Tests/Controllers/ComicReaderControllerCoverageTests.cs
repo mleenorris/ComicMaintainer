@@ -203,8 +203,10 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         _reader.Setup(r => r.GetPageCountAsync(physicalPath)).ReturnsAsync(24);
         _reader.Setup(r => r.GetPageAsync(physicalPath, 1)).ReturnsAsync((new byte[] { 0xFF, 0xD8 }, "image/jpeg"));
         _reader.Setup(r => r.GetPageNamesAsync(physicalPath)).ReturnsAsync(new List<string> { "001.jpg" });
+        _coverCache.Setup(c => c.GetValidator(physicalPath))
+            .Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
         _coverCache.Setup(c => c.GetOrCreateAsync(physicalPath, _cts.Token))
-            .ReturnsAsync(new FileCoverCacheEntry(new byte[] { 1 }, "image/jpeg", DateTimeOffset.UnixEpoch, "orig"));
+            .ReturnsAsync(new FileCoverCacheEntry(new byte[] { 1 }, "image/jpeg", DateTimeOffset.UnixEpoch, 4, "orig"));
         _library.Setup(l => l.GetAdjacentIssueAsync(libraryPath, "next", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AdjacentIssueResult { Found = true, HasAdjacent = false });
         _fileStore.Setup(f => f.GetReadingProgressAsync(libraryPath, _cts.Token)).ReturnsAsync(7);
@@ -299,6 +301,18 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         Assert500(result.Result, "Error reading comic file");
     }
 
+    [Fact]
+    public async Task GetComicInfo_ArchiveOverTheReadLimits_Returns422WithTheReason()
+    {
+        _reader.Setup(r => r.GetPageCountAsync(_file))
+            .ThrowsAsync(new ArchiveLimitExceededException("'Saga 001.cbz' has more than 20,000 entries, which is over the limit for a comic archive."));
+
+        var result = await CreateController().GetComicInfo(_file);
+
+        AssertError<UnprocessableEntityObjectResult>(result.Result,
+            "'Saga 001.cbz' has more than 20,000 entries, which is over the limit for a comic archive.");
+    }
+
     // ---- GetPage ------------------------------------------------------------------------
 
     [Theory]
@@ -323,7 +337,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GetPage_ExistingPage_StreamsImageWithPublicCacheHeader()
+    public async Task GetPage_ExistingPage_StreamsImageThatOnlyTheRequestingBrowserMayCache()
     {
         var bytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 };
         _reader.Setup(r => r.GetPageAsync(_file, 3)).ReturnsAsync((bytes, "image/jpeg"));
@@ -334,7 +348,70 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var file = Assert.IsType<FileContentResult>(result);
         Assert.Equal(bytes, file.FileContents);
         Assert.Equal("image/jpeg", file.ContentType);
-        Assert.Equal("public, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+        // Pages are behind authentication: never "public", so no shared cache stores them.
+        Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task GetPage_ExistingPage_CarriesValidatorsFromTheFilesMetadata()
+    {
+        _reader.Setup(r => r.GetPageAsync(_file, 3)).ReturnsAsync((new byte[] { 1 }, "image/png"));
+        var lastWrite = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(_file, lastWrite);
+        var controller = CreateController();
+
+        await controller.GetPage(_file, 3);
+
+        var length = new FileInfo(_file).Length;
+        Assert.Equal(ComicReaderController.BuildPageETag(length, lastWrite, 3), controller.Response.Headers.ETag.ToString());
+        Assert.Equal("Wed, 04 Mar 2026 05:06:07 GMT", controller.Response.Headers.LastModified.ToString());
+    }
+
+    [Fact]
+    public async Task GetPage_Revalidation_Returns304WithoutOpeningTheArchive()
+    {
+        var info = new FileInfo(_file);
+        var controller = CreateController();
+        controller.Request.Headers.IfNoneMatch = ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 2);
+
+        var result = await controller.GetPage(_file, 2);
+
+        Assert.Equal(StatusCodes.Status304NotModified, Assert.IsType<StatusCodeResult>(result).StatusCode);
+        Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+        Assert.Equal(ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 2), controller.Response.Headers.ETag.ToString());
+        _reader.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GetPage_RevalidationAfterTheFileChanged_ServesTheNewPage()
+    {
+        var info = new FileInfo(_file);
+        var stale = ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 2);
+        File.WriteAllBytes(_file, new byte[] { 0x50, 0x4B, 0x05, 0x06, 0x00 });
+        _reader.Setup(r => r.GetPageAsync(_file, 2)).ReturnsAsync((new byte[] { 7 }, "image/jpeg"));
+        var controller = CreateController();
+        controller.Request.Headers.IfNoneMatch = stale;
+
+        var result = await controller.GetPage(_file, 2);
+
+        Assert.Equal(new byte[] { 7 }, Assert.IsType<FileContentResult>(result).FileContents);
+        Assert.NotEqual(stale, controller.Response.Headers.ETag.ToString());
+    }
+
+    [Fact]
+    public void BuildPageETag_DiffersByPageLengthAndLastWriteTime()
+    {
+        var when = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var tags = new[]
+        {
+            ComicReaderController.BuildPageETag(100, when, 1),
+            ComicReaderController.BuildPageETag(100, when, 2),
+            ComicReaderController.BuildPageETag(101, when, 1),
+            ComicReaderController.BuildPageETag(100, when.AddTicks(1), 1),
+        };
+
+        Assert.Equal(tags.Length, tags.Distinct().Count());
+        Assert.All(tags, tag => Assert.Matches("^\"p[0-9]+-[0-9a-f]+-[0-9a-f]+\"$", tag));
     }
 
     [Fact]
@@ -345,6 +422,19 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var result = await CreateController().GetPage(_file, 1);
 
         Assert500(result, "Error reading page");
+    }
+
+    [Fact]
+    public async Task GetPage_PageOverTheReadLimits_Returns422WithTheReasonAndNoCacheHeaders()
+    {
+        _reader.Setup(r => r.GetPageAsync(_file, 1))
+            .ThrowsAsync(new ArchiveLimitExceededException("Archive entry 'p1.png' is 2 GiB uncompressed, over the 100 MiB limit."));
+        var controller = CreateController();
+
+        var result = await controller.GetPage(_file, 1);
+
+        AssertError<UnprocessableEntityObjectResult>(result, "Archive entry 'p1.png' is 2 GiB uncompressed, over the 100 MiB limit.");
+        Assert.Equal(0, controller.Response.Headers.ETag.Count);
     }
 
     // ---- GetCover -----------------------------------------------------------------------
@@ -383,6 +473,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [Fact]
     public async Task GetCover_NoExtractableCover_ReturnsNotFound()
     {
+        _coverCache.Setup(c => c.GetValidator(_file)).Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
         _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
             .ReturnsAsync(default(FileCoverCacheEntry?));
 
@@ -395,7 +486,8 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     public async Task GetCover_FreshCover_SetsValidatorsAndHttpDateLastModified()
     {
         var entry = new FileCoverCacheEntry(
-            new byte[] { 1, 2, 3 }, "image/jpeg", new DateTimeOffset(2026, 1, 2, 5, 4, 5, TimeSpan.FromHours(2)), "orig");
+            new byte[] { 1, 2, 3 }, "image/jpeg", new DateTimeOffset(2026, 1, 2, 5, 4, 5, TimeSpan.FromHours(2)), 4, "orig");
+        _coverCache.Setup(c => c.GetValidator(_file)).Returns(entry.Validator);
         _coverCache.Setup(c => c.GetOrCreateAsync(_file, _cts.Token)).ReturnsAsync(entry);
         var controller = CreateController();
 
@@ -405,17 +497,17 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         Assert.Equal(new byte[] { 1, 2, 3 }, file.FileContents);
         Assert.Equal("image/jpeg", file.ContentType);
         var headers = controller.Response.Headers;
-        Assert.Equal(ComicReaderController.BuildCoverETag(entry), headers.ETag.ToString());
-        Assert.Equal("public, max-age=3600", headers.CacheControl.ToString());
+        Assert.Equal(ComicReaderController.BuildCoverETag(entry.Validator), headers.ETag.ToString());
+        Assert.Equal("private, max-age=3600", headers.CacheControl.ToString());
         Assert.Equal("Fri, 02 Jan 2026 03:04:05 GMT", headers.LastModified.ToString());
     }
 
     [Fact]
     public async Task GetCover_NotModified_KeepsCacheHeadersButOmitsBody()
     {
-        var entry = new FileCoverCacheEntry(new byte[] { 9 }, "image/webp", DateTimeOffset.UnixEpoch, "w480");
-        _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>())).ReturnsAsync(entry);
-        var etag = ComicReaderController.BuildCoverETag(entry);
+        var validator = new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "w480");
+        _coverCache.Setup(c => c.GetValidator(_file)).Returns(validator);
+        var etag = ComicReaderController.BuildCoverETag(validator);
         var controller = CreateController();
         controller.Request.Headers.IfNoneMatch = etag;
 
@@ -424,13 +516,15 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var status = Assert.IsType<StatusCodeResult>(result);
         Assert.Equal(StatusCodes.Status304NotModified, status.StatusCode);
         Assert.Equal(etag, controller.Response.Headers.ETag.ToString());
-        Assert.Equal("public, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+        Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
         Assert.Equal(0, controller.Response.Headers.LastModified.Count);
+        _coverCache.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task GetCover_CacheFailure_Returns500()
     {
+        _coverCache.Setup(c => c.GetValidator(_file)).Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
         _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("cache dir unavailable"));
 
@@ -450,7 +544,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [InlineData("wébp", "\"10-3-wbp\"")]
     public void BuildCoverETag_EncodesTicksLengthAndSanitisedVariant(string? variant, string expected)
     {
-        var entry = new FileCoverCacheEntry(new byte[3], "image/jpeg", new DateTimeOffset(16, TimeSpan.Zero), variant!);
+        var entry = new FileCoverValidator(3, new DateTimeOffset(16, TimeSpan.Zero), variant!);
 
         Assert.Equal(expected, ComicReaderController.BuildCoverETag(entry));
     }

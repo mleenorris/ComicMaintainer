@@ -1,4 +1,4 @@
-using System.IO.Compression;
+using System.Collections.Concurrent;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Caching.Memory;
@@ -18,15 +18,18 @@ namespace ComicMaintainer.Core.Services;
 /// small, size-bounded in-memory cache keyed on the file path and validated
 /// against the file's length and last-write time, so a page turn costs one
 /// <c>stat</c> plus the read of the one entry it shows, and counting pages costs
-/// only the <c>stat</c>.
+/// only the <c>stat</c>. Concurrent requests for an archive that is not cached
+/// yet (the reader asks for the page count and prefetches several pages at once)
+/// share one listing.
 /// </para>
 /// <para>
 /// Entries are read through <see cref="ArchiveEntryReader"/>, which refuses
 /// archives with too many entries and entries that would expand past
 /// <see cref="ArchiveEntryReader.MaxPageBytes"/> with an
 /// <see cref="ArchiveLimitExceededException"/>. Those propagate to the caller so it
-/// can report a clear error; every other failure is logged and reported as
-/// "no pages" exactly as before.
+/// can report a clear error; a refused listing is remembered for that version of
+/// the file, so it is not re-read on every request. Every other failure is
+/// logged and reported as "no pages" exactly as before.
 /// </para>
 /// </remarks>
 public class ComicReaderService : IComicReaderService, IDisposable
@@ -41,6 +44,11 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
     private readonly ILogger<ComicReaderService> _logger;
     private readonly MemoryCache _pageIndexes;
+
+    // Listings in progress, per file version, so concurrent cold requests share one.
+    private readonly ConcurrentDictionary<FileVersion, Lazy<Task<PageIndex>>> _listings = new();
+
+    private int _listingCount;
 
     public ComicReaderService(ILogger<ComicReaderService> logger)
         : this(logger, DefaultPageIndexCacheBytes)
@@ -67,6 +75,9 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
     /// <summary>Number of archives whose page list is currently cached (for tests).</summary>
     internal int CachedPageIndexCount => _pageIndexes.Count;
+
+    /// <summary>Number of times an archive has been listed (for tests).</summary>
+    internal int ListingCount => Volatile.Read(ref _listingCount);
 
     public async Task<int> GetPageCountAsync(string filePath)
     {
@@ -109,7 +120,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
                     return null;
                 }
 
-                var data = await Task.Run(() => ReadPage(filePath, index, pageNumber));
+                var data = await Task.Run(() => ReadPage(index, pageNumber));
                 if (data is not null)
                 {
                     return (data, GetContentType(index.Names[pageNumber - 1]));
@@ -164,8 +175,10 @@ public class ComicReaderService : IComicReaderService, IDisposable
     /// Returns the sorted page list for the current version of the file, from the
     /// cache when the file's length and last-write time still match, otherwise by
     /// listing the archive. Returns <c>null</c> when the file is missing or is not
-    /// a supported archive. Failures are not cached.
+    /// a supported archive. Failures are not cached, except a refusal by the
+    /// archive read limits, which is rethrown for as long as the file is unchanged.
     /// </summary>
+    /// <exception cref="ArchiveLimitExceededException">The archive is over the read limits.</exception>
     private async Task<PageIndex?> GetPageIndexAsync(string filePath)
     {
         var info = new FileInfo(filePath);
@@ -188,22 +201,45 @@ public class ComicReaderService : IComicReaderService, IDisposable
             return null;
         }
 
-        var length = info.Length;
-        var lastWriteTicks = info.LastWriteTimeUtc.Ticks;
-        if (_pageIndexes.TryGetValue(filePath, out PageIndex? cached)
-            && cached is not null
-            && cached.Kind == kind
-            && cached.Length == length
-            && cached.LastWriteUtcTicks == lastWriteTicks)
+        var version = new FileVersion(filePath, kind.Value, info.Length, info.LastWriteTimeUtc.Ticks);
+        if (!_pageIndexes.TryGetValue(filePath, out PageIndex? index)
+            || index is null
+            || index.Version != version)
         {
-            return cached;
+            var listing = _listings.GetOrAdd(version, v => new Lazy<Task<PageIndex>>(() => ListAndCacheAsync(v)));
+            try
+            {
+                index = await listing.Value;
+            }
+            finally
+            {
+                // Only this listing: a later one for the same version may have started since.
+                _listings.TryRemove(KeyValuePair.Create(version, listing));
+            }
         }
 
-        var index = await Task.Run(() => kind == ArchiveKind.Zip
-            ? BuildZipIndex(filePath, length, lastWriteTicks)
-            : BuildRarIndex(filePath, length, lastWriteTicks));
+        if (index.Refusal is not null)
+        {
+            throw new ArchiveLimitExceededException(index.Refusal);
+        }
 
-        _pageIndexes.Set(filePath, index, new MemoryCacheEntryOptions
+        return index;
+    }
+
+    private async Task<PageIndex> ListAndCacheAsync(FileVersion version)
+    {
+        PageIndex index;
+        try
+        {
+            index = await Task.Run(() => version.Kind == ArchiveKind.Zip ? BuildZipIndex(version) : BuildRarIndex(version));
+        }
+        catch (ArchiveLimitExceededException ex)
+        {
+            index = PageIndex.Refused(version, ex.Message);
+        }
+
+        Interlocked.Increment(ref _listingCount);
+        _pageIndexes.Set(version.Path, index, new MemoryCacheEntryOptions
         {
             Size = index.EstimatedBytes,
             SlidingExpiration = PageIndexSlidingExpiration,
@@ -211,11 +247,10 @@ public class ComicReaderService : IComicReaderService, IDisposable
         return index;
     }
 
-    private static PageIndex BuildZipIndex(string filePath, long length, long lastWriteTicks)
+    private static PageIndex BuildZipIndex(FileVersion version)
     {
-        using var archive = ZipFile.OpenRead(filePath);
+        using var archive = ArchiveEntryReader.OpenZip(version.Path);
         var entries = archive.Entries;
-        ArchiveEntryReader.EnsureEntryCountWithinLimit(entries.Count, Path.GetFileName(filePath));
 
         var pages = new List<(string Name, int Position)>();
         for (var i = 0; i < entries.Count; i++)
@@ -227,13 +262,13 @@ public class ComicReaderService : IComicReaderService, IDisposable
             }
         }
 
-        return CreateIndex(ArchiveKind.Zip, length, lastWriteTicks, pages);
+        return CreateIndex(version, pages);
     }
 
-    private static PageIndex BuildRarIndex(string filePath, long length, long lastWriteTicks)
+    private static PageIndex BuildRarIndex(FileVersion version)
     {
-        using var archive = RarArchive.OpenArchive(filePath);
-        var archiveName = Path.GetFileName(filePath);
+        using var archive = RarArchive.OpenArchive(version.Path);
+        var archiveName = Path.GetFileName(version.Path);
 
         var pages = new List<(string Name, int Position)>();
         var position = 0;
@@ -251,19 +286,18 @@ public class ComicReaderService : IComicReaderService, IDisposable
             position++;
         }
 
-        return CreateIndex(ArchiveKind.Rar, length, lastWriteTicks, pages);
+        return CreateIndex(version, pages);
     }
 
-    private static PageIndex CreateIndex(ArchiveKind kind, long length, long lastWriteTicks, List<(string Name, int Position)> pages)
+    private static PageIndex CreateIndex(FileVersion version, List<(string Name, int Position)> pages)
     {
         // OrderBy is stable, so entries with equal names keep their archive order.
         var sorted = pages.OrderBy(p => p.Name, new NaturalStringComparer()).ToArray();
         return new PageIndex(
-            kind,
-            length,
-            lastWriteTicks,
+            version,
             sorted.Select(p => p.Name).ToArray(),
-            sorted.Select(p => p.Position).ToArray());
+            sorted.Select(p => p.Position).ToArray(),
+            refusal: null);
     }
 
     /// <summary>
@@ -271,14 +305,15 @@ public class ComicReaderService : IComicReaderService, IDisposable
     /// at the cached position is no longer the expected one (the file changed
     /// without its length or timestamp changing), so the caller can rebuild.
     /// </summary>
-    private static byte[]? ReadPage(string filePath, PageIndex index, int pageNumber)
+    private static byte[]? ReadPage(PageIndex index, int pageNumber)
     {
+        var filePath = index.Version.Path;
         var expectedName = index.Names[pageNumber - 1];
         var position = index.EntryPositions[pageNumber - 1];
 
-        if (index.Kind == ArchiveKind.Zip)
+        if (index.Version.Kind == ArchiveKind.Zip)
         {
-            using var archive = ZipFile.OpenRead(filePath);
+            using var archive = ArchiveEntryReader.OpenZip(filePath);
             var entries = archive.Entries;
             if (position >= entries.Count || !string.Equals(entries[position].FullName, expectedName, StringComparison.Ordinal))
             {
@@ -330,28 +365,33 @@ public class ComicReaderService : IComicReaderService, IDisposable
         Rar,
     }
 
+    /// <summary>One version of an archive file: its path, format, length and last-write time.</summary>
+    private readonly record struct FileVersion(string Path, ArchiveKind Kind, long Length, long LastWriteUtcTicks);
+
     /// <summary>
     /// The image entries of one version of an archive, in reading order, with the
-    /// position of each in the archive's entry list.
+    /// position of each in the archive's entry list; or, when the read limits
+    /// refused the archive, the reason.
     /// </summary>
     private sealed class PageIndex
     {
-        public PageIndex(ArchiveKind kind, long length, long lastWriteUtcTicks, string[] names, int[] entryPositions)
+        public PageIndex(FileVersion version, string[] names, int[] entryPositions, string? refusal)
         {
-            Kind = kind;
-            Length = length;
-            LastWriteUtcTicks = lastWriteUtcTicks;
+            Version = version;
             Names = names;
             EntryPositions = entryPositions;
-            // Rough managed footprint: the object and arrays, plus each name string.
-            EstimatedBytes = 96 + names.Sum(n => 40L + 2L * n.Length) + 4L * entryPositions.Length;
+            Refusal = refusal;
+            // Rough managed footprint: the object and arrays, plus each string.
+            EstimatedBytes = 96 + 2L * (refusal?.Length ?? 0) + names.Sum(n => 40L + 2L * n.Length) + 4L * entryPositions.Length;
         }
 
-        public ArchiveKind Kind { get; }
-        public long Length { get; }
-        public long LastWriteUtcTicks { get; }
+        public static PageIndex Refused(FileVersion version, string reason) =>
+            new(version, Array.Empty<string>(), Array.Empty<int>(), reason);
+
+        public FileVersion Version { get; }
         public string[] Names { get; }
         public int[] EntryPositions { get; }
+        public string? Refusal { get; }
         public long EstimatedBytes { get; }
     }
 }

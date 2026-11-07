@@ -4,17 +4,25 @@ namespace ComicMaintainer.Core.Interfaces;
 /// Result of a successful <see cref="IFileCoverCacheService.GetOrCreateAsync"/>
 /// call: the cover thumbnail bytes (page 1 of the source archive, downscaled
 /// and re-encoded according to the <c>FileCoverThumbnail*</c> settings), the
-/// associated content type, the underlying file's last-write timestamp at
-/// the moment the cache entry was generated, and the thumbnail
+/// associated content type, the underlying file's last-write timestamp and
+/// length at the moment the cache entry was generated, and the thumbnail
 /// <paramref name="Variant"/> token (format/width/quality, or <c>orig</c>
-/// for untouched page bytes). HTTP validators come from
-/// <see cref="IFileCoverCacheService.GetValidator"/>, which needs no payload.
+/// for untouched page bytes).
 /// </summary>
 public readonly record struct FileCoverCacheEntry(
     byte[] Data,
     string ContentType,
     DateTimeOffset LastModified,
-    string Variant = "orig");
+    long SourceLength,
+    string Variant = "orig")
+{
+    /// <summary>
+    /// The validator of the source version this cover was generated from. It
+    /// equals what <see cref="IFileCoverCacheService.GetValidator"/> reported
+    /// for that version, so an ETag built from either one matches.
+    /// </summary>
+    public FileCoverValidator Validator => new(SourceLength, LastModified, Variant);
+}
 
 /// <summary>
 /// What determines the cover <see cref="IFileCoverCacheService"/> serves for a

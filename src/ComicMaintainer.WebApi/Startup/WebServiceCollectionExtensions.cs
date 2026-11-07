@@ -117,16 +117,10 @@ public static class WebServiceCollectionExtensions
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
         });
 
-        // Add output caching for better performance  
-        services.AddOutputCache(options =>
-        {
-            // Don't cache by default - caching should be explicit
-            options.AddBasePolicy(builder => builder.NoCache());
-            // Cache comic pages for 1 hour since they don't change frequently
-            options.AddPolicy("ComicPages", builder => builder
-                .Expire(TimeSpan.FromHours(1))
-                .SetVaryByQuery("filePath", "page"));
-        });
+        // No server-side output cache. Every API response is per user or behind
+        // authentication, and the one candidate, comic pages, is better served by
+        // the reader's page-list cache plus ETag revalidation and private browser
+        // caching (see ComicReaderController.GetPage).
 
         // Add SignalR
         services.AddSignalR();

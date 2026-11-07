@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
@@ -51,18 +52,18 @@ public partial class ComicProcessorService
             // Look for ComicInfo.xml
             var comicInfoEntry = FindComicInfoEntry(archive);
 
-            if (comicInfoEntry != null)
-            {
-                var xmlContent = ReadComicInfoXml(comicInfoEntry);
-                return Task.FromResult(ParseComicInfoXml(xmlContent));
-            }
+            var metadata = comicInfoEntry != null
+                ? ParseComicInfoXml(ReadComicInfoXml(comicInfoEntry))
+                : new ComicMetadata
+                {
+                    // Fallback: parse from the folder and file name
+                    Series = ExtractSeriesFromFilename(fallbackFilePath),
+                    Issue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(fallbackFilePath))
+                };
 
-            // Fallback: parse from filename
-            return Task.FromResult<ComicMetadata?>(new ComicMetadata
-            {
-                Series = ExtractSeriesFromFilename(fallbackFilePath),
-                Issue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(fallbackFilePath))
-            });
+            return ComicFileExtensions.IsWritableArchive(resolvedPath)
+                ? Task.FromResult(metadata)
+                : ApplyPendingDatabaseEditAsync(fallbackFilePath, metadata, cancellationToken);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -71,37 +72,102 @@ public partial class ComicProcessorService
         }
     }
 
-    public Task<SeriesMetadata?> GetSeriesMetadataAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task<SeriesMetadata?> GetSeriesMetadataAsync(string filePath, CancellationToken cancellationToken = default)
     {
         try
         {
             if (!TryResolveAllowedPath(filePath, out var resolvedPath))
-                return Task.FromResult<SeriesMetadata?>(null);
+                return null;
 
             if (!File.Exists(resolvedPath) || !IsComicArchive(resolvedPath))
-                return Task.FromResult<SeriesMetadata?>(null);
+                return null;
 
-            using var archive = ArchiveFactory.OpenArchive(resolvedPath);
-            var comicInfoEntry = FindComicInfoEntry(archive);
-
-            if (comicInfoEntry != null)
+            SeriesMetadata? metadata;
+            using (var archive = ArchiveFactory.OpenArchive(resolvedPath))
             {
-                var xmlContent = ReadComicInfoXml(comicInfoEntry);
-                return Task.FromResult(ParseSeriesMetadataXml(xmlContent));
+                var comicInfoEntry = FindComicInfoEntry(archive);
+                metadata = comicInfoEntry != null
+                    ? ParseSeriesMetadataXml(ReadComicInfoXml(comicInfoEntry))
+                    : new SeriesMetadata
+                    {
+                        Series = ExtractSeriesFromFilename(filePath),
+                        Issue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filePath)),
+                        SeriesGroup = Path.GetFileName(Path.GetDirectoryName(filePath))
+                    };
             }
 
-            return Task.FromResult<SeriesMetadata?>(new SeriesMetadata
+            if (metadata is null || ComicFileExtensions.IsWritableArchive(resolvedPath))
             {
-                Series = ExtractSeriesFromFilename(filePath),
-                Issue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filePath)),
-                SeriesGroup = Path.GetFileName(Path.GetDirectoryName(filePath))
-            });
+                return metadata;
+            }
+
+            var pending = await GetPendingDatabaseEditAsync(filePath, cancellationToken);
+            if (pending?.Metadata is { } stored)
+            {
+                var locked = (ComicMetadataFieldFlags)stored.UserLockedFieldsMask;
+                if (locked.HasFlag(ComicMetadataFieldFlags.Series)) metadata.Series = stored.Series;
+                if (locked.HasFlag(ComicMetadataFieldFlags.Title)) metadata.Title = stored.Title;
+                if (locked.HasFlag(ComicMetadataFieldFlags.Issue)) metadata.Issue = stored.Issue;
+                if (locked.HasFlag(ComicMetadataFieldFlags.Volume)) metadata.Volume = stored.Volume;
+                if (locked.HasFlag(ComicMetadataFieldFlags.Publisher)) metadata.Publisher = stored.Publisher;
+                if (locked.HasFlag(ComicMetadataFieldFlags.Year)) metadata.Year = stored.Year;
+            }
+
+            return metadata;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading series metadata from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return Task.FromResult<SeriesMetadata?>(null);
+            return null;
         }
+    }
+
+    /// <summary>
+    /// The tracked file at <paramref name="filePath"/> when it holds user edits that have not been
+    /// written into its archive (as a CBR, RAR or ZIP edited while converting them to CBZ is
+    /// turned off does), otherwise null. Failures to read the store count as no pending edit.
+    /// </summary>
+    private async Task<ComicFile?> GetPendingDatabaseEditAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var tracked = await _fileStore.GetFileAsync(filePath, cancellationToken);
+            return tracked is { Metadata: { IsUserEdited: true, UserLockedFieldsMask: not 0 } } &&
+                   tracked.MetadataVersion > tracked.WrittenMetadataVersion
+                ? tracked
+                : null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Could not read the stored metadata of {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Returns <paramref name="metadata"/> with the fields of pending user edits stored in the
+    /// database (see <see cref="GetPendingDatabaseEditAsync"/>) put over the archive's values, so
+    /// an edit kept in the database is what the file shows.
+    /// </summary>
+    private async Task<ComicMetadata?> ApplyPendingDatabaseEditAsync(
+        string filePath,
+        ComicMetadata? metadata,
+        CancellationToken cancellationToken)
+    {
+        if (metadata is null)
+        {
+            return null;
+        }
+
+        var pending = await GetPendingDatabaseEditAsync(filePath, cancellationToken);
+        if (pending?.Metadata is not { } stored)
+        {
+            return metadata;
+        }
+
+        var effective = metadata.Clone();
+        ComicMetadataFields.Copy(stored, effective, (ComicMetadataFieldFlags)stored.UserLockedFieldsMask);
+        return effective;
     }
 
     /// <summary>
@@ -158,6 +224,14 @@ public partial class ComicProcessorService
     /// caller's (logical) path; it keys the file store, while all file I/O goes through its
     /// validated physical path.
     /// </summary>
+    /// <remarks>
+    /// Only a CBZ is rewritten in place. A CBR, RAR or ZIP is written as a new CBZ when
+    /// <see cref="AppSettings.ConvertRarToCbzOnWrite"/> is on (see <see cref="RewriteArchiveAsync"/>);
+    /// when it is off the archive is never touched, and a <paramref name="userEdit"/> is recorded
+    /// in the database instead. Edits such an archive holds only in the database are written into
+    /// the CBZ it is converted to: a user edit's own fields take precedence over them, an automatic
+    /// write's (normalize, backfill) do not.
+    /// </remarks>
     private async Task<MetadataWriteResult> UpdateMetadataCoreAsync(
         string filePath,
         ComicMetadata metadata,
@@ -197,8 +271,34 @@ public partial class ComicProcessorService
                 return new MetadataWriteResult(MetadataWriteOutcome.Unchanged, filePath);
             }
 
+            var convert = !ComicFileExtensions.IsWritableArchive(physicalPath);
+            if (convert && !_settings.ConvertRarToCbzOnWrite)
+            {
+                if (userEdit)
+                {
+                    return await KeepMetadataEditInDatabaseAsync(filePath, physicalPath, metadata, fields, cancellationToken);
+                }
+
+                _logger.LogDebug(
+                    "Not writing metadata into {FilePath}: converting CBR/RAR/ZIP archives to CBZ is turned off",
+                    LoggingHelper.SanitizePathForLog(filePath));
+                return new MetadataWriteResult(MetadataWriteOutcome.NotWritable, filePath);
+            }
+
+            var values = metadata;
+            var writeFields = fields;
+            var pending = convert ? await GetPendingDatabaseEditAsync(filePath, cancellationToken) : null;
+            if (pending?.Metadata is { } stored)
+            {
+                var locked = (ComicMetadataFieldFlags)stored.UserLockedFieldsMask;
+                var requested = userEdit ? fields : fields & ~locked;
+                values = stored.Clone();
+                ComicMetadataFields.Copy(metadata, values, requested);
+                writeFields = requested | locked;
+            }
+
             var existing = ReadComicInfoDocument(physicalPath);
-            var updated = ComicInfoXml.Merge(existing, metadata, fields);
+            var updated = ComicInfoXml.Merge(existing, values, writeFields);
             if (ComicInfoXml.AreEquivalent(existing, updated) ||
                 (existing is null && !updated.Root!.HasElements))
             {
@@ -210,6 +310,11 @@ public partial class ComicProcessorService
 
             _logger.LogInformation("Updating metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             var result = await RewriteArchiveAsync(filePath, physicalPath, ComicInfoXml.ToUtf8Bytes(updated), cancellationToken);
+            if (pending is not null)
+            {
+                await CompletePendingDatabaseEditAsync(result.FilePath, pending, metadata, userEdit ? fields : ComicMetadataFieldFlags.None);
+            }
+
             _logger.LogInformation("Successfully updated metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(result.FilePath));
             return result;
         }
@@ -220,7 +325,69 @@ public partial class ComicProcessorService
         }
     }
 
-    public async Task<bool> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Records a user's edit of an archive that is not rewritten (a CBR, RAR or ZIP while
+    /// converting them to CBZ is turned off) in the file's stored metadata, queued for the write
+    /// that eventually converts it. Reads of the file show it from then on.
+    /// </summary>
+    private async Task<MetadataWriteResult> KeepMetadataEditInDatabaseAsync(
+        string filePath,
+        string physicalPath,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        CancellationToken cancellationToken)
+    {
+        if (await _fileStore.GetFileAsync(filePath, cancellationToken) is null)
+        {
+            _logger.LogWarning(
+                "Cannot keep the metadata edit of {FilePath} in the database: the file is not tracked",
+                LoggingHelper.SanitizePathForLog(filePath));
+            return MetadataWriteResult.Failed(filePath);
+        }
+
+        // What the file shows now (its archive plus earlier edits kept in the database) with this
+        // edit applied, so a first stored record is complete.
+        var values = await GetMetadataAtResolvedPath(physicalPath, filePath, cancellationToken) ?? new ComicMetadata();
+        ComicMetadataFields.Copy(metadata, values, fields);
+        await _fileStore.RecordUserMetadataEditAsync(filePath, values, fields, pendingWrite: true, cancellationToken);
+        _logger.LogInformation(
+            "Kept the metadata edit of {FilePath} in the database: converting CBR/RAR/ZIP archives to CBZ is turned off",
+            LoggingHelper.SanitizePathForLog(filePath));
+        return new MetadataWriteResult(MetadataWriteOutcome.KeptInDatabase, filePath);
+    }
+
+    /// <summary>
+    /// After edits held only in the database were written into the archive now at
+    /// <paramref name="filePath"/>, brings the stored record in line with what was written
+    /// (the <paramref name="userFields"/> a user edit set on top of them) and marks it written.
+    /// Best effort: the archive is already correct.
+    /// </summary>
+    private async Task CompletePendingDatabaseEditAsync(
+        string filePath,
+        ComicFile pending,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags userFields)
+    {
+        try
+        {
+            var locked = (ComicMetadataFieldFlags)(pending.Metadata?.UserLockedFieldsMask ?? 0L);
+            if ((userFields & locked) != ComicMetadataFieldFlags.None)
+            {
+                await _fileStore.RecordUserMetadataEditAsync(filePath, metadata, userFields & locked, pendingWrite: false);
+            }
+
+            await _fileStore.MarkFileBackfilledAsync(filePath, pending.MetadataVersion);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Wrote the metadata kept in the database into {FilePath} but could not mark it written",
+                LoggingHelper.SanitizePathForLog(filePath));
+        }
+    }
+
+    public async Task<MetadataWriteResult> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default)
     {
         await _processingSemaphore.WaitAsync(cancellationToken);
         try
@@ -233,7 +400,7 @@ public partial class ComicProcessorService
         }
     }
 
-    private async Task<bool> RemoveMetadataCoreAsync(string filePath, CancellationToken cancellationToken)
+    private async Task<MetadataWriteResult> RemoveMetadataCoreAsync(string filePath, CancellationToken cancellationToken)
     {
         try
         {
@@ -242,7 +409,7 @@ public partial class ComicProcessorService
                 _logger.LogWarning(
                     "Cannot remove metadata: file is outside the allowed directories: {FilePath}",
                     LoggingHelper.SanitizePathForLog(filePath));
-                return false;
+                return MetadataWriteResult.Failed(filePath);
             }
 
             if (!File.Exists(physicalPath))
@@ -250,7 +417,7 @@ public partial class ComicProcessorService
                 _logger.LogWarning(
                     "Cannot remove metadata: file does not exist: {FilePath}",
                     LoggingHelper.SanitizePathForLog(filePath));
-                return false;
+                return MetadataWriteResult.Failed(filePath);
             }
 
             if (!IsComicArchive(physicalPath))
@@ -258,30 +425,39 @@ public partial class ComicProcessorService
                 _logger.LogWarning(
                     "Cannot remove metadata: file is not a supported comic archive: {FilePath}",
                     LoggingHelper.SanitizePathForLog(filePath));
-                return false;
+                return MetadataWriteResult.Failed(filePath);
             }
 
             if (!HasComicInfoEntry(physicalPath))
             {
                 _logger.LogInformation("No metadata to remove from: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                return true;
+                return new MetadataWriteResult(MetadataWriteOutcome.Unchanged, filePath);
+            }
+
+            if (!ComicFileExtensions.IsWritableArchive(physicalPath) && !_settings.ConvertRarToCbzOnWrite)
+            {
+                _logger.LogWarning(
+                    "Cannot remove metadata from {FilePath}: converting CBR/RAR/ZIP archives to CBZ is turned off, so the archive is not rewritten",
+                    LoggingHelper.SanitizePathForLog(filePath));
+                return MetadataWriteResult.Failed(filePath);
             }
 
             _logger.LogInformation("Removing metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             var result = await RewriteArchiveAsync(filePath, physicalPath, comicInfoXml: null, cancellationToken);
             _logger.LogInformation("Successfully removed metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(result.FilePath));
-            return true;
+            return result;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error removing metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return false;
+            return MetadataWriteResult.Failed(filePath);
         }
     }
 
     /// <summary>
     /// Writes the archive at <paramref name="physicalPath"/> again with <paramref name="comicInfoXml"/>
-    /// as its ComicInfo.xml (none when null) and puts it in place of the original.
+    /// as its ComicInfo.xml (none when null) and puts it in place of the original. A CBZ is
+    /// replaced; any other archive is converted (see <see cref="ConvertToCbzAsync"/>).
     /// </summary>
     /// <remarks>
     /// The new archive is built in the original's own directory, under a temp name the file
@@ -310,6 +486,11 @@ public partial class ComicProcessorService
             // Give a brief moment for any file handles to be fully released
             await Task.Delay(FileHandleReleaseDelayMs, cancellationToken);
 
+            if (!ComicFileExtensions.IsWritableArchive(physicalPath))
+            {
+                return await ConvertToCbzAsync(logicalPath, physicalPath, tempFile, cancellationToken);
+            }
+
             // Atomically replace the original, retrying transient file locks
             // from file system watchers, readers or antivirus.
             await ReplaceFileWithRetryAsync(tempFile, physicalPath, cancellationToken);
@@ -331,6 +512,77 @@ public partial class ComicProcessorService
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Puts the rewritten archive <paramref name="tempFile"/> (a ZIP) next to the CBR, RAR or
+    /// ZIP at <paramref name="physicalPath"/> as <c>&lt;name&gt;.cbz</c>, moves the file's library
+    /// record (processing state, stored metadata, every user's read status and reading progress)
+    /// to it and deletes the original.
+    /// </summary>
+    /// <remarks>
+    /// The CBZ is created by a same-directory rename that never replaces an existing file, so a
+    /// CBZ already there fails the conversion and both files are kept. The original is deleted
+    /// only once the CBZ is in place and the record has moved; when it cannot be deleted the
+    /// conversion is undone (record moved back, CBZ removed) so the library never holds the
+    /// file twice. Past the rename the steps are not cancelled, so a cancelled job cannot leave
+    /// a half-finished conversion.
+    /// </remarks>
+    private async Task<MetadataWriteResult> ConvertToCbzAsync(
+        string logicalPath,
+        string physicalPath,
+        string tempFile,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(physicalPath)
+            ?? throw new IOException("Cannot determine the archive's directory.");
+        var cbzName = Path.GetFileNameWithoutExtension(physicalPath) + ".cbz";
+        var cbzPhysicalPath = Path.Join(directory, cbzName);
+        var cbzLogicalPath = Path.Join(GetAllowedLogicalPath(directory), cbzName);
+        if (Path.Exists(cbzPhysicalPath))
+        {
+            throw new IOException($"Cannot convert the archive to CBZ: {cbzName} already exists next to it.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Pins the checked directory for both the rename and the delete below.
+        using var directoryHandle = OpenDeleteDirectory(physicalPath);
+        var movedPath = MoveFileInRenameDirectory(OperatingSystem.IsLinux() ? directoryHandle : null, tempFile, cbzPhysicalPath);
+
+        await _fileStore.UpdateFilePathAsync(logicalPath, cbzLogicalPath, CancellationToken.None);
+        try
+        {
+            DeleteFileInDirectory(directoryHandle, physicalPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not delete {FilePath} after converting it to CBZ; keeping the original and removing the new CBZ",
+                LoggingHelper.SanitizePathForLog(logicalPath));
+            await _fileStore.UpdateFilePathAsync(cbzLogicalPath, logicalPath, CancellationToken.None);
+            try
+            {
+                DeleteFileInDirectory(directoryHandle, movedPath);
+            }
+            catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(
+                    cleanupEx,
+                    "Could not remove {CbzPath} after the conversion was undone",
+                    LoggingHelper.SanitizePathForLog(cbzLogicalPath));
+            }
+
+            throw;
+        }
+
+        await RefreshStoredFileStatsAsync(cbzLogicalPath, CancellationToken.None);
+        _logger.LogInformation(
+            "Converted {FilePath} to {CbzPath}",
+            LoggingHelper.SanitizePathForLog(logicalPath),
+            LoggingHelper.SanitizePathForLog(cbzLogicalPath));
+        return new MetadataWriteResult(MetadataWriteOutcome.ConvertedToCbz, cbzLogicalPath);
     }
 
     /// <summary>
@@ -376,28 +628,35 @@ public partial class ComicProcessorService
     /// Entries are streamed one at a time, so memory use does not grow with entry or archive size.
     /// Throws if any entry cannot be copied, so callers never replace the original with an
     /// archive that is missing pages. The destination is created new (never overwritten), gets
-    /// the source's Unix permissions, and is flushed to disk before this returns.
+    /// the source's Unix permissions, and is flushed to disk before this returns. A RAR source
+    /// (being converted to CBZ) is read in order when it is solid, and its entry names get ZIP's
+    /// '/' separators.
     /// </summary>
     private void RewriteArchive(string sourcePath, string destinationPath, byte[]? comicInfoXml)
     {
         using var sourceArchive = ArchiveFactory.OpenArchive(sourcePath);
+        var normalizeSeparators = sourceArchive.Type != ArchiveType.Zip;
         using var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         using (var writer = new ZipWriter(destination, new ZipWriterOptions(CompressionType.Deflate) { LeaveStreamOpen = true }))
         {
-            foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
+            if (sourceArchive.IsSolid)
             {
-                if (entry.Key == null)
+                // A solid archive can only be decompressed from the start.
+                using var reader = sourceArchive.ExtractAllEntries();
+                while (reader.MoveToNextEntry())
                 {
-                    throw new InvalidDataException("The archive contains an entry without a name, which cannot be copied.");
+                    if (!reader.Entry.IsDirectory)
+                    {
+                        CopyArchiveEntry(writer, reader.Entry, reader.OpenEntryStream, normalizeSeparators);
+                    }
                 }
-
-                if (entry.Key.Equals(ComicInfoXml.EntryName, StringComparison.OrdinalIgnoreCase))
+            }
+            else
+            {
+                foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
                 {
-                    continue;
+                    CopyArchiveEntry(writer, entry, entry.OpenEntryStream, normalizeSeparators);
                 }
-
-                using var entryStream = entry.OpenEntryStream();
-                writer.Write(entry.Key, entryStream, entry.LastModifiedTime);
             }
 
             if (comicInfoXml != null)
@@ -411,6 +670,27 @@ public partial class ComicProcessorService
         // before it is renamed over the original, so a power loss cannot leave an empty file there.
         destination.Flush(flushToDisk: true);
         CopyUnixFileMode(sourcePath, destinationPath);
+    }
+
+    /// <summary>
+    /// Copies one file entry into <paramref name="writer"/> under its own name and timestamp,
+    /// skipping the old ComicInfo.xml. Throws for an entry without a name.
+    /// </summary>
+    private static void CopyArchiveEntry(ZipWriter writer, IEntry entry, Func<Stream> openEntryStream, bool normalizeSeparators)
+    {
+        if (entry.Key == null)
+        {
+            throw new InvalidDataException("The archive contains an entry without a name, which cannot be copied.");
+        }
+
+        var name = normalizeSeparators ? entry.Key.Replace('\\', '/') : entry.Key;
+        if (name.Equals(ComicInfoXml.EntryName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        using var entryStream = openEntryStream();
+        writer.Write(name, entryStream, entry.LastModifiedTime);
     }
 
     /// <summary>

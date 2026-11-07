@@ -106,6 +106,11 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("WatcherEnableNormalize", enabled, cancellationToken);
     }
 
+    public async Task UpdateConvertRarToCbzOnWriteAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("ConvertRarToCbzOnWrite", enabled, cancellationToken);
+    }
+
     public async Task UpdateWriteCoverToFirstArchiveAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         await UpdateSettingAsync("WriteCoverToFirstArchive", enabled, cancellationToken);

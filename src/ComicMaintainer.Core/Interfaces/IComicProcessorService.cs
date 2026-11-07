@@ -81,12 +81,15 @@ public interface IComicProcessorService
 
     /// <summary>
     /// Remove the ComicInfo.xml entry from a comic archive, leaving the file
-    /// without any embedded metadata. Returns true on success, including when
-    /// the archive had no ComicInfo.xml to begin with (it is then left
-    /// untouched). Returns false without touching the file when its path
-    /// resolves outside the watched and duplicate directories.
+    /// without any embedded metadata. Succeeds, leaving the archive untouched
+    /// (<see cref="MetadataWriteOutcome.Unchanged"/>), when it had no
+    /// ComicInfo.xml to begin with. A CBR, RAR or ZIP becomes a new CBZ
+    /// (<see cref="MetadataWriteOutcome.ConvertedToCbz"/>, at the returned path);
+    /// while converting them is turned off the removal fails and the archive is
+    /// not touched. Fails without touching the file when its path resolves
+    /// outside the watched and duplicate directories.
     /// </summary>
-    Task<bool> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default);
+    Task<MetadataWriteResult> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rename multiple comic files based on metadata as a batch job

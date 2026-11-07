@@ -61,6 +61,7 @@ public class SettingsController : ControllerBase
             issue_number_padding = _appSettings.CurrentValue.IssueNumberPadding,
             watcher_enable_rename = _appSettings.CurrentValue.WatcherEnableRename,
             watcher_enable_normalize = _appSettings.CurrentValue.WatcherEnableNormalize,
+            convert_rar_to_cbz_on_write = _appSettings.CurrentValue.ConvertRarToCbzOnWrite,
             log_max_bytes = _appSettings.CurrentValue.LogMaxBytes,
             database_cleanup_interval_hours = _appSettings.CurrentValue.DatabaseCleanupIntervalHours,
             enable_external_series_metadata = _appSettings.CurrentValue.EnableExternalSeriesMetadata,
@@ -285,6 +286,34 @@ public class SettingsController : ControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public Task<ActionResult> SetWatcherEnableNormalize([FromBody] WatcherEnableNormalizeRequest request, CancellationToken cancellationToken = default)
         => UpdateWatcherEnableNormalize(request, cancellationToken);
+
+    [HttpGet("convert-rar-to-cbz-on-write")]
+    public ActionResult<object> GetConvertRarToCbzOnWrite()
+    {
+        return Ok(new { enabled = _appSettings.CurrentValue.ConvertRarToCbzOnWrite });
+    }
+
+    [HttpPut("convert-rar-to-cbz-on-write")]
+    public async Task<ActionResult> UpdateConvertRarToCbzOnWrite([FromBody] ConvertRarToCbzOnWriteRequest request, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Convert CBR/RAR to CBZ on write update requested: {Enabled}", request.Enabled);
+
+        try
+        {
+            await _settingsService.UpdateConvertRarToCbzOnWriteAsync(request.Enabled, cancellationToken);
+            return Ok(new { message = "Convert CBR/RAR to CBZ on write updated successfully" });
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogError(ex, "Failed to update convert CBR/RAR to CBZ on write");
+            return StatusCode(500, new { error = "Failed to update convert CBR/RAR to CBZ on write" });
+        }
+    }
+
+    [HttpPost("convert-rar-to-cbz-on-write")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetConvertRarToCbzOnWrite([FromBody] ConvertRarToCbzOnWriteRequest request, CancellationToken cancellationToken = default)
+        => UpdateConvertRarToCbzOnWrite(request, cancellationToken);
 
     [HttpGet("write-cover-to-first-archive")]
     public ActionResult<object> GetWriteCoverToFirstArchive()
@@ -755,6 +784,11 @@ public class SettingsController : ControllerBase
     }
 
     public class WatcherEnableNormalizeRequest
+    {
+        public bool Enabled { get; set; }
+    }
+
+    public class ConvertRarToCbzOnWriteRequest
     {
         public bool Enabled { get; set; }
     }

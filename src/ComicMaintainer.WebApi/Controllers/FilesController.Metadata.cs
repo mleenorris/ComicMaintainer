@@ -285,29 +285,30 @@ public partial class FilesController
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Remove metadata requested for file: {FilePath}"), sanitizedPath);
 
-            var success = await _processor.RemoveMetadataAsync(filePath, cancellationToken);
-            if (!success)
+            var result = await _processor.RemoveMetadataAsync(filePath, cancellationToken);
+            if (!result.Succeeded)
             {
                 await LogHistoryAsync(filePath, "RemoveMetadata", false, "RemoveMetadataAsync returned false");
                 return BadRequest("Failed to remove metadata");
             }
 
-            // Mark the file as unprocessed so the rename/normalize pipeline will
-            // re-evaluate it on the next run.
-            var cleared = await _fileStore.ClearProcessedStatusAsync(new[] { filePath }, cancellationToken);
+            // A CBR/RAR/ZIP is now a CBZ at a new path. Mark the file as unprocessed
+            // so the rename/normalize pipeline will re-evaluate it on the next run.
+            var currentPath = result.FilePath;
+            var cleared = await _fileStore.ClearProcessedStatusAsync(new[] { currentPath }, cancellationToken);
 
-            await LogHistoryAsync(filePath, "RemoveMetadata", true);
+            await LogHistoryAsync(currentPath, "RemoveMetadata", true);
 
             // Broadcast a file_processed event so the UI updates the affected
             // folder / series detail in place rather than waiting for the
             // debounced file_list_updated.
             if (_eventBroadcaster is not null)
             {
-                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), true); }
+                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(currentPath), true); }
                 catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata removal"); }
             }
 
-            return Ok(new { success = true, cleared });
+            return Ok(new { success = true, cleared, filePath = currentPath });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

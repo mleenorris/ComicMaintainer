@@ -40,6 +40,7 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
         var options = ParseOptions(optionsJson);
         var processed = 0;
         var failed = 0;
+        var notWritable = 0;
 
         // Pages through the queue in file-path order until it is drained, so a run that follows
         // edits made during an earlier run writes all of them back, not just the first batch.
@@ -54,13 +55,17 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
             foreach (var file in batch)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (await BackfillFileAsync(file, cancellationToken))
+                switch (await BackfillFileAsync(file, cancellationToken))
                 {
-                    processed++;
-                }
-                else
-                {
-                    failed++;
+                    case BackfillOutcome.Written:
+                        processed++;
+                        break;
+                    case BackfillOutcome.NotWritable:
+                        notWritable++;
+                        break;
+                    default:
+                        failed++;
+                        break;
                 }
             }
             if (options.MaxBatch <= 0 || batch.Count < options.MaxBatch)
@@ -71,15 +76,26 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
             afterFilePath = batch[^1].FilePath;
         }
 
-        return $"Backfill: {processed} files updated, {failed} failed (queue size was {processed + failed}).";
+        // A CBR/RAR/ZIP is not written while converting them to CBZ is turned off; it stays
+        // queued, so its edits are written once the setting is turned back on.
+        var keptInDatabase = notWritable > 0
+            ? $", {notWritable} kept in the database (converting CBR/RAR/ZIP to CBZ is turned off)"
+            : string.Empty;
+        return $"Backfill: {processed} files updated, {failed} failed{keptInDatabase} (queue size was {processed + failed + notWritable}).";
     }
 
-    private async Task<bool> BackfillFileAsync(ComicFile file, CancellationToken cancellationToken)
+    private enum BackfillOutcome { Written, Failed, NotWritable }
+
+    private async Task<BackfillOutcome> BackfillFileAsync(ComicFile file, CancellationToken cancellationToken)
     {
         try
         {
             var metadata = BuildMetadata(file);
             var flags = (ComicMetadataFieldFlags)(file.Metadata?.UserLockedFieldsMask ?? 0L);
+
+            // Every stored value is written, and so is every locked field, including one the
+            // user cleared.
+            var fields = ComicMetadataFields.Supplied(metadata) | flags;
             if (!flags.HasFlag(ComicMetadataFieldFlags.Series))
             {
                 var resolution = await _seriesNameResolver.ResolveAsync(
@@ -90,16 +106,26 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
                 if (!string.IsNullOrWhiteSpace(resolution.ResolvedSeries))
                 {
                     metadata.Series = resolution.ResolvedSeries;
+                    fields |= ComicMetadataFieldFlags.Series;
                 }
             }
 
-            if (!await _processor.UpdateMetadataAsync(file.FilePath, metadata, cancellationToken))
+            // Writes the archive only: an edit is never recorded in the database again, which
+            // would queue the file once more.
+            var result = await _processor.WriteMetadataAsync(file.FilePath, metadata, fields, cancellationToken);
+            if (result.Outcome == MetadataWriteOutcome.NotWritable)
             {
-                return false;
+                return BackfillOutcome.NotWritable;
             }
 
-            await _fileStore.MarkFileBackfilledAsync(file.FilePath, file.MetadataVersion, cancellationToken);
-            return true;
+            if (!result.Succeeded)
+            {
+                return BackfillOutcome.Failed;
+            }
+
+            // A converted CBR/RAR/ZIP is now a CBZ at a new path.
+            await _fileStore.MarkFileBackfilledAsync(result.FilePath, file.MetadataVersion, cancellationToken);
+            return BackfillOutcome.Written;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -108,7 +134,7 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Metadata backfill failed for {FilePath}", LoggingHelper.SanitizePathForLog(file.FilePath));
-            return false;
+            return BackfillOutcome.Failed;
         }
     }
 

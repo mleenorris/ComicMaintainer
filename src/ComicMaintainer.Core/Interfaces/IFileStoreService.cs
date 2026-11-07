@@ -22,6 +22,22 @@ public interface IFileStoreService
     Task ApplyUserMetadataEditAsync(string filePath, ComicMetadata patch, ComicMetadataFieldFlags lockFields, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Records a user's metadata edit in the file's stored metadata: the <paramref name="fields"/>
+    /// of <paramref name="values"/> are stored exactly (an empty value clears the field) and locked
+    /// as user-edited; a file without stored metadata gets all of <paramref name="values"/>. With
+    /// <paramref name="pendingWrite"/> the edit is queued for writing into the archive (its
+    /// <c>MetadataVersion</c> is bumped); without it the archive already holds the values and only
+    /// the stored record is brought in line. Throws <see cref="InvalidOperationException"/> when the
+    /// file is not tracked.
+    /// </summary>
+    Task RecordUserMetadataEditAsync(
+        string filePath,
+        ComicMetadata values,
+        ComicMetadataFieldFlags fields,
+        bool pendingWrite,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get up to <paramref name="max"/> files whose DB metadata has not been written back, ordered by
     /// file path. Pass the last path of the previous page as <paramref name="afterFilePath"/> to read
     /// the next page.

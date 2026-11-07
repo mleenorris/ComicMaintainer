@@ -27,7 +27,14 @@ public partial class ComicProcessorService
         }
     }
 
-    private async Task<bool> NormalizeFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
+    private async Task<bool> NormalizeFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken) =>
+        (await NormalizeFileWithResultAsync(filePath, forceReprocess, cancellationToken)).Succeeded;
+
+    /// <summary>
+    /// Normalizes one file and returns whether it succeeded and where the file is afterwards: a
+    /// CBR/RAR/ZIP that normalize wrote is a new CBZ (see <see cref="UpdateMetadataCoreAsync"/>).
+    /// </summary>
+    private async Task<(bool Succeeded, string FilePath)> NormalizeFileWithResultAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
     {
         try
         {
@@ -37,7 +44,7 @@ public partial class ComicProcessorService
             if (!forceReprocess && await _fileStore.IsFileNormalizedAsync(filePath, cancellationToken))
             {
                 _logger.LogInformation("NormalizeFileAsync: File already normalized (database), skipping: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                return true;
+                return (true, filePath);
             }
 
             _logger.LogDebug("NormalizeFileAsync: Checking if file exists and is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -47,7 +54,7 @@ public partial class ComicProcessorService
                 _logger.LogWarning("NormalizeFileAsync: File not found or not a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", false, "File not found or not a comic archive", cancellationToken);
-                return false;
+                return (false, filePath);
             }
 
             _logger.LogDebug("NormalizeFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -60,7 +67,7 @@ public partial class ComicProcessorService
                 _logger.LogWarning("NormalizeFileAsync: No metadata found for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", false, "No metadata found", cancellationToken);
-                return false;
+                return (false, filePath);
             }
 
             _logger.LogDebug("NormalizeFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}, Title: {Title}", 
@@ -81,7 +88,7 @@ public partial class ComicProcessorService
                 var filename = Path.GetFileName(filePath);
                 await LogHistoryWithChangesAsync(filePath, "Normalize", true, "File already normalized",
                     filename, filename, metadata, metadata, cancellationToken);
-                return true;
+                return (true, filePath);
             }
             
             _logger.LogDebug("NormalizeFileAsync: File needs normalization, updating metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -110,7 +117,7 @@ public partial class ComicProcessorService
                 await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
             }
             
-            return success;
+            return (success, filePath);
         }
         // A cancelled job didn't fail this file: leave it and its stored state as they are.
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -122,7 +129,7 @@ public partial class ComicProcessorService
             _logger.LogError(ex, "NormalizeFileAsync: Error normalizing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
             await LogHistoryAsync(filePath, "Normalize", false, ex.Message, cancellationToken);
-            return false;
+            return (false, filePath);
         }
     }
 

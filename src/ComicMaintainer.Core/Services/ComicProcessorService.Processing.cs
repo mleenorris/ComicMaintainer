@@ -307,8 +307,8 @@ public partial class ComicProcessorService
                 {
                     _logger.LogDebug("No metadata or series information for rename: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                    await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information", cancellationToken);
-                    renameError = "Rename skipped: no metadata or series information";
+                    await LogHistoryAsync(filePath, "Rename", false, NoSeriesMessage(filePath, "No metadata or series information"), cancellationToken);
+                    renameError = NoSeriesMessage(filePath, "Rename skipped: no metadata or series information");
                 }
             }
 

@@ -226,6 +226,12 @@ public partial class FileStoreService
                 "Updated read status for {FilePath} to {Status} for user {UserId}",
                 SanitizeForLogging(filePath), read, SanitizeForLogging(userId));
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller gave up (for example the request was aborted); that is not a
+            // database error and must not be logged as one.
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating read status in database for {FilePath}", SanitizeForLogging(filePath));
@@ -247,6 +253,9 @@ public partial class FileStoreService
             return;
         }
 
+        // One transaction, no per-file fallback: a fallback that retried every path in its own
+        // transaction turned one failed (or cancelled) bulk save into thousands of writes
+        // competing with the processing workers, and one logged error per file.
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -297,13 +306,135 @@ public partial class FileStoreService
             InvalidateUserReadPaths(userId);
             _logger.LogDebug("Bulk-updated read status for {Total} files for user {UserId}", paths.Count, SanitizeForLogging(userId));
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogError(ex, "Error bulk-updating read status; falling back to per-file updates");
-            foreach (var filePath in paths)
+            _logger.LogError(ex, "Error bulk-updating read status for {Total} files", paths.Count);
+            throw;
+        }
+    }
+
+    public async Task<int> MarkScopeReadAsync(FileReadScope scope, bool read, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var userId = CurrentUserId;
+        if (userId == null)
+        {
+            _logger.LogDebug("Ignoring {Scope} read-status update: no user in scope", scope.Kind);
+            return 0;
+        }
+
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var scopedFiles = await ScopeFilesAsync(dbContext, scope, cancellationToken);
+        var scopedPaths = scopedFiles.Select(f => f.FilePath);
+        var now = DateTime.UtcNow;
+
+        // Every statement runs in one transaction: a failure or a cancellation part-way rolls
+        // the whole change back instead of leaving the scope half read.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        var fileCount = await scopedFiles.CountAsync(cancellationToken);
+
+        if (read)
+        {
+            await dbContext.UserFileReadStatuses
+                .Where(s => s.UserId == userId && scopedPaths.Contains(s.FilePath))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(s => s.IsRead, true)
+                    .SetProperty(s => s.LastReadDate, now)
+                    .SetProperty(s => s.UpdatedAt, now), cancellationToken);
+
+            // Files this user has never touched have no row yet; only their paths are read.
+            var missing = await scopedPaths
+                .Where(path => !dbContext.UserFileReadStatuses.Any(s => s.UserId == userId && s.FilePath == path))
+                .ToListAsync(cancellationToken);
+            dbContext.UserFileReadStatuses.AddRange(missing.Select(path => new UserFileReadStatusEntity
             {
-                await MarkFileReadAsync(filePath, read, cancellationToken);
-            }
+                UserId = userId,
+                FilePath = path,
+                IsRead = true,
+                CurrentPage = 1,
+                LastReadDate = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+            }));
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // Keep "Continue Reading" (ReadingProgress) in step, as MarkFilesReadAsync does.
+            await dbContext.ReadingProgresses
+                .Where(p => p.UserId == userId && scopedPaths.Contains(p.ContentId))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(p => p.CurrentPage, p => p.TotalPages > 0 ? p.TotalPages : p.CurrentPage)
+                    .SetProperty(p => p.PercentComplete, 100)
+                    .SetProperty(p => p.CompletedAt, p => p.CompletedAt ?? now)
+                    .SetProperty(p => p.LastReadAt, now)
+                    .SetProperty(p => p.UpdatedAt, now), cancellationToken);
+        }
+        else
+        {
+            // A missing row already means unread, so only existing rows change.
+            await dbContext.UserFileReadStatuses
+                .Where(s => s.UserId == userId && scopedPaths.Contains(s.FilePath))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(s => s.IsRead, false)
+                    .SetProperty(s => s.UpdatedAt, now), cancellationToken);
+
+            await dbContext.ReadingProgresses
+                .Where(p => p.UserId == userId && scopedPaths.Contains(p.ContentId))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(p => p.CurrentPage, 1)
+                    .SetProperty(p => p.PercentComplete, 0)
+                    .SetProperty(p => p.CompletedAt, (DateTime?)null)
+                    .SetProperty(p => p.LastReadAt, now)
+                    .SetProperty(p => p.UpdatedAt, now), cancellationToken);
+        }
+
+        // The resume page of a file with reading progress follows that progress.
+        await dbContext.UserFileReadStatuses
+            .Where(s => s.UserId == userId
+                && scopedPaths.Contains(s.FilePath)
+                && dbContext.ReadingProgresses.Any(p => p.UserId == userId && p.ContentId == s.FilePath))
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(s => s.CurrentPage, s => dbContext.ReadingProgresses
+                    .Where(p => p.UserId == userId && p.ContentId == s.FilePath)
+                    .Select(p => p.CurrentPage)
+                    .First())
+                .SetProperty(s => s.UpdatedAt, now), cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+        InvalidateUserReadPaths(userId);
+
+        _logger.LogInformation(
+            "Marked {Count} file(s) in scope {Scope} as {Status} for user {UserId}",
+            fileCount, scope.Kind, read ? "read" : "unread", SanitizeForLogging(userId));
+        return fileCount;
+    }
+
+    /// <summary>The tracked rows a <see cref="FileReadScope"/> selects, as a query.</summary>
+    private async Task<IQueryable<ComicFileEntity>> ScopeFilesAsync(
+        ComicMaintainerDbContext dbContext,
+        FileReadScope scope,
+        CancellationToken cancellationToken)
+    {
+        var files = dbContext.ComicFiles.AsNoTracking();
+        switch (scope.Kind)
+        {
+            case FileReadScopeKind.Library:
+                return files;
+            case FileReadScopeKind.Folder:
+                // The same folder-key mapping the folder's file list uses.
+                var watchedDir = _settings.CurrentValue?.WatchedDirectory;
+                var directories = (await GetDistinctDirectoriesAsync(dbContext, cancellationToken))
+                    .Where(d => string.Equals(ComputeFolderKeyFromDirectory(d, watchedDir), scope.FolderKey, StringComparison.Ordinal))
+                    .ToList();
+                return files.Where(f => directories.Contains(f.Directory));
+            default:
+                var paths = scope.FilePaths ?? Array.Empty<string>();
+                return files.Where(f => paths.Contains(f.FilePath));
         }
     }
 

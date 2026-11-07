@@ -1332,36 +1332,29 @@
             }
         }
         
-        async function fetchAllLibraryFilePaths() {
-            // Use the legacy /api/files endpoint with per_page=-1 to grab every
-            // path for whole-library bulk operations.
-            const url = apiUrl('/api/files?per_page=-1');
-            const response = await fetch(url, { headers: getAuthHeaders() });
-            if (handleAuthError(response)) return [];
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            return (data.files || []).map(f => f.relative_path);
+        // Whole-library read changes are resolved and applied on the server
+        // (one set-based transaction), so the client never downloads the
+        // whole file table just to post every path back.
+        function markWholeLibraryRead(read) {
+            return fetch(apiUrl('/api/files/read-all'), {
+                method: 'POST',
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ scope: 'library', read })
+            });
         }
 
         async function markAllFilesRead() {
             if (!confirm('Mark EVERY file in the library as read?\n\nThis overwrites the read status of all files and cannot be undone.')) {
                 return;
             }
-            
+
             try {
                 showMessage('Marking all files as read...', 'info');
-                
-                const allFilePaths = await fetchAllLibraryFilePaths();
-                const response = await fetch(apiUrl('/api/files/read-batch'), {
-                    method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ files: allFilePaths, read: true })
-                });
+
+                const response = await markWholeLibraryRead(true);
                 
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
@@ -1382,16 +1375,8 @@
             
             try {
                 showMessage('Marking all files as unread...', 'info');
-                
-                const allFilePaths = await fetchAllLibraryFilePaths();
-                const response = await fetch(apiUrl('/api/files/read-batch'), {
-                    method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ files: allFilePaths, read: false })
-                });
+
+                const response = await markWholeLibraryRead(false);
                 
                 if (handleAuthError(response)) return;
                 if (!response.ok) {

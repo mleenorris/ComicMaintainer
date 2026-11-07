@@ -1648,7 +1648,10 @@ public class FileStoreServiceTests : IDisposable
         using var cancellationTokenSource = new CancellationTokenSource();
         interceptor.AfterNextSave = () => cancellationTokenSource.Cancel();
 
-        await service.MarkFileReadAsync(filePath, true, cancellationTokenSource.Token);
+        // The read status itself was committed before the cancellation hit the progress sync;
+        // the cancellation reaches the caller instead of being logged as a database error.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.MarkFileReadAsync(filePath, true, cancellationTokenSource.Token));
 
         Assert.True(cancellationTokenSource.IsCancellationRequested);
         Assert.True(service.GetReadStateVersion("test-user") > versionBeforeMarkingRead);

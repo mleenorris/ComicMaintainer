@@ -147,17 +147,13 @@ for (const { label, read, confirm } of [
     }
 ]) {
     const word = read ? 'read' : 'unread';
-    test(`${label} lists every library file and updates them all`, async (t) => {
-        let listAnswer = _call => ({ files: [{ relative_path: ISSUE_A }, { relative_path: ISSUE_B }], total_files: 2 });
-        let batchAnswer = _call => ({ success: true });
+    test(`${label} asks the server to update the whole library without listing it first`, async (t) => {
+        let answer = _call => ({ success: true, updated: 2 });
         const page = await h.bootJobsApp(t, {
-            routes: {
-                'GET /api/files': c => listAnswer(c),
-                'POST /api/files/read-batch': c => batchAnswer(c)
-            }
+            routes: { 'POST /api/files/read-all': c => answer(c) }
         });
         const lists = () => h.requests(page, 'GET', '/api/files');
-        const batches = () => h.requests(page, 'POST', '/api/files/read-batch');
+        const updates = () => h.requests(page, 'POST', '/api/files/read-all');
         const refreshes = () => h.requests(page, 'GET', LIBRARY_REFRESH).length;
         const choose = () => h.chooseMenuItem(page, 'markDropdown', label);
 
@@ -165,60 +161,49 @@ for (const { label, read, confirm } of [
         choose();
         await page.settle();
         assert.deepEqual(h.takeConfirms(page), [confirm]);
-        assert.equal(lists().length, 0);
+        assert.equal(updates().length, 0);
         assert.deepEqual(h.messages(page), []);
 
         choose();
         await page.settle();
         assert.deepEqual(h.takeConfirms(page), [confirm]);
-        assert.equal(lists()[0].url, '/api/files?per_page=-1');
-        assert.match(lists()[0].headers.authorization, /^Bearer /);
-        assert.deepEqual(batches()[0].body, { files: [ISSUE_A, ISSUE_B], read });
+        // Regression: the whole file table was downloaded (/api/files?per_page=-1) only to
+        // post every path back; the server now resolves the library itself.
+        assert.equal(lists().length, 0);
+        assert.equal(h.requests(page, 'POST', '/api/files/read-batch').length, 0);
+        assert.deepEqual(updates()[0].body, { scope: 'library', read });
+        assert.equal(updates()[0].headers['content-type'], 'application/json');
+        assert.match(updates()[0].headers.authorization, /^Bearer /);
         assert.deepEqual(h.takeMessages(page), [
             { type: 'info', text: `Marking all files as ${word}...` },
             { type: 'success', text: `All files marked as ${word}!` }
         ]);
         assert.equal(refreshes(), 1, 'the series library reloads');
 
-        // A listing without files still sends an (empty) update.
-        listAnswer = () => ({});
-        choose();
-        await page.settle();
-        assert.deepEqual(batches().at(-1).body, { files: [], read });
-        assert.deepEqual(h.takeMessages(page).at(-1), { type: 'success', text: `All files marked as ${word}!` });
-
-        listAnswer = () => respond(500, 'Error');
-        const batchesBefore = batches().length;
-        choose();
-        await page.settle();
-        assert.deepEqual(h.takeMessages(page).at(-1), { type: 'error', text: `Failed to mark files as ${word}: HTTP error! status: 500` });
-        assert.equal(batches().length, batchesBefore, 'nothing is updated without the file list');
-
-        listAnswer = () => ({ files: [{ relative_path: ISSUE_A }] });
-        batchAnswer = () => respond(503, 'Unavailable');
+        answer = () => respond(503, 'Unavailable');
         choose();
         await page.settle();
         assert.deepEqual(h.takeMessages(page).at(-1), { type: 'error', text: `Failed to mark files as ${word}: HTTP error! status: 503` });
 
-        batchAnswer = () => { throw new TypeError('Failed to fetch'); };
+        answer = () => { throw new TypeError('Failed to fetch'); };
         choose();
         await page.settle();
         assert.deepEqual(h.takeMessages(page).at(-1), { type: 'error', text: `Failed to mark files as ${word}: Failed to fetch` });
-        assert.equal(refreshes(), 2);
+        assert.equal(refreshes(), 1);
 
-        batchAnswer = () => 401;
+        answer = () => 401;
         choose();
         await page.settle();
         assert.equal(h.loginRedirects(page), 1);
         assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: `Marking all files as ${word}...` }]);
-        assert.equal(refreshes(), 2);
+        assert.equal(refreshes(), 1);
         assert.deepEqual(page.errors, []);
     });
 }
 
-test('Mark All Read sends a signed-out user to the login page when the file list is refused', async (t) => {
+test('Mark All Read sends a signed-out user to the login page when the update is refused', async (t) => {
     const page = await h.bootJobsApp(t, {
-        routes: { 'GET /api/files': 401, 'POST /api/files/read-batch': 401 }
+        routes: { 'POST /api/files/read-all': 401 }
     });
 
     h.chooseMenuItem(page, 'markDropdown', 'Mark All Read');

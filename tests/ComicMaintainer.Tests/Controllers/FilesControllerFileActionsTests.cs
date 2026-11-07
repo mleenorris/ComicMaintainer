@@ -181,6 +181,92 @@ public sealed class FilesControllerFileActionsTests
         AssertStatus(result, 500, "Error updating read status");
     }
 
+    // --------------------------------------------------------------- MarkScopeRead
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("library", false)]
+    [InlineData(" Library ", true)]
+    public async Task MarkScopeRead_Library_MarksTheWholeLibraryServerSide(string? scope, bool read)
+    {
+        _fileStore.Setup(f => f.MarkScopeReadAsync(It.IsAny<FileReadScope>(), read, It.IsAny<CancellationToken>())).ReturnsAsync(42);
+
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Scope = scope, Read = read });
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(42, Prop(ok.Value, "updated"));
+        _fileStore.Verify(f => f.MarkScopeReadAsync(FileReadScope.Library, read, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task MarkScopeRead_Folder_PassesTheFolderKey()
+    {
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Scope = "folder", Id = "Saga", Read = true });
+
+        Assert.IsType<OkObjectResult>(result);
+        _fileStore.Verify(f => f.MarkScopeReadAsync(
+            It.Is<FileReadScope>(s => s.Kind == FileReadScopeKind.Folder && s.FolderKey == "Saga"),
+            true,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task MarkScopeRead_Series_MarksEveryIssueOfTheSeries()
+    {
+        var first = InRoot("Saga", "Saga 001.cbz");
+        var second = InRoot("Saga", "Saga 002.cbz");
+        _seriesLibrary.Setup(s => s.GetSeriesIssuesAsync("saga", null, 1, -1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesIssuesResult
+            {
+                Id = "saga",
+                Issues = new List<SeriesIssueDto> { new() { FilePath = first }, new() { FilePath = second } }
+            });
+
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Scope = "series", Id = "saga", Read = false });
+
+        Assert.IsType<OkObjectResult>(result);
+        _fileStore.Verify(f => f.MarkScopeReadAsync(
+            It.Is<FileReadScope>(s => s.Kind == FileReadScopeKind.Files && s.FilePaths!.SequenceEqual(new[] { first, second })),
+            false,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("series", null, 400)]
+    [InlineData("series", "missing", 404)]
+    [InlineData("everything", null, 400)]
+    public async Task MarkScopeRead_BadScope_ChangesNothing(string scope, string? id, int status)
+    {
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Scope = scope, Id = id, Read = true });
+
+        Assert.Equal(status, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        _fileStore.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task MarkScopeRead_Cancelled_Returns499()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        _fileStore.Setup(f => f.MarkScopeReadAsync(It.IsAny<FileReadScope>(), It.IsAny<bool>(), cancelled.Token))
+            .ThrowsAsync(new OperationCanceledException(cancelled.Token));
+
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Read = true }, cancelled.Token);
+
+        Assert.Equal(499, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task MarkScopeRead_StoreThrows_Returns500()
+    {
+        _fileStore.Setup(f => f.MarkScopeReadAsync(It.IsAny<FileReadScope>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("db locked"));
+
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Read = true });
+
+        AssertStatus(result, 500, "Error updating read status");
+    }
+
     // ----------------------------------------------------------------- ProcessFile
 
     [Fact]

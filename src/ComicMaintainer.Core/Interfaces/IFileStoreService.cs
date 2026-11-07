@@ -88,9 +88,21 @@ public interface IFileStoreService
     Task MarkFileReadAsync(string filePath, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Mark multiple files as read or unread
+    /// Mark multiple files as read or unread for the current user, in one transaction.
+    /// Throws when the change could not be saved (nothing is saved then), including
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> fires.
     /// </summary>
     Task MarkFilesReadAsync(IEnumerable<string> filePaths, bool read, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Marks every tracked file in <paramref name="scope"/> read or unread for the current
+    /// user with set-based statements in a single transaction (reading progress included),
+    /// so a whole-library change needs neither a client-side path list nor a write per file.
+    /// Nothing is saved when it fails or <paramref name="cancellationToken"/> fires; the
+    /// exception propagates. Returns the number of tracked files in the scope, or 0 when no
+    /// user is in scope.
+    /// </summary>
+    Task<int> MarkScopeReadAsync(FileReadScope scope, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Save reading progress (current page) for a comic file

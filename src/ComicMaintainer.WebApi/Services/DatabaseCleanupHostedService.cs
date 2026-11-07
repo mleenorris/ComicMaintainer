@@ -1,17 +1,21 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Services;
 
 /// <summary>
-/// Hosted service that periodically cleans up stale database entries
+/// Hosted service that periodically cleans up stale database entries and refreshes the
+/// SQLite query-planner statistics.
 /// </summary>
 public class DatabaseCleanupHostedService : IHostedService, IDisposable
 {
     private readonly IFileStoreService _fileStore;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<DatabaseCleanupHostedService> _logger;
+    private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
     private Timer? _timer;
     private readonly SemaphoreSlim _cleanupLock = new(1, 1);
     private CancellationTokenSource? _cancellationTokenSource;
@@ -23,11 +27,13 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     public DatabaseCleanupHostedService(
         IFileStoreService fileStore,
         IOptionsMonitor<AppSettings> appSettings,
-        ILogger<DatabaseCleanupHostedService> logger)
+        ILogger<DatabaseCleanupHostedService> logger,
+        IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null)
     {
         _fileStore = fileStore;
         _appSettings = appSettings;
         _logger = logger;
+        _dbContextFactory = dbContextFactory;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -142,6 +148,7 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
             _logger.LogInformation("Starting scheduled database cleanup");
             var removedCount = await _fileStore.CleanupStaleEntriesAsync(cancellationToken);
             _logger.LogInformation("Database cleanup completed, removed {Count} stale entries", removedCount);
+            await RefreshPlannerStatisticsAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -154,6 +161,34 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
         finally
         {
             _cleanupLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>PRAGMA optimize</c> so the planner has current statistics for the library
+    /// indexes. Failures are logged and never fail the cleanup run.
+    /// </summary>
+    private async Task RefreshPlannerStatisticsAsync(CancellationToken cancellationToken)
+    {
+        if (_dbContextFactory is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (await SqliteStatisticsMaintenance.OptimizeAsync(_dbContextFactory, cancellationToken))
+            {
+                _logger.LogDebug("Refreshed SQLite query-planner statistics");
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Failed to refresh SQLite query-planner statistics");
         }
     }
 

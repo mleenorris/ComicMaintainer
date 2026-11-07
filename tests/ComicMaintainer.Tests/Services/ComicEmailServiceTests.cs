@@ -315,7 +315,9 @@ public class ComicEmailServiceTests : IDisposable
         Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(queued.Id)).Status);
         Assert.False(File.Exists(epubPath!));
         Assert.NotNull(usedOptions);
-        Assert.Equal(25L * 1024 * 1024, usedOptions!.MaxSizeBytes);
+        // The converter gets the attachment budget that keeps the encoded
+        // email within the 25 MB limit, not the limit itself.
+        Assert.Equal(EmailMessageSize.MaxAttachmentBytes(25L * 1024 * 1024), usedOptions!.MaxSizeBytes);
     }
 
     [Theory]
@@ -399,7 +401,9 @@ public class ComicEmailServiceTests : IDisposable
         Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(queued.Id)).Status);
         Assert.False(File.Exists(azw3Path!));
         Assert.NotNull(usedOptions);
-        Assert.Equal(25L * 1024 * 1024, usedOptions!.MaxSizeBytes);
+        // The converter gets the attachment budget that keeps the encoded
+        // email within the 25 MB limit, not the limit itself.
+        Assert.Equal(EmailMessageSize.MaxAttachmentBytes(25L * 1024 * 1024), usedOptions!.MaxSizeBytes);
         _epub.Verify(e => e.ConvertToEpubAsync(
             It.IsAny<string>(),
             It.IsAny<string>(),
@@ -441,6 +445,62 @@ public class ComicEmailServiceTests : IDisposable
         Assert.Equal(EmailDeliveryStatus.Failed, delivery.Status);
         Assert.Contains("exceeds", delivery.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
         _sender.Verify(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_FailsAFileThatFitsTheLimitOnlyBeforeItIsEncoded()
+    {
+        // 900 KB is under 1 MB on disk, but about 1.2 MB once base64 encoded,
+        // which is what the mail server measures.
+        _settings.EmailMaxAttachmentMegabytes = 1;
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
+        var file = CreateComic("Big - Chapter 0001.cbz", sizeBytes: 900 * 1024);
+        var queued = Assert.Single((await _service.QueueFilesAsync(
+            new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
+
+        await _service.ProcessDeliveryAsync(queued.Id);
+
+        var delivery = await GetDeliveryAsync(queued.Id);
+        Assert.Equal(EmailDeliveryStatus.Failed, delivery.Status);
+        Assert.Contains("once encoded for email", delivery.ErrorMessage);
+        Assert.Contains("1 MB email size limit", delivery.ErrorMessage);
+        _sender.Verify(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_SendsAFileWhoseEncodedEmailFitsTheLimit()
+    {
+        _settings.EmailMaxAttachmentMegabytes = 1;
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
+        var size = (int)EmailMessageSize.MaxAttachmentBytes(1024 * 1024);
+        var file = CreateComic("Fits - Chapter 0001.cbz", sizeBytes: size);
+        var queued = Assert.Single((await _service.QueueFilesAsync(
+            new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await _service.ProcessDeliveryAsync(queued.Id);
+
+        Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(queued.Id)).Status);
+    }
+
+    [Fact]
+    public async Task PlanCondensedDeliveryAsync_FlagsABookThatOnlyFitsBeforeItIsEncoded()
+    {
+        _settings.EmailMaxAttachmentMegabytes = 1;
+        var files = new[]
+        {
+            CreateComic("Series - Chapter 0001.cbz", sizeBytes: 400 * 1024),
+            CreateComic("Series - Chapter 0002.cbz", sizeBytes: 400 * 1024)
+        };
+
+        var plan = await _service.PlanCondensedDeliveryAsync(files, EmailCondenseMode.All, null);
+
+        var book = Assert.Single(plan.Books);
+        Assert.True(book.EstimatedBytes < 1024 * 1024);
+        Assert.True(book.ExceedsAttachmentLimit);
+        Assert.Equal(EmailMessageSize.MaxAttachmentBytes(1024 * 1024), plan.MaxAttachmentBytes);
+        Assert.False(plan.CanEmail);
     }
 
     [Fact]
@@ -789,7 +849,8 @@ public class ComicEmailServiceTests : IDisposable
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => _service.QueueCondensedFilesAsync(
             files, device.Id, EmailCondenseMode.All, null, EmailDeliverySource.Manual, skipAlreadyDelivered: false));
 
-        Assert.Contains("attachment limit", error.Message);
+        Assert.Contains("email size limit", error.Message);
+        Assert.Contains("once encoded for email", error.Message);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         Assert.Empty(db.ComicEmailDeliveries);

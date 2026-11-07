@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Telemetry;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
@@ -401,7 +402,7 @@ public class ComicEmailService : IComicEmailService
                 if (estimated > maxBytes)
                 {
                     throw new InvalidOperationException(
-                        $"Condensed book \"{displayName}\" is about {FormatMegabytes(estimated)} which exceeds the {FormatMegabytes(maxBytes)} attachment limit. Download it instead, or condense fewer issues per book.");
+                        $"Condensed book \"{displayName}\" is about {FormatMegabytes(estimated)}, {DescribeOversizedAttachment(estimated)}. Download it instead, or condense fewer issues per book.");
                 }
 
                 var delivery = new ComicEmailDeliveryEntity
@@ -805,11 +806,28 @@ public class ComicEmailService : IComicEmailService
         return (long)(total * 1.02) + 64 * 1024;
     }
 
-    private long GetMaxAttachmentBytes() =>
+    /// <summary>
+    /// The configured email size limit. Mail servers enforce their limits on
+    /// the whole encoded message, so attachments are measured against
+    /// <see cref="GetMaxAttachmentBytes"/> instead.
+    /// </summary>
+    private long GetMaxMessageBytes() =>
         (long)Math.Max(1, _settings.CurrentValue.EmailMaxAttachmentMegabytes) * 1024 * 1024;
 
+    /// <summary>
+    /// Largest attachment whose email, once base64 encoded and wrapped in
+    /// MIME, stays within <see cref="GetMaxMessageBytes"/>. Used for every size
+    /// check and as the budget an oversized book is recompressed to.
+    /// </summary>
+    private long GetMaxAttachmentBytes() =>
+        EmailMessageSize.MaxAttachmentBytes(GetMaxMessageBytes());
+
+    /// <summary>Explains that an attachment of <paramref name="attachmentBytes"/> is too large to email.</summary>
+    private string DescribeOversizedAttachment(long attachmentBytes) =>
+        $"about {FormatMegabytes(EmailMessageSize.EstimateMessageBytes(attachmentBytes))} once encoded for email, which exceeds the {FormatMegabytes(GetMaxMessageBytes())} email size limit";
+
     private static string FormatMegabytes(long bytes) =>
-        $"{bytes / (1024d * 1024d):0.#} MB";
+        string.Create(CultureInfo.InvariantCulture, $"{bytes / (1024d * 1024d):0.#} MB");
 
     /// <summary>
     /// Names a condensed book after the series and the range it covers, e.g.
@@ -1133,7 +1151,7 @@ public class ComicEmailService : IComicEmailService
             if (attachmentLength > maxBytes)
             {
                 throw new InvalidOperationException(
-                    $"Attachment is {attachmentLength / (1024 * 1024)} MB which exceeds the {_settings.CurrentValue.EmailMaxAttachmentMegabytes} MB limit.");
+                    $"The attachment is {FormatMegabytes(attachmentLength)}, {DescribeOversizedAttachment(attachmentLength)}.");
             }
 
             // Past this point the delivery can no longer be cancelled.

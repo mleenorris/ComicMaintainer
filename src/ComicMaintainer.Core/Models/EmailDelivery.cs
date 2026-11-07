@@ -227,6 +227,67 @@ public static class EmailRateLimitBounds
     public const int MaxMinSecondsBetweenSends = 86_400;
 }
 
+/// <summary>
+/// Relates the size of an attachment on disk to the size of the email that
+/// carries it. Mail servers enforce their limits on the encoded message, and
+/// base64 turns every 3 bytes into 4 characters wrapped at 76 characters per
+/// line, so an attachment grows by about 37% on the wire: a 25 MB book is a
+/// 34 MB email.
+/// </summary>
+public static class EmailMessageSize
+{
+    /// <summary>
+    /// Room reserved for the headers, the text body and the MIME boundaries,
+    /// which together take a few kilobytes, with the rest as a safety margin.
+    /// </summary>
+    public const long MessageOverheadBytes = 64 * 1024;
+
+    /// <summary>Base64 characters per line; each line ends with CRLF.</summary>
+    private const long Base64LineLength = 76;
+
+    /// <summary>
+    /// Upper estimate of the size of an email carrying an attachment of
+    /// <paramref name="attachmentBytes"/> bytes.
+    /// </summary>
+    public static long EstimateMessageBytes(long attachmentBytes)
+    {
+        var raw = Math.Max(0, attachmentBytes);
+        var base64 = checked((raw + 2) / 3 * 4);
+        var lineBreaks = (base64 + Base64LineLength - 1) / Base64LineLength * 2;
+        return checked(base64 + lineBreaks + MessageOverheadBytes);
+    }
+
+    /// <summary>
+    /// Largest attachment whose email stays within
+    /// <paramref name="maxMessageBytes"/>; 0 when not even an empty
+    /// attachment fits.
+    /// </summary>
+    public static long MaxAttachmentBytes(long maxMessageBytes)
+    {
+        var available = maxMessageBytes - MessageOverheadBytes;
+        if (available <= 0)
+        {
+            return 0;
+        }
+
+        // Invert the estimate, then correct the rounding either way; that is
+        // at most a few bytes, so each loop runs only a handful of times.
+        var base64 = available * Base64LineLength / (Base64LineLength + 2);
+        var raw = base64 / 4 * 3;
+        while (raw > 0 && EstimateMessageBytes(raw) > maxMessageBytes)
+        {
+            raw--;
+        }
+
+        while (EstimateMessageBytes(raw + 1) <= maxMessageBytes)
+        {
+            raw++;
+        }
+
+        return raw;
+    }
+}
+
 /// <summary>A saved ereader destination.</summary>
 public record EreaderDeviceDto(
     int Id,
@@ -339,8 +400,9 @@ public record EmailDeliveryBulkCancelResult(int Cancelled, int Stopping, int Sen
 /// container overhead is a close approximation.
 /// </param>
 /// <param name="ExceedsAttachmentLimit">
-/// True when <paramref name="EstimatedBytes"/> is over the configured mail
-/// attachment limit. Such a book should be downloaded rather than emailed:
+/// True when <paramref name="EstimatedBytes"/> is over the largest attachment
+/// that fits the configured email size limit once encoded (see
+/// <see cref="EmailMessageSize"/>). Such a book should be downloaded rather than emailed:
 /// the converter will still try to recompress it, but heavily condensed books
 /// cannot realistically be shrunk far enough.
 /// </param>
@@ -354,6 +416,10 @@ public record CondensedBookDto(
 /// What condensing a selection would produce, so the user can be warned before
 /// a mass condense that cannot be emailed.
 /// </summary>
+/// <param name="MaxAttachmentBytes">
+/// Largest book that can be emailed: the configured email size limit less
+/// the base64 and MIME overhead (see <see cref="EmailMessageSize"/>).
+/// </param>
 public record CondensePlanDto(
     string Mode,
     int TotalIssues,

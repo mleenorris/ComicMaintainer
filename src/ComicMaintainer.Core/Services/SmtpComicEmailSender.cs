@@ -8,6 +8,7 @@ using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
+using MimeKit.IO;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -52,19 +53,26 @@ public class SmtpComicEmailSender : IComicEmailSender
         mime.Subject = message.Subject;
 
         var body = new BodyBuilder { TextBody = message.Body };
-        if (!string.IsNullOrWhiteSpace(message.AttachmentPath))
+
+        // The attachment is streamed from disk while the message is written
+        // rather than copied into memory first, so it stays open until sent.
+        await using var attachmentStream = string.IsNullOrWhiteSpace(message.AttachmentPath)
+            ? null
+            : File.OpenRead(message.AttachmentPath);
+        if (attachmentStream is not null)
         {
             var contentType = ContentType.Parse(
                 string.IsNullOrWhiteSpace(message.AttachmentContentType)
                     ? "application/octet-stream"
                     : message.AttachmentContentType);
 
-            await using var attachmentStream = File.OpenRead(message.AttachmentPath);
-            await body.Attachments.AddAsync(
-                message.AttachmentFileName ?? Path.GetFileName(message.AttachmentPath),
-                attachmentStream,
-                contentType,
-                cancellationToken);
+            body.Attachments.Add(new MimePart(contentType)
+            {
+                Content = new MimeContent(attachmentStream),
+                ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+                ContentTransferEncoding = ContentEncoding.Base64,
+                FileName = message.AttachmentFileName ?? Path.GetFileName(message.AttachmentPath)
+            });
         }
 
         mime.Body = body.ToMessageBody();
@@ -98,6 +106,11 @@ public class SmtpComicEmailSender : IComicEmailSender
                 await client.AuthenticateAsync(settings.SmtpUsername, settings.SmtpPassword ?? string.Empty, cancellationToken);
             }
 
+            // The advertised limit can change once authenticated, so it is read
+            // only now. Checking it here explains the rejection before the
+            // whole attachment is uploaded.
+            await EnsureWithinServerLimitAsync(client, mime, cancellationToken);
+
             await client.SendAsync(mime, cancellationToken);
         }
         catch (Exception ex) when (IsTransient(ex, cancellationToken))
@@ -123,6 +136,39 @@ public class SmtpComicEmailSender : IComicEmailSender
             "Sent comic email to {Recipient}",
             LoggingHelper.SanitizeForLog(message.ToAddress));
     }
+
+    /// <summary>
+    /// Fails with a clear message when the server advertises a message size
+    /// limit (the SMTP SIZE extension) that the encoded message exceeds. The
+    /// server would reject it with a 552 anyway, but only after the upload.
+    /// </summary>
+    private static async Task EnsureWithinServerLimitAsync(
+        SmtpClient client,
+        MimeMessage message,
+        CancellationToken cancellationToken)
+    {
+        if ((client.Capabilities & SmtpCapabilities.Size) == 0 || client.MaxSize == 0)
+        {
+            return;
+        }
+
+        var options = FormatOptions.Default.Clone();
+        options.NewLineFormat = NewLineFormat.Dos;
+        using var measure = new MeasuringStream();
+        await message.WriteToAsync(options, measure, cancellationToken);
+        if (measure.Length <= client.MaxSize)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"The email is {FormatMegabytes(measure.Length)} once encoded, but the mail server accepts at most " +
+            $"{FormatMegabytes(client.MaxSize)}. Lower the maximum email size in Settings to " +
+            $"{Math.Max(1, (long)client.MaxSize / (1024 * 1024))} MB or less so books are compressed to fit.");
+    }
+
+    private static string FormatMegabytes(long bytes) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{bytes / (1024d * 1024d):0.#} MB");
 
     /// <summary>
     /// Whether a failure to connect, authenticate or send is worth retrying

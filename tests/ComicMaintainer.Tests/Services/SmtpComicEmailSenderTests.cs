@@ -312,6 +312,50 @@ public class SmtpComicEmailSenderTests : IDisposable
             e.Level == LogLevel.Information && e.Message.Contains("Sent comic email to kindle@example.com"));
     }
 
+    [Fact]
+    public async Task SendAsync_WhenTheEncodedEmailExceedsTheServersSizeLimit_FailsBeforeUploading()
+    {
+        using var server = new FakeSmtpServer { MaxMessageSize = 100_000 };
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+
+        // 90 KB fits the advertised 100 KB on disk, but not once base64 encoded.
+        var attachment = Path.Join(_workDir, "Series 001.epub");
+        await File.WriteAllBytesAsync(attachment, new byte[90_000]);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Series 001", "Body", attachment),
+            _guard.Token));
+
+        Assert.Contains("once encoded", ex.Message);
+        Assert.Contains("accepts at most", ex.Message);
+        Assert.DoesNotContain(server.Commands, c => c.StartsWith("MAIL", StringComparison.OrdinalIgnoreCase));
+        Assert.False(server.Message.IsCompleted);
+    }
+
+    [Fact]
+    public async Task SendAsync_WhenTheEmailFitsTheServersSizeLimit_SendsTheWholeAttachment()
+    {
+        using var server = new FakeSmtpServer { MaxMessageSize = 10 * 1024 * 1024 };
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+
+        var attachment = Path.Join(_workDir, "Series 001.epub");
+        var content = new byte[300_000];
+        new Random(42).NextBytes(content);
+        await File.WriteAllBytesAsync(attachment, content);
+
+        await _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Series 001", "Body", attachment, "Series 001.epub", "application/epub+zip"),
+            _guard.Token);
+
+        var mime = await server.Message.WaitAsync(Timeout);
+        var part = Assert.IsType<MimePart>(Assert.Single(mime.Attachments));
+        Assert.Equal(ContentEncoding.Base64, part.ContentTransferEncoding);
+        Assert.Equal(content, Decode(part));
+        Assert.Contains(server.Commands, c => c.StartsWith("MAIL", StringComparison.OrdinalIgnoreCase) && c.Contains("SIZE="));
+    }
+
     public static TheoryData<Exception, bool> TransientClassificationCases() => new()
     {
         { new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.MessageNotAccepted, MailKit.Net.Smtp.SmtpStatusCode.ServiceNotAvailable, "busy"), true },

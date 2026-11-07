@@ -295,10 +295,13 @@ public class AppSettings
     public string EmailFromName { get; set; } = "ComicMaintainer";
 
     /// <summary>
-    /// Maximum size, in megabytes, of a single comic attachment. Issues larger
-    /// than this are failed with a clear message rather than being handed to the
-    /// SMTP server, which would reject them anyway (Kindle's personal-document
-    /// limit is 50 MB, most providers cap at 25 MB). Defaults to 25.
+    /// Maximum size, in megabytes, of a whole comic email as the SMTP server
+    /// measures it: the attachment once base64 encoded (about 37% larger than
+    /// the file) plus headers. Providers enforce their limits on this encoded
+    /// size (most cap at 25 MB), so with the default of 25 a book can be about
+    /// 18 MB. Converted books are recompressed to fit; anything still larger is
+    /// failed with a clear message rather than being handed to the SMTP server,
+    /// which would reject it anyway.
     /// </summary>
     public int EmailMaxAttachmentMegabytes { get; set; } = 25;
 

@@ -28,7 +28,7 @@ public interface IFolderCombineService
     /// plans it without changing anything, including which source folders
     /// will be removed and what would keep the others.
     /// </summary>
-    Task<FolderCombinePlanResult> PreviewAsync(FolderCombineRequest request, CancellationToken cancellationToken = default);
+    Task<FolderCombinePlanResult> PreviewAsync(FolderCombineRequest? request, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Plans <paramref name="request"/> like <see cref="PreviewAsync"/> and
@@ -36,5 +36,5 @@ public interface IFolderCombineService
     /// hold anything other than disposable files when the moves are done are
     /// kept and reported in the job's results.
     /// </summary>
-    Task<FolderCombineStartResult> StartAsync(FolderCombineRequest request, CancellationToken cancellationToken = default);
+    Task<FolderCombineStartResult> StartAsync(FolderCombineRequest? request, CancellationToken cancellationToken = default);
 }

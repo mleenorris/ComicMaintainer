@@ -18,6 +18,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
     private readonly string _downloads;
     private readonly AppSettings _settings;
     private readonly Mock<ISeriesLibraryService> _seriesLibrary = new();
+    private ILibraryMutationLock _libraryMutationLock = new LibraryMutationLock();
 
     // An hour ahead, so everything a test writes counts as finished.
     private FakeTimeProvider _time = new(DateTimeOffset.UtcNow.AddHours(1));
@@ -59,6 +60,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         return new SuwayomiDownloadImportService(
             monitor.Object,
             _seriesLibrary.Object,
+            _libraryMutationLock,
             logger ?? NullLogger<SuwayomiDownloadImportService>.Instance,
             _time);
     }
@@ -122,6 +124,55 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
 
     private string Download(string source, string series, string chapter, string page = "page")
         => WriteCbz(Path.Join(_downloads, source, series, chapter), page);
+
+    /// <summary>
+    /// Counts acquisitions of a real lock and, as each locked section ends,
+    /// notes any staged chapter still in the library, so a chapter staged in
+    /// one section and published in another (or outside the lock) is caught.
+    /// </summary>
+    private sealed class RecordingLibraryMutationLock(string libraryRoot) : ILibraryMutationLock
+    {
+        private readonly LibraryMutationLock _inner = new();
+
+        public int Acquisitions { get; private set; }
+
+        public List<string> StagedFilesLeftAtRelease { get; } = new();
+
+        public T Execute<T>(Func<T> action, CancellationToken cancellationToken = default) =>
+            _inner.Execute(() =>
+            {
+                Acquisitions++;
+                try
+                {
+                    return action();
+                }
+                finally
+                {
+                    StagedFilesLeftAtRelease.AddRange(
+                        Directory.EnumerateFiles(libraryRoot, "*.suwayomi-import", SearchOption.AllDirectories));
+                }
+            }, cancellationToken);
+
+        public void Execute(Action action, CancellationToken cancellationToken = default) =>
+            Execute(() => { action(); return true; }, cancellationToken);
+
+        public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken cancellationToken = default) =>
+            _inner.ExecuteAsync(action, cancellationToken);
+    }
+
+    [Fact]
+    public async Task ImportAsync_StagesAndPublishesEachChapterWhileHoldingTheInjectedLibraryMutationLock()
+    {
+        Download("MangaDex (EN)", "Solo Leveling", "Official_Chapter 1.cbz");
+        var recordingLock = new RecordingLibraryMutationLock(_library);
+        _libraryMutationLock = recordingLock;
+
+        var result = await CreateService().ImportAsync();
+
+        Assert.Single(result.Imported);
+        Assert.True(recordingLock.Acquisitions >= 1);
+        Assert.Empty(recordingLock.StagedFilesLeftAtRelease);
+    }
 
     [Fact]
     public async Task ImportAsync_MovesAFinishedChapterIntoASeriesFolderAndRemovesTheEmptiedFolders()

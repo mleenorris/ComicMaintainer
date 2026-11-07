@@ -230,6 +230,9 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<EventBroadcasterService>();
         services.AddSingleton<IEventBroadcaster>(sp => sp.GetRequiredService<EventBroadcasterService>());
         services.AddSingleton<IFileStoreService, FileStoreService>();
+        // One lock for everything that creates, fills or removes library folders
+        // (Suwayomi import, folder combine), so none removes a folder another fills.
+        services.AddSingleton<ILibraryMutationLock, LibraryMutationLock>();
         services.AddSingleton<ISeriesNameResolver, SeriesNameResolver>();
         services.AddSingleton<IJobStateStore, JobStateStore>();
         services.AddSingleton<IComicProcessorService, ComicProcessorService>();
@@ -241,6 +244,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
         services.AddSingleton<IOverviewService, OverviewService>();
         services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheService>();
+        services.AddSingleton<IFolderCombineService, FolderCombineService>();
         services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRefreshJobService>();
         services.AddSingleton<ISeriesLanguagePreferenceRetagService, SeriesLanguagePreferenceRetagService>();
         services.AddSingleton<ISeriesImageStore, SeriesImageStore>();

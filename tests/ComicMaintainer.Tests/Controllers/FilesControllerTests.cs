@@ -1,11 +1,9 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
-using ComicMaintainer.Core.Data;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -40,31 +38,39 @@ public class FilesControllerTests
         _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
         // Make RunCustomBatchJobAsync execute the supplied per-item callback
-        // and post-loop hook inline so combine-folders / bulk-delete tests can
-        // observe the moves/deletes synchronously the way the pre-job
-        // implementation behaved.
-        _mockProcessor
-            .Setup(p => p.RunCustomBatchJobAsync(
-                It.IsAny<string>(),
-                It.IsAny<IEnumerable<string>>(),
-                It.IsAny<Func<string, CancellationToken, Task<bool>>>(),
-                It.IsAny<string>(),
-                It.IsAny<Func<CancellationToken, Task>?>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(async (string _, IEnumerable<string> items, Func<string, CancellationToken, Task<bool>> op, string _, Func<CancellationToken, Task>? post, CancellationToken ct) =>
-            {
-                foreach (var item in items)
-                {
-                    await op(item, ct);
-                }
-                if (post is not null)
-                {
-                    await post(ct);
-                }
-                return Guid.NewGuid();
-            });
+        // and post-loop hook inline so combine-folders tests can observe the
+        // moves synchronously the way the pre-job implementation behaved.
+        _mockProcessor.RunCustomBatchJobsInline();
 
-        _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockHistoryService.Object, _mockSeriesLibrary.Object, _mockLogger.Object, _mockSettings.Object);
+        _controller = CreateController();
+    }
+
+    /// <summary>
+    /// Builds a controller whose folder-combine endpoints run the real
+    /// <see cref="ComicMaintainer.Core.Services.FolderCombineService"/> over
+    /// this class's mocks.
+    /// </summary>
+    private FilesController CreateController(
+        ISeriesMetadataCacheService? metadataCache = null,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        IFileStoreService? fileStore = null)
+    {
+        var store = fileStore ?? _mockFileStore.Object;
+        return new FilesController(
+            store,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            TestFolderCombineService.Create(
+                store,
+                _mockProcessor.Object,
+                _mockHistoryService.Object,
+                _mockSeriesLibrary.Object,
+                _mockSettings.Object,
+                metadataCache,
+                memoryCache));
     }
 
     [Fact]
@@ -301,42 +307,19 @@ public class FilesControllerTests
     [Fact]
     public async Task GetFileCounts_WithMatchingMetadataAcrossFolders_ReturnsCombinableFolderCount()
     {
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-
-        await using (var dbContext = new ComicMaintainerDbContext(options))
-        {
-            dbContext.ComicFiles.AddRange(
-                new ComicFileEntity
-                {
-                    FilePath = "/library/older/Batman-001.cbz",
-                    FileName = "Batman-001.cbz",
-                    Directory = "/library/older",
-                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                },
-                new ComicFileEntity
-                {
-                    FilePath = "/library/newer/Batman-002.cbz",
-                    FileName = "Batman-002.cbz",
-                    Directory = "/library/newer",
-                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
-                });
-
-            await dbContext.SaveChangesAsync();
-        }
-
         var files = new List<ComicFile>
         {
             new()
             {
                 FilePath = "/library/older/Batman-001.cbz",
+                CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                 Directory = "/library/older",
                 LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
             },
             new()
             {
                 FilePath = "/library/newer/Batman-002.cbz",
+                CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
                 Directory = "/library/newer",
                 LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
             }
@@ -351,90 +334,7 @@ public class FilesControllerTests
         _mockProcessor.Setup(p => p.GetSeriesMetadataAsync("/library/newer/Batman-002.cbz", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadata { Series = "Batman" });
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options));
-
-        var result = await controller.GetFileCounts();
-
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        Assert.NotNull(okResult.Value);
-        Assert.Equal(1, GetIntProperty(okResult.Value, "combinableFolders"));
-    }
-
-    [Fact]
-    public async Task GetFileCounts_WithDuplicateDatabaseFilePaths_UsesLatestCreatedAtWithoutThrowing()
-    {
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-
-        await using (var dbContext = new ComicMaintainerDbContext(options))
-        {
-            dbContext.ComicFiles.AddRange(
-                new ComicFileEntity
-                {
-                    FilePath = "/library/older/Batman-001.cbz",
-                    FileName = "Batman-001.cbz",
-                    Directory = "/library/older",
-                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                },
-                new ComicFileEntity
-                {
-                    FilePath = "/library/older/Batman-001.cbz",
-                    FileName = "Batman-001.cbz",
-                    Directory = "/library/older",
-                    CreatedAt = new DateTime(2026, 4, 3, 0, 0, 0, DateTimeKind.Utc)
-                },
-                new ComicFileEntity
-                {
-                    FilePath = "/library/newer/Batman-002.cbz",
-                    FileName = "Batman-002.cbz",
-                    Directory = "/library/newer",
-                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
-                });
-
-            await dbContext.SaveChangesAsync();
-        }
-
-        var files = new List<ComicFile>
-        {
-            new()
-            {
-                FilePath = "/library/older/Batman-001.cbz",
-                FileName = "Batman-001.cbz",
-                Directory = "/library/older",
-                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
-                Metadata = new ComicMetadata { Series = "Batman" }
-            },
-            new()
-            {
-                FilePath = "/library/newer/Batman-002.cbz",
-                FileName = "Batman-002.cbz",
-                Directory = "/library/newer",
-                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
-                Metadata = new ComicMetadata { Series = "Batman" }
-            }
-        };
-
-        _mockFileStore.Setup(fs => fs.GetFileCountsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((2, 2, 0, 0));
-        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(files);
-
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options));
+        var controller = CreateController();
 
         var result = await controller.GetFileCounts();
 
@@ -449,36 +349,13 @@ public class FilesControllerTests
         // Two folders whose series titles differ ("Batman" and "The Dark Knight")
         // should be reported as a single combinable group when the metadata
         // cache says the user has linked them via aliases.
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-
-        await using (var dbContext = new ComicMaintainerDbContext(options))
-        {
-            dbContext.ComicFiles.AddRange(
-                new ComicFileEntity
-                {
-                    FilePath = "/library/canonical/Batman-001.cbz",
-                    FileName = "Batman-001.cbz",
-                    Directory = "/library/canonical",
-                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                },
-                new ComicFileEntity
-                {
-                    FilePath = "/library/aliasfolder/DarkKnight-002.cbz",
-                    FileName = "DarkKnight-002.cbz",
-                    Directory = "/library/aliasfolder",
-                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
-                });
-
-            await dbContext.SaveChangesAsync();
-        }
 
         var files = new List<ComicFile>
         {
             new()
             {
                 FilePath = "/library/canonical/Batman-001.cbz",
+                CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "Batman-001.cbz",
                 Directory = "/library/canonical",
                 LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -487,6 +364,7 @@ public class FilesControllerTests
             new()
             {
                 FilePath = "/library/aliasfolder/DarkKnight-002.cbz",
+                CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "DarkKnight-002.cbz",
                 Directory = "/library/aliasfolder",
                 LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
@@ -510,16 +388,7 @@ public class FilesControllerTests
                 }
             });
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options),
-            null,
-            mockCache.Object);
+        var controller = CreateController(metadataCache: mockCache.Object);
 
         var result = await controller.GetCombinableFolders();
 
@@ -547,36 +416,13 @@ public class FilesControllerTests
         // combinable group so the user can consolidate them. Previously the
         // directory bucket used a case-insensitive comparer, which collapsed
         // both folders into one bucket and silently dropped the group.
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-
-        await using (var dbContext = new ComicMaintainerDbContext(options))
-        {
-            dbContext.ComicFiles.AddRange(
-                new ComicFileEntity
-                {
-                    FilePath = "/library/Manga A/Batman-001.cbz",
-                    FileName = "Batman-001.cbz",
-                    Directory = "/library/Manga A",
-                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                },
-                new ComicFileEntity
-                {
-                    FilePath = "/library/manga a/Batman-002.cbz",
-                    FileName = "Batman-002.cbz",
-                    Directory = "/library/manga a",
-                    CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
-                });
-
-            await dbContext.SaveChangesAsync();
-        }
 
         var files = new List<ComicFile>
         {
             new()
             {
                 FilePath = "/library/Manga A/Batman-001.cbz",
+                CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "Batman-001.cbz",
                 Directory = "/library/Manga A",
                 LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -585,6 +431,7 @@ public class FilesControllerTests
             new()
             {
                 FilePath = "/library/manga a/Batman-002.cbz",
+                CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "Batman-002.cbz",
                 Directory = "/library/manga a",
                 LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
@@ -595,14 +442,7 @@ public class FilesControllerTests
         _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options));
+        var controller = CreateController();
 
         var result = await controller.GetCombinableFolders();
 
@@ -632,36 +472,13 @@ public class FilesControllerTests
         // union-find merging, record "Y" would overwrite the alias entry
         // produced by record "X", leaving the two folders un-combinable even
         // though the series view tile already merges them.
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-
-        await using (var dbContext = new ComicMaintainerDbContext(options))
-        {
-            dbContext.ComicFiles.AddRange(
-                new ComicFileEntity
-                {
-                    FilePath = "/library/canonical/Batman-001.cbz",
-                    FileName = "Batman-001.cbz",
-                    Directory = "/library/canonical",
-                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                },
-                new ComicFileEntity
-                {
-                    FilePath = "/library/aliasfolder/DarkKnight-002.cbz",
-                    FileName = "DarkKnight-002.cbz",
-                    Directory = "/library/aliasfolder",
-                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
-                });
-
-            await dbContext.SaveChangesAsync();
-        }
 
         var files = new List<ComicFile>
         {
             new()
             {
                 FilePath = "/library/canonical/Batman-001.cbz",
+                CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "Batman-001.cbz",
                 Directory = "/library/canonical",
                 LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -670,6 +487,7 @@ public class FilesControllerTests
             new()
             {
                 FilePath = "/library/aliasfolder/DarkKnight-002.cbz",
+                CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "DarkKnight-002.cbz",
                 Directory = "/library/aliasfolder",
                 LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
@@ -705,16 +523,7 @@ public class FilesControllerTests
                 }
             });
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options),
-            null,
-            mockCache.Object);
+        var controller = CreateController(metadataCache: mockCache.Object);
 
         var result = await controller.GetCombinableFolders();
 
@@ -736,9 +545,6 @@ public class FilesControllerTests
     {
         // Sanity check: without any cache record, two distinct series titles
         // remain in separate groups (so no group is reported).
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
 
         var files = new List<ComicFile>
         {
@@ -767,16 +573,7 @@ public class FilesControllerTests
         mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options),
-            null,
-            mockCache.Object);
+        var controller = CreateController(metadataCache: mockCache.Object);
 
         var result = await controller.GetCombinableFolders();
 
@@ -796,35 +593,13 @@ public class FilesControllerTests
         // alias is a number stripped from a CJK title (e.g. "怪獣8号" and
         // "8階級魔法使い" both reduce to "8" after the [^a-z0-9]+ sanitizer)
         // must NOT be grouped into a combinable-folder suggestion.
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-
-        await using (var dbContext = new ComicMaintainerDbContext(options))
-        {
-            dbContext.ComicFiles.AddRange(
-                new ComicFileEntity
-                {
-                    FilePath = "/library/kaiju/Kaiju No 8 001.cbz",
-                    FileName = "Kaiju No 8 001.cbz",
-                    Directory = "/library/kaiju",
-                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                },
-                new ComicFileEntity
-                {
-                    FilePath = "/library/mage8/8th Class Mage 002.cbz",
-                    FileName = "8th Class Mage 002.cbz",
-                    Directory = "/library/mage8",
-                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
-                });
-            await dbContext.SaveChangesAsync();
-        }
 
         var files = new List<ComicFile>
         {
             new()
             {
                 FilePath = "/library/kaiju/Kaiju No 8 001.cbz",
+                CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "Kaiju No 8 001.cbz",
                 Directory = "/library/kaiju",
                 LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -833,6 +608,7 @@ public class FilesControllerTests
             new()
             {
                 FilePath = "/library/mage8/8th Class Mage 002.cbz",
+                CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "8th Class Mage 002.cbz",
                 Directory = "/library/mage8",
                 LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
@@ -863,16 +639,7 @@ public class FilesControllerTests
                 }
             });
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options),
-            null,
-            mockCache.Object);
+        var controller = CreateController(metadataCache: mockCache.Object);
 
         var result = await controller.GetCombinableFolders();
 
@@ -891,35 +658,13 @@ public class FilesControllerTests
         // Regression: same false-positive shape as the "8" case but with
         // "100" — two series whose only shared normalized key is "100"
         // (stripped from "モブサイコ100" / "100カノジョ") must NOT merge.
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-
-        await using (var dbContext = new ComicMaintainerDbContext(options))
-        {
-            dbContext.ComicFiles.AddRange(
-                new ComicFileEntity
-                {
-                    FilePath = "/library/mob/Mob Psycho 100 001.cbz",
-                    FileName = "Mob Psycho 100 001.cbz",
-                    Directory = "/library/mob",
-                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                },
-                new ComicFileEntity
-                {
-                    FilePath = "/library/100gf/100 Girlfriends 002.cbz",
-                    FileName = "100 Girlfriends 002.cbz",
-                    Directory = "/library/100gf",
-                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
-                });
-            await dbContext.SaveChangesAsync();
-        }
 
         var files = new List<ComicFile>
         {
             new()
             {
                 FilePath = "/library/mob/Mob Psycho 100 001.cbz",
+                CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "Mob Psycho 100 001.cbz",
                 Directory = "/library/mob",
                 LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -928,6 +673,7 @@ public class FilesControllerTests
             new()
             {
                 FilePath = "/library/100gf/100 Girlfriends 002.cbz",
+                CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
                 FileName = "100 Girlfriends 002.cbz",
                 Directory = "/library/100gf",
                 LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
@@ -958,16 +704,7 @@ public class FilesControllerTests
                 }
             });
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options),
-            null,
-            mockCache.Object);
+        var controller = CreateController(metadataCache: mockCache.Object);
 
         var result = await controller.GetCombinableFolders();
 
@@ -1746,35 +1483,12 @@ public class FilesControllerTests
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
-            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            await using (var dbContext = new ComicMaintainerDbContext(options))
-            {
-                dbContext.ComicFiles.AddRange(
-                    new ComicFileEntity
-                    {
-                        FilePath = olderPath,
-                        FileName = "Batman-001.cbz",
-                        Directory = olderDir,
-                        CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                    },
-                    new ComicFileEntity
-                    {
-                        FilePath = newerPath,
-                        FileName = "Batman-002.cbz",
-                        Directory = newerDir,
-                        CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
-                    });
-                await dbContext.SaveChangesAsync();
-            }
-
             var files = new List<ComicFile>
             {
                 new()
                 {
                     FilePath = olderPath,
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-001.cbz",
                     Directory = olderDir,
                     LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -1783,6 +1497,7 @@ public class FilesControllerTests
                 new()
                 {
                     FilePath = newerPath,
+                    CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-002.cbz",
                     Directory = newerDir,
                     LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
@@ -1796,14 +1511,7 @@ public class FilesControllerTests
             var settings = new AppSettings { WatchedDirectory = tempDir };
             _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
-            var controller = new FilesController(
-                _mockFileStore.Object,
-                _mockProcessor.Object,
-                _mockHistoryService.Object,
-                _mockSeriesLibrary.Object,
-                _mockLogger.Object,
-                _mockSettings.Object,
-                new TestDbContextFactory(options));
+            var controller = CreateController();
 
             var result = await controller.GetCombinableFolders();
 
@@ -1847,35 +1555,12 @@ public class FilesControllerTests
             System.IO.File.WriteAllText(Path.Join(olderDir, "cover.jpg"), "img");
             System.IO.File.WriteAllText(Path.Join(olderDir, "ComicInfo.xml"), "<xml/>");
 
-            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            await using (var dbContext = new ComicMaintainerDbContext(options))
-            {
-                dbContext.ComicFiles.AddRange(
-                    new ComicFileEntity
-                    {
-                        FilePath = olderPath,
-                        FileName = "Batman-001.cbz",
-                        Directory = olderDir,
-                        CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                    },
-                    new ComicFileEntity
-                    {
-                        FilePath = newerPath,
-                        FileName = "Batman-002.cbz",
-                        Directory = newerDir,
-                        CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
-                    });
-                await dbContext.SaveChangesAsync();
-            }
-
             var files = new List<ComicFile>
             {
                 new()
                 {
                     FilePath = olderPath,
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-001.cbz",
                     Directory = olderDir,
                     LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -1884,6 +1569,7 @@ public class FilesControllerTests
                 new()
                 {
                     FilePath = newerPath,
+                    CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-002.cbz",
                     Directory = newerDir,
                     LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
@@ -1909,16 +1595,7 @@ public class FilesControllerTests
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-            var controller = new FilesController(
-                _mockFileStore.Object,
-                _mockProcessor.Object,
-                _mockHistoryService.Object,
-                _mockSeriesLibrary.Object,
-                _mockLogger.Object,
-                _mockSettings.Object,
-                new TestDbContextFactory(options),
-                eventBroadcaster: null,
-                metadataCache: mockMetadataCache.Object);
+            var controller = CreateController(metadataCache: mockMetadataCache.Object);
 
             var request = new FilesController.CombineFoldersRequest
             {
@@ -1957,35 +1634,12 @@ public class FilesControllerTests
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
-            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            await using (var dbContext = new ComicMaintainerDbContext(options))
-            {
-                dbContext.ComicFiles.AddRange(
-                    new ComicFileEntity
-                    {
-                        FilePath = olderPath,
-                        FileName = "Batman-001.cbz",
-                        Directory = olderDir,
-                        CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                    },
-                    new ComicFileEntity
-                    {
-                        FilePath = newerPath,
-                        FileName = "Batman-002.cbz",
-                        Directory = newerDir,
-                        CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
-                    });
-                await dbContext.SaveChangesAsync();
-            }
-
             var files = new List<ComicFile>
             {
                 new()
                 {
                     FilePath = olderPath,
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-001.cbz",
                     Directory = olderDir,
                     LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -1994,6 +1648,7 @@ public class FilesControllerTests
                 new()
                 {
                     FilePath = newerPath,
+                    CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-002.cbz",
                     Directory = newerDir,
                     LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
@@ -2019,16 +1674,7 @@ public class FilesControllerTests
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-            var controller = new FilesController(
-                _mockFileStore.Object,
-                _mockProcessor.Object,
-                _mockHistoryService.Object,
-                _mockSeriesLibrary.Object,
-                _mockLogger.Object,
-                _mockSettings.Object,
-                new TestDbContextFactory(options),
-                eventBroadcaster: null,
-                metadataCache: mockMetadataCache.Object);
+            var controller = CreateController(metadataCache: mockMetadataCache.Object);
 
             var request = new FilesController.CombineFoldersRequest
             {
@@ -2084,30 +1730,6 @@ public class FilesControllerTests
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
-            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            await using (var dbContext = new ComicMaintainerDbContext(options))
-            {
-                dbContext.ComicFiles.AddRange(
-                    new ComicFileEntity
-                    {
-                        FilePath = olderPath,
-                        FileName = "Batman-001.cbz",
-                        Directory = olderDir,
-                        CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                    },
-                    new ComicFileEntity
-                    {
-                        FilePath = newerPath,
-                        FileName = "Batman-002.cbz",
-                        Directory = newerDir,
-                        CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
-                    });
-                await dbContext.SaveChangesAsync();
-            }
-
             // The two folders should be groupable because alias metadata says
             // "Batman" and "Batman (Classic)" both resolve to the same series.
             // We seed that by giving the in-memory ComicFile entries metadata
@@ -2118,6 +1740,7 @@ public class FilesControllerTests
                 new()
                 {
                     FilePath = olderPath,
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-001.cbz",
                     Directory = olderDir,
                     LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -2126,6 +1749,7 @@ public class FilesControllerTests
                 new()
                 {
                     FilePath = newerPath,
+                    CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-002.cbz",
                     Directory = newerDir,
                     LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
@@ -2151,16 +1775,7 @@ public class FilesControllerTests
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-            var controller = new FilesController(
-                _mockFileStore.Object,
-                _mockProcessor.Object,
-                _mockHistoryService.Object,
-                _mockSeriesLibrary.Object,
-                _mockLogger.Object,
-                _mockSettings.Object,
-                new TestDbContextFactory(options),
-                eventBroadcaster: null,
-                metadataCache: mockMetadataCache.Object);
+            var controller = CreateController(metadataCache: mockMetadataCache.Object);
 
             var request = new FilesController.CombineFoldersRequest
             {
@@ -2204,35 +1819,12 @@ public class FilesControllerTests
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
-            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            await using (var dbContext = new ComicMaintainerDbContext(options))
-            {
-                dbContext.ComicFiles.AddRange(
-                    new ComicFileEntity
-                    {
-                        FilePath = olderPath,
-                        FileName = "Batman-001.cbz",
-                        Directory = olderDir,
-                        CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                    },
-                    new ComicFileEntity
-                    {
-                        FilePath = newerPath,
-                        FileName = "Batman-002.cbz",
-                        Directory = newerDir,
-                        CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
-                    });
-                await dbContext.SaveChangesAsync();
-            }
-
             var files = new List<ComicFile>
             {
                 new()
                 {
                     FilePath = olderPath,
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-001.cbz",
                     Directory = olderDir,
                     LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -2241,6 +1833,7 @@ public class FilesControllerTests
                 new()
                 {
                     FilePath = newerPath,
+                    CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-002.cbz",
                     Directory = newerDir,
                     LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
@@ -2256,16 +1849,7 @@ public class FilesControllerTests
 
             // Explicitly pass a null metadata cache - the combine must still
             // succeed without it.
-            var controller = new FilesController(
-                _mockFileStore.Object,
-                _mockProcessor.Object,
-                _mockHistoryService.Object,
-                _mockSeriesLibrary.Object,
-                _mockLogger.Object,
-                _mockSettings.Object,
-                new TestDbContextFactory(options),
-                eventBroadcaster: null,
-                metadataCache: null);
+            var controller = CreateController();
 
             var request = new FilesController.CombineFoldersRequest
             {
@@ -2300,13 +1884,7 @@ public class FilesControllerTests
             _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<ComicFile>());
 
-            var controller = new FilesController(
-                _mockFileStore.Object,
-                _mockProcessor.Object,
-                _mockHistoryService.Object,
-                _mockSeriesLibrary.Object,
-                _mockLogger.Object,
-                _mockSettings.Object);
+            var controller = CreateController();
 
             var outside = Path.Join(Path.GetTempPath(), $"cm-outside-{Guid.NewGuid()}");
             var request = new FilesController.CombineFoldersRequest
@@ -2341,35 +1919,12 @@ public class FilesControllerTests
             System.IO.File.WriteAllText(olderPath, "x");
             System.IO.File.WriteAllText(newerPath, "x");
 
-            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            await using (var dbContext = new ComicMaintainerDbContext(options))
-            {
-                dbContext.ComicFiles.AddRange(
-                    new ComicFileEntity
-                    {
-                        FilePath = olderPath,
-                        FileName = "Batman-001.cbz",
-                        Directory = olderDir,
-                        CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
-                    },
-                    new ComicFileEntity
-                    {
-                        FilePath = newerPath,
-                        FileName = "Batman-001.cbz",
-                        Directory = newerDir,
-                        CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
-                    });
-                await dbContext.SaveChangesAsync();
-            }
-
             var files = new List<ComicFile>
             {
                 new()
                 {
                     FilePath = olderPath,
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-001.cbz",
                     Directory = olderDir,
                     LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -2378,6 +1933,7 @@ public class FilesControllerTests
                 new()
                 {
                     FilePath = newerPath,
+                    CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
                     FileName = "Batman-001.cbz",
                     Directory = newerDir,
                     LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
@@ -2391,14 +1947,7 @@ public class FilesControllerTests
             var settings = new AppSettings { WatchedDirectory = tempDir };
             _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
-            var controller = new FilesController(
-                _mockFileStore.Object,
-                _mockProcessor.Object,
-                _mockHistoryService.Object,
-                _mockSeriesLibrary.Object,
-                _mockLogger.Object,
-                _mockSettings.Object,
-                new TestDbContextFactory(options));
+            var controller = CreateController();
 
             var request = new FilesController.CombineFoldersRequest
             {
@@ -2440,10 +1989,6 @@ public class FilesControllerTests
             System.IO.File.WriteAllText(pathA, "x");
             System.IO.File.WriteAllText(pathB, "x");
 
-            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
             var files = new List<ComicFile>
             {
                 new() { FilePath = pathA, FileName = "Batman-001.cbz", Directory = folderA,
@@ -2458,14 +2003,7 @@ public class FilesControllerTests
             var settings = new AppSettings { WatchedDirectory = tempDir };
             _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
-            var controller = new FilesController(
-                _mockFileStore.Object,
-                _mockProcessor.Object,
-                _mockHistoryService.Object,
-                _mockSeriesLibrary.Object,
-                _mockLogger.Object,
-                _mockSettings.Object,
-                new TestDbContextFactory(options));
+            var controller = CreateController();
 
             var request = new FilesController.CombineFoldersRequest
             {
@@ -2579,9 +2117,6 @@ public class FilesControllerTests
         // into a single series card (e.g. via file-level metadata aliases)
         // but the alias-index pass doesn't, the folder-combine listing should
         // still report them as a combinable group via the series-library pass.
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
 
         var files = new List<ComicFile>
         {
@@ -2627,16 +2162,7 @@ public class FilesControllerTests
                 }
             });
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options),
-            null,
-            mockCache.Object);
+        var controller = CreateController(metadataCache: mockCache.Object);
 
         var result = await controller.GetCombinableFolders();
 
@@ -2656,10 +2182,6 @@ public class FilesControllerTests
     [Fact]
     public async Task GetCombinableFolders_CancelledReconciliation_DoesNotCacheIncompleteGroups()
     {
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-
         var files = new List<ComicFile>
         {
             new()
@@ -2718,17 +2240,7 @@ public class FilesControllerTests
 
         using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(
             new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
-        var controller = new FilesController(
-            fileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options),
-            null,
-            mockCache.Object,
-            memoryCache: memoryCache);
+        var controller = CreateController(metadataCache: mockCache.Object, memoryCache: memoryCache, fileStore: fileStore.Object);
 
         await controller.GetCombinableFolders(cts.Token);
 
@@ -2749,9 +2261,6 @@ public class FilesControllerTests
         // Regression for issue 2: "Tomb Raider King" and "Tomb Raider King (Official)"
         // are different folder names (no alias bridge) but the parenthetical-
         // suffix pass should recommend merging them.
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
 
         var files = new List<ComicFile>
         {
@@ -2780,16 +2289,7 @@ public class FilesControllerTests
         mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options),
-            null,
-            mockCache.Object);
+        var controller = CreateController(metadataCache: mockCache.Object);
 
         var result = await controller.GetCombinableFolders();
 
@@ -2810,9 +2310,6 @@ public class FilesControllerTests
         // Guard: parenthetical year suffixes (e.g. "(2018)") are NOT in the
         // non-distinguishing whitelist and must NOT collapse legitimately
         // distinct print runs into one group.
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
 
         var files = new List<ComicFile>
         {
@@ -2841,16 +2338,7 @@ public class FilesControllerTests
         mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            new TestDbContextFactory(options),
-            null,
-            mockCache.Object);
+        var controller = CreateController(metadataCache: mockCache.Object);
 
         var result = await controller.GetCombinableFolders();
 
@@ -2943,16 +2431,7 @@ public class FilesControllerTests
         mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var controller = new FilesController(
-            _mockFileStore.Object,
-            _mockProcessor.Object,
-            _mockHistoryService.Object,
-            _mockSeriesLibrary.Object,
-            _mockLogger.Object,
-            _mockSettings.Object,
-            null,
-            null,
-            mockCache.Object);
+        var controller = CreateController(metadataCache: mockCache.Object);
 
         var request = new FilesController.CombineFoldersRequest
         {
@@ -2978,20 +2457,4 @@ public class FilesControllerTests
         Assert.Equal(srcFile, sourcePath);
         Assert.Equal(Path.Join(destDir, "src-001.cbz"), destinationPath);
     }
-}
-
-internal sealed class TestDbContextFactory : IDbContextFactory<ComicMaintainerDbContext>
-{
-    private readonly DbContextOptions<ComicMaintainerDbContext> _options;
-
-    public TestDbContextFactory(DbContextOptions<ComicMaintainerDbContext> options)
-    {
-        _options = options;
-    }
-
-    public ComicMaintainerDbContext CreateDbContext()
-        => new(_options);
-
-    public Task<ComicMaintainerDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult(CreateDbContext());
 }

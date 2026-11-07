@@ -1,10 +1,10 @@
 using ComicMaintainer.Core.Configuration;
-using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -13,14 +13,16 @@ using Moq;
 namespace ComicMaintainer.Tests.Controllers;
 
 /// <summary>
-/// Covers combinable-folder discovery (FilesController.CombinableFolders.cs), the
-/// combine-folders plan and endpoints (FilesController.CombineFolders.cs) and the
-/// alias bookkeeping behind them (FilesController.FolderCombineAliases.cs).
+/// Covers the folder-combine endpoints (FilesController.CombinableFolders.cs and
+/// FilesController.CombineFolders.cs) end to end over the real
+/// <see cref="FolderCombineService"/>: combinable-folder discovery, the combine plan,
+/// the response shapes and the alias bookkeeping after a combine. Source-folder
+/// cleanup is covered by FolderCombineServiceTests and FolderCombineSourceCleanerTests.
 /// </summary>
 public sealed class FilesControllerFolderCombineTests : IDisposable
 {
-    private const string NoGroupError = "No combinable folder group matches the request. The library may have changed; please reload.";
-    private const string CombinableGroupsCacheKey = "FilesController.CombinableFolderGroups";
+    private const string NoGroupError = FolderCombineService.NoGroupError;
+    private const string CombinableGroupsCacheKey = FolderCombineService.CombinableGroupsCacheKey;
 
     private static readonly DateTime T1 = new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime T2 = new(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -60,27 +62,10 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
 
         // Run the per-item operation and post-loop hook inline so the effects of a
         // combine job are observable as soon as the action returns.
-        _processor
-            .Setup(p => p.RunCustomBatchJobAsync(
-                It.IsAny<string>(),
-                It.IsAny<IEnumerable<string>>(),
-                It.IsAny<Func<string, CancellationToken, Task<bool>>>(),
-                It.IsAny<string>(),
-                It.IsAny<Func<CancellationToken, Task>?>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(async (string _, IEnumerable<string> items, Func<string, CancellationToken, Task<bool>> operation, string _, Func<CancellationToken, Task>? postLoop, CancellationToken token) =>
-            {
-                foreach (var item in items)
-                {
-                    await operation(item, token);
-                }
-                if (postLoop is not null)
-                {
-                    await postLoop(token);
-                }
-                return Guid.NewGuid();
-            });
+        _jobReport = _processor.RunCustomBatchJobsInline();
     }
+
+    private readonly RecordingBatchJobReport _jobReport;
 
     public void Dispose()
     {
@@ -90,9 +75,20 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         }
     }
 
-    private FilesController CreateController(
-        IMemoryCache? memoryCache = null,
-        IDbContextFactory<ComicMaintainerDbContext>? dbFactory = null) =>
+    private FolderCombineService CreateService(IMemoryCache? memoryCache = null) =>
+        TestFolderCombineService.Create(
+            _fileStore.Object,
+            _processor.Object,
+            _history.Object,
+            _seriesLibrary.Object,
+            _settings.Object,
+            _metadataCache.Object,
+            memoryCache);
+
+    private FilesController CreateController(IMemoryCache? memoryCache = null) =>
+        CreateController(CreateService(memoryCache));
+
+    private FilesController CreateController(IFolderCombineService folderCombine) =>
         new(
             _fileStore.Object,
             _processor.Object,
@@ -100,9 +96,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
             _seriesLibrary.Object,
             NullLogger<FilesController>.Instance,
             _settings.Object,
-            dbContextFactory: dbFactory,
-            metadataCache: _metadataCache.Object,
-            memoryCache: memoryCache);
+            folderCombine);
 
     private string Dir(string name) => Path.Join(_root, name);
 
@@ -158,15 +152,6 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         var objectResult = Assert.IsAssignableFrom<ObjectResult>(result);
         Assert.Equal(expectedStatus, objectResult.StatusCode);
         Assert.Equal(expectedValue, objectResult.Value);
-    }
-
-    private sealed class InMemoryDbFactory(DbContextOptions<ComicMaintainerDbContext> options)
-        : IDbContextFactory<ComicMaintainerDbContext>
-    {
-        public ComicMaintainerDbContext CreateDbContext() => new(options);
-
-        public Task<ComicMaintainerDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(CreateDbContext());
     }
 
     // ------------------------------------------------------------ groups cache
@@ -236,16 +221,18 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
                 return releaseBuild.Task;
             });
         using var cache = new MemoryCache(new MemoryCacheOptions());
+        // The service is a singleton: every request's controller shares it.
+        var service = CreateService(cache);
 
         Task<ActionResult<object>> firstRequest;
         Task<ActionResult<object>> secondRequest;
         try
         {
-            firstRequest = CreateController(memoryCache: cache).GetCombinableFolders();
+            firstRequest = CreateController(service).GetCombinableFolders();
             await buildStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
             // The first request holds the build lock until its file scan completes.
-            secondRequest = CreateController(memoryCache: cache).GetCombinableFolders();
+            secondRequest = CreateController(service).GetCombinableFolders();
             Assert.False(secondRequest.IsCompleted);
         }
         finally
@@ -681,7 +668,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
             It.IsAny<IEnumerable<string>>(),
             It.IsAny<Func<string, CancellationToken, Task<bool>>>(),
             It.IsAny<string>(),
-            It.IsAny<Func<CancellationToken, Task>?>(),
+            It.IsAny<Func<IBatchJobReport, CancellationToken, Task>>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -769,29 +756,17 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         var dirB = Dir("S B");
         var unbucketed = MakeFile(dirA, "Alpha 001.cbz", "Alpha", T1);
         unbucketed.Directory = string.Empty;
+        // The file store's added date wins over the modification time.
+        unbucketed.CreatedAt = T3;
         SetupFiles(
             unbucketed,
             MakeFile(dirB, "Beta 001.cbz", "Beta", T2),
             MakeFile(Dir("Elsewhere"), "Gamma 001.cbz", "Gamma", T3));
-        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-        await using (var db = new ComicMaintainerDbContext(options))
-        {
-            db.ComicFiles.Add(new ComicFileEntity
-            {
-                FilePath = unbucketed.FilePath,
-                FileName = unbucketed.FileName,
-                Directory = dirA,
-                CreatedAt = T3
-            });
-            await db.SaveChangesAsync();
-        }
         _seriesLibrary
             .Setup(s => s.GetFoldersForSeriesIdAsync("s7", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesFoldersResult { Id = "s7", Title = seriesTitle, Folders = Folders(dirA, dirB) });
 
-        var result = await CreateController(dbFactory: new InMemoryDbFactory(options)).PreviewCombineFolders(
+        var result = await CreateController().PreviewCombineFolders(
             new FilesController.CombineFoldersRequest { GroupKey = "series:s7", DestinationDirectory = dirB });
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
@@ -870,6 +845,10 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         Assert.True(Directory.Exists(Dir("Foo (Old)")));
         Assert.True(File.Exists(staging));
         Assert.True(File.Exists(Path.Join(Dir("Foo"), "Foo Legacy 002.cbz")));
+        // The kept folder is listed in the job's results with what kept it.
+        var problem = Assert.Single(_jobReport.Problems);
+        Assert.Equal(Dir("Foo (Old)"), problem.Key);
+        Assert.Contains(Path.GetFileName(staging), problem.Value);
     }
 
     [Theory]

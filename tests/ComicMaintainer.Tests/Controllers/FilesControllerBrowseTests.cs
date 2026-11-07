@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -33,7 +34,8 @@ public sealed class FilesControllerBrowseTests
             _history.Object,
             _seriesLibrary.Object,
             NullLogger<FilesController>.Instance,
-            _settings.Object);
+            _settings.Object,
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, _history.Object, _seriesLibrary.Object, _settings.Object));
     }
 
     private static object? Prop(object? value, string name) => value?.GetType().GetProperty(name)?.GetValue(value);

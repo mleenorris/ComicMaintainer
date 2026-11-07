@@ -15,7 +15,7 @@ public sealed partial class FolderCombineService
     private const int MaxFileRenameAttempts = 1000;
 
     /// <inheritdoc />
-    public async Task<FolderCombineStartResult> StartAsync(FolderCombineRequest request, CancellationToken cancellationToken = default)
+    public async Task<FolderCombineStartResult> StartAsync(FolderCombineRequest? request, CancellationToken cancellationToken = default)
     {
         var planned = await BuildPlanAsync(request, includeSourceCleanup: false, cancellationToken);
         if (planned.Error is not null)
@@ -55,7 +55,7 @@ public sealed partial class FolderCombineService
     /// predicts which source folders will be removed.
     /// </summary>
     private async Task<FolderCombinePlanResult> BuildPlanAsync(
-        FolderCombineRequest request,
+        FolderCombineRequest? request,
         bool includeSourceCleanup,
         CancellationToken cancellationToken)
     {

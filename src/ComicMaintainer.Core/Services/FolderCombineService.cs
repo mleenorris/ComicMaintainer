@@ -127,7 +127,7 @@ public sealed partial class FolderCombineService : IFolderCombineService
     }
 
     /// <inheritdoc />
-    public Task<FolderCombinePlanResult> PreviewAsync(FolderCombineRequest request, CancellationToken cancellationToken = default) =>
+    public Task<FolderCombinePlanResult> PreviewAsync(FolderCombineRequest? request, CancellationToken cancellationToken = default) =>
         BuildPlanAsync(request, includeSourceCleanup: true, cancellationToken);
 
     /// <summary>

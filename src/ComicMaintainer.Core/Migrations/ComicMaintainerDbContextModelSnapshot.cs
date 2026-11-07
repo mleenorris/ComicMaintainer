@@ -138,6 +138,12 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<DateTime?>("LastWriteAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("MetadataScannedModified")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("MetadataScannedSize")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("MetadataSource")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

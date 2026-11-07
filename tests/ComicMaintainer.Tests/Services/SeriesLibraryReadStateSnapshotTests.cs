@@ -89,7 +89,6 @@ public class SeriesLibraryReadStateSnapshotTests
 
     private SeriesLibraryService CreateService() => new(
         _fileStore.Object,
-        new Mock<IComicProcessorService>().Object,
         _metadataCache.Object,
         _settings.Object,
         new Mock<ILogger<SeriesLibraryService>>().Object,

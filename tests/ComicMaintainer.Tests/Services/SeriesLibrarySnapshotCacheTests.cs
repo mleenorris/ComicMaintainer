@@ -21,7 +21,6 @@ public class SeriesLibrarySnapshotCacheTests
     private readonly Mock<IChangeVersionSource> _fileVersions;
     private readonly Mock<ISeriesMetadataCacheService> _metadataCache = new();
     private readonly Mock<IChangeVersionSource> _metadataVersions;
-    private readonly Mock<IComicProcessorService> _processor = new();
     private readonly AppSettings _appSettings = new();
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
     private readonly TestUserContextAccessor _user = new("alice");
@@ -60,8 +59,7 @@ public class SeriesLibrarySnapshotCacheTests
     };
 
     private SeriesLibraryService CreateService(IUserContextAccessor? user) => new(
-        _fileStore.Object,
-        _processor.Object,
+        _fileStore.Object,
         _metadataCache.Object,
         _settings.Object,
         new Mock<ILogger<SeriesLibraryService>>().Object,
@@ -177,7 +175,7 @@ public class SeriesLibrarySnapshotCacheTests
         fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => _files.ToList());
         var service = new SeriesLibraryService(
-            fileStore.Object, _processor.Object, _metadataCache.Object, _settings.Object,
+            fileStore.Object, _metadataCache.Object, _settings.Object,
             new Mock<ILogger<SeriesLibraryService>>().Object, userContext: _user);
 
         await service.GetSeriesSummariesAsync();

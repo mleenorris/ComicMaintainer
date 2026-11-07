@@ -169,6 +169,30 @@ public interface IFileStoreService
     Task<int> RefreshFileStatsAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Cache the metadata just written into the file's archive, stamped with the file's
+    /// stored size and modification time (call it after <see cref="RefreshFileStatsAsync"/>),
+    /// so the library shows it without reading the archive again. A user edit not yet
+    /// written to the archive is kept. Never throws: if the metadata cannot be cached, the
+    /// background archive-metadata scan reads the archive instead.
+    /// </summary>
+    Task RecordArchiveMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Up to <paramref name="max"/> tracked files, in id order after <paramref name="afterId"/>,
+    /// whose cached archive metadata is missing or was read from a different version of the
+    /// file (its stored size or modification time has changed since). Files with a user edit
+    /// waiting to be written to the archive are left out.
+    /// </summary>
+    Task<IReadOnlyList<ArchiveMetadataScanCandidate>> GetFilesNeedingMetadataScanAsync(int afterId, int max, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cache the metadata the background scan read from <paramref name="candidate"/>'s
+    /// archive. Returns false, recording nothing, when the row changed since it was selected
+    /// (the file was modified, replaced or edited meanwhile); a later scan reads it again.
+    /// </summary>
+    Task<bool> RecordScannedArchiveMetadataAsync(ArchiveMetadataScanCandidate candidate, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Remove stale entries from the database for files that no longer exist on disk,
     /// guarded so a missing or unmounted library can never wipe it: see
     /// <see cref="StaleCleanupResult"/> for the outcomes. Never throws; failures and

@@ -333,6 +333,10 @@ public partial class FileStoreService
                     if (newEntity.Metadata == null && entity.Metadata != null)
                     {
                         newEntity.Metadata = entity.Metadata.Clone();
+                        // A move keeps the file's content, so the cached archive metadata
+                        // stays current as long as the size and modification time match.
+                        newEntity.MetadataScannedSize = entity.MetadataScannedSize;
+                        newEntity.MetadataScannedModified = entity.MetadataScannedModified;
                         newEntity.LastDbEditAt = entity.LastDbEditAt;
                         newEntity.LastWriteAt = entity.LastWriteAt;
                         newEntity.MetadataSource = entity.MetadataSource;

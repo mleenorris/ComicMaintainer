@@ -388,6 +388,21 @@ public class ComicFileEntity
     /// briefly unavailable library keeps every row and everything stored on it.
     /// </summary>
     public DateTime? MissingSince { get; set; }
+
+    /// <summary>
+    /// <see cref="FileSize"/> of the archive when <see cref="Metadata"/> was last read from
+    /// (or written to) it, or <c>null</c> when it never was. Together with
+    /// <see cref="MetadataScannedModified"/> this says whether the cached metadata still
+    /// describes the archive: once the stored size or modification time moves on, the
+    /// background archive-metadata scan reads the archive again.
+    /// </summary>
+    public long? MetadataScannedSize { get; set; }
+
+    /// <summary>
+    /// <see cref="LastModified"/> of the archive when <see cref="Metadata"/> was last read
+    /// from (or written to) it; see <see cref="MetadataScannedSize"/>.
+    /// </summary>
+    public DateTime? MetadataScannedModified { get; set; }
 }
 
 /// <summary>

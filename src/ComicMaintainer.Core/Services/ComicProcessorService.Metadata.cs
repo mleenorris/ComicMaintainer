@@ -173,7 +173,8 @@ public partial class ComicProcessorService
                 // to handle transient file locks from file system watchers or antivirus
                 await ReplaceFileWithRetryAsync(tempFile, filePath, cancellationToken);
                 await RefreshStoredFileStatsAsync(filePath, cancellationToken);
-                
+                await _fileStore.RecordArchiveMetadataAsync(filePath, metadata, cancellationToken);
+
                 _logger.LogInformation("Successfully updated metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 return true;
             }

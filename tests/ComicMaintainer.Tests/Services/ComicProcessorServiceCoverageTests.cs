@@ -439,6 +439,13 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
                 It.Is<IEnumerable<string>>(paths => paths.Single().EndsWith("round.cbz")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+        // What was written is cached for the library, so it never has to reopen the archive.
+        _fileStore.Verify(
+            f => f.RecordArchiveMetadataAsync(
+                It.Is<string>(p => p.EndsWith("round.cbz")),
+                metadata,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

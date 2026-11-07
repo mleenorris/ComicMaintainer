@@ -257,13 +257,6 @@ public class AppSettings
     public string? DefaultPreferredLanguage { get; set; }
 
     /// <summary>
-    /// Hard cap on the number of comic archives a single
-    /// <c>GetSeriesIssuesAsync</c> call is allowed to open from disk to
-    /// upgrade missing <c>Title</c> / <c>Issue</c> metadata.
-    /// </summary>
-    public int SeriesIssuesMaxArchiveUpgrades { get; set; } = 100;
-
-    /// <summary>
     /// When true (the default), the server caches the cover (page 1) bytes of
     /// every comic file it serves to the UI on disk under
     /// <see cref="FileCoverCacheDirectory"/>. Cached entries are validated

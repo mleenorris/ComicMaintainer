@@ -24,7 +24,6 @@ public partial class SeriesLibraryService : ISeriesLibraryService
     private const string MissingIssuesFilter = "missing";
 
     private readonly IFileStoreService _fileStore;
-    private readonly IComicProcessorService _processor;
     private readonly ISeriesMetadataCacheService _metadataCache;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesLibraryService> _logger;
@@ -54,7 +53,6 @@ public partial class SeriesLibraryService : ISeriesLibraryService
 
     public SeriesLibraryService(
         IFileStoreService fileStore,
-        IComicProcessorService processor,
         ISeriesMetadataCacheService metadataCache,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesLibraryService> logger,
@@ -63,7 +61,6 @@ public partial class SeriesLibraryService : ISeriesLibraryService
     {
         _userContext = userContext;
         _fileStore = fileStore;
-        _processor = processor;
         _metadataCache = metadataCache;
         _settings = settings;
         _logger = logger;

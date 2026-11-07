@@ -19,7 +19,7 @@ public partial class SeriesLibraryService
         }
 
         var (fileFilter, _) = SplitFilter(filter);
-        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(fileFilter, cancellationToken);
         if (!TryResolveGroup(groups, seriesId, out var accumulator))
         {
             return Array.Empty<string>();
@@ -45,7 +45,7 @@ public partial class SeriesLibraryService
         }
 
         var (fileFilter, _) = SplitFilter(filter);
-        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(fileFilter, cancellationToken);
         if (!TryResolveGroup(groups, seriesId, out var accumulator))
         {
             return null;
@@ -99,7 +99,7 @@ public partial class SeriesLibraryService
         CancellationToken cancellationToken = default)
     {
         var (fileFilter, _) = SplitFilter(filter);
-        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(fileFilter, cancellationToken);
 
         var results = new List<SeriesFoldersResult>(groups.Count);
         foreach (var accumulator in groups.Values)
@@ -157,7 +157,7 @@ public partial class SeriesLibraryService
             return Array.Empty<SeriesFolderDto>();
         }
 
-        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(filter: null, cancellationToken);
 
         // Match by ImageNormalizedKey first (the authoritative cache key for
         // the cover image); fall back to a case-insensitive match against the
@@ -214,7 +214,7 @@ public partial class SeriesLibraryService
             return null;
         }
 
-        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(filter: null, cancellationToken);
 
         // Match by ImageNormalizedKey first (the authoritative cache key for
         // the cover image); fall back to a case-insensitive match against the

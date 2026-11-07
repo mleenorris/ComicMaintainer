@@ -16,18 +16,19 @@ public partial class SeriesLibraryService
     /// representative (the series id surfaced to the API).
     /// </summary>
     /// <remarks>
-    /// Cache-only builds (<paramref name="allowDiskRead"/> = false) are served
-    /// from a <see cref="GroupsSnapshot"/> that is reused until the file store,
-    /// metadata cache or relevant settings change. The returned dictionary and
+    /// Built from the database only: every file's archive metadata comes from the cache
+    /// in <c>ComicFiles.Metadata</c> (filled by the processor's writes and the background
+    /// archive-metadata scan), so a request never opens an archive. Builds are served from
+    /// a <see cref="GroupsSnapshot"/> that is reused until the file store, metadata cache
+    /// or relevant settings change. The returned dictionary and
     /// its accumulators are shared between requests and MUST be treated as
     /// read-only by callers; per-user read state is applied when issues are
     /// projected (see <see cref="ProjectIssue"/>).
     /// </remarks>
     private async Task<Dictionary<string, SeriesAccumulator>> BuildGroupsAsync(
         string? filter,
-        bool allowDiskRead,
         CancellationToken cancellationToken)
-        => (await GetGroupsSnapshotAsync(filter, allowDiskRead, cancellationToken)).Groups;
+        => (await GetGroupsSnapshotAsync(filter, cancellationToken)).Groups;
 
     /// <summary>
     /// Returns the grouped library for <paramref name="filter"/>, reusing a
@@ -45,24 +46,20 @@ public partial class SeriesLibraryService
     /// </remarks>
     private async Task<GroupsSnapshot> GetGroupsSnapshotAsync(
         string? filter,
-        bool allowDiskRead,
         CancellationToken cancellationToken)
     {
         var normalizedFilter = string.IsNullOrWhiteSpace(filter) ? null : filter.Trim().ToLowerInvariant();
         var bakeReadState = _fileStore is not IUserReadStateSource;
         var perUser = bakeReadState || IsReadStateFilter(normalizedFilter);
 
-        // Disk reads make the result depend on archive contents we don't
-        // version, and sources that don't report change versions (e.g. test
-        // doubles) can't be validated — build fresh in both cases. A per-user
-        // snapshot without a user context to key on can't tell users apart and
-        // must not be shared either.
-        if (allowDiskRead
-            || (perUser && _userContext is null)
+        // Sources that don't report change versions (e.g. test doubles) can't be
+        // validated, so they are built fresh. A per-user snapshot without a user
+        // context to key on can't tell users apart and must not be shared either.
+        if ((perUser && _userContext is null)
             || _fileStore is not IChangeVersionSource fileVersions
             || _metadataCache is not IChangeVersionSource metadataVersions)
         {
-            return await BuildGroupsSnapshotAsync(filter, allowDiskRead, bakeReadState, default, cancellationToken);
+            return await BuildGroupsSnapshotAsync(filter, bakeReadState, default, cancellationToken);
         }
 
         var cacheKey = new GroupsCacheKey(normalizedFilter, perUser ? _userContext!.UserId : null);
@@ -87,7 +84,7 @@ public partial class SeriesLibraryService
                 return cached;
             }
 
-            var snapshot = await BuildGroupsSnapshotAsync(filter, allowDiskRead: false, bakeReadState, versions, cancellationToken);
+            var snapshot = await BuildGroupsSnapshotAsync(filter, bakeReadState, versions, cancellationToken);
 
             // Drop snapshots that can never be served again, each judged by its own
             // versions (another user's read-filtered view survives as long as that
@@ -187,7 +184,6 @@ public partial class SeriesLibraryService
     /// </param>
     private async Task<GroupsSnapshot> BuildGroupsSnapshotAsync(
         string? filter,
-        bool allowDiskRead,
         bool bakeReadState,
         SnapshotVersions versions,
         CancellationToken cancellationToken)
@@ -199,14 +195,9 @@ public partial class SeriesLibraryService
 
         foreach (var file in files)
         {
-            // Reuse metadata already loaded from the database when available so we
-            // don't have to open every archive on disk just to render the library.
-            var metadata = BuildSeriesMetadataFromCache(file);
-            if (metadata is null && allowDiskRead)
-            {
-                metadata = await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken);
-            }
-            metadata ??= BuildSeriesMetadataFromFileName(file);
+            // The archive metadata cached in the database; a file the background scan has
+            // not read yet falls back to what its folder and file name say.
+            var metadata = BuildSeriesMetadataFromCache(file) ?? BuildSeriesMetadataFromFileName(file);
             var groupingTitle = ResolveGroupingTitle(metadata, file);
             var metadataAliases = ResolveMetadataAliases(metadata, groupingTitle);
             fileEntries.Add((file, metadata, groupingTitle, metadataAliases));

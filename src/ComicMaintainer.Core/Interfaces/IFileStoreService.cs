@@ -147,6 +147,25 @@ public interface IFileStoreService
     Task UpdateFilePathAsync(string oldPath, string newPath, CancellationToken cancellationToken = default, bool broadcastUpdate = true);
 
     /// <summary>
+    /// After a directory was renamed or moved on disk, moves every tracked file under
+    /// <paramref name="oldDirectory"/> to the same relative path under
+    /// <paramref name="newDirectory"/>, in one transaction: the file rows with all their state
+    /// (processing flags, user metadata edits and field locks), every user's read status and
+    /// reader progress. Where a row already exists at a destination path, the moved row wins
+    /// and absorbs its state. Returns the number of files moved; 0 when nothing is tracked
+    /// under <paramref name="oldDirectory"/> or <paramref name="newDirectory"/> is outside the
+    /// allowed directories.
+    /// </summary>
+    Task<int> MoveDirectoryAsync(string oldDirectory, string newDirectory, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// After a directory was deleted or moved out of the library, removes every tracked file
+    /// under <paramref name="directory"/> from the store, as <see cref="RemoveFileAsync"/> does
+    /// for one file. Returns the number of files removed.
+    /// </summary>
+    Task<int> RemoveDirectoryAsync(string directory, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Re-reads the on-disk size and last-write time of each tracked file in
     /// <paramref name="filePaths"/> and stores them as <c>FileSize</c> /
     /// <c>LastModified</c> (local time, matching <see cref="AddFileAsync"/>).

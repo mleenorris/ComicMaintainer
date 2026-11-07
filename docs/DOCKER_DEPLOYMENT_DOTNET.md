@@ -16,7 +16,8 @@ openssl rand -base64 48 > jwt_secret.txt
 
 # Edit .env and update:
 # - JWT_SECRET with the generated value, or leave it empty
-# - ADMIN_PASSWORD to a strong password
+# - ADMIN_PASSWORD to a strong password of your own, or leave it unset and
+#   create the first administrator in the web UI's first-run setup
 # - Other settings as needed
 ```
 
@@ -81,7 +82,7 @@ docker run -d \
 | `JWT_SECRET_FILE` | | File holding `JWT_SECRET`, such as a Docker secret. Set only one of the two |
 | `ADMIN_USERNAME` | admin | Default admin username |
 | `ADMIN_EMAIL` | admin@local | Default admin email |
-| `ADMIN_PASSWORD` | *required* | Default admin password |
+| `ADMIN_PASSWORD` | *(unset)* | Optional. Password of the administrator `ADMIN_USERNAME` created on first start. Leave it unset to create the first administrator in the web UI's first-run setup. Published example passwords such as `Admin123!` are refused |
 | `ADMIN_PASSWORD_FILE` | | File holding `ADMIN_PASSWORD`, such as a Docker secret. Set only one of the two |
 
 **Note on PUID/PGID**: The application dynamically creates a user and group with the specified IDs at container startup. This ensures files created by the container have the correct ownership on the host system. Use `id -u` and `id -g` on your host to find your user/group IDs.

@@ -1,6 +1,8 @@
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Services.Auth;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -42,33 +44,112 @@ internal static class WebApplicationExtensions
                 await EnsureRoleExistsAsync(roleManager, db, roleName);
             }
             
-            // Check if admin user should be seeded from environment variables (for backward compatibility).
-            // ADMIN_PASSWORD_FILE can name a file holding the password instead, such as a Docker secret.
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-            var adminUsername = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
-            var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out _);
-            
-            // Only create default admin if both ADMIN_USERNAME and ADMIN_PASSWORD are explicitly set
-            if (!string.IsNullOrEmpty(adminUsername) && !string.IsNullOrEmpty(adminPassword)
-                && await userManager.FindByNameAsync(adminUsername) == null)
-            {
-                var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? $"{adminUsername}@comicmaintainer.local";
-                var adminUser = new ApplicationUser
-                {
-                    UserName = adminUsername,
-                    Email = adminEmail,
-                    FullName = "Administrator",
-                    IsActive = true,
-                    EmailConfirmed = true
-                };
+            await SeedAdminFromEnvironmentAsync(userManager, logger);
+        }
+    }
 
-                var result = await userManager.CreateAsync(adminUser, adminPassword);
-                if (result.Succeeded)
-                {
-                    await userManager.AddToRoleAsync(adminUser, "Admin");
-                    logger.LogInformation("Admin user '{Username}' created from environment variables", adminUsername);
-                }
-            }
+    /// <summary>
+    /// Creates the administrator named by <c>ADMIN_USERNAME</c> with the password in <c>ADMIN_PASSWORD</c> (or the
+    /// file <c>ADMIN_PASSWORD_FILE</c> names, such as a Docker secret) when both are set and no account has that name.
+    /// A password published with ComicMaintainer (see <see cref="PublishedPasswords"/>) is refused, so that the
+    /// first-run setup runs instead. An existing account with that name is left alone, unless it still has a
+    /// published password: that is replaced by <c>ADMIN_PASSWORD</c> when it is a password of the operator's own.
+    /// </summary>
+    private static async Task SeedAdminFromEnvironmentAsync(UserManager<ApplicationUser> userManager, Microsoft.Extensions.Logging.ILogger logger)
+    {
+        var adminUsername = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
+        var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out var passwordSource);
+        if (string.IsNullOrEmpty(adminUsername))
+        {
+            return;
+        }
+
+        var safeUsername = LoggingHelper.SanitizeForLog(adminUsername);
+        var existing = await userManager.FindByNameAsync(adminUsername);
+        if (existing is not null)
+        {
+            await ReplacePublishedAdminPasswordAsync(userManager, existing, adminPassword, passwordSource, safeUsername, logger);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(adminPassword))
+        {
+            return;
+        }
+
+        if (PublishedPasswords.IsPublished(adminPassword))
+        {
+            logger.LogError(
+                "Not creating the administrator '{Username}': {PasswordSource} is set to a password that was published " +
+                "with ComicMaintainer, so anyone could sign in with it. Open the web UI to create the first administrator " +
+                "with first-run setup, or set {PasswordSource} to a password of your own and restart.",
+                safeUsername, passwordSource, passwordSource);
+            return;
+        }
+
+        var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? $"{adminUsername}@comicmaintainer.local";
+        var adminUser = new ApplicationUser
+        {
+            UserName = adminUsername,
+            Email = adminEmail,
+            FullName = "Administrator",
+            IsActive = true,
+            EmailConfirmed = true
+        };
+
+        var result = await userManager.CreateAsync(adminUser, adminPassword);
+        if (!result.Succeeded)
+        {
+            logger.LogError(
+                "Not creating the administrator '{Username}' from {PasswordSource}: {Errors}",
+                safeUsername, passwordSource, string.Join(" ", result.Errors.Select(e => e.Description)));
+            return;
+        }
+
+        await userManager.AddToRoleAsync(adminUser, "Admin");
+        logger.LogInformation("Admin user '{Username}' created from environment variables", safeUsername);
+    }
+
+    // Before 3.0.0 the shipped docker-compose.dotnet.yml and .env.example seeded admin / Admin123!. Sign-in with a
+    // published password is refused (AuthService), so give the operator a way back in: setting ADMIN_PASSWORD to a
+    // password of their own replaces it on the next start.
+    private static async Task ReplacePublishedAdminPasswordAsync(
+        UserManager<ApplicationUser> userManager,
+        ApplicationUser admin,
+        string? adminPassword,
+        string? passwordSource,
+        string safeUsername,
+        Microsoft.Extensions.Logging.ILogger logger)
+    {
+        if (!PublishedPasswords.MatchesUser(userManager.PasswordHasher, admin))
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(adminPassword) || PublishedPasswords.IsPublished(adminPassword))
+        {
+            logger.LogError(
+                "The account '{Username}' still has a password that was published with ComicMaintainer, so signing in " +
+                "with it is refused. Set ADMIN_PASSWORD (or ADMIN_PASSWORD_FILE) to a password of your own and restart " +
+                "to replace it.",
+                safeUsername);
+            return;
+        }
+
+        var resetToken = await userManager.GeneratePasswordResetTokenAsync(admin);
+        var result = await userManager.ResetPasswordAsync(admin, resetToken, adminPassword);
+        if (result.Succeeded)
+        {
+            logger.LogWarning(
+                "Replaced the published password of the account '{Username}' with the one in {PasswordSource}",
+                safeUsername, passwordSource);
+        }
+        else
+        {
+            logger.LogError(
+                "Could not replace the published password of the account '{Username}' with the one in {PasswordSource}: {Errors}",
+                safeUsername, passwordSource, string.Join(" ", result.Errors.Select(e => e.Description)));
         }
     }
 

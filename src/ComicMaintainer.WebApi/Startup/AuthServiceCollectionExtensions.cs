@@ -3,6 +3,7 @@ using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models.Auth;
+using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -34,6 +35,7 @@ internal static class AuthServiceCollectionExtensions
             options.User.RequireUniqueEmail = true;
         })
         .AddEntityFrameworkStores<ComicMaintainerDbContext>()
+        .AddPasswordValidator<PublishedPasswordValidator>()
         .AddDefaultTokenProviders();
 
         // Read settings through the same binder as IOptions<JwtSettings>, then resolve the signing secret once so

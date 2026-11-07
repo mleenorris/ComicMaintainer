@@ -163,6 +163,130 @@ public sealed class WebApplicationExtensionsTests : IDisposable
         Assert.Equal(3, await db.Roles.CountAsync());
     }
 
+    // docker-compose.dotnet.yml and .env.example seeded admin / Admin123! before 3.0.0: anyone could look it up.
+    [Theory]
+    [InlineData("Admin123!")]
+    [InlineData(" Admin123! ")]
+    [InlineData("YourStrongPassword123!")]
+    public async Task RefusesToSeedAnAdminWithAPublishedPasswordSoThatFirstRunSetupRuns(string password)
+    {
+        _environment.Set("ADMIN_USERNAME", "admin");
+        _environment.Set("ADMIN_PASSWORD", password);
+        await using var app = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(app, logger);
+
+        using var scope = app.Services.CreateScope();
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>().Users.ToListAsync());
+        var error = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
+        Assert.Contains("published with ComicMaintainer", error.Message);
+        Assert.Contains("first-run setup", error.Message);
+    }
+
+    [Fact]
+    public async Task ReplacesThePublishedPasswordOfAnExistingAdminWithTheOneInAdminPassword()
+    {
+        await using (var firstStart = BuildApp())
+        {
+            await InitializeDatabase(firstStart, NullLogger.Instance);
+            await CreateUserWithPublishedPasswordAsync(firstStart, "admin");
+        }
+
+        _environment.Set("ADMIN_USERNAME", "admin");
+        _environment.Set("ADMIN_PASSWORD", AdminPassword);
+        await using var secondStart = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(secondStart, logger);
+
+        using var scope = secondStart.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var admin = Assert.Single(await users.Users.ToListAsync());
+        Assert.True(await users.CheckPasswordAsync(admin, AdminPassword));
+        Assert.False(await users.CheckPasswordAsync(admin, "Admin123!"));
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Warning && entry.Message.Contains("Replaced the published password"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Admin123!")]
+    public async Task ReportsAnExistingAdminThatStillHasAPublishedPassword(string? adminPassword)
+    {
+        await using (var firstStart = BuildApp())
+        {
+            await InitializeDatabase(firstStart, NullLogger.Instance);
+            await CreateUserWithPublishedPasswordAsync(firstStart, "admin");
+        }
+
+        _environment.Set("ADMIN_USERNAME", "admin");
+        _environment.Set("ADMIN_PASSWORD", adminPassword);
+        await using var secondStart = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(secondStart, logger);
+
+        using var scope = secondStart.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var admin = Assert.Single(await users.Users.ToListAsync());
+        Assert.True(await users.CheckPasswordAsync(admin, "Admin123!"));
+        var error = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
+        Assert.Contains("still has a password that was published", error.Message);
+    }
+
+    [Fact]
+    public async Task IdentityRejectsPublishedPasswordsForNewAccounts()
+    {
+        await using var app = BuildApp();
+        await InitializeDatabase(app, NullLogger.Instance);
+
+        using var scope = app.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var result = await users.CreateAsync(new ApplicationUser { UserName = "someone", Email = "someone@example.com" }, "Admin123!");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Errors, error => error.Code == ComicMaintainer.Core.Services.Auth.PublishedPasswordValidator.ErrorCode);
+    }
+
+    // An account created by an earlier version, whose password validators did not reject published passwords.
+    private static async Task CreateUserWithPublishedPasswordAsync(WebApplication app, string username)
+    {
+        using var scope = app.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = new ApplicationUser { UserName = username, Email = $"{username}@comicmaintainer.local", IsActive = true };
+        user.PasswordHash = users.PasswordHasher.HashPassword(user, "Admin123!");
+        Assert.True((await users.CreateAsync(user)).Succeeded);
+        Assert.True((await users.AddToRoleAsync(user, "Admin")).Succeeded);
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        private readonly List<(LogLevel Level, string Message)> _entries = [];
+
+        public IReadOnlyList<(LogLevel Level, string Message)> Entries
+        {
+            get
+            {
+                lock (_entries)
+                {
+                    return _entries.ToList();
+                }
+            }
+        }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (_entries)
+            {
+                _entries.Add((logLevel, formatter(state, exception)));
+            }
+        }
+    }
+
     [Theory]
     [InlineData("root-admin", null)]
     [InlineData(null, AdminPassword)]

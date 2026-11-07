@@ -51,7 +51,7 @@ Most endpoints require authentication. Follow these steps:
 2. **Setup Admin User** (if needed)
    - Create the first admin user
    - Modify the request body with your desired credentials
-   - Default: username=`admin`, password=`Admin123!`
+   - Set the `admin_username` and `admin_password` environment variables to the credentials you want; there is no default password
 
 3. **Login**
    - Use your admin credentials

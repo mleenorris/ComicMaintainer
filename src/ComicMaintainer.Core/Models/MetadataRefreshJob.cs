@@ -38,4 +38,11 @@ public class MetadataRefreshOutcome
     public string Status { get; set; } = string.Empty;
     public string? Source { get; set; }
     public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Why the refresh of this series failed (for example "MangaDex did not
+    /// answer within 15s"), or null when it did not fail. A failed refresh
+    /// leaves the series' cached metadata as it was.
+    /// </summary>
+    public string? Error { get; set; }
 }

@@ -167,12 +167,32 @@ public class MetadataController : ControllerBase
             var record = await _cache.RefreshAsync(seriesTitle, cancellationToken);
             return Ok(record);
         }
+        catch (ExternalMetadataUnavailableException ex)
+        {
+            // The provider could not answer; the cached record was kept.
+            _logger.LogWarning(LoggingHelper.WithWebsitePrefix("Metadata refresh for {SeriesTitle} failed: {Reason}"),
+                LoggingHelper.SanitizeForLog(seriesTitle), LoggingHelper.SanitizeForLog(ex.Message));
+            return ProvidersUnavailable(ex);
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error refreshing metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, new { error = "Error refreshing metadata" });
         }
     }
+
+    /// <summary>
+    /// 503 answer for a lookup that failed because external providers could
+    /// not answer (timeouts, outages, throttling), naming them so the UI can
+    /// say which one is down instead of reporting "not found".
+    /// </summary>
+    private ObjectResult ProvidersUnavailable(ExternalMetadataUnavailableException ex)
+        => StatusCode(StatusCodes.Status503ServiceUnavailable, new
+        {
+            error = ex.Message,
+            providers = ex.Providers,
+            retry_after_seconds = ex.RetryAfter is { } retryAfter ? (int?)Math.Ceiling(retryAfter.TotalSeconds) : null
+        });
 
     /// <summary>
     /// Queue an external metadata refresh for every title that maps to a single
@@ -373,6 +393,9 @@ public class MetadataController : ControllerBase
                     canonical_title = x.metadata.CanonicalTitle,
                     aliases = x.metadata.Aliases ?? new List<string>(),
                     source = x.metadata.Source,
+                    // The provider's id of the candidate; sent back with
+                    // apply-match so a later refresh re-fetches this entry.
+                    source_id = x.metadata.SourceId,
                     image_url = x.metadata.ImageUrl,
                     thumbnail_url = x.metadata.ThumbnailUrl,
                     match_score = x.score,
@@ -385,6 +408,13 @@ public class MetadataController : ControllerBase
                         .Select(lt => new { title = lt.Title, language = lt.Language })
                 })
             });
+        }
+        catch (ExternalMetadataUnavailableException ex)
+        {
+            // No provider produced results and at least one could not answer.
+            _logger.LogWarning(LoggingHelper.WithWebsitePrefix("External metadata search for {Query} failed: {Reason}"),
+                LoggingHelper.SanitizeForLog(query), LoggingHelper.SanitizeForLog(ex.Message));
+            return ProvidersUnavailable(ex);
         }
         // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a search error.
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -498,6 +528,7 @@ public class MetadataController : ControllerBase
                     Aliases = request.Aliases?.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).ToList()
                               ?? new List<string>(),
                     Source = request.Source ?? string.Empty,
+                    SourceId = string.IsNullOrWhiteSpace(request.SourceId) ? null : request.SourceId.Trim(),
                     ImageUrl = string.IsNullOrWhiteSpace(request.ImageUrl) ? null : request.ImageUrl,
                     ThumbnailUrl = string.IsNullOrWhiteSpace(request.ThumbnailUrl) ? null : request.ThumbnailUrl,
                     // Preserve provider-supplied language tags so the cached
@@ -776,6 +807,15 @@ public class MetadataController : ControllerBase
         public string CanonicalTitle { get; set; } = string.Empty;
         public List<string>? Aliases { get; set; }
         public string? Source { get; set; }
+
+        /// <summary>
+        /// The candidate's id at <see cref="Source"/> (the <c>source_id</c> of a
+        /// search result). Lets a later refresh re-fetch exactly this entry;
+        /// without it the refresh looks the matched title up at the same
+        /// provider.
+        /// </summary>
+        public string? SourceId { get; set; }
+
         public string? ImageUrl { get; set; }
         public string? ThumbnailUrl { get; set; }
 

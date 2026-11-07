@@ -119,6 +119,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 job.CurrentSeries = title;
                 string outcomeStatus;
                 string? outcomeSource = null;
+                string? outcomeError = null;
                 try
                 {
                     var record = await _cache.RefreshAsync(title, cancellationToken);
@@ -164,11 +165,22 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     job.Status = JobStatus.Cancelled;
                     break;
                 }
+                catch (ExternalMetadataUnavailableException ex)
+                {
+                    // The provider could not answer: the record was kept as it
+                    // was, and the series counts as failed, not as not found.
+                    _logger.LogWarning("Metadata refresh failed for {SeriesTitle}: {Reason}",
+                        LoggingHelper.SanitizeForLog(title), LoggingHelper.SanitizeForLog(ex.Message));
+                    job.Failures++;
+                    outcomeStatus = "error";
+                    outcomeError = ex.Message;
+                }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex, "Metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(title));
                     job.Failures++;
                     outcomeStatus = "error";
+                    outcomeError = "Refresh failed; see the server log";
                 }
 
                 lock (job.RecentResults)
@@ -178,6 +190,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                         SeriesTitle = title,
                         Status = outcomeStatus,
                         Source = outcomeSource,
+                        Error = outcomeError,
                         TimestampUtc = _timeProvider.GetUtcNow().UtcDateTime
                     });
                     while (job.RecentResults.Count > MaxRecentResults)
@@ -327,6 +340,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     SeriesTitle = r.SeriesTitle,
                     Status = r.Status,
                     Source = r.Source,
+                    Error = r.Error,
                     TimestampUtc = r.TimestampUtc
                 })
                 .ToList();

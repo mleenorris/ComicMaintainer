@@ -283,22 +283,20 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
 
         // If the user previously chose a manual match for this series, refresh
         // must re-resolve to that same match (not perform a fresh title search
-        // that might pick a different result). We look up by the user-selected
-        // canonical title and preserve the "manual_match" status so the
-        // series stays marked as manually matched.
+        // that might pick a different result). Only the provider that supplied
+        // the match is asked, for the matched entry's id when it is known, and
+        // the "manual_match" status is preserved so the series stays marked as
+        // manually matched.
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
         var wasManualMatch = string.Equals(entity?.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase);
-        var lookupQuery = wasManualMatch && !string.IsNullOrWhiteSpace(entity!.CanonicalTitle)
-            ? entity.CanonicalTitle
-            : trimmedTitle;
 
-        ExternalSeriesMetadata? lookup = null;
-        string status;
+        ExternalSeriesMetadata? lookup;
         try
         {
-            lookup = await _externalMetadata.LookupSeriesAsync(lookupQuery, cancellationToken);
-            status = lookup is null ? "not_found" : "success";
+            lookup = wasManualMatch
+                ? await LookupManualMatchAsync(entity!, cancellationToken)
+                : await _externalMetadata.LookupSeriesAsync(trimmedTitle, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -307,10 +305,14 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(lookupQuery));
-            status = "error";
+            // The provider could not answer, which says nothing about the
+            // series: keep what is known and report the failure to the caller.
+            _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(trimmedTitle));
+            await RecordRefreshFailureAsync(db, entity, key, trimmedTitle, cancellationToken);
+            throw;
         }
 
+        var status = lookup is null ? "not_found" : "success";
         var now = DateTime.UtcNow;
         if (entity is null)
         {
@@ -321,6 +323,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                 Aliases = lookup?.Aliases?.ToList() ?? new List<string>(),
                 UserAliases = new List<string>(),
                 Source = lookup?.Source,
+                SourceId = lookup?.SourceId,
                 LastLookupUtc = now,
                 LookupStatus = status,
                 LocalizedTitlesJson = lookup is null ? null : SerializeLocalizedTitles(BuildLocalizedTitles(lookup)),
@@ -335,6 +338,10 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             {
                 entity.CanonicalTitle = string.IsNullOrWhiteSpace(lookup.CanonicalTitle) ? entity.CanonicalTitle : lookup.CanonicalTitle;
                 entity.Aliases = lookup.Aliases?.ToList() ?? new List<string>();
+                // A refresh by title may not report the id; keep the known one
+                // when the entry is still from the same provider.
+                entity.SourceId = lookup.SourceId
+                    ?? (string.Equals(entity.Source, lookup.Source, StringComparison.OrdinalIgnoreCase) ? entity.SourceId : null);
                 entity.Source = lookup.Source;
                 entity.LastLookupUtc = now;
                 entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(lookup));
@@ -350,11 +357,11 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             }
             else if (wasManualMatch)
             {
-                // Lookup failed (not_found / error) for a series the user had
-                // previously manually matched. Don't clobber the user's
-                // selection — preserve the existing canonical title, aliases,
-                // and source, and keep the manual_match status. Only record
-                // that a refresh was attempted.
+                // The matched entry is gone (or its provider is disabled) for
+                // a series the user had manually matched. Don't clobber the
+                // user's selection — preserve the existing canonical title,
+                // aliases, and source, and keep the manual_match status. Only
+                // record that a refresh was attempted.
                 entity.LastLookupUtc = now;
                 entity.UpdatedAt = now;
             }
@@ -375,6 +382,79 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
 
         MarkChanged();
         return ToRecord(entity);
+    }
+
+    /// <summary>
+    /// Re-fetches a manual match from the provider that supplied it (by the
+    /// stored entry id when known). A match without a recorded source cannot
+    /// be re-fetched; it is left as the user chose it.
+    /// </summary>
+    private Task<ExternalSeriesMetadata?> LookupManualMatchAsync(
+        SeriesMetadataCacheEntity entity,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(entity.Source) || string.IsNullOrWhiteSpace(entity.CanonicalTitle))
+        {
+            return Task.FromResult<ExternalSeriesMetadata?>(null);
+        }
+
+        return _externalMetadata.LookupMatchAsync(entity.Source, entity.SourceId, entity.CanonicalTitle, cancellationToken);
+    }
+
+    /// <summary>
+    /// Records a refresh whose provider lookup failed. A record that holds a
+    /// match or a user decision (success, manual, manual_match, cleared) is
+    /// left exactly as it was: the failure says nothing about the series, and
+    /// downgrading it would hide the match from the resolver and expose it to
+    /// the stale-sibling cleanup. A record that had no match yet (or a series
+    /// with no record) is marked <c>error</c> so the UI shows that the lookup
+    /// could not be made, rather than that the series was not found.
+    /// </summary>
+    private async Task RecordRefreshFailureAsync(
+        ComicMaintainerDbContext db,
+        SeriesMetadataCacheEntity? entity,
+        string key,
+        string title,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        if (entity is null)
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = key,
+                CanonicalTitle = title,
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                LastLookupUtc = now,
+                LookupStatus = "error",
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+        else if (RankLookupStatus(entity.LookupStatus) <= RankLookupStatus("not_found")
+                 && !string.Equals(entity.LookupStatus, "cleared", StringComparison.OrdinalIgnoreCase))
+        {
+            entity.LookupStatus = "error";
+            entity.LastLookupUtc = now;
+            entity.UpdatedAt = now;
+        }
+        else
+        {
+            return;
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            MarkChanged();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        {
+            // Recording the failure is best effort; the lookup failure itself
+            // is what the caller needs to see.
+            _logger.LogWarning(ex, "Failed to record the failed metadata refresh for {SeriesTitle}", LoggingHelper.SanitizeForLog(title));
+        }
     }
 
     private async Task TryDownloadImageAsync(
@@ -559,7 +639,11 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.ImageContentType = result.ContentType;
         entity.ImageDownloadedUtc = now;
         entity.ImageStatus = "downloaded";
-        if (!string.IsNullOrWhiteSpace(source))
+        // Attribute the record to the image's provider only while it has no
+        // matched entry: Source and SourceId together identify the match a
+        // refresh re-fetches, so a cover picked from another provider must not
+        // re-point it.
+        if (!string.IsNullOrWhiteSpace(source) && string.IsNullOrWhiteSpace(entity.SourceId))
         {
             entity.Source = source;
         }
@@ -787,6 +871,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                 Aliases = match.Aliases?.ToList() ?? new List<string>(),
                 UserAliases = new List<string>(),
                 Source = match.Source,
+                SourceId = match.SourceId,
                 LastLookupUtc = now,
                 LookupStatus = lookupStatus,
                 LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match)),
@@ -803,6 +888,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             entity.CanonicalTitle = match.CanonicalTitle;
             entity.Aliases = match.Aliases?.ToList() ?? new List<string>();
             entity.Source = match.Source;
+            entity.SourceId = match.SourceId;
             entity.LastLookupUtc = now;
             entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match));
             entity.LookupStatus = lookupStatus;
@@ -852,6 +938,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         // user aliases and (if set) the user's canonical-title override.
         entity.Aliases = new List<string>();
         entity.Source = null;
+        entity.SourceId = null;
         entity.LastLookupUtc = null;
         entity.LookupStatus = "cleared";
         entity.LocalizedTitlesJson = null;
@@ -894,6 +981,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             UserAliases = entity.UserAliases?.ToList() ?? new List<string>(),
             SeriesName = entity.SeriesName,
             Source = entity.Source,
+            SourceId = entity.SourceId,
             LastLookupUtc = entity.LastLookupUtc,
             LookupStatus = entity.LookupStatus,
             RemoteImageUrl = entity.RemoteImageUrl,

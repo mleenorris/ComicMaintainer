@@ -14,9 +14,10 @@ namespace ComicMaintainer.Core.Services;
 /// <summary>
 /// Shared plumbing for the HTTP-backed external metadata providers
 /// (ComicVine, MangaDex, AniList): input and settings checks, the per-provider
-/// match cache, rate-limited requests with a per-attempt timeout, the choice
-/// of an automatic match, and the mapping of every transport, HTTP and
-/// response-format error to <see cref="ExternalMetadataUnavailableException"/>.
+/// lookup cache, rate-limited requests with a per-attempt timeout, the choice
+/// of an automatic match, re-fetching a matched entry by its id, and the
+/// mapping of every transport, HTTP and response-format error to
+/// <see cref="ExternalMetadataUnavailableException"/>.
 /// </summary>
 /// <remarks>
 /// A provider that answers with no usable result returns <c>null</c> (lookup)
@@ -28,6 +29,12 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
 {
     /// <summary>How long a matched lookup is served from the in-memory cache.</summary>
     protected static readonly TimeSpan CacheDuration = TimeSpan.FromHours(12);
+
+    /// <summary>
+    /// How long a lookup that found no match is remembered, so every file of an
+    /// unmatched folder does not query the provider again during a batch.
+    /// </summary>
+    protected static readonly TimeSpan NotFoundCacheDuration = TimeSpan.FromMinutes(30);
 
     /// <summary>How long a reachability probe result is reused.</summary>
     protected static readonly TimeSpan HealthCacheDuration = TimeSpan.FromSeconds(60);
@@ -68,7 +75,7 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     /// <summary>Current application settings.</summary>
     protected IOptionsMonitor<AppSettings> Settings { get; }
 
-    /// <summary>Cache shared by matched lookups and reachability probes.</summary>
+    /// <summary>Cache shared by lookups and reachability probes.</summary>
     protected IMemoryCache Cache { get; }
 
     /// <summary>Logger of the concrete provider.</summary>
@@ -98,6 +105,12 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     /// <summary>Parses a successful search response into candidates, in the provider's order.</summary>
     private protected abstract IReadOnlyList<ExternalSeriesMetadata> ParseSearchResults(JsonElement root);
 
+    /// <summary>Builds the request that fetches the entry with id <paramref name="sourceId"/>.</summary>
+    private protected abstract HttpRequestMessage CreateGetByIdRequest(AppSettings settings, string sourceId);
+
+    /// <summary>Parses a successful by-id response; null when it holds no entry.</summary>
+    private protected abstract ExternalSeriesMetadata? ParseGetByIdResult(JsonElement root);
+
     /// <summary>
     /// Inspects a successfully parsed response body for an API-level error
     /// (an error envelope sent with HTTP 200). Returns the failure to throw,
@@ -110,6 +123,13 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         => statusCode == HttpStatusCode.TooManyRequests;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Returns only a candidate that matches <paramref name="seriesName"/>
+    /// exactly or by alias (see <see cref="SeriesMatchScorer.SelectAutomaticMatch"/>);
+    /// a fuzzy top hit is "no match". Matches are cached for
+    /// <see cref="CacheDuration"/>, misses for <see cref="NotFoundCacheDuration"/>;
+    /// failures are not cached.
+    /// </remarks>
     public async Task<ExternalSeriesMetadata?> LookupSeriesAsync(string seriesName, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesName))
@@ -123,20 +143,31 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             return null;
         }
 
-        var cacheKey = $"{CacheKeyPrefix}:{NormalizeForCacheKey(seriesName)}";
+        var key = SeriesKey.Normalize(seriesName);
+        var cacheKey = $"{CacheKeyPrefix}:{key}";
         if (Cache.TryGetValue(cacheKey, out ExternalSeriesMetadata? cached))
         {
             return cached;
         }
 
-        var results = await SearchCoreAsync(config, seriesName, LookupCandidateCount, cancellationToken);
-        var result = PickBestMatch(results, seriesName);
-        if (result != null)
+        var missKey = $"{CacheKeyPrefix}-miss:{key}";
+        if (Cache.TryGetValue(missKey, out _))
         {
-            Cache.Set(cacheKey, result, CacheDuration);
+            return null;
         }
 
-        return result;
+        var results = await SearchCoreAsync(config, seriesName, LookupCandidateCount, cancellationToken);
+        var match = SeriesMatchScorer.SelectAutomaticMatch(results, seriesName)?.Match;
+        if (match != null)
+        {
+            Cache.Set(cacheKey, match, CacheDuration);
+        }
+        else
+        {
+            Cache.Set(missKey, true, NotFoundCacheDuration);
+        }
+
+        return match;
     }
 
     /// <inheritdoc />
@@ -160,6 +191,44 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// With a <paramref name="sourceId"/> the entry is fetched by id (null
+    /// when the provider no longer has it); without one, legacy matches fall
+    /// back to <see cref="LookupSeriesAsync"/> on this provider only.
+    /// </remarks>
+    public async Task<ExternalSeriesMetadata?> LookupMatchAsync(
+        string source,
+        string? sourceId,
+        string title,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.Equals(source, ProviderName, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var config = Settings.CurrentValue;
+        if (!CanQuery(config))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            return await LookupSeriesAsync(title, cancellationToken);
+        }
+
+        var id = sourceId.Trim();
+        return await SendAsync(
+            config,
+            () => CreateGetByIdRequest(config, id),
+            $"{title} (id {id})",
+            ParseGetByIdResult,
+            cancellationToken,
+            notFoundIsEmpty: true);
+    }
+
+    /// <inheritdoc />
     public abstract Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Per-attempt request timeout from the settings, clamped to 1-120 seconds.</summary>
@@ -168,17 +237,18 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
 
     private protected HttpClient CreateClient() => _httpClientFactory.CreateClient(HttpClientName);
 
-    private Task<IReadOnlyList<ExternalSeriesMetadata>> SearchCoreAsync(
+    private async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchCoreAsync(
         AppSettings config,
         string query,
         int limit,
         CancellationToken cancellationToken)
-        => SendAsync(
-            config,
-            () => CreateSearchRequest(config, query, limit),
-            query,
-            ParseSearchResults,
-            cancellationToken);
+        => await SendAsync(
+               config,
+               () => CreateSearchRequest(config, query, limit),
+               query,
+               ParseSearchResults,
+               cancellationToken)
+           ?? Array.Empty<ExternalSeriesMetadata>();
 
     /// <summary>
     /// Sends a rate-limited, time-limited request and parses the JSON answer.
@@ -187,13 +257,18 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     /// counters and thrown as <see cref="ExternalMetadataUnavailableException"/>.
     /// Only the caller's own cancellation is rethrown as is.
     /// </summary>
-    private protected async Task<T> SendAsync<T>(
+    /// <param name="notFoundIsEmpty">
+    /// True when HTTP 404 means "no such entry" (a by-id fetch): it then
+    /// returns null instead of failing.
+    /// </param>
+    private protected async Task<T?> SendAsync<T>(
         AppSettings config,
         Func<HttpRequestMessage> requestFactory,
         string subject,
-        Func<JsonElement, T> parse,
+        Func<JsonElement, T?> parse,
         CancellationToken cancellationToken,
-        Func<HttpResponseMessage, T?>? handleStatus = null)
+        bool notFoundIsEmpty = false)
+        where T : class
     {
         try
         {
@@ -210,10 +285,10 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
                 cancellationToken,
                 IsRateLimitStatus);
 
-            if (handleStatus is not null && handleStatus(response) is { } handled)
+            if (notFoundIsEmpty && response.StatusCode == HttpStatusCode.NotFound)
             {
                 Health.RecordSuccess();
-                return handled;
+                return null;
             }
 
             if (!response.IsSuccessStatusCode)
@@ -222,7 +297,7 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             }
 
             await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            T result;
+            T? result;
             try
             {
                 using var document = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
@@ -237,7 +312,7 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
             {
                 // JsonElement throws InvalidOperationException when the body
-                // has an unexpected shape (e.g. a property read on null).
+                // has an unexpected shape (e.g. a property read on a string).
                 throw new ExternalMetadataUnavailableException(
                     ProviderName,
                     ExternalMetadataFailureKind.InvalidResponse,
@@ -306,10 +381,11 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     private void RecordFailure(ExternalMetadataUnavailableException failure, string subject)
     {
         Logger.LogWarning(
-            failure,
-            "{Provider} lookup failed for {SeriesName}",
+            failure.InnerException,
+            "{Provider} lookup failed for {SeriesName}: {Reason}",
             ProviderName,
-            LoggingHelper.SanitizeForLog(subject));
+            LoggingHelper.SanitizeForLog(subject),
+            LoggingHelper.SanitizeForLog(failure.Message));
         if (failure.Kind == ExternalMetadataFailureKind.RateLimited)
         {
             Health.RecordRateLimited(failure.RetryAfter ?? DefaultRateLimitBackoff, failure.Message, recordFailedRequest: true);
@@ -369,13 +445,13 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         {
             return (false, "Timed out");
         }
-        catch (ExternalMetadataUnavailableException ex) when (ex.InnerException is HttpRequestException network)
+        catch (ExternalMetadataUnavailableException ex) when (ex.Kind == ExternalMetadataFailureKind.RateLimited)
         {
-            return (false, $"Network error: {network.Message}");
+            return (false, "Rate limited");
         }
-        catch (ExternalMetadataUnavailableException ex)
+        catch (HttpRequestException ex)
         {
-            return (false, ex.Message);
+            return (false, $"Network error: {ex.Message}");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -384,8 +460,8 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     }
 
     /// <summary>
-    /// Fills the configuration-independent parts of a health snapshot from
-    /// the cached or a fresh probe result.
+    /// Fills the reachability part of a health snapshot from the cached or a
+    /// fresh probe result.
     /// </summary>
     private protected async Task ApplyProbeAsync(
         ProviderHealth snapshot,
@@ -407,30 +483,19 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         Cache.Set(probeCacheKey, (reachable, message), cacheDuration);
     }
 
-    private static ExternalSeriesMetadata? PickBestMatch(IReadOnlyList<ExternalSeriesMetadata> candidates, string requestedSeriesName)
+    /// <summary>Reads a string or integer JSON id as a string; null when absent.</summary>
+    private protected static string? ReadId(JsonElement item)
     {
-        var requestedNormalized = NormalizeForCacheKey(requestedSeriesName);
-        ExternalSeriesMetadata? bestExact = null;
-        ExternalSeriesMetadata? bestAlias = null;
-
-        foreach (var metadata in candidates)
+        if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("id", out var id))
         {
-            if (NormalizeForCacheKey(metadata.CanonicalTitle) == requestedNormalized)
-            {
-                bestExact ??= metadata;
-                continue;
-            }
-
-            if (metadata.Aliases.Any(alias => NormalizeForCacheKey(alias) == requestedNormalized))
-            {
-                bestAlias ??= metadata;
-            }
+            return null;
         }
 
-        return bestExact ?? bestAlias ?? candidates.FirstOrDefault();
+        return id.ValueKind switch
+        {
+            JsonValueKind.String => string.IsNullOrWhiteSpace(id.GetString()) ? null : id.GetString(),
+            JsonValueKind.Number => id.GetRawText(),
+            _ => null
+        };
     }
-
-    /// <summary>Lowercase letters and digits only: the key the providers cache lookups under.</summary>
-    private protected static string NormalizeForCacheKey(string value)
-        => new(value.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
 }

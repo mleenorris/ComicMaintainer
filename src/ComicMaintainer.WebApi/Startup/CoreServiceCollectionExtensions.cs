@@ -262,26 +262,22 @@ internal static class CoreServiceCollectionExtensions
                 // "image download failed: HTTP 400" errors for certain series.
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
             });
-        services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
-        services.AddHttpClient(nameof(MangaDexSeriesMetadataService))
-            .ConfigureHttpClient(client =>
-            {
-                // MangaDex (and AniList below) recommend setting a descriptive
-                // User-Agent. Identifying ourselves makes it easier for the provider
-                // to contact us if our traffic causes issues, and some providers
-                // reject empty User-Agent values from misbehaving clients.
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
-            });
-        services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService))
-            .ConfigureHttpClient(client =>
-            {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
-            });
-        services.AddHttpClient(nameof(AniListMangaSeriesMetadataService))
-            .ConfigureHttpClient(client =>
-            {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
-            });
+        // Metadata provider clients. Each request also carries its own, shorter
+        // per-attempt timeout (AppSettings.MetadataProviderTimeoutSeconds); the
+        // client timeout is only the backstop that replaces HttpClient's
+        // 100-second default. ComicVine, MangaDex and AniList all ask for a
+        // descriptive User-Agent: identifying ourselves makes it easier for the
+        // provider to contact us if our traffic causes issues, and some
+        // providers reject or block empty User-Agent values.
+        static void ConfigureMetadataProviderClient(HttpClient client)
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+        }
+        services.AddHttpClient(nameof(ComicVineSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
+        services.AddHttpClient(nameof(MangaDexSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
+        services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
+        services.AddHttpClient(nameof(AniListMangaSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
         services.AddHttpClient(SuwayomiService.HttpClientName)
             .ConfigureHttpClient(client =>
             {

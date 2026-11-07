@@ -42,6 +42,13 @@ public class SeriesMetadataCacheRecord
     [JsonPropertyName("source")]
     public string? Source { get; set; }
 
+    /// <summary>
+    /// The matched entry's id at <see cref="Source"/> (see
+    /// <see cref="ExternalSeriesMetadata.SourceId"/>), or null when unknown.
+    /// </summary>
+    [JsonPropertyName("source_id")]
+    public string? SourceId { get; set; }
+
     [JsonPropertyName("last_lookup_utc")]
     public DateTime? LastLookupUtc { get; set; }
 

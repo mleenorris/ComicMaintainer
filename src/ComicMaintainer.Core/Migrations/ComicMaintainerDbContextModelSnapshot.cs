@@ -766,6 +766,10 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SourceId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Synopsis")
                         .HasColumnType("TEXT");
 

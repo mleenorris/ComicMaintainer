@@ -216,6 +216,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.NormalizedKey).HasMaxLength(512);
             entity.Property(e => e.CanonicalTitle).IsRequired().HasMaxLength(512);
             entity.Property(e => e.Source).HasMaxLength(128);
+            entity.Property(e => e.SourceId).HasMaxLength(128);
             entity.Property(e => e.LookupStatus).HasMaxLength(64);
             // Aliases and UserAliases are stored as newline-delimited strings to
             // keep the entity model portable across providers without requiring
@@ -591,6 +592,13 @@ public class SeriesMetadataCacheEntity
 
     /// <summary>Provider source name (e.g. ComicVine, MangaDex), null when unknown.</summary>
     public string? Source { get; set; }
+
+    /// <summary>
+    /// Id of the matched entry at <see cref="Source"/> (MangaDex manga id,
+    /// AniList media id, ComicVine volume id), null when unknown. Lets a
+    /// refresh of a manual match re-fetch exactly that entry.
+    /// </summary>
+    public string? SourceId { get; set; }
 
     /// <summary>Last successful or attempted external lookup time, null if never.</summary>
     public DateTime? LastLookupUtc { get; set; }

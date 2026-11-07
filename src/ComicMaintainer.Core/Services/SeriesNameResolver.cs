@@ -386,6 +386,18 @@ public class SeriesNameResolver : ISeriesNameResolver
         {
             throw;
         }
+        catch (ExternalMetadataUnavailableException ex)
+        {
+            // A provider could not answer (the provider logs the cause, and the
+            // composite skips it while it backs off). Nothing is persisted, so
+            // a later file retries once the provider is back; this file keeps
+            // its existing series name.
+            _logger.LogInformation(
+                "External metadata unavailable for series {SeriesName}: {Reason}",
+                LoggingHelper.SanitizeForLog(seriesName),
+                LoggingHelper.SanitizeForLog(ex.Message));
+            return null;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex, "Failed to resolve external metadata for series {SeriesName}",

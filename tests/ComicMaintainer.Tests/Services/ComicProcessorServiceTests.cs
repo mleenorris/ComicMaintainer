@@ -364,8 +364,8 @@ public class ComicProcessorServiceTests : IDisposable
         // Act
         var result = await _service.ProcessFileAsync(file2);
 
-        // Assert
-        Assert.True(result);
+        // Assert: a duplicate is not processed, so the call reports failure.
+        Assert.False(result);
         // Verify that file2 was marked as duplicate (renamed=false since it couldn't be renamed)
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(file2, false, It.IsAny<CancellationToken>()), Times.Once);
         // Verify that file2 was marked with IsDuplicate flag
@@ -387,8 +387,8 @@ public class ComicProcessorServiceTests : IDisposable
         // Act
         var result = await _service.ProcessFileAsync(filePath);
 
-        // Assert
-        Assert.True(result);
+        // Assert: a duplicate is not processed, so the call reports failure.
+        Assert.False(result);
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(filePath, false, It.IsAny<CancellationToken>()), Times.Once);
         _mockFileStore.Verify(f => f.MarkFileDuplicateAsync(filePath, true, It.IsAny<CancellationToken>()), Times.Once);
     }

@@ -22,15 +22,32 @@ public partial class ComicProcessorService
 
     public async Task<bool> ProcessFileAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken = default)
     {
-        var success = await RunExclusiveAsync(
+        var result = await RunExclusiveAsync(
             filePath,
             token => ProcessFileCoreAsync(filePath, forceReprocess, token),
             cancellationToken);
-        _metrics?.RecordFileProcessed("Process", success);
-        return success;
+        _metrics?.RecordFileProcessed("Process", result.Success);
+        return result.Success;
     }
 
-    private async Task<bool> ProcessFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
+    /// <summary>
+    /// Outcome of processing one file.
+    /// </summary>
+    /// <param name="Success">
+    /// True only when the file ended up fully processed: every enabled phase (normalize,
+    /// rename) succeeded or found nothing to change, or the file was already processed.
+    /// A duplicate, a failed write or rename, or a file without series information is a
+    /// failure, so jobs, the API and metrics report it instead of counting it as done.
+    /// </param>
+    /// <param name="FilePath">Where the file is now: the new path after a rename.</param>
+    /// <param name="Error">Why the file is not fully processed, for job results.</param>
+    private readonly record struct FileProcessingResult(bool Success, string FilePath, string? Error = null)
+    {
+        public static implicit operator BatchItemResult(FileProcessingResult result) =>
+            new(result.Success, result.Error);
+    }
+
+    private async Task<FileProcessingResult> ProcessFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
     {
         try
         {
@@ -40,7 +57,7 @@ public partial class ComicProcessorService
             if (!TryResolveAllowedPath(filePath, out var resolvedPath))
             {
                 _logger.LogWarning("ProcessFileAsync: File is outside the allowed directories: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                return false;
+                return new(false, filePath, "File is outside the allowed directories");
             }
 
             if (new FileInfo(filePath).LinkTarget is not null)
@@ -49,7 +66,7 @@ public partial class ComicProcessorService
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Process", false, "File symlinks are not processed", cancellationToken);
-                return false;
+                return new(false, filePath, "File symlinks are not processed");
             }
 
             _logger.LogInformation("ProcessFileAsync: Starting processing for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -59,7 +76,7 @@ public partial class ComicProcessorService
             if (!forceReprocess && await _fileStore.IsFileProcessedAsync(filePath, cancellationToken))
             {
                 _logger.LogInformation("ProcessFileAsync: File already fully processed (database), skipping: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                return true;
+                return new(true, filePath);
             }
 
             _logger.LogDebug("ProcessFileAsync: Checking if file exists: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -68,17 +85,17 @@ public partial class ComicProcessorService
             {
                 _logger.LogWarning("ProcessFileAsync: File not found: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await LogHistoryAsync(filePath, "Process", false, "File not found", cancellationToken);
-                return false;
+                return new(false, filePath, "File not found");
             }
 
             _logger.LogDebug("ProcessFileAsync: Verifying file is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            
+
             // Verify it's a comic archive
             if (!IsComicArchive(resolvedPath))
             {
                 _logger.LogWarning("ProcessFileAsync: File is not a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await LogHistoryAsync(filePath, "Process", false, "File is not a comic archive", cancellationToken);
-                return false;
+                return new(false, filePath, "File is not a comic archive");
             }
 
             _logger.LogDebug("ProcessFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -100,9 +117,11 @@ public partial class ComicProcessorService
             
             _logger.LogDebug("ProcessFileAsync: Continuing with processing: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
-            // Track rename and normalize separately
+            // Track rename and normalize separately, with the reason each one failed.
             bool renameSuccess = false;
             bool normalizeSuccess = false;
+            string? normalizeError = null;
+            string? renameError = null;
 
             _logger.LogDebug("ProcessFileAsync: Starting normalize phase - WatcherEnableNormalize: {NormalizeEnabled}, Has Metadata: {HasMetadata}",
                 _settings.WatcherEnableNormalize, metadata != null);
@@ -144,6 +163,7 @@ public partial class ComicProcessorService
                     {
                         _logger.LogWarning("Failed to normalize metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                         await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
+                        normalizeError = "Normalize failed: the metadata could not be written";
                     }
                 }
             }
@@ -157,7 +177,9 @@ public partial class ComicProcessorService
             }
             else
             {
+                // The archive could not be read (GetMetadataAtResolvedPath logged why).
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
+                normalizeError = "Normalize failed: the archive could not be read";
             }
 
             _logger.LogDebug("ProcessFileAsync: Starting rename phase - WatcherEnableRename: {RenameEnabled}, Has Metadata: {HasMetadata}, Has Series: {HasSeries}",
@@ -188,6 +210,7 @@ public partial class ComicProcessorService
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, FilenameGenerationFailedMessage, cancellationToken);
+                    renameError = $"Rename failed: {FilenameGenerationFailedMessage}";
                 }
                 else if (newResolvedPath == resolvedPath)
                 {
@@ -207,6 +230,7 @@ public partial class ComicProcessorService
                     await _fileStore.MarkFileDuplicateAsync(filePath, true, cancellationToken);
                     await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
                     renameSuccess = false;
+                    renameError = DuplicateTargetMessage;
                 }
                 else if (!TryResolveAllowedPath(resolvedPath, out var currentPath) || currentPath != resolvedPath)
                 {
@@ -215,6 +239,7 @@ public partial class ComicProcessorService
                     _logger.LogWarning("ProcessFileAsync: File path changed during processing, not renaming: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, "File path changed during processing", cancellationToken);
+                    renameError = "Rename failed: the file path changed during processing";
                 }
                 else
                 {
@@ -227,6 +252,7 @@ public partial class ComicProcessorService
                             _logger.LogWarning("ProcessFileAsync: File path changed during processing, not renaming: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                             await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                             await LogHistoryAsync(filePath, "Rename", false, "File path changed during processing", cancellationToken);
+                            renameError = "Rename failed: the file path changed during processing";
                         }
                         else
                         {
@@ -267,12 +293,14 @@ public partial class ComicProcessorService
                         await _fileStore.MarkFileDuplicateAsync(filePath, true, cancellationToken);
                         await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
                         renameSuccess = false;
+                        renameError = DuplicateTargetMessage;
                     }
                     catch (Exception ex) when (ex is not OutOfMemoryException)
                     {
                         _logger.LogError(ex, "Failed to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                         await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                         await LogHistoryAsync(filePath, "Rename", false, ex.Message, cancellationToken);
+                        renameError = $"Rename failed: {ex.Message}";
                     }
                 }
             }
@@ -291,6 +319,7 @@ public partial class ComicProcessorService
                     _logger.LogDebug("No metadata or series information for rename: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information", cancellationToken);
+                    renameError = "Rename skipped: no metadata or series information";
                 }
             }
 
@@ -323,7 +352,13 @@ public partial class ComicProcessorService
                 await TryQueueAutomaticEmailAsync(filePath, metadata?.Series, cancellationToken);
             }
 
-            return true;
+            if (isFullyProcessed)
+            {
+                return new(true, filePath);
+            }
+
+            var reasons = new[] { normalizeError, renameError }.Where(reason => reason is not null).ToList();
+            return new(false, filePath, reasons.Count > 0 ? string.Join("; ", reasons) : "File not fully processed");
         }
         // A cancelled job didn't fail this file: leave it and its stored state as they are.
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -341,9 +376,11 @@ public partial class ComicProcessorService
             }
 
             await LogHistoryAsync(filePath, "Process", false, ex.Message, cancellationToken);
-            return false;
+            return new(false, filePath, ex.Message);
         }
     }
+
+    private const string DuplicateTargetMessage = "Duplicate: a file with the target name already exists";
 
     /// <summary>
     /// Queues automatic email delivery for a newly processed issue. Failures are

@@ -273,3 +273,51 @@ test('deleting a ticked issue from its menu unselects it for good', async (t) =>
     assert.deepEqual(h.requests(page, 'POST', '/api/jobs/process-selected').map(call => call.body.Files), [[ISSUE_B]]);
     assert.deepEqual(page.errors, []);
 });
+
+// Paths that differ only in characters outside [A-Za-z0-9] used to share one
+// menu id, so the second issue's button opened the first issue's menu and its
+// actions changed (or deleted) the wrong archive.
+for (const [first, second] of [
+    ['Manga/X/第1話.cbz', 'Manga/X/第1巻.cbz'],
+    ['Saga/Saga 001.cbz', 'Saga/Saga_001.cbz']
+]) {
+    test(`each issue's menu acts on its own file: ${second} is not mistaken for ${first}`, async (t) => {
+        const page = await h.bootSeriesDetail(t, {
+            issues: [h.seriesIssue(first), h.seriesIssue(second)],
+            routes: {
+                'POST /api/jobs/process-selected': { job_id: h.JOB_ID, total_items: 1 },
+                [`GET /api/jobs/${h.JOB_ID}`]: h.jobStatus({ total_items: 1 }),
+                [`DELETE /api/files/${b64(first)}`]: 200,
+                [`DELETE /api/files/${b64(second)}`]: 200
+            }
+        });
+        const menus = page.$$('.series-issue-card .dropdown-menu');
+        assert.equal(menus.length, 2);
+        assert.notEqual(menus[0].id, menus[1].id, 'every menu has its own id');
+
+        // Open the second card's menu the way a user does, without going
+        // through getDropdownId().
+        const chooseOnSecond = label => {
+            page.click(h.issueCard(page, second).querySelector('.series-issue-actions-toggle'));
+            const open = page.$$('.dropdown-menu.show');
+            assert.equal(open.length, 1);
+            assert.equal(open[0], menus[1], 'the clicked card\'s own menu opens');
+            page.click([...open[0].querySelectorAll('.dropdown-item')].find(item => item.textContent.trim() === label));
+        };
+
+        h.answerConfirms(page, true, false);
+        chooseOnSecond('Process');
+        await page.settle();
+        assert.deepEqual(h.takeConfirms(page), [`Process ${second}?`, `This will process ${second}.\n\nClick OK to include files already marked as processed, or Cancel to skip them.`]);
+        assert.deepEqual(h.requests(page, 'POST', '/api/jobs/process-selected').map(call => call.body.Files), [[second]]);
+        await h.endTrackedJob(t, page);
+
+        h.answerConfirms(page, true);
+        chooseOnSecond('Delete');
+        await page.settle();
+        assert.deepEqual(h.takeConfirms(page), [`Are you sure you want to delete ${second}?\n\nThis action cannot be undone!`]);
+        assert.equal(h.requests(page, 'DELETE', `/api/files/${b64(second)}`).length, 1);
+        assert.equal(h.requests(page, 'DELETE', `/api/files/${b64(first)}`).length, 0);
+        assert.deepEqual(page.errors, []);
+    });
+}

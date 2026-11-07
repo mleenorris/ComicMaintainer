@@ -174,7 +174,7 @@ test('file rows show the processing status, read state, size and age', async () 
 
     const [dupe, , , normalized, fresh] = page.$$('#fileList .file-item');
     const actions = row => [...row.querySelectorAll('.dropdown-item')].map(item => item.textContent.trim());
-    assert.equal(dupe.querySelector('.dropdown-menu').id, 'dropdown-Mixed_dupe_cbz');
+    assert.equal(dupe.querySelector('.dropdown-menu').id, 'dropdown-' + Buffer.from('Mixed/dupe.cbz').toString('base64url'));
     assert.ok(actions(dupe).includes('Review Duplicate'));
     assert.ok(!actions(fresh).includes('Review Duplicate'));
     assert.ok(actions(normalized).includes('Mark Unread') && !actions(normalized).includes('Mark Read'));
@@ -304,7 +304,7 @@ test('files at the library root are listed at once, under no folder header, and 
     assert.equal(row.querySelector('.file-name').title, tricky);
     assert.equal(row.querySelector('.file-path').textContent, tricky);
     assert.equal(row.querySelector('b'), null, 'markup in names is not interpreted');
-    assert.equal(row.querySelector('.dropdown-menu').id, 'dropdown-Bob_s__b_Comics____Co___1_cbz');
+    assert.equal(row.querySelector('.dropdown-menu').id, 'dropdown-' + Buffer.from(tricky).toString('base64url'));
 });
 
 test('the library root\'s files follow the filter, even once loaded', async () => {

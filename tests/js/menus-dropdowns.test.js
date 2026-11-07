@@ -12,8 +12,9 @@ const FILES = [
     { name: 'Issue #1.cbz', relative_path: 'Series A/Issue #1.cbz', size: 2048, modified: 1700000000, renamed: true, normalized: true },
     { name: 'Issue 2.cbz', relative_path: 'Series A/Issue 2.cbz', size: 4096, modified: 1700000100 }
 ];
-const MENU_A = 'dropdown-Series_A_Issue__1_cbz';
-const MENU_B = 'dropdown-Series_A_Issue_2_cbz';
+// getDropdownId(): 'dropdown-' + the path's base64url form.
+const MENU_A = 'dropdown-U2VyaWVzIEEvSXNzdWUgIzEuY2J6';
+const MENU_B = 'dropdown-U2VyaWVzIEEvSXNzdWUgMi5jYno';
 
 async function bootLibrary() {
     const page = await bootApp({
@@ -194,7 +195,7 @@ test('portaling copes with repeated, unanchored and unknown menus', async () => 
     const logged = page.consoleMessages.length;
     page.run('toggleDropdown')({ stopPropagation() {}, target: page.document.body }, 'Missing/file #9.cbz');
     assert.deepEqual(errorsSince(page, logged), [
-        ['Dropdown not found for filepath:', 'Missing/file #9.cbz', 'ID:', 'dropdown-Missing_file__9_cbz']
+        ['Dropdown not found for filepath:', 'Missing/file #9.cbz', 'ID:', 'dropdown-TWlzc2luZy9maWxlICM5LmNieg']
     ]);
     assert.equal(state(b.dropdown).shown, true, 'an unknown menu leaves the open one alone');
     assert.equal(page.$(`#${MENU_B}`), b.dropdown);

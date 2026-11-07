@@ -276,6 +276,7 @@ public partial class FileStoreService
         moved.IsRenamed |= existing.IsRenamed;
         moved.IsNormalized |= existing.IsNormalized;
         moved.IsDuplicate |= existing.IsDuplicate;
+        moved.IsProcessingPending |= existing.IsProcessingPending;
         moved.IsProcessed = ComputeProcessedState(moved.IsRenamed, moved.IsNormalized);
         if (existing.CreatedAt < moved.CreatedAt)
         {

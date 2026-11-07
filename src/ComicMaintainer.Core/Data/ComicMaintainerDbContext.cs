@@ -375,6 +375,15 @@ public class ComicFileEntity
     public DateTime? LastDbEditAt { get; set; }
     public DateTime? LastWriteAt { get; set; }
     public string MetadataSource { get; set; } = "Scanned";
+
+    /// <summary>
+    /// Set while the file watcher has queued this file for automatic processing that has not
+    /// run yet (the file is still settling, or waits for a free worker). A queued file used to
+    /// be held only in memory, so a restart or a watcher stop in the meantime left it
+    /// unprocessed for good; at its next start the watcher queues every file with this flag
+    /// set again. Cleared once the watcher has processed the file or decided it needs nothing.
+    /// </summary>
+    public bool IsProcessingPending { get; set; }
 }
 
 /// <summary>

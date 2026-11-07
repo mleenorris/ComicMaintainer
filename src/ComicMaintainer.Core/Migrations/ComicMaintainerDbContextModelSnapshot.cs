@@ -123,6 +123,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<bool>("IsProcessed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsProcessingPending")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsRead")
                         .HasColumnType("INTEGER");
 

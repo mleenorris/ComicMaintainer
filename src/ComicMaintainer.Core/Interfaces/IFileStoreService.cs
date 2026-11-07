@@ -166,6 +166,20 @@ public interface IFileStoreService
     Task<int> RemoveDirectoryAsync(string directory, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Records whether the file watcher has queued the tracked file at
+    /// <paramref name="filePath"/> for automatic processing that has not run yet, so that a
+    /// restart in the meantime does not lose it (see <see cref="GetProcessingPendingFilesAsync"/>).
+    /// Does nothing for an untracked file.
+    /// </summary>
+    Task SetProcessingPendingAsync(string filePath, bool pending, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The tracked files the file watcher queued for automatic processing that has not run,
+    /// for example because the application stopped while they were still settling.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetProcessingPendingFilesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Re-reads the on-disk size and last-write time of each tracked file in
     /// <paramref name="filePaths"/> and stores them as <c>FileSize</c> /
     /// <c>LastModified</c> (local time, matching <see cref="AddFileAsync"/>).

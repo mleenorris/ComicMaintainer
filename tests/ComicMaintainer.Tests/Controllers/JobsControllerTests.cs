@@ -488,7 +488,7 @@ public class JobsControllerTests
         var expectedJobId = Guid.NewGuid();
         
         _mockProcessor
-            .Setup(p => p.UpdateMetadataAsync(files, metadata, default))
+            .Setup(p => p.UpdateMetadataAsync(files, metadata, It.IsAny<ComicMetadataFieldFlags>(), default))
             .ReturnsAsync(expectedJobId);
 
         var request = new JobsController.UpdateMetadataSelectedRequest
@@ -505,6 +505,62 @@ public class JobsControllerTests
         var (jobId, totalItems) = GetJobResponse(okResult);
         Assert.Equal(expectedJobId.ToString(), jobId);
         Assert.Equal(2, totalItems);
+        // Without a field list only the fields that carry a value are applied.
+        _mockProcessor.Verify(p => p.UpdateMetadataAsync(
+            files, metadata, ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Issue, default), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateMetadataSelected_WithAFieldList_AppliesExactlyThoseFields()
+    {
+        var files = new List<string> { "/path/file1.cbz" };
+        var metadata = new ComicMetadata { Publisher = "Kodansha" };
+        _mockProcessor
+            .Setup(p => p.UpdateMetadataAsync(files, metadata, It.IsAny<ComicMetadataFieldFlags>(), default))
+            .ReturnsAsync(Guid.NewGuid());
+
+        var result = await _controller.UpdateMetadataSelected(new JobsController.UpdateMetadataSelectedRequest
+        {
+            Files = files,
+            Metadata = metadata,
+            Fields = new List<string> { "publisher", "title" }
+        });
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        // The listed Title has no value, so it is cleared; nothing else is touched.
+        _mockProcessor.Verify(p => p.UpdateMetadataAsync(
+            files, metadata, ComicMetadataFieldFlags.Publisher | ComicMetadataFieldFlags.Title, default), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("notes")]
+    [InlineData(null)]
+    public async Task UpdateMetadataSelected_WithAnUnknownField_ReturnsBadRequest(string? field)
+    {
+        var result = await _controller.UpdateMetadataSelected(new JobsController.UpdateMetadataSelectedRequest
+        {
+            Files = new List<string> { "/path/file1.cbz" },
+            Metadata = new ComicMetadata { Series = "Saga" },
+            Fields = new List<string> { "series", field! }
+        });
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        _mockProcessor.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateMetadataSelected_WithNothingToApply_ReturnsBadRequest()
+    {
+        // A batch edit with every field left blank must not run (it used to write an
+        // empty ComicInfo.xml into every selected file).
+        var result = await _controller.UpdateMetadataSelected(new JobsController.UpdateMetadataSelectedRequest
+        {
+            Files = new List<string> { "/path/file1.cbz" },
+            Metadata = new ComicMetadata()
+        });
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        _mockProcessor.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -551,7 +607,7 @@ public class JobsControllerTests
         var metadata = new ComicMetadata { Series = "Test Series" };
         
         _mockProcessor
-            .Setup(p => p.UpdateMetadataAsync(files, metadata, default))
+            .Setup(p => p.UpdateMetadataAsync(files, metadata, It.IsAny<ComicMetadataFieldFlags>(), default))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
         var request = new JobsController.UpdateMetadataSelectedRequest

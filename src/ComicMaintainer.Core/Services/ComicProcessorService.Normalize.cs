@@ -90,19 +90,19 @@ public partial class ComicProcessorService
             var beforeMetadata = metadata.Clone();
             var normalizedMetadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
 
-            // Update metadata (normalize it by re-writing ComicInfo.xml)
-            var success = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, cancellationToken);
+            // Write only the fields normalize owns into ComicInfo.xml; every other element stays.
+            var write = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken);
+            var success = write.Succeeded;
+            var beforeFilename = Path.GetFileName(filePath);
+            filePath = write.FilePath;
             await _fileStore.MarkFileNormalizedAsync(filePath, success, cancellationToken);
-            
+
             if (success)
             {
                 await StampSeriesMetadataVersionAsync(filePath, normalizedMetadata.Series, cancellationToken);
                 _logger.LogInformation("NormalizeFileAsync: File normalized successfully: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var filename = Path.GetFileName(filePath);
-                // For normalize operations, we log the same metadata as before/after since we're ensuring
-                // the existing metadata is written properly to ComicInfo.xml
-                await LogHistoryWithChangesAsync(filePath, "Normalize", true, null, 
-                    filename, filename, beforeMetadata, normalizedMetadata, cancellationToken);
+                await LogHistoryWithChangesAsync(filePath, "Normalize", true, DescribeUnwrittenOutcome(write),
+                    beforeFilename, Path.GetFileName(filePath), beforeMetadata, normalizedMetadata, cancellationToken);
             }
             else
             {
@@ -154,19 +154,19 @@ public partial class ComicProcessorService
             // Series exists but doesn't match folder name - not normalized
             return false;
         }
-        // Compute the expected title using the same logic as NormalizeMetadataAsync:
-        // if the ComicInfo issue is missing, fall back to parsing the chapter
-        // number from the filename so the expected title becomes "Chapter <n>"
-        // instead of "Chapter Unknown" (which would incorrectly mark files with
-        // a discoverable chapter number in their filename as already normalized).
-        var expectedIssue = metadata.Issue;
-        if (string.IsNullOrEmpty(expectedIssue))
+
+        if (!hasSeries && !string.IsNullOrEmpty(expectedSeries))
         {
-            var parsedIssue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filePath));
-            if (!string.IsNullOrEmpty(parsedIssue))
-            {
-                expectedIssue = parsedIssue;
-            }
+            // The series is missing but known from the folder or the series cache.
+            return false;
+        }
+        // A missing <Number> is not normalized when the filename holds the issue
+        // number: normalize recovers it into the metadata (see NormalizeMetadataAsync).
+        var expectedIssue = metadata.Issue;
+        if (string.IsNullOrEmpty(expectedIssue) &&
+            !string.IsNullOrEmpty(IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filePath))))
+        {
+            return false;
         }
 
         // The issue field must not be zero padded. If the stored <Number> is
@@ -182,8 +182,10 @@ public partial class ComicProcessorService
             expectedIssue = strippedIssue;
         }
 
-        var expectedTitle = CreateNormalizedTitle(expectedIssue);
-        _logger.LogInformation(
+        // A real chapter title counts as normalized; only a missing title or a stale
+        // generated "Chapter <n>" one is rewritten, so a title alone never forces a rewrite.
+        var expectedTitle = NormalizedTitleFor(metadata.Title, expectedIssue);
+        _logger.LogDebug(
             "Checking title normalization for file: {FilePath}, Current metadata {title} Expected {expectedTitle}",
             LoggingHelper.SanitizePathForLog(filePath),
             LoggingHelper.SanitizeForLog(metadata.Title),
@@ -199,55 +201,107 @@ public partial class ComicProcessorService
     ///<summary>
     /// Helper method to create nomalized title from issue number
     /// </summary>
-    private string CreateNormalizedTitle(string? issueNumber)
+    private static string CreateNormalizedTitle(string? issueNumber)
     {
         if (string.IsNullOrEmpty(issueNumber))
             return "Chapter Unknown";
-        
+
         return $"Chapter {issueNumber}";
     }
 
+    /// <summary>A title in the form normalize generates: "Chapter 5", "Chapter Unknown".</summary>
+    private static readonly Regex GeneratedChapterTitlePattern = new(
+        @"^\s*chapter\s+(?<value>\S+)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// The title normalize settles on. A real chapter title (what Suwayomi and most taggers write)
+    /// is kept. A missing title becomes "Chapter &lt;issue&gt;", and so does a generated
+    /// "Chapter &lt;n&gt;" title that no longer matches the issue number (for example
+    /// "Chapter 0012" or "Chapter Unknown" for issue 12).
+    /// </summary>
+    private static string NormalizedTitleFor(string? title, string? issue)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return CreateNormalizedTitle(issue);
+        }
+
+        var generated = GeneratedChapterTitlePattern.Match(title);
+        if (generated.Success &&
+            !string.IsNullOrEmpty(issue) &&
+            !string.Equals(generated.Groups["value"].Value, issue, StringComparison.Ordinal))
+        {
+            return CreateNormalizedTitle(issue);
+        }
+
+        return title;
+    }
+
+    /// <summary>
+    /// The history note for a write that succeeded without rewriting the archive, or null.
+    /// </summary>
+    private static string? DescribeUnwrittenOutcome(MetadataWriteResult write) => write.Outcome switch
+    {
+        MetadataWriteOutcome.Unchanged => "ComicInfo.xml already up to date",
+        MetadataWriteOutcome.NotWritable => "Archive not rewritten: converting CBR/RAR to CBZ is turned off",
+        MetadataWriteOutcome.KeptInDatabase => "Kept in the database: converting CBR/RAR to CBZ is turned off",
+        _ => null
+    };
+
     /// <summary>
     /// When a file's metadata is missing the issue/chapter number but the
-    /// original filename contains an explicit "Ch"/"Chapter &lt;n&gt;" token,
-    /// recover the chapter number into the metadata's <c>Issue</c> field and
-    /// set <c>Title</c> to "Chapter &lt;n&gt;", then persist the updated
-    /// metadata back to the archive's ComicInfo.xml. This ensures the chapter
-    /// number is preserved in metadata (not just in the filename) during
-    /// rename operations on files that only have the series tag set.
-    /// Returns the (possibly updated) metadata instance and a flag indicating
-    /// whether metadata was modified.
+    /// original filename contains an explicitly marked chapter ("Ch 5", "#5"),
+    /// recover the chapter number into the metadata's <c>Issue</c> field (and a
+    /// missing title into "Chapter &lt;n&gt;") so the rename keeps the chapter.
+    /// While normalize is enabled the recovered fields are also written into the
+    /// archive's ComicInfo.xml; with normalize disabled the archive is never
+    /// rewritten and the recovered chapter only shapes the new filename.
+    /// Returns the file's path afterwards, which differs from
+    /// <paramref name="filePath"/> only when the write converted the archive to CBZ.
     /// </summary>
-    private async Task<bool> EnsureChapterMetadataPreservedAsync(
+    private async Task<string> EnsureChapterMetadataPreservedAsync(
         string filePath,
         ComicMetadata metadata,
         CancellationToken cancellationToken)
     {
         if (metadata == null || !string.IsNullOrEmpty(metadata.Issue))
         {
-            return false;
+            return filePath;
         }
 
         var originalNameStem = Path.GetFileNameWithoutExtension(filePath);
         var parsedChapter = IssueNumberParser.ParseMarked(originalNameStem);
         if (string.IsNullOrEmpty(parsedChapter))
         {
-            return false;
+            return filePath;
         }
 
-        var normalizedTitle = CreateNormalizedTitle(parsedChapter);
+        metadata.Issue = parsedChapter;
+        metadata.Title = NormalizedTitleFor(metadata.Title, parsedChapter);
+
+        if (!_settings.WatcherEnableNormalize)
+        {
+            _logger.LogDebug(
+                "Using chapter number '{Chapter}' from the filename for the new name of {FilePath}; normalize is disabled, so ComicInfo.xml is left unchanged.",
+                parsedChapter,
+                LoggingHelper.SanitizePathForLog(filePath));
+            return filePath;
+        }
 
         _logger.LogInformation(
             "Recovering chapter number '{Chapter}' from filename into metadata for {FilePath}; setting Issue and Title='{Title}'.",
             parsedChapter,
             LoggingHelper.SanitizePathForLog(filePath),
-            LoggingHelper.SanitizeForLog(normalizedTitle));
+            LoggingHelper.SanitizeForLog(metadata.Title));
 
-        metadata.Issue = parsedChapter;
-        metadata.Title = normalizedTitle;
-
-        var success = await UpdateMetadataCoreAsync(filePath, metadata, cancellationToken);
-        if (!success)
+        var write = await UpdateMetadataCoreAsync(
+            filePath,
+            metadata,
+            ComicMetadataFieldFlags.Issue | ComicMetadataFieldFlags.Title,
+            cancellationToken);
+        if (!write.Succeeded)
         {
             _logger.LogWarning(
                 "Failed to write recovered chapter number '{Chapter}' to metadata for {FilePath}.",
@@ -255,7 +309,7 @@ public partial class ComicProcessorService
                 LoggingHelper.SanitizePathForLog(filePath));
         }
 
-        return success;
+        return write.FilePath;
     }
 
     ///<summary>
@@ -301,9 +355,9 @@ public partial class ComicProcessorService
             }
         }
 
-        // Set title to standard format
-        string normalizedTitle = CreateNormalizedTitle(normalizedMetadata.Issue);
-        if(!normalizedTitle.Equals(normalizedMetadata.Title))
+        // Keep a real chapter title; fill in a missing one and correct a stale generated one.
+        var normalizedTitle = NormalizedTitleFor(normalizedMetadata.Title, normalizedMetadata.Issue);
+        if (!string.Equals(normalizedTitle, normalizedMetadata.Title, StringComparison.Ordinal))
         {
             _logger.LogDebug("Setting title to standard format: {Title}", LoggingHelper.SanitizeForLog(normalizedTitle));
             normalizedMetadata.Title = normalizedTitle;

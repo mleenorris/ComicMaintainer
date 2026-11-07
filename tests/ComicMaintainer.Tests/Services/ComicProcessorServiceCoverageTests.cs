@@ -431,8 +431,11 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal("Pub", info.Element("Publisher")?.Value);
         Assert.Equal("2022", info.Element("Year")?.Value);
         Assert.Equal("Summary", info.Element("Summary")?.Value);
-        Assert.Equal(new[] { "Alice", "Bob" }, info.Elements("Writer").Select(e => e.Value));
-        Assert.Equal(new[] { "t1", "t2" }, info.Elements("Tag").Select(e => e.Value));
+        // Credits and tags are written the way the ComicInfo schema defines them: one
+        // comma-separated element each.
+        Assert.Equal(new[] { "Alice, Bob" }, info.Elements("Writer").Select(e => e.Value));
+        Assert.Equal(new[] { "t1, t2" }, info.Elements("Tags").Select(e => e.Value));
+        Assert.Empty(info.Elements("Tag"));
         Assert.Contains("page001.jpg", EntryNames(path));
         _fileStore.Verify(
             f => f.RefreshFileStatsAsync(
@@ -442,16 +445,17 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateMetadataAsync_EmptyMetadata_WritesComicInfoWithoutElements()
+    public async Task UpdateMetadataAsync_EmptyMetadata_LeavesTheArchiveUntouched()
     {
         var service = CreateService();
         var path = WriteCbz("Series/blank.cbz", Xml("Old", "1", "Old Title"));
+        var before = await File.ReadAllBytesAsync(path);
 
         var result = await service.UpdateMetadataAsync(path, new ComicMetadata());
 
+        // No field carries a value, so there is nothing to apply and nothing is cleared.
         Assert.True(result);
-        var info = ReadComicInfo(path)!;
-        Assert.Empty(info.Elements());
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
     }
 
     [Fact]
@@ -548,25 +552,35 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task MetadataRewrite_EntryWithoutName_FailsAndLeavesArchiveUntouched(bool removeMetadata)
+    [Fact]
+    public async Task MetadataRewrite_EntryWithoutName_FailsAndLeavesArchiveUntouched()
     {
         var service = CreateService();
         var path = WriteNamelessGzipCbz("Series/nameless.cbz");
         var before = await File.ReadAllBytesAsync(path);
 
-        var result = removeMetadata
-            ? await service.RemoveMetadataAsync(path)
-            : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
+        var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
 
         Assert.False(result);
         Assert.Equal(before, await File.ReadAllBytesAsync(path));
         var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
-        Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
+        Assert.Equal("Error updating metadata for {FilePath}", error.Template);
         Assert.IsType<InvalidDataException>(error.Exception);
         Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
+    }
+
+    [Fact]
+    public async Task RemoveMetadataAsync_ArchiveWithoutComicInfo_SucceedsWithoutRewritingIt()
+    {
+        var service = CreateService();
+        var path = WriteNamelessGzipCbz("Series/nameless.cbz");
+        var before = await File.ReadAllBytesAsync(path);
+
+        var result = await service.RemoveMetadataAsync(path);
+
+        Assert.True(result);
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+        Assert.DoesNotContain(_logger.Entries, e => e.Level == LogLevel.Error);
     }
 
     [Fact]
@@ -1841,14 +1855,14 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         await File.WriteAllTextAsync(tempAsFile, "blocking");
         _settings.TempFileDirectory = tempAsFile;
         var service = CreateService();
-        var path = WriteCbz("Series X/book.cbz", Xml("Series X", "5", "Wrong"));
+        var path = WriteCbz("Series X/Series X Ch 7.cbz", Xml("Series X", number: null, title: "Wrong"));
 
         var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.FailedFiles);
         Assert.True(_logger.Has(LogLevel.Warning, "NormalizeFileAsync: Failed to normalize file: {FilePath}"));
         Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == "Failed to update metadata");
-        Assert.Equal("Wrong", ReadComicInfo(path)!.Element("Title")?.Value);
+        Assert.Null(ReadComicInfo(path)!.Element("Number"));
     }
 
     [Fact]
@@ -1878,7 +1892,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var info = ReadComicInfo(path)!;
         Assert.Equal("Series X", info.Element("Series")?.Value);
         Assert.Equal("7", info.Element("Number")?.Value);
-        Assert.Equal("Chapter 7", info.Element("Title")?.Value);
+        Assert.Equal("Something", info.Element("Title")?.Value);
     }
 
     [Fact]
@@ -1893,7 +1907,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var info = ReadComicInfo(path)!;
         Assert.Equal("Series X", info.Element("Series")?.Value);
         Assert.Equal("5", info.Element("Number")?.Value);
-        Assert.Equal("Chapter 5", info.Element("Title")?.Value);
+        Assert.Equal("Some Title", info.Element("Title")?.Value);
     }
 
     [Fact]
@@ -1913,7 +1927,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(1, job.ProcessedFiles);
         var info = ReadComicInfo(path)!;
         Assert.Equal("Unknown Series", info.Element("Series")?.Value);
-        Assert.Equal("Chapter 5", info.Element("Title")?.Value);
+        Assert.Equal("Some Title", info.Element("Title")?.Value);
     }
 
     // -------------------------------------------------------- series resolution

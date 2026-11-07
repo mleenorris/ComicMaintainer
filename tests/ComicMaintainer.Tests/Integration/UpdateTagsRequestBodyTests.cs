@@ -27,7 +27,11 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
 {
     private const string ComicInfo =
         "<ComicInfo><Series>Batman</Series><Title>The Dark Knight</Title><Number>1</Number>" +
-        "<Year>2016</Year><Writer>Tom King</Writer><Tag>Superhero</Tag></ComicInfo>";
+        "<Year>2016</Year><Writer>Tom King</Writer><Penciller>David Finch</Penciller><Tag>Superhero</Tag>" +
+        "<Genre>Superhero</Genre><Manga>No</Manga><Pages><Page Image=\"0\" Type=\"FrontCover\" /></Pages></ComicInfo>";
+
+    /// <summary>ComicInfo elements the application does not model, which every write must keep.</summary>
+    private static readonly string[] UnmodelledElements = { "Penciller", "Genre", "Manga", "Pages" };
 
     private readonly string _root = Path.Join(AppContext.BaseDirectory, "update-tags-body-tests", Guid.NewGuid().ToString("N"));
 
@@ -91,7 +95,7 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
     }
 
     [Fact]
-    public async Task PutReplacesTheTagsOfTheFile()
+    public async Task PutChangesOnlyTheFieldsInTheBody()
     {
         var path = WriteCbz("Batman #001.cbz");
         await using var factory = CreateFactory();
@@ -109,9 +113,12 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
         using var tags = await GetTagsAsync(client, path);
         Assert.Equal("I Am Gotham", tags.RootElement.GetProperty("title").GetString());
         Assert.Equal(new[] { "Tom King", "David Finch" }, tags.RootElement.GetProperty("authors").EnumerateArray().Select(a => a.GetString()));
-        // The fields the body leaves out are removed, not kept
-        Assert.Equal(JsonValueKind.Null, tags.RootElement.GetProperty("year").ValueKind);
-        Assert.Empty(tags.RootElement.GetProperty("tags").EnumerateArray());
+        // The fields the body leaves out are kept, and so is every element the application does not model
+        Assert.Equal(2016, tags.RootElement.GetProperty("year").GetInt32());
+        Assert.Equal("Superhero", Assert.Single(tags.RootElement.GetProperty("tags").EnumerateArray()).GetString());
+        var info = ReadComicInfo(path);
+        Assert.All(UnmodelledElements, name => Assert.NotNull(info.Element(name)));
+        Assert.Equal("Tom King, David Finch", info.Element("Writer")?.Value);
     }
 
     [Fact]
@@ -134,10 +141,54 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
             using var tags = await GetTagsAsync(client, path);
             Assert.Equal("DC Comics", tags.RootElement.GetProperty("publisher").GetString());
             Assert.Equal(2023, tags.RootElement.GetProperty("year").GetInt32());
-            // The metadata replaces the tags of each file, so the fields it leaves out are removed
-            Assert.Equal(JsonValueKind.Null, tags.RootElement.GetProperty("title").ValueKind);
-            Assert.Empty(tags.RootElement.GetProperty("authors").EnumerateArray());
+            // Only the supplied fields change; each file keeps its own title, number and credits
+            Assert.Equal("The Dark Knight", tags.RootElement.GetProperty("title").GetString());
+            Assert.Equal("Tom King", Assert.Single(tags.RootElement.GetProperty("authors").EnumerateArray()).GetString());
+            Assert.All(UnmodelledElements, name => Assert.NotNull(ReadComicInfo(path).Element(name)));
         }
+    }
+
+    [Fact]
+    public async Task PostWithAFieldListAppliesAndClearsExactlyThoseFields()
+    {
+        var path = WriteCbz("Batman #001.cbz");
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/files/tags", new
+        {
+            files = new[] { path },
+            metadata = new { publisher = "DC Comics", title = (string?)null, series = "Ignored" },
+            fields = new[] { "publisher", "title" },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var info = ReadComicInfo(path);
+        Assert.Equal("DC Comics", info.Element("Publisher")?.Value);
+        Assert.Null(info.Element("Title"));
+        Assert.Equal("Batman", info.Element("Series")?.Value);
+        Assert.Equal("1", info.Element("Number")?.Value);
+        Assert.All(UnmodelledElements, name => Assert.NotNull(info.Element(name)));
+    }
+
+    [Fact]
+    public async Task PostWithAnUnknownFieldIsRejectedAndChangesNothing()
+    {
+        var path = WriteCbz("Batman #001.cbz");
+        var original = await File.ReadAllBytesAsync(path);
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/files/tags", new
+        {
+            files = new[] { path },
+            metadata = new { publisher = "DC Comics" },
+            fields = new[] { "publisher", "month" },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("month", await response.Content.ReadAsStringAsync());
+        Assert.Equal(original, await File.ReadAllBytesAsync(path));
     }
 
     // {path} stands for the archive's path as a JSON string. The first body is the
@@ -183,6 +234,13 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
         using var response = await client.GetAsync($"/api/files/{Encode(path)}/tags");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    }
+
+    private static System.Xml.Linq.XElement ReadComicInfo(string path)
+    {
+        using var zip = ZipFile.OpenRead(path);
+        using var stream = zip.GetEntry("ComicInfo.xml")!.Open();
+        return System.Xml.Linq.XElement.Load(stream);
     }
 
     private string WriteCbz(string fileName)

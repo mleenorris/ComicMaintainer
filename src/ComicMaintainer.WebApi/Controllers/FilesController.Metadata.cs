@@ -165,12 +165,12 @@ public partial class FilesController
                 return BadRequest("Metadata patch is required");
 
             var patch = body.Metadata;
-            var lockFields = DetermineEditedFields(patch);
+            var lockFields = ComicMetadataFields.Supplied(patch);
             if (body.LockFields is not null)
             {
                 foreach (var field in body.LockFields)
                 {
-                    lockFields |= ParseMetadataField(field);
+                    lockFields |= ComicMetadataFields.Parse(field);
                 }
             }
 
@@ -198,38 +198,6 @@ public partial class FilesController
         }
     }
 
-    private static ComicMetadataFieldFlags DetermineEditedFields(ComicMetadata metadata)
-    {
-        var flags = ComicMetadataFieldFlags.None;
-        if (metadata.Series is not null) flags |= ComicMetadataFieldFlags.Series;
-        if (metadata.Title is not null) flags |= ComicMetadataFieldFlags.Title;
-        if (metadata.Issue is not null) flags |= ComicMetadataFieldFlags.Issue;
-        if (metadata.Volume is not null) flags |= ComicMetadataFieldFlags.Volume;
-        if (metadata.Publisher is not null) flags |= ComicMetadataFieldFlags.Publisher;
-        if (metadata.Year.HasValue) flags |= ComicMetadataFieldFlags.Year;
-        if (metadata.Summary is not null) flags |= ComicMetadataFieldFlags.Summary;
-        if (metadata.Authors.Count > 0) flags |= ComicMetadataFieldFlags.Authors;
-        if (metadata.Tags.Count > 0) flags |= ComicMetadataFieldFlags.Tags;
-        return flags;
-    }
-
-    private static ComicMetadataFieldFlags ParseMetadataField(string? field)
-    {
-        if (string.IsNullOrWhiteSpace(field)) return ComicMetadataFieldFlags.None;
-        return field.Trim().ToLowerInvariant() switch
-        {
-            "series" => ComicMetadataFieldFlags.Series,
-            "title" => ComicMetadataFieldFlags.Title,
-            "issue" or "number" => ComicMetadataFieldFlags.Issue,
-            "volume" => ComicMetadataFieldFlags.Volume,
-            "publisher" => ComicMetadataFieldFlags.Publisher,
-            "year" => ComicMetadataFieldFlags.Year,
-            "summary" or "description" => ComicMetadataFieldFlags.Summary,
-            "authors" or "writer" or "writers" => ComicMetadataFieldFlags.Authors,
-            "tags" => ComicMetadataFieldFlags.Tags,
-            _ => ComicMetadataFieldFlags.None
-        };
-    }
 
     [HttpGet("~/api/files/{encodedFilePath}/tags")]
     public async Task<ActionResult<ComicMetadata>> GetFileTags(string encodedFilePath)

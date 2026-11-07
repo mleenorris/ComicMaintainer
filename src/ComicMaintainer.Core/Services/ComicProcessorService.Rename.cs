@@ -73,7 +73,7 @@ public partial class ComicProcessorService
                 // token, recover that chapter number into the metadata so the
                 // rename preserves it not only in the filename but also in
                 // ComicInfo.xml.
-                await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
+                filePath = await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
 
                 // Resolve the normalized series name before generating the new
                 // filename so a standalone rename produces the exact same target

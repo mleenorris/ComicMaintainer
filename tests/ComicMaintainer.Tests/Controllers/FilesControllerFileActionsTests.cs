@@ -245,13 +245,25 @@ public sealed class FilesControllerFileActionsTests
     private static IEnumerable<string> Failed(object? value) =>
         Assert.IsAssignableFrom<IEnumerable<string>>(Prop(value, "failed"));
 
+    /// <summary>Makes ApplyMetadataEditAsync succeed or fail for <paramref name="path"/> (any path when null).</summary>
+    private void SetupEdit(string? path, ComicMetadata? metadata, bool succeeds)
+    {
+        _processor.Setup(p => p.ApplyMetadataEditAsync(
+                It.Is<string>(file => path == null || file == path),
+                It.Is<ComicMetadata>(m => metadata == null || m == metadata),
+                It.IsAny<ComicMetadataFieldFlags>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string file, ComicMetadata _, ComicMetadataFieldFlags _, CancellationToken _) =>
+                new MetadataWriteResult(succeeds ? MetadataWriteOutcome.Written : MetadataWriteOutcome.Failed, file));
+    }
+
     [Fact]
     public async Task UpdateTags_SkipsBlankEntriesAndUpdatesTheRest()
     {
         var first = InRoot("Saga 001.cbz");
         var second = InRoot("Saga 002.cbz");
         var metadata = new ComicMetadata { Series = "Saga" };
-        _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), metadata, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        SetupEdit(null, metadata, succeeds: true);
         var request = new FilesController.UpdateTagsRequest
         {
             Files = new List<string> { first, "", " ", "\t", null!, second },
@@ -261,8 +273,59 @@ public sealed class FilesControllerFileActionsTests
         var result = await _controller.UpdateTags(request);
 
         Assert.IsType<OkResult>(result);
-        _processor.Verify(p => p.UpdateMetadataAsync(first, metadata, It.IsAny<CancellationToken>()), Times.Once);
-        _processor.Verify(p => p.UpdateMetadataAsync(second, metadata, It.IsAny<CancellationToken>()), Times.Once);
+        // Without a field list only the fields that carry a value are applied.
+        _processor.Verify(p => p.ApplyMetadataEditAsync(first, metadata, ComicMetadataFieldFlags.Series, It.IsAny<CancellationToken>()), Times.Once);
+        _processor.Verify(p => p.ApplyMetadataEditAsync(second, metadata, ComicMetadataFieldFlags.Series, It.IsAny<CancellationToken>()), Times.Once);
+        _processor.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateTags_WithAFieldList_AppliesExactlyThoseFields()
+    {
+        var file = InRoot("Saga 001.cbz");
+        var metadata = new ComicMetadata { Series = "Saga" };
+        SetupEdit(file, metadata, succeeds: true);
+
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { file },
+            Metadata = metadata,
+            Fields = new List<string> { "publisher", "Writer" }
+        });
+
+        Assert.IsType<OkResult>(result);
+        _processor.Verify(p => p.ApplyMetadataEditAsync(
+            file, metadata, ComicMetadataFieldFlags.Publisher | ComicMetadataFieldFlags.Authors, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("month")]
+    [InlineData("")]
+    public async Task UpdateTags_UnknownField_IsRejectedAndUpdatesNothing(string field)
+    {
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { InRoot("Saga 001.cbz") },
+            Metadata = new ComicMetadata { Series = "Saga" },
+            Fields = new List<string> { "series", field }
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal($"Unknown metadata field: {field}", Prop(badRequest.Value, "error"));
+        _processor.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateTags_NothingToApply_IsRejectedAndUpdatesNothing()
+    {
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { InRoot("Saga 001.cbz") },
+            Metadata = new ComicMetadata()
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("No metadata fields specified", Prop(badRequest.Value, "error"));
         _processor.VerifyNoOtherCalls();
     }
 
@@ -285,8 +348,7 @@ public sealed class FilesControllerFileActionsTests
     {
         var missing = InRoot("Missing 001.cbz");
         var notAnArchive = InRoot("Notes.txt");
-        _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+        SetupEdit(null, null, succeeds: false);
 
         var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
         {
@@ -305,8 +367,8 @@ public sealed class FilesControllerFileActionsTests
         var missing = InRoot("Missing 001.cbz");
         var updated = InRoot("Saga 002.cbz");
         var metadata = new ComicMetadata { Series = "Saga" };
-        _processor.Setup(p => p.UpdateMetadataAsync(missing, metadata, It.IsAny<CancellationToken>())).ReturnsAsync(false);
-        _processor.Setup(p => p.UpdateMetadataAsync(updated, metadata, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        SetupEdit(missing, metadata, succeeds: false);
+        SetupEdit(updated, metadata, succeeds: true);
 
         var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
         {
@@ -317,7 +379,7 @@ public sealed class FilesControllerFileActionsTests
         var multiStatus = Assert.IsType<ObjectResult>(result);
         Assert.Equal(207, multiStatus.StatusCode);
         Assert.Equal(new[] { missing }, Failed(multiStatus.Value));
-        _processor.Verify(p => p.UpdateMetadataAsync(updated, metadata, It.IsAny<CancellationToken>()), Times.Once);
+        _processor.Verify(p => p.ApplyMetadataEditAsync(updated, metadata, It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -339,12 +401,14 @@ public sealed class FilesControllerFileActionsTests
     [Fact]
     public async Task UpdateTags_ProcessorThrows_Returns500()
     {
-        _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+        _processor.Setup(p => p.ApplyMetadataEditAsync(
+                It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("read-only"));
 
         var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
         {
-            Files = new List<string> { InRoot("Saga 001.cbz") }
+            Files = new List<string> { InRoot("Saga 001.cbz") },
+            Metadata = new ComicMetadata { Series = "Saga" }
         });
 
         AssertStatus(result, 500, "Error updating tags");

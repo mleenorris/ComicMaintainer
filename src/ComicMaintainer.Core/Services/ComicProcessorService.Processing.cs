@@ -89,7 +89,7 @@ public partial class ComicProcessorService
             _logger.LogDebug("ProcessFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             
             // Extract metadata from the archive
-            var metadata = await GetMetadataAtResolvedPath(resolvedPath, filePath);
+            var metadata = await GetMetadataAtResolvedPath(resolvedPath, filePath, cancellationToken);
             
             if (metadata != null)
             {
@@ -133,13 +133,20 @@ public partial class ComicProcessorService
                     var beforeMetadata = metadata.Clone();
                     var normalizedMetadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
 
-                    normalizeSuccess = await UpdateMetadataCoreAsync(resolvedPath, normalizedMetadata, cancellationToken);
+                    // Only the fields normalize owns are written; a CBR/RAR may come back as a new CBZ.
+                    var normalizeWrite = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken);
+                    normalizeSuccess = normalizeWrite.Succeeded;
+                    var beforeFilename = Path.GetFileName(filePath);
+                    if (!FollowMovedFile(normalizeWrite.FilePath, ref filePath, ref resolvedPath))
+                    {
+                        normalizeSuccess = false;
+                    }
+
                     await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
                     if (normalizeSuccess)
                     {
-                        var filename = Path.GetFileName(filePath);
-                        await LogHistoryWithChangesAsync(filePath, "Normalize", true, null,
-                            filename, filename, beforeMetadata, normalizedMetadata, cancellationToken);
+                        await LogHistoryWithChangesAsync(filePath, "Normalize", true, DescribeUnwrittenOutcome(normalizeWrite),
+                            beforeFilename, Path.GetFileName(filePath), beforeMetadata, normalizedMetadata, cancellationToken);
 
                         // Use the normalized metadata for the rename phase so the new filename
                         // reflects the resolved series name and any populated issue/title.
@@ -177,7 +184,8 @@ public partial class ComicProcessorService
                 // generating the new filename. This guarantees that when rename
                 // preserves the chapter number in the filename, it also preserves
                 // it in the file's metadata.
-                await EnsureChapterMetadataPreservedAsync(resolvedPath, metadata, cancellationToken);
+                var preservedPath = await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
+                FollowMovedFile(preservedPath, ref filePath, ref resolvedPath);
 
                 _logger.LogDebug("ProcessFileAsync: Attempting to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var newResolvedPath = GenerateFileName(metadata, resolvedPath);

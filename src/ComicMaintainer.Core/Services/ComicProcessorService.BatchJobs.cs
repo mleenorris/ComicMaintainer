@@ -64,11 +64,24 @@ public partial class ComicProcessorService
 
     public Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(metadata);
+        return UpdateMetadataAsync(filePaths, metadata, ComicMetadataFields.Supplied(metadata), cancellationToken);
+    }
+
+    public Task<Guid> UpdateMetadataAsync(
+        IEnumerable<string> filePaths,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        // Every file gets the same partial edit; fields outside the mask keep each file's own value.
         return QueueBatchJobAsync(
             filePaths,
             "UpdateMetadataAsync",
             "updating metadata for",
-            (file, token) => UpdateMetadataCoreAsync(file, metadata, token),
+            async (file, token) => (await UpdateMetadataCoreAsync(file, metadata, fields, token, userEdit: true)).Succeeded,
             "Update metadata failed",
             cancellationToken);
     }

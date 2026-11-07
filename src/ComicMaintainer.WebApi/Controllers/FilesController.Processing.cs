@@ -82,12 +82,28 @@ public partial class FilesController
                 }
             }
 
+            var metadata = request.Metadata ?? new ComicMetadata();
+            ComicMetadataFieldFlags fields;
+            if (request.Fields is null)
+            {
+                fields = ComicMetadataFields.Supplied(metadata);
+            }
+            else if (!ComicMetadataFields.TryParse(request.Fields, out fields, out var unknownField))
+            {
+                return BadRequest(new { error = $"Unknown metadata field: {unknownField}" });
+            }
+
+            var files = request.Files.Where(file => !string.IsNullOrWhiteSpace(file)).ToList();
+            if (files.Count > 0 && fields == ComicMetadataFieldFlags.None)
+                return BadRequest(new { error = "No metadata fields specified" });
+
             var attempted = 0;
             var failed = new List<string>();
-            foreach (var file in request.Files.Where(file => !string.IsNullOrWhiteSpace(file)))
+            foreach (var file in files)
             {
                 attempted++;
-                if (!await _processor.UpdateMetadataAsync(file, request.Metadata))
+                var result = await _processor.ApplyMetadataEditAsync(file, metadata, fields);
+                if (!result.Succeeded)
                     failed.Add(file);
             }
 
@@ -208,6 +224,13 @@ public partial class FilesController
     {
         public List<string> Files { get; set; } = new();
         public ComicMetadata Metadata { get; set; } = new();
+
+        /// <summary>
+        /// The fields to apply; a listed field without a value in <see cref="Metadata"/> is
+        /// removed and unlisted fields are kept. When omitted, every field that carries a value is
+        /// applied and nothing is removed.
+        /// </summary>
+        public List<string>? Fields { get; set; }
     }
 
     public class ProcessedStatusRequest

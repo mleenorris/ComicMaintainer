@@ -1251,8 +1251,8 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange - ComicInfo.xml has no <Number> element, but the filename
         // contains a chapter number. After normalization the issue number
-        // should be populated from the filename and the title should become
-        // "Chapter <n>" instead of "Chapter Unknown".
+        // should be populated from the filename, and the file's real chapter
+        // title is kept rather than replaced with "Chapter <n>".
         var seriesFolder = Path.Join(_testDirectory, "Spider-Man");
         Directory.CreateDirectory(seriesFolder);
 
@@ -1297,7 +1297,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.NotNull(updatedMetadata);
         Assert.Equal("Spider-Man", updatedMetadata.Series);
         Assert.Equal("7", updatedMetadata.Issue);
-        Assert.Equal("Chapter 7", updatedMetadata.Title);
+        Assert.Equal("Some Old Title", updatedMetadata.Title);
     }
 
     [Fact]

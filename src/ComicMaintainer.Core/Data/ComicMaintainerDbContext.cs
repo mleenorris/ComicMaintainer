@@ -868,6 +868,15 @@ public class ErrorReportEntity
     /// forever; changing any part of the configuration clears the block.
     /// </summary>
     public string? PermanentFailureSignature { get; set; }
+
+    /// <summary>
+    /// When an attempt to file the issue started whose outcome is unknown: the
+    /// request timed out or failed after it may have reached GitHub, so the
+    /// issue may exist without its number being recorded. Before filing again
+    /// the repository is searched for an issue carrying this fingerprint that
+    /// was created since then. Null once the outcome is known.
+    /// </summary>
+    public DateTime? IssueCreationAttemptedAt { get; set; }
 }
 
 /// <summary>

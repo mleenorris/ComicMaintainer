@@ -273,6 +273,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<DateTime?>("IssueCreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("IssueCreationAttemptedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LastError")
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");

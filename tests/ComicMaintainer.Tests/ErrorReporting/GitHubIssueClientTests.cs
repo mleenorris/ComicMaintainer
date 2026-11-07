@@ -443,6 +443,212 @@ public sealed class GitHubIssueClientTests
         Assert.Single(handler.Requests);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.RequestTimeout)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.GatewayTimeout)]
+    public async Task ServerErrors_MayHaveCreatedTheIssue(HttpStatusCode status)
+    {
+        var (client, _, _) = CreateClient(_ => Json(status, "{}"));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.True(ex.MayHaveSucceeded);
+        Assert.Null(ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task Timeouts_MayHaveCreatedTheIssue()
+    {
+        var (client, _, _) = CreateClient(_ => throw new TaskCanceledException("timed out"));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.True(ex.MayHaveSucceeded);
+    }
+
+    [Theory]
+    [InlineData(HttpRequestError.ConnectionError, false)]
+    [InlineData(HttpRequestError.NameResolutionError, false)]
+    [InlineData(HttpRequestError.SecureConnectionError, false)]
+    [InlineData(HttpRequestError.ResponseEnded, true)]
+    [InlineData(HttpRequestError.Unknown, true)]
+    public async Task NetworkFailures_MayHaveCreatedTheIssueOnlyOnceTheRequestWasSent(HttpRequestError error, bool mayHaveSucceeded)
+    {
+        var (client, _, _) = CreateClient(_ => throw new HttpRequestException(error, "network failure"));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.Equal(mayHaveSucceeded, ex.MayHaveSucceeded);
+    }
+
+    [Theory]
+    [InlineData("""{ "html_url": "https://github.com/acme/comics/issues/9" }""")]
+    [InlineData("not json")]
+    public async Task ASuccessWhoseNumberCannotBeRead_HasCreatedTheIssue(string responseBody)
+    {
+        var (client, _, _) = CreateClient(_ => Json(HttpStatusCode.Created, responseBody));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.True(ex.MayHaveSucceeded);
+    }
+
+    [Fact]
+    public async Task RetryAfterInSeconds_IsCarriedOnTheFailure()
+    {
+        var (client, _, _) = CreateClient(_ =>
+        {
+            var response = Json(HttpStatusCode.Forbidden, """{ "message": "You have exceeded a secondary rate limit" }""");
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(120));
+            return response;
+        });
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.Equal(TimeSpan.FromSeconds(120), ex.RetryAfter);
+        Assert.False(ex.MayHaveSucceeded);
+    }
+
+    [Fact]
+    public async Task RetryAfterAsADate_IsMeasuredFromNow()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(new DateTimeOffset(2026, 5, 4, 8, 0, 0, TimeSpan.Zero));
+        var (client, _, _) = CreateClient(
+            (_, _) =>
+            {
+                var response = Json(HttpStatusCode.TooManyRequests, "{}");
+                response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(
+                    new DateTimeOffset(2026, 5, 4, 8, 3, 0, TimeSpan.Zero));
+                return response;
+            },
+            time);
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.Equal(TimeSpan.FromMinutes(3), ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task AnExhaustedQuota_WaitsUntilTheRateLimitResets()
+    {
+        var now = new DateTimeOffset(2026, 5, 4, 8, 0, 0, TimeSpan.Zero);
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(now);
+        var (client, _, _) = CreateClient(
+            (_, _) =>
+            {
+                var response = Json(HttpStatusCode.Forbidden, """{ "message": "API rate limit exceeded" }""");
+                response.Headers.TryAddWithoutValidation("x-ratelimit-remaining", "0");
+                response.Headers.TryAddWithoutValidation(
+                    "x-ratelimit-reset",
+                    now.AddMinutes(17).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+                return response;
+            },
+            time);
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.Equal(TimeSpan.FromMinutes(17), ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task ARateLimitWithoutAWaitTime_WaitsAMinute()
+    {
+        var (client, _, _) = CreateClient(_ => Json(HttpStatusCode.TooManyRequests, "{}"));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.Equal(TimeSpan.FromMinutes(1), ex.RetryAfter);
+        Assert.False(ex.MayHaveSucceeded);
+    }
+
+    [Fact]
+    public async Task FindIssueByFingerprintAsync_ReadsTheNewestIssuesAndMatchesTheFingerprintBlock()
+    {
+        var since = new DateTimeOffset(2026, 5, 4, 8, 25, 0, TimeSpan.Zero);
+        var body = "Report text\n\n" + ErrorReportIssueFormatter.BuildFingerprintBlock("abc123");
+        var (client, handler, _) = CreateClient(_ => Json(HttpStatusCode.OK, JsonSerializer.Serialize(new object[]
+        {
+            new { number = 12, html_url = "https://github.com/acme/comics/pull/12", body, created_at = "2026-05-04T08:31:00Z", pull_request = new { url = "x" } },
+            new { number = 11, html_url = "https://github.com/acme/comics/issues/11", body = "fingerprint: abc1234", created_at = "2026-05-04T08:30:30Z" },
+            new { number = 10, html_url = "https://github.com/acme/comics/issues/10", body = body.Replace("\n", "\r\n"), created_at = "2026-05-04T08:30:00Z" },
+        })));
+
+        var issue = await client.FindIssueByFingerprintAsync(Target, "abc123", since, CancellationToken.None);
+
+        Assert.Equal(new GitHubIssueReference(10, "https://github.com/acme/comics/issues/10"), issue);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Null(request.Body);
+        Assert.Equal("/repos/acme/comics/issues", request.Uri.AbsolutePath);
+        var query = System.Web.HttpUtility.ParseQueryString(request.Uri.Query);
+        Assert.Equal("all", query["state"]);
+        Assert.Equal("created", query["sort"]);
+        Assert.Equal("desc", query["direction"]);
+        Assert.Equal("2026-05-04T08:25:00Z", query["since"]);
+        Assert.Equal("100", query["per_page"]);
+        Assert.Equal("1", query["page"]);
+    }
+
+    [Fact]
+    public async Task FindIssueByFingerprintAsync_StopsAtTheFirstIssueCreatedBeforeTheWindow()
+    {
+        var since = new DateTimeOffset(2026, 5, 4, 8, 0, 0, TimeSpan.Zero);
+        var (client, handler, _) = CreateClient(request =>
+        {
+            var page = int.Parse(System.Web.HttpUtility.ParseQueryString(request.Uri!.Query)["page"]!, System.Globalization.CultureInfo.InvariantCulture);
+            var issues = Enumerable.Range(0, GitHubIssueClient.LookupPageSize).Select(i => new
+            {
+                number = 1000 - (page * 100) - i,
+                body = "unrelated",
+                // The second page reaches issues older than the window.
+                created_at = (page == 1 ? since.AddMinutes(30) : since.AddMinutes(-30)).ToString("O"),
+            });
+            return Json(HttpStatusCode.OK, JsonSerializer.Serialize(issues));
+        });
+
+        var issue = await client.FindIssueByFingerprintAsync(Target, "abc123", since, CancellationToken.None);
+
+        Assert.Null(issue);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task FindIssueByFingerprintAsync_ReadsABoundedNumberOfPages()
+    {
+        var since = new DateTimeOffset(2026, 5, 4, 8, 0, 0, TimeSpan.Zero);
+        var (client, handler, _) = CreateClient(_ => Json(HttpStatusCode.OK, JsonSerializer.Serialize(
+            Enumerable.Range(0, GitHubIssueClient.LookupPageSize).Select(i => new
+            {
+                number = i + 1,
+                body = "unrelated",
+                created_at = since.AddHours(1).ToString("O"),
+            }))));
+
+        Assert.Null(await client.FindIssueByFingerprintAsync(Target, "abc123", since, CancellationToken.None));
+        Assert.Equal(GitHubIssueClient.MaxLookupPages, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task FindIssueByFingerprintAsync_ReturnsNullForAnEmptyListing()
+    {
+        var (client, handler, _) = CreateClient(_ => Json(HttpStatusCode.OK, "[]"));
+
+        Assert.Null(await client.FindIssueByFingerprintAsync(Target, "abc123", DateTimeOffset.UnixEpoch, CancellationToken.None));
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task FindIssueByFingerprintAsync_ClassifiesFailuresLikeEveryOtherRequest()
+    {
+        var (client, _, _) = CreateClient(_ => Json(HttpStatusCode.BadGateway, "{}"));
+
+        await Assert.ThrowsAsync<GitHubIssueTransientException>(
+            () => client.FindIssueByFingerprintAsync(Target, "abc123", DateTimeOffset.UnixEpoch, CancellationToken.None));
+    }
+
     private static Task<GitHubIssueReference> CreateIssue(GitHubIssueClient client, string? assignee = null)
         => client.CreateIssueAsync(Target, "Title", "Body", new[] { "bug" }, assignee, CancellationToken.None);
 
@@ -464,11 +670,12 @@ public sealed class GitHubIssueClientTests
         => CreateClient((request, _) => respond(request));
 
     private static (GitHubIssueClient Client, StubHandler Handler, StubHttpClientFactory Factory) CreateClient(
-        Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> respond)
+        Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> respond,
+        TimeProvider? timeProvider = null)
     {
         var handler = new StubHandler(respond);
         var factory = new StubHttpClientFactory(handler);
-        return (new GitHubIssueClient(factory), handler, factory);
+        return (new GitHubIssueClient(factory, timeProvider), handler, factory);
     }
 
     private sealed record CapturedRequest(

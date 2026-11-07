@@ -276,6 +276,13 @@ public class ErrorReportingServiceCoverageTests
 
             return Task.CompletedTask;
         }
+
+        public Task<GitHubIssueReference?> FindIssueByFingerprintAsync(
+            GitHubIssueTarget target,
+            string fingerprint,
+            DateTimeOffset createdSince,
+            CancellationToken cancellationToken)
+            => Task.FromResult<GitHubIssueReference?>(null);
     }
 
     /// <summary>Signals when the service starts a delay, so a test can advance the clock past it.</summary>

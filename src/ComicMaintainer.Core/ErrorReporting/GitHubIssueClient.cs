@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -45,6 +46,32 @@ public sealed class GitHubIssueTransientException : Exception
     public GitHubIssueTransientException(string message, Exception inner) : base(message, inner)
     {
     }
+
+    public GitHubIssueTransientException(
+        string message,
+        Exception? inner,
+        bool mayHaveSucceeded,
+        TimeSpan? retryAfter)
+        : base(message, inner)
+    {
+        MayHaveSucceeded = mayHaveSucceeded;
+        RetryAfter = retryAfter;
+    }
+
+    /// <summary>
+    /// True when GitHub may have carried out the request even though no usable
+    /// answer came back: the request timed out, the connection broke after it
+    /// was sent, or GitHub answered with a server error. Repeating a request
+    /// that creates something can then create it twice.
+    /// </summary>
+    public bool MayHaveSucceeded { get; }
+
+    /// <summary>
+    /// How long GitHub asked the caller to wait (Retry-After, or until the
+    /// rate limit resets) before sending another request; null when it did
+    /// not say.
+    /// </summary>
+    public TimeSpan? RetryAfter { get; }
 }
 
 /// <summary>Minimal GitHub issues API surface needed to report field errors.</summary>
@@ -56,6 +83,18 @@ public interface IGitHubIssueClient
         string body,
         IReadOnlyCollection<string> labels,
         string? assignee,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finds an issue (open or closed) created since <paramref name="createdSince"/>
+    /// whose body carries the fingerprint block for <paramref name="fingerprint"/>
+    /// (<see cref="ErrorReportIssueFormatter.BuildFingerprintBlock"/>), so a
+    /// creation whose outcome is unknown is not repeated. Null when there is none.
+    /// </summary>
+    Task<GitHubIssueReference?> FindIssueByFingerprintAsync(
+        GitHubIssueTarget target,
+        string fingerprint,
+        DateTimeOffset createdSince,
         CancellationToken cancellationToken);
 
     Task AddCommentAsync(
@@ -84,11 +123,29 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly IHttpClientFactory _httpClientFactory;
+    /// <summary>Issues requested per page when looking an issue up by fingerprint.</summary>
+    internal const int LookupPageSize = 100;
 
-    public GitHubIssueClient(IHttpClientFactory httpClientFactory)
+    /// <summary>
+    /// Most pages read when looking an issue up by fingerprint. Pages are
+    /// newest first and the lookup stops at the first issue created before the
+    /// window, so this only matters in a very busy repository.
+    /// </summary>
+    internal const int MaxLookupPages = 10;
+
+    /// <summary>
+    /// How long to stay away after a rate-limit response that gives no time:
+    /// GitHub asks for at least a minute before retrying.
+    /// </summary>
+    internal static readonly TimeSpan DefaultRateLimitWait = TimeSpan.FromMinutes(1);
+
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly TimeProvider _timeProvider;
+
+    public GitHubIssueClient(IHttpClientFactory httpClientFactory, TimeProvider? timeProvider = null)
     {
         _httpClientFactory = httpClientFactory;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<GitHubIssueReference> CreateIssueAsync(
@@ -122,20 +179,88 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
             payload,
             cancellationToken);
 
+        // From here on GitHub has created the issue; only its number is
+        // missing, so posting it again would file a duplicate.
         try
         {
             var created = await ReadJsonAsync<IssueResponse>(response.Content, cancellationToken);
             if (created is null || created.Number <= 0)
             {
-                throw new GitHubIssueTransientException("GitHub accepted the issue but returned no issue number");
+                throw new GitHubIssueTransientException(
+                    "GitHub accepted the issue but returned no issue number",
+                    null,
+                    mayHaveSucceeded: true,
+                    retryAfter: null);
             }
 
             return new GitHubIssueReference(created.Number, created.HtmlUrl);
         }
         catch (JsonException ex)
         {
-            throw new GitHubIssueTransientException("GitHub returned a response that could not be parsed", ex);
+            throw new GitHubIssueTransientException(
+                "GitHub returned a response that could not be parsed",
+                ex,
+                mayHaveSucceeded: true,
+                retryAfter: null);
         }
+    }
+
+    public async Task<GitHubIssueReference?> FindIssueByFingerprintAsync(
+        GitHubIssueTarget target,
+        string fingerprint,
+        DateTimeOffset createdSince,
+        CancellationToken cancellationToken)
+    {
+        // The issues listing is read rather than the search API: search is
+        // eventually consistent, so an issue created moments ago by a request
+        // that timed out may not be found yet.
+        var marker = $"fingerprint: {fingerprint}";
+        var since = Uri.EscapeDataString(createdSince.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture));
+        var basePath = $"repos/{Uri.EscapeDataString(target.Owner)}/{Uri.EscapeDataString(target.Repo)}/issues";
+
+        for (var page = 1; page <= MaxLookupPages; page++)
+        {
+            using var response = await SendAsync(
+                target,
+                HttpMethod.Get,
+                $"{basePath}?state=all&sort=created&direction=desc&since={since}&per_page={LookupPageSize}&page={page}",
+                payload: null,
+                cancellationToken);
+
+            List<IssueListItem>? issues;
+            try
+            {
+                issues = await ReadJsonAsync<List<IssueListItem>>(response.Content, cancellationToken);
+            }
+            catch (JsonException ex)
+            {
+                throw new GitHubIssueTransientException("GitHub returned a response that could not be parsed", ex);
+            }
+
+            if (issues is null || issues.Count == 0)
+            {
+                return null;
+            }
+
+            var match = issues.FirstOrDefault(issue =>
+                issue.PullRequest is null &&
+                issue.Number > 0 &&
+                ContainsMarker(issue.Body, marker));
+            if (match is not null)
+            {
+                return new GitHubIssueReference(match.Number, match.HtmlUrl);
+            }
+
+            // Newest first: once a page reaches issues created before the
+            // window (listed because they were updated since), no later page
+            // can hold the one being looked for.
+            if (issues.Count < LookupPageSize || issues.Any(issue => issue.CreatedAt < createdSince))
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     public async Task AddCommentAsync(
@@ -158,14 +283,14 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         GitHubIssueTarget target,
         HttpMethod method,
         string path,
-        object payload,
+        object? payload,
         CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient(HttpClientName);
 
         using var request = new HttpRequestMessage(method, path)
         {
-            Content = JsonContent.Create(payload, options: JsonOptions)
+            Content = payload is null ? null : JsonContent.Create(payload, options: JsonOptions)
         };
 
         // The token is attached per-request rather than baked into the named
@@ -182,11 +307,25 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         }
         catch (HttpRequestException ex)
         {
-            throw new GitHubIssueTransientException("Could not reach GitHub", ex);
+            // Only a failure to open the connection proves the request never
+            // reached GitHub; one that broke later may have been carried out.
+            var neverSent = ex.HttpRequestError is HttpRequestError.NameResolutionError
+                or HttpRequestError.ConnectionError
+                or HttpRequestError.SecureConnectionError
+                or HttpRequestError.ProxyTunnelError;
+            throw new GitHubIssueTransientException(
+                "Could not reach GitHub",
+                ex,
+                mayHaveSucceeded: !neverSent,
+                retryAfter: null);
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new GitHubIssueTransientException("Request to GitHub timed out", ex);
+            throw new GitHubIssueTransientException(
+                "Request to GitHub timed out",
+                ex,
+                mayHaveSucceeded: true,
+                retryAfter: null);
         }
 
         if (response.IsSuccessStatusCode)
@@ -195,7 +334,8 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         }
 
         var status = response.StatusCode;
-        var isRateLimited = IsRateLimited(response);
+        var isRateLimited = IsRateLimited(response) || status == HttpStatusCode.TooManyRequests;
+        var retryAfter = GetRetryAfter(response, isRateLimited);
         var isAssigneeRejection = status == HttpStatusCode.UnprocessableEntity
             && await IsAssigneeValidationFailureAsync(response, cancellationToken);
         response.Dispose();
@@ -206,14 +346,19 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         // 403 rather than a 429, so the rate-limit headers decide rather than
         // the status code alone — a permissions 403 stays permanent.
         if (isRateLimited
-            || status is HttpStatusCode.TooManyRequests
-            or HttpStatusCode.RequestTimeout
+            || status is HttpStatusCode.RequestTimeout
             or HttpStatusCode.InternalServerError
             or HttpStatusCode.BadGateway
             or HttpStatusCode.ServiceUnavailable
             or HttpStatusCode.GatewayTimeout)
         {
-            throw new GitHubIssueTransientException($"GitHub returned {(int)status} ({status})");
+            // A rate-limited request was refused outright; a server error or
+            // timeout may have happened after the request was carried out.
+            throw new GitHubIssueTransientException(
+                $"GitHub returned {(int)status} ({status})",
+                null,
+                mayHaveSucceeded: !isRateLimited,
+                retryAfter);
         }
 
         // The response body is intentionally not included: it echoes request
@@ -247,6 +392,72 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// True when <paramref name="body"/> contains <paramref name="marker"/> as a
+    /// whole value, so one fingerprint never matches another it is a prefix of.
+    /// </summary>
+    private static bool ContainsMarker(string? body, string marker)
+    {
+        if (string.IsNullOrEmpty(body))
+        {
+            return false;
+        }
+
+        for (var index = body.IndexOf(marker, StringComparison.Ordinal);
+             index >= 0;
+             index = body.IndexOf(marker, index + 1, StringComparison.Ordinal))
+        {
+            var end = index + marker.Length;
+            if (end == body.Length || !char.IsLetterOrDigit(body[end]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// How long GitHub asked us to stay away: the <c>Retry-After</c> header,
+    /// else for an exhausted quota the time until <c>x-ratelimit-reset</c>,
+    /// else a minute for any other rate-limit response, as GitHub's guidance on
+    /// secondary rate limits asks. Null for a response that names no wait and
+    /// is not rate limited.
+    /// </summary>
+    private TimeSpan? GetRetryAfter(HttpResponseMessage response, bool isRateLimited)
+    {
+        var now = _timeProvider.GetUtcNow();
+        if (response.Headers.RetryAfter is { } retryAfter)
+        {
+            if (retryAfter.Delta is TimeSpan delta)
+            {
+                return delta < TimeSpan.Zero ? TimeSpan.Zero : delta;
+            }
+
+            if (retryAfter.Date is DateTimeOffset date)
+            {
+                return date > now ? date - now : TimeSpan.Zero;
+            }
+        }
+
+        if (!isRateLimited)
+        {
+            return null;
+        }
+
+        if (response.Headers.TryGetValues("x-ratelimit-remaining", out var remainingValues)
+            && int.TryParse(remainingValues.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var remaining)
+            && remaining <= 0
+            && response.Headers.TryGetValues("x-ratelimit-reset", out var resetValues)
+            && long.TryParse(resetValues.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var resetEpoch))
+        {
+            var reset = DateTimeOffset.FromUnixTimeSeconds(resetEpoch);
+            return reset > now ? reset - now : TimeSpan.Zero;
+        }
+
+        return DefaultRateLimitWait;
     }
 
     /// <summary>
@@ -295,6 +506,23 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
 
         [JsonPropertyName("html_url")]
         public string? HtmlUrl { get; init; }
+    }
+
+    private sealed record IssueListItem
+    {
+        public int Number { get; init; }
+
+        [JsonPropertyName("html_url")]
+        public string? HtmlUrl { get; init; }
+
+        public string? Body { get; init; }
+
+        [JsonPropertyName("created_at")]
+        public DateTimeOffset CreatedAt { get; init; }
+
+        /// <summary>Present only on pull requests, which the issues listing includes.</summary>
+        [JsonPropertyName("pull_request")]
+        public JsonElement? PullRequest { get; init; }
     }
 
     private sealed record ValidationErrorResponse

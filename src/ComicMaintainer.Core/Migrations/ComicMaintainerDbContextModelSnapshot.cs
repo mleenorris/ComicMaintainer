@@ -915,7 +915,14 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<int>("AccessFailedCount")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("ApiKey")
+                    b.Property<DateTime?>("ApiKeyCreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ApiKeyHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ApiKeyLastUsedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ConcurrencyStamp")
@@ -976,7 +983,8 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ApiKey");
+                    b.HasIndex("ApiKeyHash")
+                        .IsUnique();
 
                     b.HasIndex("NormalizedEmail")
                         .HasDatabaseName("EmailIndex");

@@ -16,9 +16,17 @@ public interface IAuthService
     Task<(bool Success, string? Error)> RegisterAsync(string username, string password, string email, string? fullName = null);
     /// <summary>Changes the password; this signs every session of the account out.</summary>
     Task<(bool Success, string? Error)> ChangePasswordAsync(string userId, string currentPassword, string newPassword);
+    /// <summary>The active account whose API key is <paramref name="apiKey"/> (see <see cref="ApiKeys"/>), or null.</summary>
     Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey);
+
+    /// <summary>Creates a new API key for the account, replacing (and so revoking) its previous one. The key is only returned here.</summary>
     Task<(bool Success, string? ApiKey, string? Error)> GenerateApiKeyAsync(string userId);
-    Task<bool> ValidateApiKeyAsync(string apiKey);
+
+    /// <summary>Revokes the account's API key. Returns false when it had none.</summary>
+    Task<bool> RevokeApiKeyAsync(string userId);
+
+    /// <summary>Whether the account has an API key, and when it was created and last used.</summary>
+    Task<ApiKeyStatus> GetApiKeyStatusAsync(string userId);
     /// <summary>Whether first-run setup may create the first administrator: no account exists and Authelia is not enabled.</summary>
     Task<bool> IsSetupRequiredAsync();
 

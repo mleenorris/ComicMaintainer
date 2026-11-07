@@ -125,6 +125,11 @@ public class AuthController : ControllerBase
         return Ok(new { message = "Password changed successfully", token = string.IsNullOrEmpty(token) ? null : token });
     }
 
+    /// <summary>
+    /// Creates an API key for the caller's account, replacing (and so revoking) its previous one. Send it in the
+    /// <c>X-API-Key</c> header; it acts as this account with its current roles. It is shown only in this response.
+    /// A request authenticated with an API key cannot create one, so a leaked key cannot replace itself.
+    /// </summary>
     [Authorize]
     [HttpPost("api-key")]
     public async Task<ActionResult> GenerateApiKey()
@@ -135,14 +140,56 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
+        if (User.FindFirst("auth_method")?.Value == ApiKeys.AuthMethod)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Sign in to create an API key; an API key cannot create one." });
+        }
+
         var (success, apiKey, error) = await _authService.GenerateApiKeyAsync(userId);
-        
+
         if (!success)
         {
             return BadRequest(new { error });
         }
 
-        return Ok(new { apiKey });
+        return Ok(new { apiKey, header = ApiKeys.HeaderName });
+    }
+
+    /// <summary>Whether the caller's account has an API key, and when it was created and last used.</summary>
+    [Authorize]
+    [HttpGet("api-key")]
+    public async Task<ActionResult> GetApiKeyStatus()
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        var status = await _authService.GetApiKeyStatusAsync(userId);
+        return Ok(new
+        {
+            hasApiKey = status.HasApiKey,
+            createdAt = status.CreatedAt,
+            lastUsedAt = status.LastUsedAt,
+            header = ApiKeys.HeaderName
+        });
+    }
+
+    /// <summary>Revokes the caller's API key: requests that send it are refused from now on.</summary>
+    [Authorize]
+    [HttpDelete("api-key")]
+    public async Task<ActionResult> RevokeApiKey()
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        return await _authService.RevokeApiKeyAsync(userId)
+            ? NoContent()
+            : NotFound(new { error = "This account has no API key." });
     }
 
     [HttpGet("setup-required")]

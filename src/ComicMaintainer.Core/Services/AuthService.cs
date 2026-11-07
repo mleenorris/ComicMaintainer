@@ -194,48 +194,41 @@ public class AuthService : IAuthService
         return (true, null);
     }
 
-    public async Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey)
+    /// <summary>
+    /// The active account whose API key is <paramref name="apiKey"/>, found by the key's hash
+    /// (<see cref="ApiKeys.Hash"/>, indexed), whatever its roles: the key acts as that account.
+    /// </summary>
+    public Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey)
     {
-        if (string.IsNullOrEmpty(apiKey))
+        if (string.IsNullOrEmpty(apiKey) || apiKey.Length > ApiKeys.MaxLength)
         {
-            return null;
+            return Task.FromResult<ApplicationUser?>(null);
         }
 
-        // Query directly on the backing IQueryable instead of pulling every user
-        // in the "User" role into memory and filtering client-side. EF Core
-        // translates this into a single indexed SELECT (IX_AspNetUsers_ApiKey).
-        // We use the synchronous LINQ overload so that the call works against
-        // both real EF Core providers and mocked IQueryable<T> instances in
-        // unit tests; for SQLite this is a fast in-process round-trip.
-        var user = _userManager.Users
-            .FirstOrDefault(u => u.ApiKey == apiKey && u.IsActive);
-
-        if (user is null)
-        {
-            return null;
-        }
-
-        // Preserve original semantics: API keys are only valid for users in the
-        // "User" role.
-        if (!await _userManager.IsInRoleAsync(user, "User"))
-        {
-            return null;
-        }
-
-        return user;
+        var hash = ApiKeys.Hash(apiKey);
+        // The synchronous LINQ overload works against both EF Core and the mocked IQueryable<T> of unit tests;
+        // for SQLite it is one indexed, in-process lookup.
+        var user = _userManager.Users.FirstOrDefault(u => u.ApiKeyHash == hash && u.IsActive);
+        return Task.FromResult(user);
     }
 
+    /// <summary>
+    /// Creates a new API key for the account: only its hash is stored, and it replaces (so revokes) the previous
+    /// key. The key is returned once, here.
+    /// </summary>
     public async Task<(bool Success, string? ApiKey, string? Error)> GenerateApiKeyAsync(string userId)
     {
         var user = await _userManager.FindByIdAsync(userId);
-        if (user == null)
+        if (user == null || !user.IsActive)
         {
             return (false, null, "User not found");
         }
 
-        // Generate a secure API key
-        var apiKey = GenerateSecureApiKey();
-        user.ApiKey = apiKey;
+        var replaced = user.ApiKeyHash is not null;
+        var apiKey = ApiKeys.Generate();
+        user.ApiKeyHash = ApiKeys.Hash(apiKey);
+        user.ApiKeyCreatedAt = DateTime.UtcNow;
+        user.ApiKeyLastUsedAt = null;
 
         var result = await _userManager.UpdateAsync(user);
         if (!result.Succeeded)
@@ -243,13 +236,41 @@ public class AuthService : IAuthService
             return (false, null, "Failed to update user");
         }
 
+        _logger.LogInformation(
+            replaced ? "{Username} created a new API key, revoking the previous one" : "{Username} created an API key",
+            LoggingHelper.SanitizeForLog(user.UserName));
         return (true, apiKey, null);
     }
 
-    public async Task<bool> ValidateApiKeyAsync(string apiKey)
+    /// <summary>Revokes the account's API key: requests sending it are refused from now on.</summary>
+    public async Task<bool> RevokeApiKeyAsync(string userId)
     {
-        var user = await GetUserByApiKeyAsync(apiKey);
-        return user != null;
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user?.ApiKeyHash is null)
+        {
+            return false;
+        }
+
+        user.ApiKeyHash = null;
+        user.ApiKeyCreatedAt = null;
+        user.ApiKeyLastUsedAt = null;
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            return false;
+        }
+
+        _logger.LogInformation("{Username} revoked their API key", LoggingHelper.SanitizeForLog(user.UserName));
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<ApiKeyStatus> GetApiKeyStatusAsync(string userId)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        return user?.ApiKeyHash is null
+            ? ApiKeyStatus.None
+            : new ApiKeyStatus(true, user.ApiKeyCreatedAt, user.ApiKeyLastUsedAt);
     }
 
     private async Task<string> GenerateJwtTokenAsync(ApplicationUser user)
@@ -419,13 +440,5 @@ public class AuthService : IAuthService
 
         var token = await GenerateJwtTokenAsync(user);
         return (true, token, null);
-    }
-
-    private static string GenerateSecureApiKey()
-    {
-        var randomBytes = new byte[32];
-        using var rng = RandomNumberGenerator.Create();
-        rng.GetBytes(randomBytes);
-        return Convert.ToBase64String(randomBytes).Replace("+", "-").Replace("/", "_").TrimEnd('=');
     }
 }

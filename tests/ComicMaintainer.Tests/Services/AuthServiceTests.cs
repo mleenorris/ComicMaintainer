@@ -209,7 +209,7 @@ public class AuthServiceTests
     public async Task GenerateApiKeyAsync_WithValidUser_ReturnsSuccess()
     {
         // Arrange
-        var user = new ApplicationUser { Id = "test-user-id" };
+        var user = new ApplicationUser { Id = "test-user-id", IsActive = true };
         _mockUserManager.Setup(x => x.FindByIdAsync("test-user-id"))
             .ReturnsAsync(user);
         _mockUserManager.Setup(x => x.UpdateAsync(user))
@@ -242,40 +242,34 @@ public class AuthServiceTests
     }
 
     [Fact]
-    public async Task ValidateApiKeyAsync_WithValidKey_ReturnsTrue()
+    public async Task GetUserByApiKeyAsync_WithTheGeneratedKey_ReturnsItsOwner()
     {
         // Arrange
-        var user = new ApplicationUser
-        {
-            Id = "test-user-id",
-            ApiKey = "valid-api-key",
-            IsActive = true
-        };
-
-        _mockUserManager.Setup(x => x.Users)
-            .Returns(new List<ApplicationUser> { user }.AsQueryable());
-        _mockUserManager.Setup(x => x.IsInRoleAsync(user, "User"))
-            .ReturnsAsync(true);
+        var user = new ApplicationUser { Id = "test-user-id", IsActive = true };
+        _mockUserManager.Setup(x => x.FindByIdAsync("test-user-id")).ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        _mockUserManager.Setup(x => x.Users).Returns(new List<ApplicationUser> { user }.AsQueryable());
+        var (_, apiKey, _) = await _authService.GenerateApiKeyAsync("test-user-id");
 
         // Act
-        var isValid = await _authService.ValidateApiKeyAsync("valid-api-key");
+        var owner = await _authService.GetUserByApiKeyAsync(apiKey!);
 
         // Assert
-        Assert.True(isValid);
+        Assert.Same(user, owner);
     }
 
     [Fact]
-    public async Task ValidateApiKeyAsync_WithInvalidKey_ReturnsFalse()
+    public async Task GetUserByApiKeyAsync_WithAnUnknownKey_ReturnsNull()
     {
         // Arrange
         _mockUserManager.Setup(x => x.Users)
             .Returns(new List<ApplicationUser>().AsQueryable());
 
         // Act
-        var isValid = await _authService.ValidateApiKeyAsync("invalid-api-key");
+        var owner = await _authService.GetUserByApiKeyAsync("invalid-api-key");
 
         // Assert
-        Assert.False(isValid);
+        Assert.Null(owner);
     }
 
     [Fact]

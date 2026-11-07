@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -14,7 +15,8 @@ using Serilog;
 namespace ComicMaintainer.WebApi.Startup;
 
 /// <summary>
-/// Registers Identity, JWT/Authelia authentication and the authorization policies.
+/// Registers Identity, the authentication schemes (Authelia, session and stream tokens, API keys) and the
+/// authorization policies.
 /// </summary>
 internal static class AuthServiceCollectionExtensions
 {
@@ -143,33 +145,24 @@ internal static class AuthServiceCollectionExtensions
             options.Events = JwtSessionEvents.StreamTokens();
         });
 
+        // API keys: long-lived credentials for scripts, in the X-API-Key header only (never a URL). A key acts as the
+        // account that owns it, with that account's current roles (see ApiKeyAuthenticationHandler).
+        authBuilder.AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName, _ => { });
+
         // Configure authorization policies to support multiple authentication schemes
         services.AddAuthorization(options =>
         {
-            // Default policy that accepts both Authelia and JWT authentication
-            // This allows SSE connections to work with JWT tokens even when Authelia is the default
-            if (autheliaSettings.Enabled)
-            {
-                options.DefaultPolicy = new AuthorizationPolicyBuilder()
-                    .AddAuthenticationSchemes("Authelia", JwtBearerDefaults.AuthenticationScheme)
-                    .RequireAuthenticatedUser()
-                    .Build();
-                
-                Log.Information("Authorization policy configured to accept both Authelia and JWT Bearer tokens");
-            }
-            else
-            {
-                options.DefaultPolicy = new AuthorizationPolicyBuilder()
-                    .AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme)
-                    .RequireAuthenticatedUser()
-                    .Build();
-            }
-
-            // Schemes accepted by every named policy, mirroring the default policy so
-            // SSE/EventSource JWT connections keep working under Authelia.
+            // Schemes accepted by the default and every named policy: Authelia (when enabled), session tokens in the
+            // Authorization header, and API keys. A request is meant to send one of them.
             var schemes = autheliaSettings.Enabled
-                ? new[] { "Authelia", JwtBearerDefaults.AuthenticationScheme }
-                : new[] { JwtBearerDefaults.AuthenticationScheme };
+                ? new[] { "Authelia", JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationHandler.SchemeName }
+                : new[] { JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationHandler.SchemeName };
+
+            options.DefaultPolicy = new AuthorizationPolicyBuilder()
+                .AddAuthenticationSchemes(schemes)
+                .RequireAuthenticatedUser()
+                .Build();
+            Log.Information("Authorization accepts {Schemes}", string.Join(", ", schemes));
 
             // Library mutations: allowed for any authenticated user except members of
             // the ReadOnly role. Denying by role (rather than requiring User/Admin)

@@ -102,18 +102,6 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
     }
 
     [Fact]
-    public void TheProgressHubIsNotSubjectToTheDefaultTimeout()
-    {
-        var hub = _factory.Services
-            .GetRequiredService<EndpointDataSource>()
-            .Endpoints
-            .FirstOrDefault(e => e.DisplayName?.Contains("/hubs/progress", StringComparison.Ordinal) == true);
-
-        Assert.NotNull(hub);
-        Assert.NotNull(hub!.Metadata.GetMetadata<DisableRequestTimeoutAttribute>());
-    }
-
-    [Fact]
     public async Task TimeoutMiddlewareHonorsRoutedEndpointMetadata()
     {
         using var factory = _factory.WithWebHostBuilder(builder =>

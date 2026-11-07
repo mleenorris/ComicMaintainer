@@ -19,9 +19,8 @@ public class EventsControllerTests
         _loggerMock = new Mock<ILogger<EventsController>>();
         
         // Create concrete EventBroadcasterService for testing
-        var hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<ComicMaintainer.WebApi.Hubs.ProgressHub>>();
         var broadcasterLoggerMock = new Mock<ILogger<EventBroadcasterService>>();
-        _eventBroadcaster = new EventBroadcasterService(broadcasterLoggerMock.Object, hubContextMock.Object);
+        _eventBroadcaster = new EventBroadcasterService(broadcasterLoggerMock.Object);
         
         _controller = new EventsController(_loggerMock.Object, _eventBroadcaster);
         

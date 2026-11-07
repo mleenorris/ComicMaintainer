@@ -1,6 +1,4 @@
-using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Services;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Moq;
 using System.IO;
@@ -10,49 +8,12 @@ namespace ComicMaintainer.Tests.Services;
 public class EventBroadcasterServiceTests
 {
     private readonly Mock<ILogger<EventBroadcasterService>> _mockLogger;
-    private readonly Mock<IHubContext<ProgressHub>> _mockHubContext;
-    private readonly Mock<IClientProxy> _mockClientProxy;
     private readonly EventBroadcasterService _service;
 
     public EventBroadcasterServiceTests()
     {
         _mockLogger = new Mock<ILogger<EventBroadcasterService>>();
-        _mockHubContext = new Mock<IHubContext<ProgressHub>>();
-        _mockClientProxy = new Mock<IClientProxy>();
-        
-        // Setup SignalR hub context mock
-        _mockHubContext
-            .Setup(h => h.Clients.Group(It.IsAny<string>()))
-            .Returns(_mockClientProxy.Object);
-        
-        _service = new EventBroadcasterService(_mockLogger.Object, _mockHubContext.Object);
-    }
-
-    [Fact]
-    public async Task BroadcastJobUpdateAsync_BroadcastsToSignalR()
-    {
-        // Arrange
-        var jobId = Guid.NewGuid();
-        var status = "running";
-        var processed = 5;
-        var total = 10;
-        var success = 4;
-        var errors = 1;
-
-        // Act
-        await _service.BroadcastJobUpdateAsync(jobId, status, processed, total, success, errors);
-
-        // Assert
-        _mockHubContext.Verify(
-            h => h.Clients.Group($"job-{jobId}"),
-            Times.Once);
-        
-        _mockClientProxy.Verify(
-            c => c.SendCoreAsync(
-                "JobUpdate",
-                It.IsAny<object[]>(),
-                default),
-            Times.Once);
+        _service = new EventBroadcasterService(_mockLogger.Object);
     }
 
     [Fact]

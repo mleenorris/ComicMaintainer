@@ -12,7 +12,7 @@ using Serilog;
 namespace ComicMaintainer.WebApi.Startup;
 
 /// <summary>
-/// Registers MVC, Swagger, compression, request timeouts, rate limiting, output caching, SignalR, health checks, problem details and CORS.
+/// Registers MVC, Swagger, compression, request timeouts, rate limiting, output caching, health checks, problem details and CORS.
 /// </summary>
 public static class WebServiceCollectionExtensions
 {
@@ -128,8 +128,6 @@ public static class WebServiceCollectionExtensions
                 .SetVaryByQuery("filePath", "page"));
         });
 
-        // Add SignalR
-        services.AddSignalR();
         services.AddMemoryCache();
 
         // Add health checks.

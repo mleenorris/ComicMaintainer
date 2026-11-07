@@ -3,7 +3,6 @@ using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.Core.Utilities;
-using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Identity;
@@ -225,13 +224,16 @@ internal static class WebApplicationExtensions
             // <style> blocks and style attributes, so script-src and style-src must
             // allow 'unsafe-inline' until those are removed as well. The
             // remaining directives still provide meaningful protection: injected
-            // markup cannot load an attacker-hosted script, exfiltrate data to a
-            // third-party origin, embed plugins, rewrite <base>, or post forms
-            // off-origin.
+            // markup cannot load an attacker-hosted script, open a fetch, XHR,
+            // EventSource or WebSocket connection to another origin (connect-src
+            // is same-origin only; the app's only stream is the same-origin SSE
+            // endpoint), embed plugins, rewrite <base>, or post forms off-origin.
             //
-            // img-src allows https: because series covers may be fetched directly from
-            // external metadata providers, and blob:/data: because covers and comic
-            // pages are rendered from object URLs.
+            // img-src allows https: because series cover candidates are previewed
+            // straight from external metadata providers, and blob:/data: because
+            // covers and comic pages are rendered from object URLs. That means an
+            // injected script could still leak data in the URL of an image request,
+            // so the CSP limits the damage of an XSS but does not prevent it.
             const string baseCspDirectives =
                 "default-src 'self'; " +
                 "script-src 'self' 'unsafe-inline'; " +
@@ -239,7 +241,7 @@ internal static class WebApplicationExtensions
                 "img-src 'self' data: blob: https:; " +
                 "font-src 'self' data:; " +
                 "media-src 'self' blob:; " +
-                "connect-src 'self' ws: wss:; " +
+                "connect-src 'self'; " +
                 "worker-src 'self'; " +
                 "manifest-src 'self'; " +
                 "object-src 'none'; " +
@@ -377,9 +379,6 @@ internal static class WebApplicationExtensions
         app.UseRateLimiter();
 
         app.MapControllers();
-        // A hub connection is open for as long as the page is, so it must never be
-        // subject to the default request timeout.
-        app.MapHub<ProgressHub>("/hubs/progress").DisableRequestTimeout();
 
         // Map health check endpoints. Both are anonymous so probes do not need credentials.
         app.MapHealthChecks("/health", new HealthCheckOptions

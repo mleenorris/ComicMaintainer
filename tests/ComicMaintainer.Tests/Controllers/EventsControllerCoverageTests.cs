@@ -1,11 +1,9 @@
 using System.Text;
 using ComicMaintainer.WebApi.Controllers;
-using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Moq;
 
@@ -20,8 +18,7 @@ public class EventsControllerCoverageTests
 {
     private readonly Mock<ILogger<EventsController>> _logger = new();
     private readonly EventBroadcasterService _broadcaster = new(
-        Mock.Of<ILogger<EventBroadcasterService>>(),
-        Mock.Of<IHubContext<ProgressHub>>());
+        Mock.Of<ILogger<EventBroadcasterService>>());
 
     [Fact]
     public async Task Stream_SendsHeartbeatsAndBroadcastsUntilTheClientDisconnects()
@@ -68,7 +65,6 @@ public class EventsControllerCoverageTests
     {
         var broadcaster = new EventBroadcasterService(
             Mock.Of<ILogger<EventBroadcasterService>>(),
-            Mock.Of<IHubContext<ProgressHub>>(),
             TimeSpan.FromMilliseconds(100));
         var body = new FlushSignallingStream();
         using var lifetime = new RecordingLifetimeFeature();

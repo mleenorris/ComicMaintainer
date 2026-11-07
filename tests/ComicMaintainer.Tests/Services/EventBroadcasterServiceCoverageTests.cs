@@ -1,8 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Services;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Moq;
 
@@ -10,14 +8,11 @@ namespace ComicMaintainer.Tests.Services;
 
 public class EventBroadcasterServiceCoverageTests
 {
-    private readonly Mock<IHubContext<ProgressHub>> _hubContext = new();
-    private readonly Mock<IClientProxy> _clientProxy = new();
     private readonly EventBroadcasterService _service;
 
     public EventBroadcasterServiceCoverageTests()
     {
-        _hubContext.Setup(h => h.Clients.Group(It.IsAny<string>())).Returns(_clientProxy.Object);
-        _service = new EventBroadcasterService(Mock.Of<ILogger<EventBroadcasterService>>(), _hubContext.Object);
+        _service = new EventBroadcasterService(Mock.Of<ILogger<EventBroadcasterService>>());
     }
 
     private static (MemoryStream Stream, StreamWriter Writer) CreateClient()
@@ -45,15 +40,13 @@ public class EventBroadcasterServiceCoverageTests
         const string expected = "data: {\"type\":\"file_list_updated\",\"data\":{}}\n\n";
         Assert.Equal(expected, ReadAll(firstStream));
         Assert.Equal(expected, ReadAll(secondStream));
-        // The file-list notification is SSE only; it is not pushed to any SignalR group.
-        _hubContext.Verify(h => h.Clients, Times.Never);
     }
 
     [Fact]
     public async Task Broadcast_StalledSseClient_IsDisconnectedAfterTheSendTimeout()
     {
         var service = new EventBroadcasterService(
-            Mock.Of<ILogger<EventBroadcasterService>>(), _hubContext.Object, TimeSpan.FromMilliseconds(100));
+            Mock.Of<ILogger<EventBroadcasterService>>(), TimeSpan.FromMilliseconds(100));
         var (healthyStream, healthyWriter) = CreateClient();
         using var stalledStream = new StalledStream();
         using var stalledWriter = new StreamWriter(stalledStream);
@@ -81,7 +74,7 @@ public class EventBroadcasterServiceCoverageTests
     public async Task Broadcast_StalledSseClient_AbortsItsConnection()
     {
         var service = new EventBroadcasterService(
-            Mock.Of<ILogger<EventBroadcasterService>>(), _hubContext.Object, TimeSpan.FromMilliseconds(100));
+            Mock.Of<ILogger<EventBroadcasterService>>(), TimeSpan.FromMilliseconds(100));
         using var stalledStream = new StalledStream();
         using var stalledWriter = new StreamWriter(stalledStream);
         var aborts = 0;
@@ -166,8 +159,6 @@ public class EventBroadcasterServiceCoverageTests
     public async Task BroadcastFileListUpdateAsync_WithoutClients_DoesNotThrow()
     {
         await _service.BroadcastFileListUpdateAsync();
-
-        _hubContext.Verify(h => h.Clients, Times.Never);
     }
 
     [Fact]
@@ -175,12 +166,6 @@ public class EventBroadcasterServiceCoverageTests
     {
         var jobId = Guid.NewGuid();
         var (stream, writer) = CreateClient();
-        object?[]? signalRArgs = null;
-        _clientProxy
-            .Setup(c => c.SendCoreAsync("JobUpdate", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()))
-            .Callback<string, object?[], CancellationToken>((_, args, _) => signalRArgs = args)
-            .Returns(Task.CompletedTask);
-
         using (writer)
         {
             _service.RegisterSseClient("client", writer);
@@ -197,10 +182,5 @@ public class EventBroadcasterServiceCoverageTests
         Assert.Equal("queued", data.GetProperty("status").GetString());
         Assert.Equal(0, data.GetProperty("progress").GetProperty("total").GetInt32());
         Assert.Equal(0, data.GetProperty("progress").GetProperty("percentage").GetInt32());
-
-        _hubContext.Verify(h => h.Clients.Group($"job-{jobId}"), Times.Once);
-        var sent = Assert.Single(Assert.IsType<object?[]>(signalRArgs));
-        using var sentJson = JsonDocument.Parse(JsonSerializer.Serialize(sent));
-        Assert.Equal(0, sentJson.RootElement.GetProperty("progress").GetProperty("percentage").GetInt32());
     }
 }

@@ -403,7 +403,7 @@ public class ComicReaderController : ControllerBase
         try
         {
             await _fileStore.MarkFileReadAsync(filePath, true, cancellationToken);
-            await RecordUserProgressAsync(filePath, resolvedPath, markComplete: true, page: null, cancellationToken);
+            await RecordCompletedAsync(filePath, resolvedPath, cancellationToken);
             _logger.LogDebug("Marked file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return Ok();
         }
@@ -415,8 +415,16 @@ public class ComicReaderController : ControllerBase
     }
 
     /// <summary>
-    /// Save reading progress for a comic file
+    /// Save reading progress for a comic file: the page the reader resumes at
+    /// and the per-user "Continue Reading" progress, in one transaction.
     /// </summary>
+    /// <remarks>
+    /// The reader posts this on every page turn. The page count comes from the
+    /// reader service's cached page list (a <c>stat</c>, not an archive listing);
+    /// when it is unknown (an unreadable or refused archive) only the resume page
+    /// is recorded. A failed write answers 500, which the reader treats as
+    /// transient: it keeps the page and replays it later.
+    /// </remarks>
     /// <param name="filePath">Path to the comic file</param>
     /// <param name="page">Current page number</param>
     [HttpPost("progress")]
@@ -438,10 +446,17 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
+        var userId = CurrentUserId;
+        if (userId is null)
+        {
+            // Progress is per user; a caller without a user id has nowhere to keep it.
+            return Ok();
+        }
+
         try
         {
-            await _fileStore.SaveReadingProgressAsync(filePath, page, cancellationToken);
-            await RecordUserProgressAsync(filePath, resolvedPath, markComplete: false, page: page, cancellationToken);
+            var totalPages = await TryGetPageCountAsync(resolvedPath);
+            await _readingProgress.RecordPageAsync(userId, filePath, page, totalPages, cancellationToken);
             _logger.LogDebug("Saved reading progress for {FilePath}: page {Page}", LoggingHelper.SanitizePathForLog(filePath), page);
             return Ok();
         }
@@ -482,18 +497,44 @@ public class ComicReaderController : ControllerBase
         }
     }
 
+    /// <summary>The caller's user id, or <c>null</c> when the principal has none.</summary>
+    private string? CurrentUserId
+    {
+        get
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return string.IsNullOrEmpty(userId) ? null : userId;
+        }
+    }
+
     /// <summary>
-    /// Records durable per-user reading progress for the authenticated user.
+    /// The archive's page count from the reader service's cached page list, or 0
+    /// when it cannot be read (the service has logged why).
+    /// </summary>
+    private async Task<int> TryGetPageCountAsync(string resolvedPath)
+    {
+        try
+        {
+            return await _readerService.GetPageCountAsync(resolvedPath);
+        }
+        catch (ArchiveLimitExceededException)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Records the authenticated user's durable progress for a file they
+    /// finished, which powers the per-user "Continue Reading" overview row.
     /// ContentId follows the reader convention of using the requested file
     /// path; the page count is read from the validated physical
-    /// <paramref name="resolvedPath"/>. This powers the per-user
-    /// "Continue Reading" overview row and is best-effort: failures here never
-    /// fail the originating request.
+    /// <paramref name="resolvedPath"/>. Best-effort: failures here never fail
+    /// the originating request.
     /// </summary>
-    private async Task RecordUserProgressAsync(string filePath, string resolvedPath, bool markComplete, int? page, CancellationToken cancellationToken)
+    private async Task RecordCompletedAsync(string filePath, string resolvedPath, CancellationToken cancellationToken)
     {
-        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(userId))
+        var userId = CurrentUserId;
+        if (userId is null)
         {
             return;
         }
@@ -515,11 +556,7 @@ public class ComicReaderController : ControllerBase
                 };
 
             existing.TotalPages = totalPages;
-            var targetPage = markComplete
-                ? totalPages
-                : Math.Clamp(page ?? existing.CurrentPage, 1, totalPages);
-
-            ReadingProgressCalculator.ApplyProgress(existing, targetPage, DateTime.UtcNow);
+            ReadingProgressCalculator.ApplyProgress(existing, totalPages, DateTime.UtcNow);
             await _readingProgress.SaveProgressAsync(existing, cancellationToken);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

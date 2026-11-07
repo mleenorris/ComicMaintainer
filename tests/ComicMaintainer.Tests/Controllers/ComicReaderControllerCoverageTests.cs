@@ -270,10 +270,9 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         _reader.Verify(r => r.GetPageNamesAsync(physical), Times.Once);
         _reader.Verify(r => r.GetPageCountAsync(physical), Times.Exactly(3));
         _fileStore.Verify(f => f.MarkFileReadAsync(alias, true, _cts.Token), Times.Once);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(alias, 3, _cts.Token), Times.Once);
-        Assert.Equal(2, saved.Count);
-        Assert.All(saved, progress => Assert.Equal(alias, progress.ContentId));
-        _progress.Verify(p => p.GetProgressAsync("user-1", alias, _cts.Token), Times.Exactly(2));
+        _progress.Verify(p => p.RecordPageAsync("user-1", alias, 3, 24, _cts.Token), Times.Once);
+        Assert.Equal(alias, Assert.Single(saved).ContentId);
+        _progress.Verify(p => p.GetProgressAsync("user-1", alias, _cts.Token), Times.Once);
     }
 
     // ---- GetComicInfo -------------------------------------------------------------------
@@ -663,72 +662,77 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     // ---- SaveProgress -------------------------------------------------------------------
 
     [Fact]
-    public async Task SaveProgress_AnonymousRequest_PersistsFileProgressOnly()
+    public async Task SaveProgress_AnonymousRequest_RecordsNothing()
     {
         var result = await CreateController().SaveProgress(_file, 4, _cts.Token);
 
         Assert.IsType<OkResult>(result);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(_file, 4, _cts.Token), Times.Once);
+        _reader.VerifyNoOtherCalls();
+        _fileStore.VerifyNoOtherCalls();
         _progress.VerifyNoOtherCalls();
     }
 
     [Theory]
-    [InlineData(7, 30, 7, false)]
-    [InlineData(30, 30, 30, true)]
-    [InlineData(50, 30, 30, true)]
-    public async Task SaveProgress_User_RecordsPageClampedToArchiveLength(int page, int totalPages, int expectedPage, bool completed)
+    [InlineData(7, 30)]
+    [InlineData(50, 30)]
+    public async Task SaveProgress_User_RecordsThePageAndTheArchiveLengthInOneWrite(int page, int totalPages)
     {
+        // The service clamps the page to the length and writes both the resume
+        // page and the durable progress in one transaction (ReadingProgressRecordPageTests).
         _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(totalPages);
-        _progress.Setup(p => p.GetProgressAsync("user-2", _file, _cts.Token)).ReturnsAsync(default(ReadingProgress?));
-        var saved = TrackSavedProgress();
 
         var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, page, _cts.Token);
 
         Assert.IsType<OkResult>(result);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(_file, page, _cts.Token), Times.Once);
-        var progress = Assert.Single(saved);
-        Assert.Equal("user-2", progress.UserId);
-        Assert.Equal(_file, progress.ContentId);
-        Assert.Equal(totalPages, progress.TotalPages);
-        Assert.Equal(expectedPage, progress.CurrentPage);
-        Assert.Equal(completed, progress.CompletedAt is not null);
+        _progress.Verify(p => p.RecordPageAsync("user-2", _file, page, totalPages, _cts.Token), Times.Once);
+        _progress.VerifyNoOtherCalls();
+        // The per-page save no longer goes through the file store's separate write.
+        _fileStore.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task SaveProgress_UserOnEmptyArchive_SkipsPerUserProgress()
+    public async Task SaveProgress_UserOnEmptyArchive_RecordsTheResumePageWithoutALength()
     {
         _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(0);
 
         var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, 1);
 
         Assert.IsType<OkResult>(result);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(_file, 1, It.IsAny<CancellationToken>()), Times.Once);
-        _progress.VerifyNoOtherCalls();
+        _progress.Verify(p => p.RecordPageAsync("user-2", _file, 1, 0, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task SaveProgress_PerUserProgressFailure_DoesNotFailRequest()
+    public async Task SaveProgress_ArchiveOverTheReadLimits_StillRecordsTheResumePage()
     {
-        _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(10);
-        _progress.Setup(p => p.GetProgressAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("progress db offline"));
+        _reader.Setup(r => r.GetPageCountAsync(_file))
+            .ThrowsAsync(new ArchiveLimitExceededException("'Saga 001.cbz' has more than 20,000 entries."));
 
         var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, 3);
 
         Assert.IsType<OkResult>(result);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(_file, 3, It.IsAny<CancellationToken>()), Times.Once);
-        _progress.Verify(p => p.SaveProgressAsync(It.IsAny<ReadingProgress>(), It.IsAny<CancellationToken>()), Times.Never);
+        _progress.Verify(p => p.RecordPageAsync("user-2", _file, 3, 0, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task SaveProgress_StoreFailure_Returns500()
+    public async Task SaveProgress_WriteFailure_Returns500SoTheReaderRetries()
     {
-        _fileStore.Setup(f => f.SaveReadingProgressAsync(_file, 2, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("disk full"));
+        // reader.js keeps a page whose save answered 5xx and replays it later; the
+        // old path logged the failure and answered 200, so the page was lost.
+        _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(10);
+        _progress.Setup(p => p.RecordPageAsync("user-2", _file, 2, 10, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
 
         var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, 2);
 
         Assert500(result, "Error saving reading progress");
+    }
+
+    [Fact]
+    public async Task SaveProgress_UserWithEmptyIdClaim_RecordsNothing()
+    {
+        var result = await CreateController(UserWithId(string.Empty)).SaveProgress(_file, 2);
+
+        Assert.IsType<OkResult>(result);
         _progress.VerifyNoOtherCalls();
     }
 

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
@@ -23,13 +22,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
     public long ChangeVersion => Interlocked.Read(ref _changeVersion);
 
     private void MarkChanged() => Interlocked.Increment(ref _changeVersion);
-
-    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
-    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
-    // distinguishable keys instead of collapsing to a bare digit when every
-    // letter gets stripped. Pure-ASCII titles still produce the same output
-    // as the previous [^a-z0-9]+ sanitizer.
-    private static readonly Regex SeriesKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
 
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IExternalSeriesMetadataService _externalMetadata;
@@ -60,16 +52,9 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         _logger = logger;
     }
 
-    public string NormalizeKey(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "unknown-series";
-        }
-
-        var normalized = SeriesKeySanitizer.Replace(value.ToLowerInvariant(), "-").Trim('-');
-        return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
-    }
+    /// <inheritdoc />
+    /// <remarks>Cache records are keyed by <see cref="SeriesKey.Normalize"/>.</remarks>
+    public string NormalizeKey(string? value) => SeriesKey.Normalize(value);
 
     public async Task<IReadOnlyList<SeriesMetadataCacheRecord>> GetAllAsync(CancellationToken cancellationToken = default)
     {

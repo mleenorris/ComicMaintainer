@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
@@ -9,13 +8,6 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class SeriesLibraryService : ISeriesLibraryService
 {
-    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
-    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
-    // distinguishable keys instead of collapsing to a bare digit when every
-    // letter gets stripped. Pure-ASCII titles still produce the same output
-    // as the previous [^a-z0-9]+ sanitizer.
-    private static readonly Regex SeriesKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
-
     // Series-level filters that operate on the grouped/series record (rather
     // than on individual files in the file store). These are applied AFTER
     // BuildGroupsAsync so the file-store call sees a no-op file filter.
@@ -65,17 +57,6 @@ public partial class SeriesLibraryService : ISeriesLibraryService
     private static string? FirstNonEmpty(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
-    private static string NormalizeKey(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "unknown-series";
-        }
-
-        var normalized = SeriesKeySanitizer.Replace(value.ToLowerInvariant(), "-").Trim('-');
-        return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
-    }
-
     /// <summary>
     /// Computes the public series id used in <c>#/series/{id}</c> deep links and
     /// id-based API lookups. When the series carries an explicit pinned
@@ -92,7 +73,7 @@ public partial class SeriesLibraryService : ISeriesLibraryService
             return representative;
         }
 
-        var slug = NormalizeKey(pinnedName);
+        var slug = SeriesKey.Normalize(pinnedName);
         return IsAmbiguousNormalizedKey(slug) ? representative : slug;
     }
 

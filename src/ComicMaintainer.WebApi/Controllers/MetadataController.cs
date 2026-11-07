@@ -837,8 +837,9 @@ public class MetadataController : ControllerBase
 
     /// <summary>
     /// Locate every file currently belonging to <paramref name="seriesTitle"/>
-    /// (matched by folder-derived series name, current ComicInfo.xml series,
-    /// or any cached alias of the new canonical title) and queue a background
+    /// (by <see cref="SeriesFileMatcher"/>: its folder-derived series name or
+    /// tracked ComicInfo.xml series matches the requested title or any title of
+    /// the matched record) and queue a background
     /// normalize job so each file's metadata is rewritten to the freshly-matched
     /// canonical title. Mirrors the automatic match flow, which only
     /// re-normalizes (never renames) the affected files. Returns null when there
@@ -855,78 +856,17 @@ public class MetadataController : ControllerBase
             return null;
         }
 
-        // Build a case-insensitive set of names that should map to this series.
-        // We include the requested title (which is typically the current folder
-        // name), the new canonical title, and every cached alias so files whose
-        // metadata still references an older name are picked up.
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void Add(string? value)
-        {
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                names.Add(value!.Trim());
-            }
-        }
-
-        Add(seriesTitle);
-        Add(record.CanonicalTitle);
-        if (record.Aliases is { Count: > 0 })
-        {
-            foreach (var alias in record.Aliases) Add(alias);
-        }
-        if (record.UserAliases is { Count: > 0 })
-        {
-            foreach (var alias in record.UserAliases) Add(alias);
-        }
-
-        if (names.Count == 0)
+        // The series is known by the requested title (typically the current
+        // folder name) and every title of the matched record, so files whose
+        // metadata or folder still references an older name are picked up.
+        var seriesKeys = SeriesFileMatcher.KeysOf(record, seriesTitle);
+        if (seriesKeys.Count == 0)
         {
             return null;
         }
 
-        // Normalize comparison keys via the cache so they line up with how the
-        // rest of the system identifies series (case- and whitespace-tolerant).
-        var keys = new HashSet<string>(
-            names.Select(n => _cache.NormalizeKey(n))
-                 .Where(k => !string.IsNullOrWhiteSpace(k))!,
-            StringComparer.OrdinalIgnoreCase);
-
         var files = await _fileStore.GetAllFilesAsync(cancellationToken);
-        var matchingPaths = new List<string>();
-        foreach (var file in files)
-        {
-            if (string.IsNullOrWhiteSpace(file.FilePath))
-            {
-                continue;
-            }
-
-            // Match on the file's current ComicInfo.xml series (if known).
-            var metadataSeries = file.Metadata?.Series;
-            if (!string.IsNullOrWhiteSpace(metadataSeries))
-            {
-                var metaKey = _cache.NormalizeKey(metadataSeries);
-                if (!string.IsNullOrWhiteSpace(metaKey) && keys.Contains(metaKey))
-                {
-                    matchingPaths.Add(file.FilePath);
-                    continue;
-                }
-            }
-
-            // Fall back to the parent-folder-derived series name so that files
-            // whose metadata has not yet been written still get updated.
-            var folderName = Path.GetFileName(Path.GetDirectoryName(file.FilePath));
-            if (string.IsNullOrWhiteSpace(folderName))
-            {
-                continue;
-            }
-            var folderSeries = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
-            var folderKey = _cache.NormalizeKey(folderSeries);
-            if (!string.IsNullOrWhiteSpace(folderKey) && keys.Contains(folderKey))
-            {
-                matchingPaths.Add(file.FilePath);
-            }
-        }
-
+        var matchingPaths = SeriesFileMatcher.SelectFilePaths(files, seriesKeys);
         if (matchingPaths.Count == 0)
         {
             return null;

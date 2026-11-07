@@ -100,11 +100,9 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         job.Status = JobStatus.Running;
         await BroadcastAsync(job);
 
-        // Track titles whose cache refresh produced a usable canonical record,
-        // along with their aliases, so we can re-tag the affected files at the
-        // end of the run. We collect into a case-insensitive set keyed by every
-        // title that should match a file's SeriesName.
-        var titlesToRetag = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Series keys of every series whose refresh produced a usable match,
+        // so the files of those series can be re-tagged at the end of the run.
+        var seriesKeysToRetag = new HashSet<string>(StringComparer.Ordinal);
 
         try
         {
@@ -133,31 +131,19 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                             // re-resolves to its user-selected match is a
                             // successful refresh outcome.
                             job.Successes++;
+                            // Retag the files of the series: those under the
+                            // requested title (typically the folder name) and
+                            // under any title of the refreshed record, so the
+                            // freshly resolved name reaches each file.
+                            seriesKeysToRetag.UnionWith(SeriesFileMatcher.KeysOf(record, title));
                             break;
                         case "not_found":
+                            // Nothing new is known, so the files keep their tags.
                             job.NotFound++;
                             break;
                         default:
                             job.Failures++;
                             break;
-                    }
-
-                    // Collect titles+aliases for the post-run file retag step.
-                    // We always include the input title so files whose
-                    // SeriesName still matches the pre-refresh value get
-                    // re-tagged with the freshly resolved canonical name.
-                    titlesToRetag.Add(title);
-                    if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
-                    {
-                        titlesToRetag.Add(record.CanonicalTitle);
-                    }
-                    if (record.Aliases is { Count: > 0 })
-                    {
-                        titlesToRetag.UnionWith(record.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
-                    }
-                    if (record.UserAliases is { Count: > 0 })
-                    {
-                        titlesToRetag.UnionWith(record.UserAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
                     }
                 }
                 catch (OperationCanceledException)
@@ -254,11 +240,11 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         // the metadata-refresh job itself as failed — file retagging is a
         // best-effort downstream step and surfaces its own progress through
         // the standard processing-job pipeline.
-        if (job.Status == JobStatus.Completed && titlesToRetag.Count > 0)
+        if (job.Status == JobStatus.Completed && seriesKeysToRetag.Count > 0)
         {
             try
             {
-                await QueueFileRetagAsync(job.JobId, titlesToRetag, cancellationToken);
+                await QueueFileRetagAsync(job.JobId, seriesKeysToRetag, cancellationToken);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -270,27 +256,22 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     }
 
     /// <summary>
-    /// Enumerate every tracked comic file whose <c>Metadata.Series</c> matches
-    /// any of the just-refreshed titles (canonical title or alias) and queue
-    /// them for normalization so their per-file ComicInfo.xml is rewritten
-    /// using the updated series metadata cache. No-op when the file store or
-    /// processor services are not wired up (e.g. lightweight unit tests).
+    /// Enumerate every tracked comic file of the just-refreshed series (by
+    /// <see cref="SeriesFileMatcher"/>: its tracked <c>&lt;Series&gt;</c> or its
+    /// folder-derived series name has one of <paramref name="seriesKeys"/>) and
+    /// queue them for normalization so their per-file ComicInfo.xml is
+    /// rewritten using the updated series metadata cache. No-op when the file
+    /// store or processor services are not wired up (e.g. lightweight unit tests).
     /// </summary>
     private async Task QueueFileRetagAsync(
         Guid sourceJobId,
-        HashSet<string> titles,
+        IReadOnlySet<string> seriesKeys,
         CancellationToken cancellationToken)
     {
         if (_fileStore is null || _processor is null) return;
 
         var files = await _fileStore.GetAllFilesAsync(cancellationToken);
-        var matchedPaths = files
-            .Where(f => !string.IsNullOrWhiteSpace(f.Metadata?.Series)
-                && titles.Contains(f.Metadata!.Series!))
-            .Select(f => f.FilePath)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var matchedPaths = SeriesFileMatcher.SelectFilePaths(files, seriesKeys);
 
         if (matchedPaths.Count == 0)
         {

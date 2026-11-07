@@ -105,11 +105,11 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
             }
 
             // Collect titles that identify files belonging to this series. We
-            // intentionally include every alias / localized title (same set
-            // used by SeriesLanguagePreferenceRetagService) so we can find
+            // intentionally include every alias / localized title (the same
+            // titles SeriesFileMatcher identifies the series by) so we can find
             // files whose <Series> has previously been written in another
             // language and now disagrees with the current preference.
-            var titles = CollectTitlesForRecord(record);
+            var titles = SeriesFileMatcher.TitlesOf(record);
             if (titles.Count == 0)
             {
                 continue;
@@ -157,36 +157,6 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
             : $"Scanned {seriesScanned} series: {seriesWithMismatch} with language mismatch ({filesWithMismatch} file(s)). Enable autoCorrect to retag.";
         _logger.LogInformation("{Summary}", summary);
         return summary;
-    }
-
-    /// <summary>
-    /// Same set used by <see cref="SeriesLanguagePreferenceRetagService"/>:
-    /// canonical title + provider/user aliases + localized titles. These are
-    /// the values the per-file <c>&lt;Series&gt;</c> tag could currently hold
-    /// for a file that belongs to <paramref name="record"/>.
-    /// </summary>
-    private static HashSet<string> CollectTitlesForRecord(SeriesMetadataCacheRecord record)
-    {
-        var titles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
-        {
-            titles.Add(record.CanonicalTitle);
-        }
-        if (record.Aliases is { Count: > 0 })
-        {
-            titles.UnionWith(record.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
-        }
-        if (record.UserAliases is { Count: > 0 })
-        {
-            titles.UnionWith(record.UserAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
-        }
-        if (record.LocalizedTitles is { Count: > 0 })
-        {
-            titles.UnionWith(record.LocalizedTitles
-                .Where(localized => !string.IsNullOrWhiteSpace(localized?.Title))
-                .Select(localized => localized!.Title));
-        }
-        return titles;
     }
 
     private static SeriesLanguageAuditOptions ParseOptions(string? optionsJson)

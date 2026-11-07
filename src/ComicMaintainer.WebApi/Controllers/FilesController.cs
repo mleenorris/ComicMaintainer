@@ -18,12 +18,6 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public partial class FilesController : ControllerBase
 {
-    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
-    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
-    // distinguishable keys instead of collapsing to a bare digit when every
-    // letter gets stripped. Pure-ASCII titles still produce the same output
-    // as the previous [^a-z0-9]+ sanitizer.
-    private static readonly Regex FolderCombineKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
     private static readonly Regex FileNameSeriesSuffixSanitizer = new(
         @"\s*(?:-|_)?\s*(?:ch|chapter|issue|#)?\s*\d+(?:\.\d+)?[a-z]?\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);

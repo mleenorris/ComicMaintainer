@@ -285,10 +285,8 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
         }
 
         // Legacy fallback used only when no ISeriesNameResolver is registered.
-        var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
-        if (string.IsNullOrWhiteSpace(folderName)) return (null, null);
-        var folderSeries = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
-        if (string.IsNullOrWhiteSpace(folderSeries)) return (null, null);
+        var folderSeries = SeriesFileMatcher.FolderSeriesOf(filePath);
+        if (folderSeries is null) return (null, null);
 
         if (_seriesCache is not null)
         {

@@ -267,7 +267,7 @@ public partial class FilesController
         if (aliasIndex is not null)
         {
             var displayTitle = EnumerateSeriesNameCandidates(file)
-                .Select(candidate => FindAliasEntry(aliasIndex, NormalizeFolderCombineKey(candidate))?.DisplayTitle)
+                .Select(candidate => FindAliasEntry(aliasIndex, SeriesKey.TryNormalize(candidate))?.DisplayTitle)
                 .FirstOrDefault(title => !string.IsNullOrWhiteSpace(title));
             if (displayTitle is not null)
             {
@@ -317,7 +317,7 @@ public partial class FilesController
             return null;
         }
 
-        var normalizedSeries = NormalizeFolderCombineKey(seriesName);
+        var normalizedSeries = SeriesKey.TryNormalize(seriesName);
         if (string.IsNullOrWhiteSpace(normalizedSeries))
         {
             return null;
@@ -331,7 +331,7 @@ public partial class FilesController
             // bare number) so we don't accidentally cross-resolve to an
             // unrelated record whose canonical key happens to share that digit.
             var aliasEntry = EnumerateSeriesNameCandidates(file)
-                .Select(NormalizeFolderCombineKey)
+                .Select(SeriesKey.TryNormalize)
                 .Where(key => key is not null && !IsAmbiguousNormalizedKey(key))
                 .Select(key => FindAliasEntry(aliasIndex, key))
                 .FirstOrDefault(entry => entry is not null);
@@ -351,17 +351,6 @@ public partial class FilesController
         IReadOnlyDictionary<string, FolderCombineAliasEntry> aliasIndex,
         string? key) =>
         key is not null && aliasIndex.TryGetValue(key, out var entry) ? entry : null;
-
-    private static string? NormalizeFolderCombineKey(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var normalized = FolderCombineKeySanitizer.Replace(value.Trim().ToLowerInvariant(), "-").Trim('-');
-        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
-    }
 
     /// <summary>
     /// Returns true if a normalized folder-combine key carries no real identifying
@@ -455,8 +444,8 @@ public partial class FilesController
                 continue;
             }
 
-            var canonicalKey = NormalizeFolderCombineKey(record.CanonicalTitle)
-                ?? NormalizeFolderCombineKey(titles[0])
+            var canonicalKey = SeriesKey.TryNormalize(record.CanonicalTitle)
+                ?? SeriesKey.TryNormalize(titles[0])
                 ?? record.NormalizedKey;
 
             var displayTitle = !string.IsNullOrWhiteSpace(record.CanonicalTitle)
@@ -464,7 +453,7 @@ public partial class FilesController
                 : titles[0];
 
             var titleKeys = titles
-                .Select(NormalizeFolderCombineKey)
+                .Select(SeriesKey.TryNormalize)
                 .Where(k => k is not null)
                 .Select(k => k!)
                 .Where(k => !IsAmbiguousNormalizedKey(k))
@@ -476,7 +465,7 @@ public partial class FilesController
             // it entirely from the cross-record bridge. Otherwise two such
             // records would share the same canonical-key string in the union-
             // find and get falsely merged. The record's files will still group
-            // together on their own via NormalizeFolderCombineKey returning
+            // together on their own via SeriesKey.TryNormalize returning
             // the same string outside the alias-index path.
             if (IsAmbiguousNormalizedKey(canonicalKey))
             {

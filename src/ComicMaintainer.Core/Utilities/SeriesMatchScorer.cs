@@ -126,9 +126,8 @@ public static class SeriesMatchScorer
 
     private static string Normalize(string value)
     {
-        // Lowercase + strip non-alphanumerics. Mirrors the normalization used
-        // by SeriesMetadataCacheService.NormalizeKey (minus the dash join),
-        // which is also what the providers' PickBestMatch routines use.
+        // Lowercase + strip non-alphanumerics: the series key of SeriesKey
+        // without the dashes, so word breaks do not count as differences.
         var chars = value.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray();
         return new string(chars);
     }

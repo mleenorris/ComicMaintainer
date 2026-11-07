@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using System.Text.RegularExpressions;
@@ -476,7 +477,7 @@ public partial class FilesController
             var baseName = stripped ?? folderName;
             hadSuffixByDirectory[directory] = stripped is not null;
 
-            var normalized = NormalizeFolderCombineKey(baseName);
+            var normalized = SeriesKey.TryNormalize(baseName);
             if (string.IsNullOrWhiteSpace(normalized) || IsAmbiguousNormalizedKey(normalized))
             {
                 continue;
@@ -561,7 +562,7 @@ public partial class FilesController
                 .First()
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) ?? string.Empty;
 
-            var groupKey = "suffix:" + (NormalizeFolderCombineKey(baseFolderName) ?? baseFolderName);
+            var groupKey = "suffix:" + (SeriesKey.TryNormalize(baseFolderName) ?? baseFolderName);
 
             groups.Add(new CombinableFolderGroup
             {

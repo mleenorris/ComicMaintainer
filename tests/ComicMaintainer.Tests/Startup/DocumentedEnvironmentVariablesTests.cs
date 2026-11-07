@@ -33,6 +33,7 @@ public sealed class DocumentedEnvironmentVariablesTests
         ["ADMIN_USERNAME"] = "src/ComicMaintainer.WebApi/Startup/WebApplicationExtensions.cs",
         ["ADMIN_EMAIL"] = "src/ComicMaintainer.WebApi/Startup/WebApplicationExtensions.cs",
         ["ADMIN_PASSWORD"] = "src/ComicMaintainer.WebApi/Startup/WebApplicationExtensions.cs",
+        ["SETUP_TOKEN"] = "src/ComicMaintainer.WebApi/Startup/AuthServiceCollectionExtensions.cs",
         ["CORS_ALLOWED_ORIGINS"] = "src/ComicMaintainer.WebApi/Startup/WebServiceCollectionExtensions.cs",
         ["TRUSTED_PROXIES"] = "src/ComicMaintainer.WebApi/Startup/WebServiceCollectionExtensions.cs",
         ["TRUSTED_PROXY_HOPS"] = "src/ComicMaintainer.WebApi/Startup/WebServiceCollectionExtensions.cs",

@@ -31,7 +31,12 @@ public class AuthServiceCoverageTests
             ExpirationMinutes = 60
         });
 
-        _authService = new AuthService(_userManager.Object, settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance);
+        _authService = new AuthService(
+            _userManager.Object,
+            settings,
+            Options.Create(new AutheliaSettings()),
+            new ComicMaintainer.Core.Services.Auth.SetupTokenProvider(null),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance);
     }
 
     [Fact]

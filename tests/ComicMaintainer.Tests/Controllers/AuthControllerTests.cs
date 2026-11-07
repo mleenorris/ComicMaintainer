@@ -1,5 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
 using ComicMaintainer.WebApi.Infrastructure;
@@ -297,76 +299,70 @@ public class AuthControllerTests
     }
 
     [Fact]
-    public async Task SetupAdmin_WhenSetupIsRequired_CreatesInitialAdmin()
+    public async Task SetupAdmin_WhenSetupIsAvailable_PassesTheSetupCodeAndCreatesTheAdmin()
     {
         SetupEmptyUserContext();
-        _mockAuthorizationService
-            .Setup(s => s.AuthorizeAsync(
-                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
-                It.IsAny<object?>(),
-                It.IsAny<string>()))
-            .ReturnsAsync(AuthorizationResult.Failed());
         _mockAuthService
             .Setup(s => s.IsSetupRequiredAsync())
             .ReturnsAsync(true);
         _mockAuthService
-            .Setup(s => s.SetupAdminAsync("admin", "Password123!", null))
-            .ReturnsAsync((true, null));
+            .Setup(s => s.SetupAdminAsync("admin", "Password123!", null, "ABCDE-FGHJK", It.IsAny<string?>()))
+            .ReturnsAsync((SetupOutcome.Created, null));
 
-        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null));
+        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null, "ABCDE-FGHJK"));
 
         Assert.IsType<OkObjectResult>(result);
-        _mockAuthService.Verify(s => s.SetupAdminAsync("admin", "Password123!", null), Times.Once);
-        _mockAuthorizationService.Verify(
-            s => s.AuthorizeAsync(
-                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
-                It.IsAny<object?>(),
-                It.IsAny<string>()),
+        _mockAuthService.Verify(s => s.SetupAdminAsync("admin", "Password123!", null, "ABCDE-FGHJK", It.IsAny<string?>()), Times.Once);
+    }
+
+    // Setup used to stay open to administrators; now it only ever creates the first account of a fresh instance.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SetupAdmin_WhenSetupIsNotAvailable_Returns403ForEveryone(bool signedInAsAdmin)
+    {
+        if (signedInAsAdmin)
+        {
+            SetupAuthenticatedUser("admin-id", roles: new[] { "Admin" });
+        }
+        else
+        {
+            SetupEmptyUserContext();
+        }
+
+        _mockAuthService
+            .Setup(s => s.IsSetupRequiredAsync())
+            .ReturnsAsync(false);
+
+        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null, "ABCDE-FGHJK"));
+
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(403, forbidden.StatusCode);
+        Assert.Equal(AuthService.SetupNotAvailableError, forbidden.Value!.GetType().GetProperty("error")!.GetValue(forbidden.Value));
+        _mockAuthService.Verify(
+            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()),
             Times.Never);
     }
 
-    [Fact]
-    public async Task SetupAdmin_WhenSetupIsCompleteAndUserIsUnauthenticated_ReturnsChallenge()
+    [Theory]
+    [InlineData(SetupOutcome.InvalidSetupToken, 403)]
+    [InlineData(SetupOutcome.NotAvailable, 403)]
+    [InlineData(SetupOutcome.Rejected, 400)]
+    public async Task SetupAdmin_ReportsAFailedSetup(SetupOutcome outcome, int expectedStatus)
     {
         SetupEmptyUserContext();
         _mockAuthService
             .Setup(s => s.IsSetupRequiredAsync())
-            .ReturnsAsync(false);
-        _mockAuthorizationService
-            .Setup(s => s.AuthorizeAsync(
-                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
-                It.IsAny<object?>(),
-                AuthorizationPolicies.CanAdminister))
-            .ReturnsAsync(AuthorizationResult.Failed());
-
-        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null));
-
-        Assert.IsType<ChallengeResult>(result);
-        _mockAuthService.Verify(
-            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public async Task SetupAdmin_WhenSetupIsCompleteAndUserIsNotAdmin_ReturnsForbid()
-    {
-        SetupAuthenticatedUser("user-id-123", roles: new[] { "User" });
+            .ReturnsAsync(true);
         _mockAuthService
-            .Setup(s => s.IsSetupRequiredAsync())
-            .ReturnsAsync(false);
-        _mockAuthorizationService
-            .Setup(s => s.AuthorizeAsync(
-                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
-                It.IsAny<object?>(),
-                AuthorizationPolicies.CanAdminister))
-            .ReturnsAsync(AuthorizationResult.Failed());
+            .Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .ReturnsAsync((outcome, "why"));
 
-        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null));
+        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null, "wrong"));
 
-        Assert.IsType<ForbidResult>(result);
-        _mockAuthService.Verify(
-            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
-            Times.Never);
+        var failure = Assert.IsAssignableFrom<ObjectResult>(result);
+        Assert.Equal(expectedStatus, failure.StatusCode);
+        Assert.Equal("why", failure.Value!.GetType().GetProperty("error")!.GetValue(failure.Value));
     }
 
     [Fact]

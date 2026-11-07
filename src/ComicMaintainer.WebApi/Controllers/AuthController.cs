@@ -1,5 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Infrastructure;
@@ -143,14 +145,19 @@ public class AuthController : ControllerBase
         return Ok(new { setupRequired });
     }
 
+    /// <summary>
+    /// First-run setup: creates the first administrator of a new instance. It is only available while no account
+    /// exists at all and Authelia is not enabled, and it requires the one-time setup code that the server writes to
+    /// its log at startup (or <c>SETUP_TOKEN</c>), so that whoever reaches a fresh, exposed instance first cannot claim
+    /// it. Answers 403 when setup is not available or the code is wrong.
+    /// </summary>
     [HttpPost("setup")]
     [EnableRateLimiting(AuthenticationRateLimit.PolicyName)]
     public async Task<ActionResult> SetupAdmin([FromBody] SetupRequest request)
     {
-        if (!await _authService.IsSetupRequiredAsync()
-            && !(await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister)).Succeeded)
+        if (!await _authService.IsSetupRequiredAsync())
         {
-            return User.Identity?.IsAuthenticated == true ? Forbid() : Challenge();
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = AuthService.SetupNotAvailableError });
         }
 
         // Validate input
@@ -164,17 +171,19 @@ public class AuthController : ControllerBase
             return BadRequest(new { error = "Password must be at least 8 characters" });
         }
 
-        var (success, error) = await _authService.SetupAdminAsync(
+        var (outcome, error) = await _authService.SetupAdminAsync(
             request.Username, 
             request.Password, 
-            request.Email);
-        
-        if (!success)
-        {
-            return BadRequest(new { error });
-        }
+            request.Email,
+            request.SetupToken,
+            _clientAddresses.Describe(HttpContext));
 
-        return Ok(new { message = "Admin user created successfully" });
+        return outcome switch
+        {
+            SetupOutcome.Created => Ok(new { message = "Admin user created successfully" }),
+            SetupOutcome.Rejected => BadRequest(new { error }),
+            _ => StatusCode(StatusCodes.Status403Forbidden, new { error }),
+        };
     }
 
     [HttpGet("status")]
@@ -258,4 +267,5 @@ public class AuthController : ControllerBase
 public record LoginRequest(string Username, string Password);
 public record RegisterRequest(string Username, string Password, string Email, string? FullName);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
-public record SetupRequest(string Username, string Password, string? Email);
+/// <param name="SetupToken">The one-time setup code from the server log, or <c>SETUP_TOKEN</c>.</param>
+public record SetupRequest(string Username, string Password, string? Email, string? SetupToken = null);

@@ -22,6 +22,11 @@ internal sealed class AuthTestHost : IAsyncDisposable
 
     private static readonly Assembly WebApi = typeof(Program).Assembly;
 
+    private static readonly Func<IServiceCollection, IConfiguration, IServiceCollection> AddComicMaintainerSettings = WebApi
+        .GetType("ComicMaintainer.WebApi.Startup.CoreServiceCollectionExtensions", throwOnError: true)!
+        .GetMethod("AddComicMaintainerSettings", BindingFlags.Static | BindingFlags.Public)!
+        .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
+
     private static readonly Func<IServiceCollection, IConfiguration, IServiceCollection> AddComicMaintainerData = WebApi
         .GetType("ComicMaintainer.WebApi.Startup.CoreServiceCollectionExtensions", throwOnError: true)!
         .GetMethod("AddComicMaintainerData", BindingFlags.Static | BindingFlags.Public)!
@@ -52,6 +57,7 @@ internal sealed class AuthTestHost : IAsyncDisposable
         services.AddSingleton<IConfiguration>(Configuration);
         services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Trace).AddProvider(Logs));
         services.AddMemoryCache();
+        AddComicMaintainerSettings(services, Configuration);
         AddComicMaintainerData(services, Configuration);
         AddComicMaintainerAuth(services, Configuration);
         services.AddScoped<IAuthService, AuthService>();

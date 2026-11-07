@@ -46,7 +46,7 @@ public sealed class WebApplicationExtensionsTests : IDisposable
     private readonly string _configDirectory = Path.Join(Path.GetTempPath(), "cm-dbinit-" + Guid.NewGuid().ToString("N"));
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
-        new("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "ADMIN_EMAIL", "JWT_SECRET", "JWT_SECRET_FILE", "AUTHELIA_ENABLED", "EFCORE_QUERY_LOGGING");
+        new("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "ADMIN_EMAIL", "JWT_SECRET", "JWT_SECRET_FILE", "AUTHELIA_ENABLED", "EFCORE_QUERY_LOGGING", "SETUP_TOKEN", "SETUP_TOKEN_FILE");
 
     public WebApplicationExtensionsTests()
     {
@@ -246,6 +246,48 @@ public sealed class WebApplicationExtensionsTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.Contains(result.Errors, error => error.Code == ComicMaintainer.Core.Services.Auth.PublishedPasswordValidator.ErrorCode);
+    }
+
+    // SEC-2: first-run setup requires a code that only someone who can read the server's log knows.
+    [Fact]
+    public async Task LogsTheGeneratedSetupCodeWhileNoAccountExists()
+    {
+        await using var app = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(app, logger);
+
+        var code = app.Services.GetRequiredService<ComicMaintainer.Core.Services.Auth.ISetupTokenProvider>().Token;
+        var notice = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        Assert.Contains($"enter the setup code {code} to create the first administrator", notice.Message);
+    }
+
+    [Fact]
+    public async Task NamesSetupTokenInsteadOfLoggingAConfiguredSetupCode()
+    {
+        _environment.Set("SETUP_TOKEN", "my-own-setup-code");
+        await using var app = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(app, logger);
+
+        var notice = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        Assert.Contains("enter the setup code set in SETUP_TOKEN", notice.Message);
+        Assert.DoesNotContain("my-own-setup-code", notice.Message);
+        Assert.True(app.Services.GetRequiredService<ComicMaintainer.Core.Services.Auth.ISetupTokenProvider>().Matches("my-own-setup-code"));
+    }
+
+    [Fact]
+    public async Task DoesNotLogASetupCodeOnceAnAccountExists()
+    {
+        _environment.Set("ADMIN_USERNAME", "root-admin");
+        _environment.Set("ADMIN_PASSWORD", AdminPassword);
+        await using var app = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(app, logger);
+
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("setup code", StringComparison.Ordinal));
     }
 
     // An account created by an earlier version, whose password validators did not reject published passwords.

@@ -111,11 +111,14 @@
         document.getElementById('setupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            // The one-time code the server logs at startup (or SETUP_TOKEN), so
+            // that whoever reaches a fresh instance first cannot claim it.
+            const setupToken = document.getElementById('setupToken').value.trim();
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
             
-            if (!username || !password || !confirmPassword) {
+            if (!setupToken || !username || !password || !confirmPassword) {
                 showError('Please fill in all fields');
                 return;
             }
@@ -153,7 +156,8 @@
                     body: JSON.stringify({ 
                         username, 
                         password,
-                        email: null
+                        email: null,
+                        setupToken
                     })
                 });
                 

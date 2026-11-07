@@ -19,6 +19,9 @@ namespace ComicMaintainer.WebApi.Startup;
 /// </summary>
 internal static class AuthServiceCollectionExtensions
 {
+    /// <summary>The environment variable that sets the first-run setup code; <c>SETUP_TOKEN_FILE</c> names a file that holds it.</summary>
+    public const string SetupTokenEnvironmentVariable = "SETUP_TOKEN";
+
     public static IServiceCollection AddComicMaintainerAuth(this IServiceCollection services, IConfiguration configuration)
     {
         // Configure Identity
@@ -50,6 +53,10 @@ internal static class AuthServiceCollectionExtensions
         var jwtSecret = JwtSecretResolver.Resolve(configuration);
         services.AddSingleton(jwtSecret);
         services.PostConfigure<JwtSettings>(options => options.Secret = jwtSecret.Value);
+
+        // The one-time code first-run setup requires (see SetupTokenProvider): SETUP_TOKEN, or the file
+        // SETUP_TOKEN_FILE names, or a random code generated for this run and logged while setup is available.
+        services.AddSingleton<ISetupTokenProvider>(new SetupTokenProvider(SecretEnvironmentVariable.Read(SetupTokenEnvironmentVariable, out _)));
 
         // Check if Authelia is enabled. Read through the same binder as IOptions<AutheliaSettings> (used by the
         // handler), so the validation, schemes and CanAdminister fallback below match what the handler sees.

@@ -45,6 +45,31 @@ internal static class WebApplicationExtensions
             
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
             await SeedAdminFromEnvironmentAsync(userManager, logger);
+
+            var autheliaSettings = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ComicMaintainer.Core.Configuration.AutheliaSettings>>().Value;
+            if (await FirstRunSetup.IsAvailableAsync(userManager, autheliaSettings))
+            {
+                LogFirstRunSetupCode(scope.ServiceProvider.GetRequiredService<ISetupTokenProvider>(), logger);
+            }
+        }
+    }
+
+    // First-run setup requires a one-time code, so that whoever reaches a fresh, exposed instance first cannot claim
+    // it: only someone who can read this log (docker logs) or set SETUP_TOKEN can create the first administrator.
+    private static void LogFirstRunSetupCode(ISetupTokenProvider setupToken, Microsoft.Extensions.Logging.ILogger logger)
+    {
+        if (setupToken.IsConfigured)
+        {
+            logger.LogWarning(
+                "No account exists yet. Open ComicMaintainer in a browser and enter the setup code set in SETUP_TOKEN " +
+                "to create the first administrator.");
+        }
+        else
+        {
+            logger.LogWarning(
+                "No account exists yet. Open ComicMaintainer in a browser and enter the setup code {SetupCode} to create " +
+                "the first administrator. A new code is generated on every start until then; set SETUP_TOKEN to choose your own.",
+                setupToken.Token);
         }
     }
 

@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
@@ -168,7 +170,7 @@ public class AuthControllerCoverageTests
 
     private void VerifyNoAdminCreated() =>
         _authService.Verify(
-            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
 
     [Theory]
     [InlineData(null)]
@@ -180,7 +182,7 @@ public class AuthControllerCoverageTests
         SetupRequired(true);
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest(username!, "LongEnough1", null));
+        var result = await controller.SetupAdmin(new SetupRequest(username!, "LongEnough1", null, "code"));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Username must be at least 3 characters", Prop<string>(badRequest.Value, "error"));
@@ -197,7 +199,7 @@ public class AuthControllerCoverageTests
         SetupRequired(true);
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", password!, null));
+        var result = await controller.SetupAdmin(new SetupRequest("admin", password!, null, "code"));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Password must be at least 8 characters", Prop<string>(badRequest.Value, "error"));
@@ -208,56 +210,44 @@ public class AuthControllerCoverageTests
     public async Task SetupAdmin_WithValidInput_CreatesFirstAdministrator()
     {
         SetupRequired(true);
-        _authService.Setup(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com")).ReturnsAsync((true, null));
+        _authService.Setup(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com", "code", "unknown"))
+            .ReturnsAsync((SetupOutcome.Created, null));
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", "admin@example.com"));
+        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", "admin@example.com", "code"));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal("Admin user created successfully", Prop<string>(ok.Value, "message"));
-        _authService.Verify(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com"), Times.Once);
+        _authService.Verify(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com", "code", "unknown"), Times.Once);
     }
 
     [Fact]
-    public async Task SetupAdmin_WhenAConcurrentRequestCreatesTheAdminFirst_ReturnsBadRequestWithServiceError()
+    public async Task SetupAdmin_WhenAConcurrentRequestCreatesTheAdminFirst_Returns403WithServiceError()
     {
-        // Setup was still required when checked; the service then finds an admin.
+        // Setup was still available when checked; the service then finds an account.
         SetupRequired(true);
-        _authService.Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
-            .ReturnsAsync((false, "Admin user already exists"));
+        _authService.Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .ReturnsAsync((SetupOutcome.NotAvailable, AuthService.SetupNotAvailableError));
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null));
+        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null, "code"));
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal("Admin user already exists", Prop<string>(badRequest.Value, "error"));
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
+        Assert.Equal(AuthService.SetupNotAvailableError, Prop<string>(forbidden.Value, "error"));
     }
 
     [Fact]
-    public async Task SetupAdmin_AfterSetup_LetsAnAdministratorThroughToTheService()
+    public async Task SetupAdmin_AfterSetup_RefusesAnAdministratorToo()
     {
         SetupRequired(false);
         GrantPolicy(AuthorizationPolicies.CanAdminister);
-        _authService.Setup(s => s.SetupAdminAsync("admin2", "12345678", null))
-            .ReturnsAsync((false, "Admin user already exists"));
         var controller = CreateController(SignedIn("admin-1", "admin"));
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin2", "12345678", null));
+        var result = await controller.SetupAdmin(new SetupRequest("admin2", "12345678", null, "code"));
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal("Admin user already exists", Prop<string>(badRequest.Value, "error"));
-        _authService.Verify(s => s.SetupAdminAsync("admin2", "12345678", null), Times.Once);
-    }
-
-    [Fact]
-    public async Task SetupAdmin_AfterSetup_ChallengesAPrincipalWithoutAnIdentity()
-    {
-        SetupRequired(false);
-        var controller = CreateController(new ClaimsPrincipal());
-
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null));
-
-        Assert.IsType<ChallengeResult>(result);
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
         VerifyNoAdminCreated();
     }
 

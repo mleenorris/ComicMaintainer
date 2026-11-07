@@ -38,14 +38,34 @@ public class AuthService : IAuthService
     private static readonly Lazy<string> TimingHash =
         new(() => TimingHasher.HashPassword(TimingUser, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))));
 
+    /// <summary>The error of a first-run setup attempt once setup is no longer available.</summary>
+    public const string SetupNotAvailableError =
+        "First-run setup is not available: it only creates the first account of a new instance, and not when Authelia is enabled.";
+
+    /// <summary>The error of a first-run setup attempt without the right setup code.</summary>
+    public const string InvalidSetupTokenError =
+        "The setup code is missing or wrong. ComicMaintainer writes it to its log when it starts (docker logs), unless SETUP_TOKEN sets it.";
+
+    // Serializes first-run setup, so that two requests racing on a fresh instance cannot both create an administrator.
+    private static readonly SemaphoreSlim SetupLock = new(1, 1);
+
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly JwtSettings _jwtSettings;
+    private readonly AutheliaSettings _autheliaSettings;
+    private readonly ISetupTokenProvider _setupToken;
     private readonly ILogger<AuthService> _logger;
 
-    public AuthService(UserManager<ApplicationUser> userManager, IOptions<JwtSettings> jwtSettings, ILogger<AuthService> logger)
+    public AuthService(
+        UserManager<ApplicationUser> userManager,
+        IOptions<JwtSettings> jwtSettings,
+        IOptions<AutheliaSettings> autheliaSettings,
+        ISetupTokenProvider setupToken,
+        ILogger<AuthService> logger)
     {
         _userManager = userManager;
         _jwtSettings = jwtSettings.Value;
+        _autheliaSettings = autheliaSettings.Value;
+        _setupToken = setupToken;
         _logger = logger;
     }
 
@@ -254,43 +274,58 @@ public class AuthService : IAuthService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public async Task<bool> IsSetupRequiredAsync()
+    /// <summary>Whether the anonymous first-run setup may create the first administrator (see <see cref="FirstRunSetup"/>).</summary>
+    public Task<bool> IsSetupRequiredAsync() => FirstRunSetup.IsAvailableAsync(_userManager, _autheliaSettings);
+
+    /// <summary>
+    /// Creates the first administrator, when <see cref="FirstRunSetup"/> allows it and <paramref name="setupToken"/>
+    /// is the setup code (<see cref="ISetupTokenProvider"/>). Attempts are serialized, so two requests racing on a
+    /// fresh instance cannot both create an administrator.
+    /// </summary>
+    public async Task<(SetupOutcome Outcome, string? Error)> SetupAdminAsync(
+        string username, string password, string? email, string? setupToken, string? clientAddress = null)
     {
-        // Check if any admin users exist
-        var adminUsers = await _userManager.GetUsersInRoleAsync("Admin");
-        return adminUsers.Count == 0;
-    }
+        var safeUsername = LoggingHelper.SanitizeForLog(username);
+        var client = LoggingHelper.SanitizeForLog(string.IsNullOrEmpty(clientAddress) ? "unknown" : clientAddress);
 
-    public async Task<(bool Success, string? Error)> SetupAdminAsync(string username, string password, string? email = null)
-    {
-        // Check if setup is still required
-        // Note: This check provides basic protection against concurrent setup attempts.
-        // The database's unique constraints on username and email provide additional protection.
-        if (!await IsSetupRequiredAsync())
+        await SetupLock.WaitAsync();
+        try
         {
-            return (false, "Admin user already exists");
+            if (!await IsSetupRequiredAsync())
+            {
+                _logger.LogWarning("Refused first-run setup from {ClientAddress}: setup is no longer available", client);
+                return (SetupOutcome.NotAvailable, SetupNotAvailableError);
+            }
+
+            if (!_setupToken.Matches(setupToken))
+            {
+                _logger.LogWarning("Refused first-run setup from {ClientAddress}: the setup code is missing or wrong", client);
+                return (SetupOutcome.InvalidSetupToken, InvalidSetupTokenError);
+            }
+
+            var adminUser = new ApplicationUser
+            {
+                UserName = username,
+                Email = email ?? $"{username}@comicmaintainer.local",
+                FullName = "Administrator",
+                IsActive = true,
+                EmailConfirmed = true
+            };
+
+            var result = await _userManager.CreateAsync(adminUser, password);
+            if (!result.Succeeded)
+            {
+                return (SetupOutcome.Rejected, string.Join(", ", result.Errors.Select(e => e.Description)));
+            }
+
+            await _userManager.AddToRoleAsync(adminUser, "Admin");
+            _logger.LogInformation("First-run setup created the administrator {Username} from {ClientAddress}", safeUsername, client);
+            return (SetupOutcome.Created, null);
         }
-
-        // Create the admin user
-        var adminUser = new ApplicationUser
+        finally
         {
-            UserName = username,
-            Email = email ?? $"{username}@comicmaintainer.local",
-            FullName = "Administrator",
-            IsActive = true,
-            EmailConfirmed = true
-        };
-
-        var result = await _userManager.CreateAsync(adminUser, password);
-        if (!result.Succeeded)
-        {
-            return (false, string.Join(", ", result.Errors.Select(e => e.Description)));
+            SetupLock.Release();
         }
-
-        // Assign admin role
-        await _userManager.AddToRoleAsync(adminUser, "Admin");
-
-        return (true, null);
     }
 
     public async Task<(bool Success, string Token, string? Error)> GenerateTokenForUserAsync(string userId)

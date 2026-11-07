@@ -13,8 +13,19 @@ public interface IComicEmailQueue
     void Enqueue(int deliveryId);
 
     /// <summary>
-    /// True while the queue holds the delivery: it is waiting to be processed
-    /// or being processed.
+    /// Queues a delivery to be processed once <paramref name="dueAt"/> has
+    /// passed, such as a retry after a temporary failure, without holding up the
+    /// deliveries queued behind it. Scheduling a delivery that is already
+    /// scheduled moves it to the new time; scheduling the delivery being
+    /// processed takes effect once that processing ends. The schedule lives in
+    /// memory: if the application stops first, the delivery stays pending in
+    /// the database and is scheduled again by the next start's pending sweep.
+    /// </summary>
+    void Schedule(int deliveryId, DateTimeOffset dueAt);
+
+    /// <summary>
+    /// True while the queue holds the delivery: it is waiting to be processed,
+    /// scheduled for later or being processed.
     /// </summary>
     bool IsQueued(int deliveryId);
 

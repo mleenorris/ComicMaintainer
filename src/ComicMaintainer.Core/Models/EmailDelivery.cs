@@ -249,6 +249,12 @@ public record SeriesEmailSubscriptionDto(
     DateTime? LastSentAt);
 
 /// <summary>A single (attempted) comic email.</summary>
+/// <param name="ErrorMessage">
+/// Why the delivery failed, or for a pending delivery whose last attempt
+/// failed temporarily, why it failed and when it is retried.
+/// </param>
+/// <param name="AttemptCount">How many times the message has been handed to the mail server.</param>
+/// <param name="NextAttemptAt">When a pending delivery is retried after a temporary failure (UTC).</param>
 public record ComicEmailDeliveryDto(
     int Id,
     string FilePath,
@@ -262,7 +268,9 @@ public record ComicEmailDeliveryDto(
     string? ErrorMessage,
     DateTime CreatedAt,
     DateTime? SentAt,
-    int IssueCount = 1);
+    int IssueCount = 1,
+    int AttemptCount = 0,
+    DateTime? NextAttemptAt = null);
 
 /// <summary>One page of the delivery history, newest first.</summary>
 /// <param name="Total">Number of deliveries in the whole history.</param>

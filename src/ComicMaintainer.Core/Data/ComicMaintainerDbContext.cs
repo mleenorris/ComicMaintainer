@@ -765,9 +765,22 @@ public class ComicEmailDeliveryEntity
     /// </summary>
     public string? DisplayName { get; set; }
 
+    /// <summary>
+    /// Why the delivery failed, or, while it is pending after a temporary
+    /// failure, why the last attempt failed and when it is tried again.
+    /// </summary>
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SentAt { get; set; }
+
+    /// <summary>How many times the message has been handed to the mail server.</summary>
+    public int AttemptCount { get; set; }
+
+    /// <summary>
+    /// When a pending delivery whose last attempt failed temporarily is tried
+    /// again (UTC); null when no retry is waiting.
+    /// </summary>
+    public DateTime? NextAttemptAt { get; set; }
 }
 
 /// <summary>

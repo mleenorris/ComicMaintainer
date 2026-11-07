@@ -66,6 +66,24 @@ public class ComicEmailService : IComicEmailService
     /// </summary>
     private static readonly TimeSpan MaxRateLimitPoll = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// How long to wait before trying again after the mail server failed a
+    /// delivery temporarily (a 4xx reply, a dropped connection or a timeout),
+    /// by attempt: the first retry comes after the first entry, and so on. A
+    /// delivery is tried at most <see cref="MaxDeliveryAttempts"/> times in all
+    /// before it is marked failed.
+    /// </summary>
+    public static readonly IReadOnlyList<TimeSpan> TransientRetryDelays = new[]
+    {
+        TimeSpan.FromMinutes(1),
+        TimeSpan.FromMinutes(5),
+        TimeSpan.FromMinutes(30),
+        TimeSpan.FromHours(2),
+    };
+
+    /// <summary>Most attempts a delivery gets when its failures are all temporary.</summary>
+    public static int MaxDeliveryAttempts => TransientRetryDelays.Count + 1;
+
     /// <summary>Ticks of <see cref="RateLimitedUntil"/>; 0 when nothing is held back.</summary>
     private long _rateLimitedUntilTicks;
 
@@ -975,8 +993,21 @@ public class ComicEmailService : IComicEmailService
                 return;
             }
 
-            if (!string.Equals(delivery.Status, EmailDeliveryStatus.Pending, StringComparison.Ordinal) ||
-                !_inFlight.TryAdd(deliveryId, inFlight))
+            if (!string.Equals(delivery.Status, EmailDeliveryStatus.Pending, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            // A retry that is not due yet (resumed early, or queued again by a
+            // sweep) waits for its time without holding up the queue.
+            if (delivery.NextAttemptAt is DateTime nextAttempt &&
+                DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc) > _timeProvider.GetUtcNow().UtcDateTime)
+            {
+                _queue.Schedule(deliveryId, new DateTimeOffset(DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc)));
+                return;
+            }
+
+            if (!_inFlight.TryAdd(deliveryId, inFlight))
             {
                 return;
             }
@@ -1028,6 +1059,7 @@ public class ComicEmailService : IComicEmailService
         CancellationToken stoppingToken)
     {
         string? temporaryAttachment = null;
+        DateTimeOffset? retryAt = null;
         try
         {
             // A condensed delivery carries several issues; an ordinary one only
@@ -1114,6 +1146,8 @@ public class ComicEmailService : IComicEmailService
             var displayName = string.IsNullOrWhiteSpace(delivery.DisplayName)
                 ? Path.GetFileNameWithoutExtension(delivery.FilePath)
                 : delivery.DisplayName;
+            delivery.AttemptCount++;
+            delivery.NextAttemptAt = null;
             await _sender.SendAsync(
                 new ComicEmailMessage(
                     delivery.DeviceEmail,
@@ -1158,23 +1192,34 @@ public class ComicEmailService : IComicEmailService
             // Shutdown: leave the delivery pending.
             throw;
         }
+        catch (TransientEmailSendException ex) when (delivery.AttemptCount < MaxDeliveryAttempts)
+        {
+            // The mail server may well accept it later: keep the delivery
+            // pending (so the already-delivered check still holds) and try again
+            // once the back-off has passed.
+            var delay = TransientRetryDelays[Math.Clamp(delivery.AttemptCount - 1, 0, TransientRetryDelays.Count - 1)];
+            var nextAttempt = _timeProvider.GetUtcNow() + delay;
+            retryAt = nextAttempt;
+            delivery.NextAttemptAt = nextAttempt.UtcDateTime;
+            delivery.ErrorMessage = Truncate(
+                $"Attempt {delivery.AttemptCount} of {MaxDeliveryAttempts} failed: {ex.Message} Retrying at {nextAttempt:u}.",
+                1024);
+            _logger.LogWarning(
+                ex,
+                "Email delivery {DeliveryId} of {FilePath} failed temporarily (attempt {Attempt} of {MaxAttempts}); retrying at {RetryAt:O}",
+                delivery.Id,
+                LoggingHelper.SanitizePathForLog(delivery.FilePath),
+                delivery.AttemptCount,
+                MaxDeliveryAttempts,
+                nextAttempt);
+        }
+        catch (TransientEmailSendException ex)
+        {
+            MarkFailed(delivery, ex, $"Failed after {delivery.AttemptCount} attempts: {ex.Message}");
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            delivery.Status = EmailDeliveryStatus.Failed;
-            delivery.ErrorMessage = Truncate(ex.Message, 1024);
-            _metrics?.RecordEmailSend(success: false);
-
-            // A rejected delivery is almost always the remote SMTP server or the
-            // recipient address, both of which the operator controls; the
-            // failure is already surfaced on the delivery row.
-            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("email delivery rejected by the remote server")))
-            {
-                _logger.LogError(
-                    ex,
-                    "Failed to email {FilePath} to device {DeviceId}",
-                    LoggingHelper.SanitizePathForLog(delivery.FilePath),
-                    delivery.DeviceId);
-            }
+            MarkFailed(delivery, ex, ex.Message);
         }
         finally
         {
@@ -1182,6 +1227,33 @@ public class ComicEmailService : IComicEmailService
         }
 
         await db.SaveChangesAsync(CancellationToken.None);
+
+        // Scheduled only once the retry time is saved, so whatever loads the
+        // delivery when it comes due sees the same time.
+        if (retryAt is DateTimeOffset due)
+        {
+            _queue.Schedule(delivery.Id, due);
+        }
+    }
+
+    private void MarkFailed(ComicEmailDeliveryEntity delivery, Exception exception, string errorMessage)
+    {
+        delivery.Status = EmailDeliveryStatus.Failed;
+        delivery.NextAttemptAt = null;
+        delivery.ErrorMessage = Truncate(errorMessage, 1024);
+        _metrics?.RecordEmailSend(success: false);
+
+        // A rejected delivery is almost always the remote SMTP server or the
+        // recipient address, both of which the operator controls; the
+        // failure is already surfaced on the delivery row.
+        using (_logger.BeginScope(ErrorReportLogProperties.Exclude("email delivery rejected by the remote server")))
+        {
+            _logger.LogError(
+                exception,
+                "Failed to email {FilePath} to device {DeviceId}",
+                LoggingHelper.SanitizePathForLog(delivery.FilePath),
+                delivery.DeviceId);
+        }
     }
 
     public async Task<int> ResumePendingDeliveriesAsync(CancellationToken cancellationToken = default)
@@ -1191,19 +1263,31 @@ public class ComicEmailService : IComicEmailService
             .AsNoTracking()
             .Where(d => d.Status == EmailDeliveryStatus.Pending)
             .OrderBy(d => d.Id)
-            .Select(d => d.Id)
+            .Select(d => new { d.Id, d.NextAttemptAt })
             .ToListAsync(cancellationToken);
 
+        var now = _timeProvider.GetUtcNow();
         var resumed = 0;
-        foreach (var deliveryId in pending)
+        foreach (var delivery in pending)
         {
             // Being worked on, or already waiting its turn: nothing to resume.
-            if (_inFlight.ContainsKey(deliveryId) || _queue.IsQueued(deliveryId))
+            if (_inFlight.ContainsKey(delivery.Id) || _queue.IsQueued(delivery.Id))
             {
                 continue;
             }
 
-            _queue.Enqueue(deliveryId);
+            // A retry keeps the time it was given rather than going out early.
+            if (delivery.NextAttemptAt is DateTime nextAttempt &&
+                new DateTimeOffset(DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc)) is var due &&
+                due > now)
+            {
+                _queue.Schedule(delivery.Id, due);
+            }
+            else
+            {
+                _queue.Enqueue(delivery.Id);
+            }
+
             resumed++;
         }
 
@@ -1834,7 +1918,9 @@ public class ComicEmailService : IComicEmailService
         entity.ErrorMessage,
         entity.CreatedAt,
         entity.SentAt,
-        Math.Max(1, DeserializeCondensedPaths(entity.CondensedFilePaths).Count));
+        Math.Max(1, DeserializeCondensedPaths(entity.CondensedFilePaths).Count),
+        entity.AttemptCount,
+        entity.NextAttemptAt is DateTime nextAttempt ? DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc) : null);
 
     /// <summary>What became of a request to stop an in-flight delivery.</summary>
     private enum InFlightCancelRequest

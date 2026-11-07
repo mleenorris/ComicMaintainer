@@ -239,6 +239,136 @@ public class ComicEmailQueueTests
     }
 
     [Fact]
+    public async Task Schedule_ProcessesTheDeliveryOnceItIsDueWithoutHoldingUpOthers()
+    {
+        var time = new TimerTrackingTimeProvider(DateTimeOffset.UtcNow);
+        var processed = new List<int>();
+        var scheduledProcessed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var otherProcessed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = new Mock<IComicEmailService>();
+        service.Setup(s => s.ProcessDeliveryAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns<int, CancellationToken>((id, _) =>
+            {
+                lock (processed)
+                {
+                    processed.Add(id);
+                }
+
+                (id == 1 ? scheduledProcessed : otherProcessed).TrySetResult();
+                return Task.CompletedTask;
+            });
+
+        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: time);
+        await queue.StartAsync();
+        await time.WaitForTimersAsync(1);
+
+        queue.Schedule(1, time.GetUtcNow() + TimeSpan.FromMinutes(5));
+        queue.Enqueue(2);
+        await otherProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(queue.IsQueued(1));
+        lock (processed)
+        {
+            Assert.Equal(new[] { 2 }, processed);
+        }
+
+        time.Advance(TimeSpan.FromMinutes(5));
+        await scheduledProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await queue.StopAsync();
+
+        Assert.Equal(new[] { 2, 1 }, processed);
+        Assert.False(queue.IsQueued(1));
+    }
+
+    [Fact]
+    public async Task Schedule_AgainMovesTheDeliveryToTheNewTime()
+    {
+        var time = new TimerTrackingTimeProvider(DateTimeOffset.UtcNow);
+        var processedAt = new TaskCompletionSource<DateTimeOffset>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = new Mock<IComicEmailService>();
+        service.Setup(s => s.ProcessDeliveryAsync(1, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                processedAt.TrySetResult(time.GetUtcNow());
+                return Task.CompletedTask;
+            });
+
+        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: time);
+        var start = time.GetUtcNow();
+        queue.Schedule(1, start + TimeSpan.FromMinutes(1));
+        queue.Schedule(1, start + TimeSpan.FromMinutes(10));
+        await queue.StartAsync();
+
+        time.Advance(TimeSpan.FromMinutes(5));
+        await Task.Delay(100);
+        Assert.False(processedAt.Task.IsCompleted);
+
+        time.Advance(TimeSpan.FromMinutes(5));
+        Assert.Equal(start + TimeSpan.FromMinutes(10), await processedAt.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        await queue.StopAsync();
+    }
+
+    [Fact]
+    public async Task Schedule_WhileTheDeliveryIsBeingProcessed_TakesEffectAfterwards()
+    {
+        var time = new TimerTrackingTimeProvider(DateTimeOffset.UtcNow);
+        var calls = 0;
+        var secondCall = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ComicEmailQueue? queue = null;
+        var service = new Mock<IComicEmailService>();
+        service.Setup(s => s.ProcessDeliveryAsync(1, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    // What the delivery service does after a temporary failure.
+                    queue!.Schedule(1, time.GetUtcNow() + TimeSpan.FromMinutes(1));
+                }
+                else
+                {
+                    secondCall.TrySetResult();
+                }
+
+                return Task.CompletedTask;
+            });
+
+        queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: time);
+        await queue.StartAsync();
+        queue.Enqueue(1);
+
+        // One timer for the sweep, one for the retry once processing ended.
+        await time.WaitForTimersAsync(2);
+        Assert.Equal(1, Volatile.Read(ref calls));
+        Assert.True(queue.IsQueued(1));
+
+        time.Advance(TimeSpan.FromMinutes(1));
+        await secondCall.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await queue.StopAsync();
+
+        Assert.Equal(2, Volatile.Read(ref calls));
+    }
+
+    [Fact]
+    public async Task Schedule_WithATimeThatHasPassed_QueuesTheDeliveryRightAway()
+    {
+        var processed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = new Mock<IComicEmailService>();
+        service.Setup(s => s.ProcessDeliveryAsync(3, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                processed.TrySetResult();
+                return Task.CompletedTask;
+            });
+
+        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
+        await queue.StartAsync();
+        queue.Schedule(3, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(1));
+
+        await processed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await queue.StopAsync();
+    }
+
+    [Fact]
     public async Task StopAsync_WithoutStart_IsNoOp()
     {
         var queue = new ComicEmailQueue(

@@ -1,6 +1,8 @@
+using System.Net.Sockets;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
+using MailKit;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Logging;
@@ -45,7 +47,7 @@ public class SmtpComicEmailSender : IComicEmailSender
         }
 
         using var mime = new MimeMessage();
-        mime.From.Add(new MailboxAddress(settings.EmailFromName ?? "ComicMaintainer", settings.EmailFromAddress));
+        mime.From.Add(new MailboxAddress(settings.EmailFromName ?? "ComicMaintainer", settings.EmailFromAddress!));
         mime.To.Add(MailboxAddress.Parse(message.ToAddress));
         mime.Subject = message.Subject;
 
@@ -80,25 +82,74 @@ public class SmtpComicEmailSender : IComicEmailSender
                 : SecureSocketOptions.StartTls;
 
         var host = settings.SmtpHost!;
-        await client.ConnectAsync(host, settings.SmtpPort, socketOptions, cancellationToken);
+        try
+        {
+            await client.ConnectAsync(host, settings.SmtpPort, socketOptions, cancellationToken);
 
-        if (!client.IsSecure)
+            if (!client.IsSecure)
+            {
+                _logger.LogWarning(
+                    "SMTP connection to {Host} is not encrypted because SmtpAllowInsecure is enabled",
+                    LoggingHelper.SanitizeForLog(host));
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.SmtpUsername))
+            {
+                await client.AuthenticateAsync(settings.SmtpUsername, settings.SmtpPassword ?? string.Empty, cancellationToken);
+            }
+
+            await client.SendAsync(mime, cancellationToken);
+        }
+        catch (Exception ex) when (IsTransient(ex, cancellationToken))
+        {
+            throw new TransientEmailSendException(DescribeTransientFailure(ex), ex);
+        }
+
+        // The server has accepted the message. Failing to say goodbye must not
+        // be reported as a failed send, or the caller would send it again.
+        try
+        {
+            await client.DisconnectAsync(true, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(
-                "SMTP connection to {Host} is not encrypted because SmtpAllowInsecure is enabled",
+                ex,
+                "The mail server accepted the message but closing the connection to {Host} failed",
                 LoggingHelper.SanitizeForLog(host));
         }
-
-        if (!string.IsNullOrWhiteSpace(settings.SmtpUsername))
-        {
-            await client.AuthenticateAsync(settings.SmtpUsername, settings.SmtpPassword ?? string.Empty, cancellationToken);
-        }
-
-        await client.SendAsync(mime, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
 
         _logger.LogInformation(
             "Sent comic email to {Recipient}",
             LoggingHelper.SanitizeForLog(message.ToAddress));
     }
+
+    /// <summary>
+    /// Whether a failure to connect, authenticate or send is worth retrying
+    /// later: a temporary (4xx) SMTP reply, a dropped or refused connection, or
+    /// a timeout. Permanent (5xx) replies, rejected credentials and TLS
+    /// failures are configuration or recipient problems that would fail the
+    /// same way again.
+    /// </summary>
+    internal static bool IsTransient(Exception exception, CancellationToken cancellationToken) => exception switch
+    {
+        SmtpCommandException command => (int)command.StatusCode is >= 400 and < 500,
+        AuthenticationException or SslHandshakeException => false,
+        System.Security.Authentication.AuthenticationException => false,
+        SmtpProtocolException or ServiceNotConnectedException => true,
+        TimeoutException or SocketException or IOException => true,
+
+        // A cancellation the caller did not ask for is MailKit's own timeout.
+        OperationCanceledException => !cancellationToken.IsCancellationRequested,
+        _ => false,
+    };
+
+    private static string DescribeTransientFailure(Exception exception) => exception switch
+    {
+        SmtpCommandException command =>
+            $"The mail server temporarily refused the message ({(int)command.StatusCode}): {command.Message}",
+        OperationCanceledException or TimeoutException =>
+            "The mail server did not respond in time.",
+        _ => $"Could not reach the mail server: {exception.Message}",
+    };
 }

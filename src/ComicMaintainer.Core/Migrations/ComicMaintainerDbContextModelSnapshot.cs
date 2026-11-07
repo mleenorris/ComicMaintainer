@@ -23,6 +23,9 @@ namespace ComicMaintainer.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("CondensedFilePaths")
                         .HasColumnType("TEXT");
 
@@ -58,6 +61,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<string>("FilePath")
                         .IsRequired()
                         .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NextAttemptAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("SentAt")

@@ -33,13 +33,13 @@ public class ComicEmailQueue : IComicEmailQueue
     private readonly object _lifecycleLock = new();
 
     /// <summary>
-    /// Every delivery the queue holds — waiting in the channel or being
-    /// processed — so the same delivery is never queued twice and the pending
-    /// sweep can tell which pending rows nobody is working on. Also guards
-    /// replacing <see cref="_channel"/>, so a delivery is never written to a
-    /// channel that has already been completed.
+    /// Every delivery the queue holds — waiting in the channel, scheduled for
+    /// later or being processed — so the same delivery is never queued twice
+    /// and the pending sweep can tell which pending rows nobody is working on.
+    /// Also guards replacing <see cref="_channel"/>, so a delivery is never
+    /// written to a channel that has already been completed.
     /// </summary>
-    private readonly Dictionary<int, EntryState> _entries = new();
+    private readonly Dictionary<int, Entry> _entries = new();
 
     // Replaced on every stop, so deliveries queued while stopped wait for the next start.
     private volatile Channel<int> _channel = CreateChannel();
@@ -68,7 +68,10 @@ public class ComicEmailQueue : IComicEmailQueue
     /// </param>
     /// <param name="logger">Logger.</param>
     /// <param name="metrics">Publishes the queue depth when set.</param>
-    /// <param name="timeProvider">Clock for the pending sweep; the system clock when null.</param>
+    /// <param name="timeProvider">
+    /// Clock for the pending sweep and for scheduled deliveries; the system
+    /// clock when null.
+    /// </param>
     public ComicEmailQueue(
         Func<IComicEmailService> serviceFactory,
         ILogger<ComicEmailQueue> logger,
@@ -86,8 +89,29 @@ public class ComicEmailQueue : IComicEmailQueue
         /// <summary>Waiting in the channel.</summary>
         Queued,
 
+        /// <summary>Waiting for its timer to put it in the channel.</summary>
+        Scheduled,
+
         /// <summary>Handed to the delivery service.</summary>
         Processing,
+    }
+
+    /// <summary>A delivery the queue holds. Only touched under the <see cref="_entries"/> lock.</summary>
+    private sealed class Entry
+    {
+        public EntryState State;
+
+        /// <summary>Timer of a scheduled delivery.</summary>
+        public ITimer? Timer;
+
+        /// <summary>
+        /// Bumped whenever the timer is replaced, so a callback of a replaced
+        /// timer that already started running cannot queue the delivery early.
+        /// </summary>
+        public int TimerGeneration;
+
+        /// <summary>When a delivery scheduled while it was being processed is due.</summary>
+        public DateTimeOffset? ScheduledAfterProcessing;
     }
 
     public void Enqueue(int deliveryId)
@@ -99,14 +123,101 @@ public class ComicEmailQueue : IComicEmailQueue
 
         lock (_entries)
         {
-            // Already waiting or being processed: queueing it again would only
-            // make the consumer load a delivery that is already handled.
-            if (!_entries.TryAdd(deliveryId, EntryState.Queued))
+            // Already waiting, scheduled or being processed: queueing it again
+            // would only make the consumer load a delivery that is already
+            // handled.
+            if (_entries.ContainsKey(deliveryId))
             {
                 return;
             }
 
-            _channel.Writer.TryWrite(deliveryId);
+            var entry = new Entry();
+            _entries.Add(deliveryId, entry);
+            QueueNow(deliveryId, entry);
+        }
+    }
+
+    public void Schedule(int deliveryId, DateTimeOffset dueAt)
+    {
+        if (deliveryId <= 0)
+        {
+            return;
+        }
+
+        lock (_entries)
+        {
+            if (!_entries.TryGetValue(deliveryId, out var entry))
+            {
+                entry = new Entry();
+                _entries.Add(deliveryId, entry);
+                ScheduleEntry(deliveryId, entry, dueAt);
+                return;
+            }
+
+            switch (entry.State)
+            {
+                case EntryState.Processing:
+                    entry.ScheduledAfterProcessing = dueAt;
+                    break;
+                case EntryState.Scheduled:
+                    ScheduleEntry(deliveryId, entry, dueAt);
+                    break;
+                default:
+                    // Already waiting in the channel; the delivery service sees
+                    // that it is not due yet and schedules it again.
+                    break;
+            }
+        }
+    }
+
+    /// <summary>Puts the delivery in the channel. Called under the <see cref="_entries"/> lock.</summary>
+    private void QueueNow(int deliveryId, Entry entry)
+    {
+        entry.State = EntryState.Queued;
+        _channel.Writer.TryWrite(deliveryId);
+    }
+
+    /// <summary>
+    /// (Re)starts the timer that queues the delivery at <paramref name="dueAt"/>,
+    /// or queues it right away when that time has passed. Called under the
+    /// <see cref="_entries"/> lock.
+    /// </summary>
+    private void ScheduleEntry(int deliveryId, Entry entry, DateTimeOffset dueAt)
+    {
+        entry.Timer?.Dispose();
+        entry.Timer = null;
+        var generation = ++entry.TimerGeneration;
+
+        var delay = dueAt - _timeProvider.GetUtcNow();
+        if (delay <= TimeSpan.Zero)
+        {
+            QueueNow(deliveryId, entry);
+            return;
+        }
+
+        entry.State = EntryState.Scheduled;
+        entry.Timer = _timeProvider.CreateTimer(
+            _ => OnScheduledDeliveryDue(deliveryId, entry, generation),
+            null,
+            delay,
+            Timeout.InfiniteTimeSpan);
+    }
+
+    private void OnScheduledDeliveryDue(int deliveryId, Entry entry, int generation)
+    {
+        lock (_entries)
+        {
+            if (!_entries.TryGetValue(deliveryId, out var current) ||
+                !ReferenceEquals(current, entry) ||
+                entry.State != EntryState.Scheduled ||
+                entry.TimerGeneration != generation)
+            {
+                return;
+            }
+
+            entry.Timer?.Dispose();
+            entry.Timer = null;
+            QueueNow(deliveryId, entry);
         }
     }
 
@@ -196,7 +307,7 @@ public class ComicEmailQueue : IComicEmailQueue
         {
             while (channel.Reader.TryRead(out var leftover))
             {
-                if (_entries.TryGetValue(leftover, out var state) && state == EntryState.Queued)
+                if (_entries.TryGetValue(leftover, out var entry) && entry.State == EntryState.Queued)
                 {
                     _entries.Remove(leftover);
                 }
@@ -223,7 +334,14 @@ public class ComicEmailQueue : IComicEmailQueue
             {
                 lock (_entries)
                 {
-                    _entries[deliveryId] = EntryState.Processing;
+                    if (!_entries.TryGetValue(deliveryId, out var entry))
+                    {
+                        entry = new Entry();
+                        _entries.Add(deliveryId, entry);
+                    }
+
+                    entry.State = EntryState.Processing;
+                    entry.ScheduledAfterProcessing = null;
                 }
 
                 try
@@ -242,7 +360,18 @@ public class ComicEmailQueue : IComicEmailQueue
                 {
                     lock (_entries)
                     {
-                        _entries.Remove(deliveryId);
+                        // A retry scheduled while the delivery was processed
+                        // starts its wait now; otherwise the queue is done with it.
+                        if (_entries.TryGetValue(deliveryId, out var entry) &&
+                            entry.ScheduledAfterProcessing is DateTimeOffset dueAt)
+                        {
+                            entry.ScheduledAfterProcessing = null;
+                            ScheduleEntry(deliveryId, entry, dueAt);
+                        }
+                        else
+                        {
+                            _entries.Remove(deliveryId);
+                        }
                     }
                 }
             }

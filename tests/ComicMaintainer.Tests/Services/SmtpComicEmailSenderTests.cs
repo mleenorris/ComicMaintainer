@@ -210,7 +210,7 @@ public class SmtpComicEmailSenderTests : IDisposable
     }
 
     [Fact]
-    public async Task SendAsync_WhenTheServerIsUnreachable_Throws()
+    public async Task SendAsync_WhenTheServerIsUnreachable_ThrowsATransientFailure()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -220,11 +220,128 @@ public class SmtpComicEmailSenderTests : IDisposable
         _settings.SmtpPort = closedPort;
         _settings.SmtpAllowInsecure = true;
 
-        await Assert.ThrowsAnyAsync<SocketException>(() => _sender.SendAsync(
+        var ex = await Assert.ThrowsAsync<TransientEmailSendException>(() => _sender.SendAsync(
             new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
             _guard.Token));
 
+        Assert.IsAssignableFrom<SocketException>(ex.InnerException);
+
         Assert.DoesNotContain(_logger.Entries, e => e.Message.Contains("Sent comic email"));
+    }
+
+    [Theory]
+    [InlineData("MAIL", "421 4.7.0 Try again later, closing connection.", 421)]
+    [InlineData("MAIL", "451 4.3.0 Mail server temporarily rejected message.", 451)]
+    [InlineData("RCPT", "450 4.2.1 The user you are trying to contact is receiving mail too quickly.", 450)]
+    [InlineData("RCPT", "452 4.2.2 Mailbox full.", 452)]
+    public async Task SendAsync_WhenTheServerRepliesWithATemporaryError_ThrowsATransientFailure(
+        string verb, string reply, int statusCode)
+    {
+        using var server = new FakeSmtpServer();
+        server.Replies[verb] = reply;
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+
+        var ex = await Assert.ThrowsAsync<TransientEmailSendException>(() => _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
+            _guard.Token));
+
+        var command = Assert.IsType<MailKit.Net.Smtp.SmtpCommandException>(ex.InnerException);
+        Assert.Equal(statusCode, (int)command.StatusCode);
+        Assert.Contains(statusCode.ToString(System.Globalization.CultureInfo.InvariantCulture), ex.Message);
+        Assert.False(server.Message.IsCompleted);
+    }
+
+    [Theory]
+    [InlineData("MAIL", "552 5.3.4 Message size exceeds fixed maximum message size")]
+    [InlineData("RCPT", "550 5.1.1 The email account that you tried to reach does not exist.")]
+    public async Task SendAsync_WhenTheServerRejectsTheMessagePermanently_DoesNotReportItAsTransient(string verb, string reply)
+    {
+        using var server = new FakeSmtpServer();
+        server.Replies[verb] = reply;
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+
+        await Assert.ThrowsAsync<MailKit.Net.Smtp.SmtpCommandException>(() => _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
+            _guard.Token));
+    }
+
+    [Fact]
+    public async Task SendAsync_WhenTheCredentialsAreRejected_DoesNotReportItAsTransient()
+    {
+        using var server = new FakeSmtpServer();
+        server.Replies["AUTH"] = "535 5.7.8 Username and Password not accepted.";
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+        _settings.SmtpUsername = "reader";
+        _settings.SmtpPassword = "wrong";
+
+        await Assert.ThrowsAsync<AuthenticationException>(() => _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
+            _guard.Token));
+    }
+
+    [Fact]
+    public async Task SendAsync_WhenTheConnectionDropsMidConversation_ThrowsATransientFailure()
+    {
+        using var server = new FakeSmtpServer();
+        server.DropConnectionOn = "RCPT";
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+
+        await Assert.ThrowsAsync<TransientEmailSendException>(() => _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
+            _guard.Token));
+    }
+
+    [Fact]
+    public async Task SendAsync_WhenClosingTheConnectionFailsAfterTheMessageWasAccepted_StillSucceeds()
+    {
+        using var server = new FakeSmtpServer();
+        server.DropConnectionOn = "QUIT";
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+
+        await _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
+            _guard.Token);
+
+        Assert.True(server.Message.IsCompletedSuccessfully);
+        Assert.Contains(_logger.Entries, e =>
+            e.Level == LogLevel.Information && e.Message.Contains("Sent comic email to kindle@example.com"));
+    }
+
+    public static TheoryData<Exception, bool> TransientClassificationCases() => new()
+    {
+        { new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.MessageNotAccepted, MailKit.Net.Smtp.SmtpStatusCode.ServiceNotAvailable, "busy"), true },
+        { new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.MessageNotAccepted, MailKit.Net.Smtp.SmtpStatusCode.MailboxUnavailable, "no such user"), false },
+        { new MailKit.Net.Smtp.SmtpProtocolException("unexpected disconnect"), true },
+        { new IOException("connection reset"), true },
+        { new SocketException((int)SocketError.ConnectionRefused), true },
+        { new TimeoutException(), true },
+        { new OperationCanceledException(), true },
+        { new AuthenticationException("bad password"), false },
+        { new SslHandshakeException("handshake failed"), false },
+        { new System.Security.Authentication.AuthenticationException("tls"), false },
+        { new NotSupportedException("STARTTLS required"), false },
+        { new InvalidOperationException("not configured"), false },
+    };
+
+    [Theory]
+    [MemberData(nameof(TransientClassificationCases))]
+    public void IsTransient_RetriesTemporaryFailuresOnly(Exception exception, bool expected)
+    {
+        Assert.Equal(expected, SmtpComicEmailSender.IsTransient(exception, CancellationToken.None));
+    }
+
+    [Fact]
+    public void IsTransient_DoesNotRetryACancellationTheCallerAskedFor()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.False(SmtpComicEmailSender.IsTransient(new OperationCanceledException(cts.Token), cts.Token));
     }
 
     private static byte[] Decode(MimePart part)
@@ -306,6 +423,15 @@ public class SmtpComicEmailSenderTests : IDisposable
 
         public Task<MimeMessage> Message => _message.Task;
 
+        /// <summary>Replies sent instead of the usual one, by command verb (e.g. <c>MAIL</c>).</summary>
+        public ConcurrentDictionary<string, string> Replies { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Command verb on which the server hangs up without replying.</summary>
+        public string? DropConnectionOn { get; set; }
+
+        /// <summary>Message size limit advertised with the SIZE extension; none when null.</summary>
+        public long? MaxMessageSize { get; set; }
+
         private async Task AcceptLoopAsync(CancellationToken token)
         {
             while (!token.IsCancellationRequested)
@@ -350,10 +476,17 @@ public class SmtpComicEmailSenderTests : IDisposable
                 _commands.Enqueue(line);
                 var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 var verb = parts.Length > 0 ? parts[0].ToUpperInvariant() : string.Empty;
+                if (string.Equals(verb, DropConnectionOn, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
                 switch (verb)
                 {
                     case "EHLO":
-                        await writer.WriteAsync("250-localhost\r\n250 AUTH PLAIN\r\n");
+                        await writer.WriteAsync(MaxMessageSize is long maxSize
+                            ? $"250-localhost\r\n250-SIZE {maxSize}\r\n250 AUTH PLAIN\r\n"
+                            : "250-localhost\r\n250 AUTH PLAIN\r\n");
                         break;
                     case "AUTH":
                         var payload = parts.Length > 2 ? parts[2] : null;
@@ -364,7 +497,12 @@ public class SmtpComicEmailSenderTests : IDisposable
                         }
 
                         _authPayload = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
-                        await writer.WriteLineAsync("235 2.7.0 Authentication successful");
+                        await writer.WriteLineAsync(Replies.TryGetValue(verb, out var authReply)
+                            ? authReply
+                            : "235 2.7.0 Authentication successful");
+                        break;
+                    case var scripted when Replies.TryGetValue(scripted, out var reply):
+                        await writer.WriteLineAsync(reply);
                         break;
                     case "DATA":
                         await writer.WriteLineAsync("354 End data with <CR><LF>.<CR><LF>");

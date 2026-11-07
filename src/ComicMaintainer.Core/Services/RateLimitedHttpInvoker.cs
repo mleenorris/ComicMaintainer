@@ -97,7 +97,13 @@ internal static class RateLimitedHttpInvoker
                 {
                     response = await client.SendAsync(request, completionOption, attemptCts.Token);
                 }
-                catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // Report the caller's own token rather than the linked one.
+                    cancellationToken.ThrowIfCancellationRequested();
+                    throw;
+                }
+                catch (OperationCanceledException ex)
                 {
                     // Our attempt timeout, or HttpClient.Timeout; not the caller.
                     throw new ExternalMetadataUnavailableException(

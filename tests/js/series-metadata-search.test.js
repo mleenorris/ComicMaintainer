@@ -61,6 +61,7 @@ const RESULTS = [
     {
         canonical_title: 'Saga (Image Comics)',
         source: 'ComicVine',
+        source_id: '4050-112',
         match_score: 96.5,
         aliases: ['サーガ', 'Saga Deluxe'],
         image_url: 'https://comicvine.example/saga.jpg',
@@ -539,6 +540,7 @@ test('Use This Match asks first, then replaces the cached provider metadata', as
         canonicalTitle: 'Saga (Image Comics)',
         aliases: ['サーガ', 'Saga Deluxe'],
         source: 'ComicVine',
+        sourceId: '4050-112',
         imageUrl: 'https://comicvine.example/saga.jpg',
         thumbnailUrl: null,
         localizedTitles: [
@@ -580,6 +582,7 @@ test('Use This Match sends what a sparse candidate has and ignores one without a
         canonicalTitle: 'SAGA',
         aliases: [],
         source: null,
+        sourceId: null,
         imageUrl: null,
         thumbnailUrl: null,
         localizedTitles: []

@@ -20,11 +20,21 @@ public class AniListManhwaSeriesMetadataService : AniListSeriesMetadataProviderB
         IMemoryCache cache,
         ILogger<AniListManhwaSeriesMetadataService> logger,
         ComicMaintainerMetrics? metrics = null)
-        : base("AniListManhwa", "KR", "ko", httpClientFactory, settings, cache, logger, metrics)
+        : this(httpClientFactory, settings, cache, logger, metrics, rateLimiter: null)
+    {
+    }
+
+    /// <summary>Creates the provider with its own throttle instead of the shared AniList one (tests only).</summary>
+    internal AniListManhwaSeriesMetadataService(
+        IHttpClientFactory httpClientFactory,
+        IOptionsMonitor<AppSettings> settings,
+        IMemoryCache cache,
+        ILogger<AniListManhwaSeriesMetadataService> logger,
+        ComicMaintainerMetrics? metrics,
+        ProviderRateLimiter? rateLimiter)
+        : base("AniListManhwa", "anilist-manhwa", "KR", "ko", httpClientFactory, settings, cache, logger, metrics, rateLimiter)
     {
     }
 
     private protected override string HttpClientName => nameof(AniListManhwaSeriesMetadataService);
-
-    private protected override string CacheKeyPrefix => "anilist-manhwa-series";
 }

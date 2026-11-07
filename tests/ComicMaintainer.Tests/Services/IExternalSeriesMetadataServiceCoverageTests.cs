@@ -68,11 +68,24 @@ public class IExternalSeriesMetadataServiceCoverageTests
             TimeSpan.FromSeconds(30),
             TimeSpan.FromHours(1));
 
-        Assert.Empty(await composite.SearchSeriesAsync("Berserk"));
-        Assert.Empty(await composite.SearchSeriesAsync("Berserk"));
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => composite.SearchSeriesAsync("Berserk"));
+        var skipped = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => composite.SearchSeriesAsync("Berserk"));
 
         // The second search is skipped because the provider is cooling down.
+        Assert.Contains("skipped after recent failures", skipped.Message);
         Assert.Single(provider.Queries);
+    }
+
+    [Fact]
+    public async Task LookupMatchAsync_Default_LooksTheTitleUpOnlyWhenTheSourceIsThisProvider()
+    {
+        var match = new ExternalSeriesMetadata { CanonicalTitle = "Berserk", Source = nameof(LookupOnlyProvider) };
+        var provider = new LookupOnlyProvider(_ => Task.FromResult<ExternalSeriesMetadata?>(match));
+        IExternalSeriesMetadataService service = provider;
+
+        Assert.Same(match, await service.LookupMatchAsync(nameof(LookupOnlyProvider), "42", "Berserk"));
+        Assert.Null(await service.LookupMatchAsync("SomeOtherProvider", "42", "Berserk"));
+        Assert.Equal(new[] { "Berserk" }, provider.Queries);
     }
 
     [Fact]

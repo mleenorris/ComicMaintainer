@@ -1272,6 +1272,9 @@
                         canonicalTitle: result.canonical_title,
                         aliases: result.aliases || [],
                         source: result.source || null,
+                        // The provider's id of the candidate, so a later refresh
+                        // re-fetches exactly this entry instead of searching again.
+                        sourceId: result.source_id || null,
                         imageUrl: result.image_url || null,
                         thumbnailUrl: result.thumbnail_url || null,
                         // Forward the provider's per-title language tags so

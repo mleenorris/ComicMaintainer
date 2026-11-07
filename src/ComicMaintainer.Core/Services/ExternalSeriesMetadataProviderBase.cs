@@ -143,7 +143,9 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             return null;
         }
 
-        var key = SeriesKey.Normalize(seriesName);
+        // Lowercase letters and digits only, the same folding the match
+        // scorer applies, so every spelling it treats as equal shares an entry.
+        var key = new string(seriesName.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
         var cacheKey = $"{CacheKeyPrefix}:{key}";
         if (Cache.TryGetValue(cacheKey, out ExternalSeriesMetadata? cached))
         {
@@ -335,11 +337,20 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            var failure = new ExternalMetadataUnavailableException(
-                ProviderName,
-                ExternalMetadataFailureKind.Unavailable,
-                $"{ProviderName} request failed: {ex.Message}",
-                innerException: ex);
+            // A cancellation the caller did not ask for is a timeout (this is
+            // how HttpClient reports its own Timeout, e.g. while reading the body).
+            var detail = string.IsNullOrWhiteSpace(ex.Message) ? string.Empty : $": {ex.Message}";
+            var failure = ex is OperationCanceledException
+                ? new ExternalMetadataUnavailableException(
+                    ProviderName,
+                    ExternalMetadataFailureKind.Timeout,
+                    $"{ProviderName} request timed out{detail}",
+                    innerException: ex)
+                : new ExternalMetadataUnavailableException(
+                    ProviderName,
+                    ExternalMetadataFailureKind.Unavailable,
+                    $"{ProviderName} request failed{detail}",
+                    innerException: ex);
             RecordFailure(failure, subject);
             throw failure;
         }
@@ -361,7 +372,7 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
                 ProviderName,
                 ExternalMetadataFailureKind.RateLimited,
                 $"{ProviderName} rate limited the request ({description})",
-                RateLimitedHttpInvoker.GetRetryAfter(response));
+                RateLimitedHttpInvoker.GetRetryAfter(response) is { } retryAfter && retryAfter > TimeSpan.Zero ? retryAfter : null);
         }
 
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
@@ -388,7 +399,9 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             LoggingHelper.SanitizeForLog(failure.Message));
         if (failure.Kind == ExternalMetadataFailureKind.RateLimited)
         {
-            Health.RecordRateLimited(failure.RetryAfter ?? DefaultRateLimitBackoff, failure.Message, recordFailedRequest: true);
+            Health.RecordRateLimited(
+                failure.RetryAfter is { } retryAfter && retryAfter > TimeSpan.Zero ? retryAfter : DefaultRateLimitBackoff,
+                failure.Message, recordFailedRequest: true);
         }
         else
         {

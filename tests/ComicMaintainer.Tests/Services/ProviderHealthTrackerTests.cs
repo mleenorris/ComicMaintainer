@@ -2,6 +2,7 @@ using System.Diagnostics.Metrics;
 using System.Net;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
 using Microsoft.Extensions.Caching.Memory;
@@ -33,15 +34,24 @@ public class ProviderHealthTrackerTests
         });
         var service = CreateService(handler);
 
-        Assert.Null(await service.LookupSeriesAsync("Berserk"));
-        Assert.Null(await service.LookupSeriesAsync("Vagabond"));
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Berserk"));
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Vagabond"));
         var health = await service.CheckHealthAsync();
 
         Assert.Equal(2, health.FailureCount);
         Assert.Equal(0, health.SuccessCount);
-        Assert.Equal("HTTP 500 Internal Server Error", health.LastError);
+        // The provider describes every failure, even one whose exception has no message.
+        Assert.Equal("MangaDex request failed", health.LastError);
         Assert.NotNull(health.LastFailureUtc);
         Assert.False(health.RateLimited);
+
+        // The tracker itself keeps the last meaningful error when a failure carries none.
+        var tracker = new ProviderHealthTracker("Direct");
+        tracker.RecordFailure("HTTP 500 Internal Server Error");
+        tracker.RecordFailure(string.Empty);
+        tracker.RecordFailure(null);
+        Assert.Equal("HTTP 500 Internal Server Error", tracker.Snapshot().LastError);
+        Assert.Equal(3, tracker.Snapshot().FailureCount);
     }
 
     [Fact]
@@ -63,7 +73,7 @@ public class ProviderHealthTrackerTests
         using var recorder = new Recorder(metrics.Meter);
         var service = CreateService(handler, metrics);
 
-        Assert.Null(await service.LookupSeriesAsync("Berserk"));
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Berserk"));
         var measurements = recorder.Measurements;
         var health = await service.CheckHealthAsync();
 
@@ -76,7 +86,8 @@ public class ProviderHealthTrackerTests
             m.Instrument == "comicmaintainer.metadata_provider.rate_limit_waits"
             && (string?)m.Tags["kind"] == "server"));
         Assert.Equal(2, health.FailureCount);
-        Assert.Equal("HTTP 429 Too Many Requests", health.LastError);
+        Assert.Equal(ExternalMetadataFailureKind.RateLimited, failure.Kind);
+        Assert.Equal("MangaDex rate limited the request (HTTP 429 Too Many Requests)", health.LastError);
         Assert.True(health.RateLimited);
         Assert.True(health.Reachable);
         Assert.Equal("Degraded - rate limited", health.StatusMessage);

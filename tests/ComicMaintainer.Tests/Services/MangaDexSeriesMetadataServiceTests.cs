@@ -2,6 +2,7 @@ using System.Diagnostics.Metrics;
 using System.Net;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
 using Microsoft.Extensions.Caching.Memory;
@@ -76,8 +77,10 @@ public class MangaDexSeriesMetadataServiceTests
         }, metrics);
 
         await service.LookupSeriesAsync("Retry succeeds");
-        await service.LookupSeriesAsync("Retry fails");
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.LookupSeriesAsync("Retry fails"));
 
+        Assert.Equal(ExternalMetadataFailureKind.RateLimited, failure.Kind);
         Assert.Equal(1, outcomes.Count(outcome => outcome == "failed"));
     }
 
@@ -237,9 +240,22 @@ public class MangaDexSeriesMetadataServiceTests
     }
 
     [Fact]
-    public async Task LookupSeriesAsync_ReturnsNull_WhenApiFails()
+    public async Task LookupSeriesAsync_ReturnsNull_WhenNoResultMatchesTheName()
     {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        // MangaDex's fuzzy title search answers with related series; none of
+        // them is the requested one, so the lookup is "not found" rather than
+        // the top hit.
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+            {
+              "data": [
+                { "id": "a", "attributes": { "title": { "en": "Monsters" } } },
+                { "id": "b", "attributes": { "title": { "en": "Monster Musume" }, "altTitles": [ { "ja": "モンスター娘のいる日常" } ] } }
+              ]
+            }
+            """, Encoding.UTF8, "application/json")
+        });
 
         var service = CreateService(handler, new AppSettings
         {
@@ -247,9 +263,211 @@ public class MangaDexSeriesMetadataServiceTests
             MangaDexBaseUrl = "https://api.mangadex.example"
         });
 
-        var result = await service.LookupSeriesAsync("Solo Leveling");
+        var result = await service.LookupSeriesAsync("Monster");
 
         Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_PrefersTheExactTitle_OverAnEarlierAliasMatch()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+            {
+              "data": [
+                { "id": "fuzzy", "attributes": { "title": { "en": "Berserk of Gluttony" } } },
+                { "id": "alias", "attributes": { "title": { "en": "Berserk: The Golden Age" }, "altTitles": [ { "en": "Berserk" } ] } },
+                { "id": "exact", "attributes": { "title": { "en": "Berserk" } } }
+              ]
+            }
+            """, Encoding.UTF8, "application/json")
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var result = await service.LookupSeriesAsync("Berserk");
+
+        Assert.NotNull(result);
+        Assert.Equal("exact", result!.SourceId);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_RemembersANoMatch_SoTheNextFileDoesNotQueryAgain()
+    {
+        var calls = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{ "data": [] }""", Encoding.UTF8, "application/json")
+            };
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        Assert.Null(await service.LookupSeriesAsync("Unknown Series"));
+        Assert.Null(await service.LookupSeriesAsync("unknown  series"));
+
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_Throws_WhenApiFails()
+    {
+        var calls = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.LookupSeriesAsync("Solo Leveling"));
+
+        Assert.Equal(ExternalMetadataFailureKind.Unavailable, failure.Kind);
+        Assert.Equal(new[] { "MangaDex" }, failure.Providers);
+        Assert.Contains("500", failure.Message);
+
+        // A failure is not remembered as "no match": the next lookup asks again.
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.LookupSeriesAsync("Solo Leveling"));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_Throws_WhenTheBodyIsAnErrorResult()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{ "result": "error", "errors": [ { "status": 503 } ] }""", Encoding.UTF8, "application/json")
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.LookupSeriesAsync("Solo Leveling"));
+
+        Assert.Equal(ExternalMetadataFailureKind.InvalidResponse, failure.Kind);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_StalledRequest_TimesOutAfterTheConfiguredTimeout()
+    {
+        var handler = new StubHttpMessageHandler(async (_, token) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example",
+            MetadataProviderTimeoutSeconds = 1
+        });
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.LookupSeriesAsync("Solo Leveling"));
+
+        Assert.Equal(ExternalMetadataFailureKind.Timeout, failure.Kind);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(30), $"took {stopwatch.Elapsed}");
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_LongRetryAfter_FailsAtOnceAsRateLimited()
+    {
+        var calls = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            calls++;
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            response.Headers.TryAddWithoutValidation("Retry-After", "120");
+            return response;
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.LookupSeriesAsync("Solo Leveling"));
+
+        Assert.Equal(ExternalMetadataFailureKind.RateLimited, failure.Kind);
+        Assert.Equal(TimeSpan.FromSeconds(120), failure.RetryAfter);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task LookupMatchAsync_FetchesTheMatchedEntryById()
+    {
+        string? requested = null;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requested = request.RequestUri!.ToString();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                { "result": "ok", "data": { "id": "abc-123", "attributes": { "title": { "en": "Solo Leveling (Renamed)" } } } }
+                """, Encoding.UTF8, "application/json")
+            };
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var result = await service.LookupMatchAsync("MangaDex", "abc-123", "Solo Leveling");
+
+        Assert.Equal("https://api.mangadex.example/manga/abc-123?includes[]=cover_art", requested);
+        Assert.NotNull(result);
+        Assert.Equal("Solo Leveling (Renamed)", result!.CanonicalTitle);
+        Assert.Equal("abc-123", result.SourceId);
+    }
+
+    [Fact]
+    public async Task LookupMatchAsync_ReturnsNull_WhenTheEntryIsGoneOrFromAnotherProvider()
+    {
+        var calls = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        Assert.Null(await service.LookupMatchAsync("MangaDex", "gone", "Solo Leveling"));
+        Assert.Null(await service.LookupMatchAsync("AniListManga", "123", "Solo Leveling"));
+        Assert.Equal(1, calls);
     }
 
     [Fact]
@@ -406,7 +624,7 @@ public class MangaDexSeriesMetadataServiceTests
             MangaDexBaseUrl = "https://api.mangadex.example"
         });
 
-        await service.LookupSeriesAsync("Anything");
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Anything"));
         var health = await service.CheckHealthAsync();
 
         Assert.True(health.FailureCount >= 1);
@@ -473,9 +691,10 @@ public class MangaDexSeriesMetadataServiceTests
             MangaDexBaseUrl = "https://api.mangadex.example"
         });
 
-        await service.LookupSeriesAsync("Anything");
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Anything"));
         var health = await service.CheckHealthAsync();
 
+        Assert.Equal(ExternalMetadataFailureKind.RateLimited, failure.Kind);
         Assert.True(health.RateLimited);
         Assert.NotNull(health.RateLimitedUntilUtc);
         // Cached probe path runs SearchInternalAsync's status, but the rate-limit
@@ -485,16 +704,21 @@ public class MangaDexSeriesMetadataServiceTests
 
     private sealed class StubHttpMessageHandler : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, HttpResponseMessage> _handler;
+        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
 
         public StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> handler)
+        {
+            _handler = (request, _) => Task.FromResult(handler(request));
+        }
+
+        public StubHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
         {
             _handler = handler;
         }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            return Task.FromResult(_handler(request));
+            return _handler(request, cancellationToken);
         }
     }
 }

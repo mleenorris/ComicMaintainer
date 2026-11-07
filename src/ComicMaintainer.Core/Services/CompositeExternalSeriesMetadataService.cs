@@ -123,7 +123,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             {
                 _logger.LogDebug(
                     "Ignoring {Provider} candidate {Candidate} for {SeriesName}: match score {Score} is below {Threshold}",
-                    provider.ProviderName,
+                    NameOf(provider),
                     LoggingHelper.SanitizeForLog(result.CanonicalTitle),
                     LoggingHelper.SanitizeForLog(seriesName),
                     score,
@@ -205,6 +205,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
         string title,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var provider = _providers.FirstOrDefault(candidate =>
             string.Equals(candidate.ProviderName, source, StringComparison.OrdinalIgnoreCase));
         if (provider is null)
@@ -280,6 +281,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             CancellationToken cancellationToken)
         where T : class?
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var failures = new List<ExternalMetadataUnavailableException>();
         var calls = new List<Task<ProviderOutcome<T>>>(_providers.Count);
         foreach (var provider in _providers)
@@ -340,14 +342,16 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                // Report the caller's own token rather than the linked one.
+                cancellationToken.ThrowIfCancellationRequested();
                 throw;
             }
             catch (OperationCanceledException ex)
             {
                 failure = new ExternalMetadataUnavailableException(
-                    provider.ProviderName,
+                    NameOf(provider),
                     ExternalMetadataFailureKind.Timeout,
-                    $"{provider.ProviderName} did not answer within {_providerCallTimeout.TotalSeconds:F0}s",
+                    $"{NameOf(provider)} did not answer within {_providerCallTimeout.TotalSeconds:F0}s",
                     innerException: ex);
             }
             catch (ExternalMetadataUnavailableException ex)
@@ -357,9 +361,9 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 failure = new ExternalMetadataUnavailableException(
-                    provider.ProviderName,
+                    NameOf(provider),
                     ExternalMetadataFailureKind.Unavailable,
-                    $"{provider.ProviderName} failed: {ex.Message}",
+                    $"{NameOf(provider)} failed: {ex.Message}",
                     innerException: ex);
             }
         }
@@ -376,10 +380,14 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
 
     private ExternalMetadataUnavailableException CoolingDownFailure(IExternalSeriesMetadataService provider, DateTimeOffset retryAt)
         => new(
-            provider.ProviderName,
+            NameOf(provider),
             ExternalMetadataFailureKind.Unavailable,
-            $"{provider.ProviderName} is skipped after recent failures until {retryAt:O}",
+            $"{NameOf(provider)} is skipped after recent failures until {retryAt:O}",
             retryAt - _timeProvider.GetUtcNow());
+
+    /// <summary>The provider's name for messages; its type name when it reports none.</summary>
+    private static string NameOf(IExternalSeriesMetadataService provider)
+        => string.IsNullOrWhiteSpace(provider.ProviderName) ? provider.GetType().Name : provider.ProviderName;
 
     private bool IsCoolingDown(IExternalSeriesMetadataService provider, out DateTimeOffset retryAt)
     {

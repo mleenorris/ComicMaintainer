@@ -673,6 +673,56 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         Assert500(result.Result, "Error searching external metadata");
     }
 
+    [Fact]
+    public async Task Search_ProvidersUnavailable_Returns503NamingThem()
+    {
+        _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException(new[]
+            {
+                new ExternalMetadataUnavailableException("MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s"),
+                new ExternalMetadataUnavailableException("ComicVine", ExternalMetadataFailureKind.RateLimited, "ComicVine budget used up", TimeSpan.FromSeconds(90))
+            }));
+
+        var result = await CreateController().Search("Batman", 10, CancellationToken.None);
+
+        var obj = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
+        var body = Json(obj.Value);
+        Assert.Contains("MangaDex did not answer within 15s", (string?)body["error"]);
+        Assert.Equal(new[] { "MangaDex", "ComicVine" }, body["providers"]!.Select(p => (string?)p));
+        Assert.Equal(90, (int?)body["retry_after_seconds"]);
+    }
+
+    [Fact]
+    public async Task Search_ReturnsEachCandidatesProviderId()
+    {
+        _external.Setup(e => e.SearchSeriesAsync("Berserk", 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ExternalSeriesMetadata>
+            {
+                new() { CanonicalTitle = "Berserk", Source = "AniListManga", SourceId = "30002" }
+            });
+
+        var result = await CreateController().Search("Berserk", 10, CancellationToken.None);
+
+        var json = Json(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal("30002", (string?)json["results"]![0]!["source_id"]);
+    }
+
+    [Fact]
+    public async Task RefreshOne_ProvidersUnavailable_Returns503AndKeepsTheRecord()
+    {
+        _cache.Setup(c => c.RefreshAsync("Batman", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException(
+                "ComicVine", ExternalMetadataFailureKind.Unavailable, "ComicVine answered HTTP 503 Service Unavailable"));
+
+        var result = await CreateController().RefreshOne("Batman", queue: false, CancellationToken.None);
+
+        var obj = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
+        Assert.Equal("ComicVine answered HTTP 503 Service Unavailable", ErrorOf(obj));
+        Assert.Null((int?)Json(obj.Value)["retry_after_seconds"]);
+    }
+
     // ---- GetSeries ----------------------------------------------------------------------
 
     [Fact]
@@ -820,6 +870,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
                 CanonicalTitle = "  Attack on Titan  ",
                 Aliases = new() { " Shingeki no Kyojin ", "", "   ", "AoT" },
                 Source = "AniList",
+                SourceId = " 16498 ",
                 ImageUrl = "https://img.example/aot.jpg",
                 ThumbnailUrl = "   ",
                 LocalizedTitles = new()
@@ -837,6 +888,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         Assert.NotNull(_appliedMatch);
         Assert.Equal("Attack on Titan", _appliedMatch!.CanonicalTitle);
         Assert.Equal(new[] { "Shingeki no Kyojin", "AoT" }, _appliedMatch.Aliases);
+        Assert.Equal("16498", _appliedMatch.SourceId);
         Assert.Equal("AniList", _appliedMatch.Source);
         Assert.Equal("https://img.example/aot.jpg", _appliedMatch.ImageUrl);
         Assert.Null(_appliedMatch.ThumbnailUrl);

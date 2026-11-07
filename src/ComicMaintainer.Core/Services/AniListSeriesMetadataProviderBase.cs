@@ -44,24 +44,32 @@ public abstract class AniListSeriesMetadataProviderBase : ExternalSeriesMetadata
         """;
 
     private readonly string _nativeLanguage;
+    private readonly string _cacheName;
     private readonly string _searchQuery;
     private readonly Lazy<ProviderRateLimiter> _rateLimiter;
 
     /// <param name="providerName">Name reported as the provider and stored as the match source.</param>
+    /// <param name="cacheName">Prefix of the provider's cache keys, e.g. <c>anilist-manga</c>.</param>
     /// <param name="countryOfOrigin">AniList country filter, e.g. <c>JP</c> or <c>KR</c>.</param>
     /// <param name="nativeLanguage">BCP-47 primary tag of the native titles, e.g. <c>ja</c> or <c>ko</c>.</param>
+    /// <param name="rateLimiter">
+    /// Throttle to use instead of the process-wide AniList limiter (tests only).
+    /// </param>
     private protected AniListSeriesMetadataProviderBase(
         string providerName,
+        string cacheName,
         string countryOfOrigin,
         string nativeLanguage,
         IHttpClientFactory httpClientFactory,
         IOptionsMonitor<AppSettings> settings,
         IMemoryCache cache,
         ILogger logger,
-        ComicMaintainerMetrics? metrics)
+        ComicMaintainerMetrics? metrics,
+        ProviderRateLimiter? rateLimiter = null)
         : base(providerName, httpClientFactory, settings, cache, logger, metrics)
     {
         _nativeLanguage = nativeLanguage;
+        _cacheName = cacheName;
         // Constrain the search to MANGA media from the provider's country.
         _searchQuery = $$"""
             query ($search: String, $perPage: Int) {
@@ -73,9 +81,11 @@ public abstract class AniListSeriesMetadataProviderBase : ExternalSeriesMetadata
             }
             """;
         _rateLimiter = new Lazy<ProviderRateLimiter>(
-            () => SharedRateLimiters.GetOrCreateAniList(Settings.CurrentValue.AniListRequestsPerMinute),
+            () => rateLimiter ?? SharedRateLimiters.GetOrCreateAniList(Settings.CurrentValue.AniListRequestsPerMinute),
             LazyThreadSafetyMode.ExecutionAndPublication);
     }
+
+    private protected override string CacheKeyPrefix => $"{_cacheName}-series";
 
     private protected override ProviderRateLimiter RateLimiter => _rateLimiter.Value;
 
@@ -205,7 +215,7 @@ public abstract class AniListSeriesMetadataProviderBase : ExternalSeriesMetadata
 
         await ApplyProbeAsync(
             snapshot,
-            $"{CacheKeyPrefix}-health-probe",
+            $"{_cacheName}-health-probe",
             () => BuildGraphQlRequest(config, ProbeQuery, variables: null),
             HealthCacheDuration,
             cancellationToken);

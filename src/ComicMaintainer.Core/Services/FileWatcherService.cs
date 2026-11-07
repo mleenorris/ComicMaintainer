@@ -70,7 +70,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// started once per process by <see cref="StartAsync"/>. Later scans wait for it, so a
     /// recovery rescan cannot take the files it has yet to add for new arrivals.
     /// </summary>
-    private Task _initialScan = Task.CompletedTask;
+    private volatile Task _initialScan = Task.CompletedTask;
 
     /// <summary>
     /// Pending per-file processing requests, keyed by full path. A burst of file-system events for

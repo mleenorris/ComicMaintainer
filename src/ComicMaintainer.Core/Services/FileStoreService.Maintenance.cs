@@ -30,21 +30,25 @@ public partial class FileStoreService
 
             _logger.LogInformation("Loading {Count} files from database", fileEntities.Count);
 
+            // The database is the record, so the in-memory copy is replaced rather than
+            // merged: a row deleted since the last load (for example by a database reset)
+            // must disappear from memory too, not linger as a file every endpoint still lists.
+            var loadedPaths = new HashSet<string>(StringComparer.Ordinal);
             foreach (var entity in fileEntities)
             {
-                var comicFile = ToComicFile(entity);
-                _files.AddOrUpdate(entity.FilePath, comicFile, (_, _) => comicFile);
+                ApplyCommittedRow(entity);
+                loadedPaths.Add(entity.FilePath);
+            }
 
-                if (entity.IsDuplicate)
-                {
-                    _duplicateFiles.TryAdd(entity.FilePath, true);
-                }
+            foreach (var stalePath in _files.Keys.Where(path => !loadedPaths.Contains(path)).ToList())
+            {
+                ForgetCommittedRow(stalePath);
             }
 
             MarkChanged();
             var loadedCount = _files.Count;
             var processedCount = _files.Values.Count(f => f.IsProcessed);
-            var duplicateCount = _duplicateFiles.Count;
+            var duplicateCount = _files.Values.Count(f => f.IsDuplicate);
 
             _logger.LogInformation("Loaded {FileCount} files from database ({ProcessedCount} processed, {DuplicateCount} duplicates)",
                 loadedCount, processedCount, duplicateCount);
@@ -68,10 +72,8 @@ public partial class FileStoreService
         }
         entity.UpdatedAt = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
-        MarkChanged();
 
-        var updated = ToComicFile(entity);
-        _files.AddOrUpdate(filePath, updated, (_, _) => updated);
+        ApplyCommittedRow(entity);
         MarkChanged();
     }
 
@@ -116,14 +118,12 @@ public partial class FileStoreService
                 if (entities.Count > 0)
                 {
                     await dbContext.SaveChangesAsync(cancellationToken);
-                    MarkChanged();
 
-                    // Mirror the bumped versions into the in-memory snapshot so
+                    // Mirror the committed versions into the in-memory copy so
                     // subsequent reads agree with the database.
                     foreach (var entity in entities)
                     {
-                        var updated = ToComicFile(entity);
-                        _files.AddOrUpdate(entity.FilePath, updated, (_, _) => updated);
+                        ApplyCommittedRow(entity);
                     }
                     MarkChanged();
                 }
@@ -162,19 +162,18 @@ public partial class FileStoreService
                 {
                     _logger.LogDebug("Marking stale entry for removal: {FilePath}", SanitizeForLogging(entity.FilePath));
                     filesToRemove.Add(entity);
-                    
-                    // Also remove from in-memory store
-                    _files.TryRemove(entity.FilePath, out _);
-                    _duplicateFiles.TryRemove(entity.FilePath, out _);
-                    MarkChanged();
                 }
             }
-            
+
             // Remove all stale entries in a single operation
             if (filesToRemove.Any())
             {
                 dbContext.ComicFiles.RemoveRange(filesToRemove);
                 await dbContext.SaveChangesAsync(cancellationToken);
+                foreach (var entity in filesToRemove)
+                {
+                    ForgetCommittedRow(entity.FilePath);
+                }
                 MarkChanged();
                 removedCount = filesToRemove.Count;
                 

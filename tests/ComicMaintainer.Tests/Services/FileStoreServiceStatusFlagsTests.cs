@@ -82,8 +82,9 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
         Assert.Equal(flag == Flag.Normalized, row.IsNormalized);
         Assert.False(row.IsProcessed);
         Assert.Equal(nameof(FileMetadataSource.Scanned), row.MetadataSource);
-        // Bumped for the in-memory change and again once the new row is persisted.
-        Assert.True(service.ChangeVersion >= before + 2);
+        // Bumped exactly once, after the row was committed and mirrored into memory.
+        Assert.Equal(before + 1, service.ChangeVersion);
+        Assert.True(Read(Assert.Single(await service.GetAllFilesAsync()), flag));
         Assert.False(_logger.Has(LogLevel.Error));
     }
 
@@ -142,36 +143,45 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
     }
 
     [Fact]
-    public async Task MarkFileDuplicateAsync_FileNotOnDiskYet_IsAppliedWhenTheFileIsAdded()
+    public async Task MarkFileDuplicateAsync_FileNotOnDiskYet_RecordsNothingAnywhere()
     {
         var path = Path.Join(_library, "Later.cbz");
         var service = CreateService();
+        var before = service.ChangeVersion;
 
         await service.MarkFileDuplicateAsync(path, true);
+
+        // There is no row to flag, so memory must not keep a flag the database never saw.
         Assert.Null(await FindRowAsync(path));
+        Assert.Empty(await service.GetAllFilesAsync());
+        Assert.Equal(before, service.ChangeVersion);
 
         File.WriteAllText(path, "comic");
         await service.AddFileAsync(path);
 
-        Assert.True((await FindRowAsync(path))!.IsDuplicate);
-        Assert.True(Assert.Single(await service.GetAllFilesAsync()).IsDuplicate);
+        Assert.False((await FindRowAsync(path))!.IsDuplicate);
+        Assert.False(Assert.Single(await service.GetAllFilesAsync()).IsDuplicate);
     }
 
     [Theory]
     [InlineData(Flag.Duplicate)]
     [InlineData(Flag.Renamed)]
     [InlineData(Flag.Normalized)]
-    public async Task MarkFlag_DatabaseUnavailable_LogsErrorAndKeepsInMemoryState(Flag flag)
+    public async Task MarkFlag_DatabaseUnavailable_LogsErrorAndLeavesMemoryAgreeingWithTheDatabase(Flag flag)
     {
         var path = WriteComic(_library, "Saga 002.cbz");
         var service = CreateService();
         await service.AddFileAsync(path);
+        var before = service.ChangeVersion;
         _factory.FailAll();
 
         await MarkAsync(service, flag, path, true);
 
         Assert.True(_logger.Contains(LogLevel.Error, $"Error updating {flag.ToString().ToLowerInvariant()} status in database"));
-        Assert.True(Read(Assert.Single(await service.GetAllFilesAsync()), flag));
+        // Regression: memory was changed first, so the Series view and /api/files/counts showed
+        // the flag while the Files list (read from SQL) did not, until a restart dropped it.
+        Assert.False(Read(Assert.Single(await service.GetAllFilesAsync()), flag));
+        Assert.Equal(before, service.ChangeVersion);
 
         _factory.Heal();
         Assert.False(Read((await FindRowAsync(path))!, flag));

@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -29,7 +30,7 @@ public partial class FileStoreService
 
         if (stats.Count == 0) return 0;
 
-        var changed = 0;
+        var changedEntities = new List<ComicFileEntity>();
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -45,32 +46,30 @@ public partial class FileStoreService
                     entity.FileSize = size;
                     entity.LastModified = lastWrite;
                     entity.UpdatedAt = DateTime.UtcNow;
-                    changed++;
+                    changedEntities.Add(entity);
                 }
             }
-            if (changed > 0)
+            if (changedEntities.Count > 0)
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
-                MarkChanged();
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // Nothing was committed, so memory is left as it was: it still agrees with the
+            // database, and the next scan sees the same difference and tries again.
             _logger.LogWarning(ex, "RefreshFileStats: failed to persist file stats for {Count} file(s)", stats.Count);
+            return 0;
         }
 
-        // Mirror into the in-memory snapshot regardless of DB outcome so the
-        // next scan compares against what is actually on disk.
-        foreach (var (path, (size, lastWrite)) in stats)
+        if (changedEntities.Count == 0) return 0;
+
+        foreach (var entity in changedEntities)
         {
-            if (_files.TryGetValue(path, out var file))
-            {
-                file.FileSize = size;
-                file.LastModified = lastWrite;
-            }
+            ApplyCommittedRow(entity);
         }
         MarkChanged();
 
-        return changed;
+        return changedEntities.Count;
     }
 }

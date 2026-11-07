@@ -12,8 +12,15 @@ using Microsoft.EntityFrameworkCore;
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// In-memory file store service (can be replaced with database implementation)
+/// Tracks the library's comic files in the <c>ComicFiles</c> table, with an in-memory
+/// copy of every row for the hot per-file checks and the series library build.
 /// </summary>
+/// <remarks>
+/// The database is the single source of truth. Every write commits to the database
+/// first and only then updates the in-memory copy from the saved row
+/// (<see cref="ApplyCommittedRow"/>), so a failed or cancelled write leaves both exactly
+/// as they were and every endpoint, whichever of the two it reads, reports the same state.
+/// </remarks>
 public partial class FileStoreService : IFileStoreService, IChangeVersionSource
 {
     private const string UnmarkedCountCacheKeyPrefix = "FileStore.UnmarkedCount";
@@ -34,8 +41,12 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
     /// </summary>
     private const int SqliteParameterChunkSize = 500;
 
+    /// <summary>
+    /// In-memory copy of every committed <c>ComicFiles</c> row, keyed by path. Entries are
+    /// replaced wholesale (never mutated in place) and only after the database commit, so a
+    /// reader always sees a row exactly as it was saved.
+    /// </summary>
     private readonly ConcurrentDictionary<string, ComicFile> _files = new();
-    private readonly ConcurrentDictionary<string, bool> _duplicateFiles = new();
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<FileStoreService> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
@@ -44,16 +55,41 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
     private readonly IUserContextAccessor? _userContext;
     private long _changeVersion;
 
+    /// <summary>Per-user read-state counters; see <see cref="GetReadStateVersion"/>.</summary>
+    private readonly ConcurrentDictionary<string, long> _readStateVersions = new(StringComparer.Ordinal);
+
     /// <inheritdoc />
     /// <remarks>
-    /// Bumped whenever the in-memory file snapshot or any user's read state
-    /// changes. Derived views (series library snapshot, combinable folders,
-    /// folder-key maps) key their caches on this value.
+    /// Bumped whenever the tracked file list or a file's stored state changes. Per-user
+    /// read state does not bump it (see <see cref="GetReadStateVersion"/>), so one user
+    /// marking an issue read does not invalidate every user's cached library. Derived
+    /// views (series library snapshot, combinable folders, folder-key maps) key their
+    /// caches on this value.
     /// </remarks>
     public long ChangeVersion => Interlocked.Read(ref _changeVersion);
 
-    /// <summary>Records that the file snapshot or read state changed.</summary>
+    /// <summary>Records that the file list or a file's stored state changed.</summary>
     private void MarkChanged() => Interlocked.Increment(ref _changeVersion);
+
+    /// <inheritdoc />
+    public long GetReadStateVersion(string userId)
+        => _readStateVersions.TryGetValue(userId, out var version) ? version : 0;
+
+    /// <summary>Records that <paramref name="userId"/>'s read state changed.</summary>
+    private void MarkReadStateChanged(string userId)
+        => _readStateVersions.AddOrUpdate(userId, 1, (_, version) => version + 1);
+
+    /// <summary>
+    /// Replaces the in-memory copy of a row with what was just committed to the database.
+    /// Only ever called after a successful <c>SaveChanges</c>, which keeps the copy in step
+    /// with the database instead of ahead of it.
+    /// </summary>
+    private void ApplyCommittedRow(ComicFileEntity entity)
+        => _files[entity.FilePath] = ToComicFile(entity);
+
+    /// <summary>Drops the in-memory copy of a row whose deletion was just committed.</summary>
+    private void ForgetCommittedRow(string filePath)
+        => _files.TryRemove(filePath, out _);
 
     public FileStoreService(
         IOptionsMonitor<AppSettings> settings,
@@ -180,7 +216,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
         }
     }
 
-    private ComicFileEntity CreateFileEntity(string filePath, bool? isDuplicate = null)
+    private static ComicFileEntity CreateFileEntity(string filePath, bool isDuplicate = false)
     {
         var fileInfo = new FileInfo(filePath);
         return new ComicFileEntity
@@ -193,7 +229,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
             IsProcessed = false, // Will be computed from IsRenamed && IsNormalized
             IsRenamed = false, // Initialize to false by default
             IsNormalized = false, // Initialize to false by default
-            IsDuplicate = isDuplicate ?? _duplicateFiles.ContainsKey(filePath),
+            IsDuplicate = isDuplicate,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             MetadataSource = FileMetadataSource.Scanned.ToString()

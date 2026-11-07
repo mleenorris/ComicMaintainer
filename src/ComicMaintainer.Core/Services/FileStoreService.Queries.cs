@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Data;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 
 namespace ComicMaintainer.Core.Services;
@@ -69,15 +70,38 @@ public partial class FileStoreService
         return allFiles;
     }
 
-    public Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Counted in SQL with the same predicates as <see cref="GetUnmarkedCountAsync"/> and the
+    /// file-list filters, so <c>/api/files/counts</c>, the list's <c>unmarked_count</c> and the
+    /// filtered pages always agree. Cached against <see cref="ChangeVersion"/> like the
+    /// unmarked count, so polling the counts does not re-scan the table.
+    /// </remarks>
+    public async Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default)
     {
-        var files = _files.Values.ToList();
-        var total = files.Count;
-        var processed = files.Count(f => f.IsProcessed);
-        var duplicates = files.Count(f => f.IsDuplicate);
-        var unprocessed = files.Count(f => !f.IsProcessed && !f.IsDuplicate);
+        var cacheKey = $"FileStore.FileCounts.{ChangeVersion}";
+        if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out (int, int, int, int) cached))
+        {
+            return cached;
+        }
 
-        return Task.FromResult((total, processed, unprocessed, duplicates));
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var counts = await dbContext.ComicFiles
+            .AsNoTracking()
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Processed = g.Count(f => f.IsRenamed && f.IsNormalized),
+                Unprocessed = g.Count(f => !(f.IsRenamed && f.IsNormalized) && !f.IsDuplicate),
+                Duplicates = g.Count(f => f.IsDuplicate),
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var result = counts is null
+            ? (0, 0, 0, 0)
+            : (counts.Total, counts.Processed, counts.Unprocessed, counts.Duplicates);
+        _memoryCache?.Set(cacheKey, result, UnmarkedCountCacheTtl);
+        return result;
     }
 
     public Task<bool> IsFileProcessedAsync(string filePath, CancellationToken cancellationToken = default)

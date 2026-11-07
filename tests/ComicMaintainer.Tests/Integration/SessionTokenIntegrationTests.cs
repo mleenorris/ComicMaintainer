@@ -2,13 +2,18 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 
 namespace ComicMaintainer.Tests.Integration;
 
@@ -57,7 +62,7 @@ public sealed class SessionTokenIntegrationTests : IClassFixture<SessionTokenInt
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
         Assert.Equal(["ComicMaintainerAPI/stream"], jwt.Audiences);
         Assert.Equal(AuthTokens.StreamTokenUse, jwt.Claims.Single(c => c.Type == AuthTokens.TokenUseClaim).Value);
-        Assert.InRange(jwt.ValidTo - jwt.IssuedAt, TimeSpan.FromSeconds(55), TimeSpan.FromSeconds(65));
+        Assert.InRange(jwt.ValidTo - jwt.ValidFrom, TimeSpan.FromSeconds(55), TimeSpan.FromSeconds(65));
         Assert.DoesNotContain(jwt.Claims, c => c.Type == "role");
 
         // Not a session token, in the header or in the URL of any other endpoint.
@@ -76,19 +81,37 @@ public sealed class SessionTokenIntegrationTests : IClassFixture<SessionTokenInt
         Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
     }
 
+    // Before 3.0.0 GET /api/auth/sse-token handed out a full session token for the event stream URL.
     [Fact]
-    public async Task TheDeprecatedSseTokenEndpointNowIssuesAStreamToken()
+    public async Task TheOldSseTokenEndpointNoLongerIssuesTokens()
     {
         var (_, session) = await _host.SignInNewUserAsync();
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/auth/sse-token");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", session);
-        using var response = await _host.Client.SendAsync(request);
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var token = body.RootElement.GetProperty("token").GetString()!;
 
-        Assert.Equal(HttpStatusCode.Unauthorized, await GetStatusAsync("/api/auth/user", bearer: token));
-        using var stream = await OpenStreamAsync(token);
-        Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, await GetStatusAsync("/api/auth/sse-token", bearer: session));
+    }
+
+    [Fact]
+    public async Task AnExpiredStreamTokenIsRefused()
+    {
+        var (user, _) = await _host.SignInNewUserAsync();
+        var expired = _host.WriteStreamToken(user, DateTime.UtcNow.AddMinutes(-2), DateTime.UtcNow.AddSeconds(-30));
+
+        using var stream = await OpenStreamAsync(expired);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, stream.StatusCode);
+    }
+
+    [Fact]
+    public async Task ATokenWithoutTheSessionClaimsIsRefused()
+    {
+        // A token signed with the right key but issued before 3.0.0, without a security-stamp fingerprint or id,
+        // cannot be revoked and is no longer accepted.
+        var (user, _) = await _host.SignInNewUserAsync();
+        var legacy = _host.WriteSessionToken(user, withSessionClaims: false);
+        var current = _host.WriteSessionToken(user, withSessionClaims: true);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, await GetStatusAsync("/api/auth/user", bearer: legacy));
+        Assert.Equal(HttpStatusCode.OK, await GetStatusAsync("/api/auth/user", bearer: current));
     }
 
     [Fact]
@@ -273,6 +296,54 @@ public sealed class SessionTokenIntegrationTests : IClassFixture<SessionTokenInt
                 .LoginAsync(username, password);
             Assert.True(success, error);
             return token;
+        }
+
+        /// <summary>A stream token for <paramref name="user"/> valid from <paramref name="notBefore"/> to <paramref name="expires"/>.</summary>
+        public string WriteStreamToken(ApplicationUser user, DateTime notBefore, DateTime expires)
+        {
+            var settings = Factory.Services.GetRequiredService<IOptions<JwtSettings>>().Value;
+            return WriteToken(
+                settings,
+                AuthTokens.StreamAudience(settings.Audience),
+                [
+                    new Claim(ClaimTypes.NameIdentifier, user.Id),
+                    new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                    new Claim(AuthTokens.SecurityStampClaim, AuthTokens.Fingerprint(FindUser(user.Id).SecurityStamp)),
+                    new Claim(AuthTokens.TokenUseClaim, AuthTokens.StreamTokenUse),
+                ],
+                notBefore,
+                expires);
+        }
+
+        /// <summary>
+        /// A session token for <paramref name="user"/>, signed with the app's key; without
+        /// <paramref name="withSessionClaims"/> it lacks the <c>jti</c> and security-stamp claims, like tokens issued
+        /// before 3.0.0.
+        /// </summary>
+        public string WriteSessionToken(ApplicationUser user, bool withSessionClaims)
+        {
+            var settings = Factory.Services.GetRequiredService<IOptions<JwtSettings>>().Value;
+            var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, user.Id), new(ClaimTypes.Name, user.UserName!) };
+            if (withSessionClaims)
+            {
+                claims.Add(new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()));
+                claims.Add(new Claim(AuthTokens.SecurityStampClaim, AuthTokens.Fingerprint(FindUser(user.Id).SecurityStamp)));
+            }
+
+            return WriteToken(settings, settings.Audience, claims, DateTime.UtcNow, DateTime.UtcNow.AddHours(1));
+        }
+
+        private ApplicationUser FindUser(string userId)
+        {
+            using var scope = Factory.Services.CreateScope();
+            return scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>().FindByIdAsync(userId).GetAwaiter().GetResult()!;
+        }
+
+        private static string WriteToken(JwtSettings settings, string audience, IEnumerable<Claim> claims, DateTime notBefore, DateTime expires)
+        {
+            var credentials = new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(settings.Secret)), SecurityAlgorithms.HmacSha256);
+            return new JwtSecurityTokenHandler().WriteToken(
+                new JwtSecurityToken(settings.Issuer, audience, claims, notBefore, expires, credentials));
         }
 
         public async Task ChangeUserAsync(string userId, Func<UserManager<ApplicationUser>, ApplicationUser, Task> change)

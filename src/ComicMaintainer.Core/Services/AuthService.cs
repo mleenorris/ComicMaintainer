@@ -342,6 +342,7 @@ public class AuthService : IAuthService
             issuer: _jwtSettings.Issuer,
             audience: audience,
             claims: claims,
+            notBefore: DateTime.UtcNow,
             expires: expires,
             signingCredentials: creds
         );

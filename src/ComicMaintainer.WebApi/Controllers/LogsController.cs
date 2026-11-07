@@ -178,18 +178,20 @@ public class LogsController : ControllerBase
             const int MAX_LINES = 10000;
             int effectiveLines = lines == 0 ? MAX_LINES : Math.Min(lines, MAX_LINES);
             
-            // Use ReadLines for streaming and take last N lines
-            var allLinesEnumerable = System.IO.File.ReadLines(logFilePath);
+            // Stream the file and keep the last N lines. The current log is still open for writing by Serilog, which
+            // Windows only lets another reader open when that reader shares write access too.
             totalLines = 0;
-            
-            // Count lines efficiently while building queue of last N lines
             var queue = new Queue<string>(effectiveLines);
-            foreach (var line in allLinesEnumerable)
+            using (var stream = new FileStream(logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream))
             {
-                totalLines++;
-                if (queue.Count >= effectiveLines)
-                    queue.Dequeue();
-                queue.Enqueue(line);
+                while (reader.ReadLine() is { } line)
+                {
+                    totalLines++;
+                    if (queue.Count >= effectiveLines)
+                        queue.Dequeue();
+                    queue.Enqueue(line);
+                }
             }
             
             linesToShow = queue.ToArray();

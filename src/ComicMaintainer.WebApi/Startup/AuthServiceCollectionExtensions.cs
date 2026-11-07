@@ -103,6 +103,7 @@ internal static class AuthServiceCollectionExtensions
         // Session tokens: signed in with a password (or minted for a password change), sent in the Authorization
         // header. Never read from the query string: proxies log URLs. Every request checks that the session has not
         // ended (IAuthSessionValidator): sign-out, password or role changes and disabled or deleted accounts revoke.
+        services.AddMemoryCache();
         services.AddSingleton<IAuthSessionValidator, AuthSessionValidator>();
         authBuilder.AddJwtBearer(options =>
         {

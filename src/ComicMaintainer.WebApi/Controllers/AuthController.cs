@@ -237,15 +237,6 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Before 3.0.0 this returned a full session token for the event stream. It now returns a stream token, like
-    /// <see cref="GetStreamToken"/>; use <c>POST /api/auth/stream-token</c> instead.
-    /// </summary>
-    [Authorize]
-    [HttpGet("sse-token")]
-    [Obsolete("Use POST /api/auth/stream-token.")]
-    public Task<ActionResult> GetSseToken() => GetStreamToken();
-
-    /// <summary>
     /// Signs out: the session token this request was made with is refused from now on. With
     /// <c>allSessions</c>, every session token of the account is (as after a password change).
     /// </summary>

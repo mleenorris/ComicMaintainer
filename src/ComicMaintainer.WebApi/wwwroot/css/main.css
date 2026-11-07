@@ -1350,6 +1350,35 @@
             outline-offset: 2px;
         }
 
+        /* A library card (and list row) is a list item holding two sibling
+           controls: the select box and the button that opens the series. The
+           open button fills the card; the select box is laid over it. */
+        .series-card-open,
+        .series-list-row-open {
+            display: block;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .series-card-open:focus-visible {
+            outline: 3px solid var(--accent-primary);
+            outline-offset: -3px;
+        }
+
+        /* Keyboard focus lifts the card like hovering does. */
+        .series-card:has(> .series-card-open:focus-visible) {
+            border-color: var(--brand-ink);
+            box-shadow: var(--shadow-pop);
+        }
+
         /* ── Series selection (series list view) ──────────────────────────── */
         .series-card--selected,
         .series-list-row--selected {
@@ -1364,6 +1393,9 @@
             z-index: 3;
             width: 24px;
             height: 24px;
+            margin: 0;
+            padding: 0;
+            font-family: inherit;
             border-radius: 6px;
             border: 2px solid rgba(255, 255, 255, 0.85);
             background: rgba(0, 0, 0, 0.45);
@@ -1403,6 +1435,7 @@
             position: static;
             align-self: center;
             flex: 0 0 auto;
+            margin-left: 12px;
             background: var(--bg-secondary);
             color: var(--text-primary);
             border-color: var(--text-muted);
@@ -2088,9 +2121,14 @@
         /* Used by the "Grid" layout option so long titles can wrap onto two
            lines against the page background instead of being clipped against
            the dark overlay on top of the cover. */
-        .series-grid--titled .series-card {
+        .series-grid--titled .series-card,
+        .series-grid--titled .series-card-open {
             display: flex;
             flex-direction: column;
+        }
+
+        .series-grid--titled .series-card-open {
+            flex: 1 1 auto;
         }
 
         .series-card-body--below {
@@ -2134,20 +2172,28 @@
             box-sizing: border-box;
         }
 
+        /* The row holds the select box and the open button side by side; the
+           open button carries the padding so the whole row beside the select
+           box is its click target. */
         .series-list-row {
             display: flex;
             align-items: stretch;
-            gap: 12px;
             width: 100%;
-            padding: 10px 12px;
+            box-sizing: border-box;
             border: none;
             border-bottom: 1px solid var(--border-primary);
             background: var(--bg-secondary);
             color: inherit;
-            font: inherit;
-            text-align: left;
-            cursor: pointer;
             transition: background 0.15s ease;
+        }
+
+        .series-list-row-open {
+            display: flex;
+            align-items: stretch;
+            flex: 1 1 auto;
+            min-width: 0;
+            gap: 12px;
+            padding: 10px 12px;
             /* Big touch target — at least the 48px Apple/Material guideline. */
             min-height: 84px;
         }
@@ -2164,11 +2210,11 @@
         }
 
         .series-list-row:hover,
-        .series-list-row:focus-visible {
+        .series-list-row:has(> .series-list-row-open:focus-visible) {
             background: var(--bg-hover);
         }
 
-        .series-list-row:focus-visible {
+        .series-list-row-open:focus-visible {
             outline: 2px solid var(--text-primary);
             outline-offset: -2px;
         }

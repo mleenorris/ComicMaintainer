@@ -83,6 +83,21 @@ public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RecoverAsync_DeletesTheOldCoverWritersTempArchivesNextToAnArchive()
+    {
+        // Before 3.0 the series cover writer built '<archive>.cover.tmp' next to the archive.
+        var series = Directory.CreateDirectory(Path.Join(_library, "Series")).FullName;
+        var coverTemp = Stale(Path.Join(series, "book.cbz.cover.tmp"), "half-written");
+        var unrelated = Stale(Path.Join(series, "notes.cover.tmp"), "mine");
+
+        var result = await CreateService().RecoverAsync();
+
+        Assert.Equal(1, result.TempFilesDeleted);
+        Assert.False(File.Exists(coverTemp));
+        Assert.True(File.Exists(unrelated));
+    }
+
+    [Fact]
     public async Task RecoverAsync_IntactArchive_RemovesTheRedundantBackup()
     {
         var archive = WriteArchive("Series/book.cbz", "new");

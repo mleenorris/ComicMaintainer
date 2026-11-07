@@ -33,7 +33,8 @@ public sealed record ArchiveWriteRecoveryResult(int TempFilesDeleted, int Backup
 /// truncated archive with the good copy in the backup. For every such backup the sweep keeps the
 /// archive when it can be read and removes the redundant backup; restores the backup when the
 /// archive is missing or unreadable and the backup can be read; and otherwise leaves both alone
-/// and logs an error. It also deletes the old version's orphaned temp archives.</para>
+/// and logs an error. It also deletes the old version's orphaned temp archives, including the
+/// <c>&lt;archive&gt;.cover.tmp</c> files its series cover writer built next to an archive.</para>
 /// <para>Only files last written before the sweep started are touched, so it can run while new
 /// writes are already happening.</para>
 /// </remarks>
@@ -46,6 +47,12 @@ public sealed class ArchiveWriteRecoveryService
     private const string TempExtension = ".comicinfo-write";
 
     private const string BackupExtension = ".backup";
+
+    /// <summary>
+    /// Suffix of the temp archive the series cover writer of versions before 3.0 built next to
+    /// the archive (<c>&lt;archive&gt;.cover.tmp</c>).
+    /// </summary>
+    private const string LegacyCoverTempSuffix = ".cover.tmp";
 
     private static readonly Regex TempNamePattern = new(
         @"^\.tmp_[0-9a-f]{32}\.comicinfo-write$",
@@ -99,7 +106,7 @@ public sealed class ArchiveWriteRecoveryService
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var name = Path.GetFileName(path);
-                if (TempNamePattern.IsMatch(name))
+                if (TempNamePattern.IsMatch(name) || IsLegacyCoverTempName(name))
                 {
                     if (TryDeleteStale(path, startedAt))
                     {
@@ -145,6 +152,10 @@ public sealed class ArchiveWriteRecoveryService
 
         return Task.FromResult(result);
     }
+
+    private static bool IsLegacyCoverTempName(string name) =>
+        name.EndsWith(LegacyCoverTempSuffix, StringComparison.OrdinalIgnoreCase) &&
+        ComicFileExtensions.IsComicArchive(name[..^LegacyCoverTempSuffix.Length]);
 
     private enum BackupOutcome { None, Restored, Removed, Kept }
 

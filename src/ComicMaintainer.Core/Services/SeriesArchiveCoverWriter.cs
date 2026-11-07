@@ -236,7 +236,10 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
     /// desired state, making repeated calls idempotent. Non-cover entries are
     /// always preserved and are streamed one at a time, so memory use does not
     /// grow with entry or archive size. The new archive is written to a sibling
-    /// temp file and atomically moved into place.
+    /// temp file (named by <see cref="ArchiveWriteRecoveryService.CreateTempPath"/>,
+    /// so the watcher and library scan ignore it and the startup sweep removes it
+    /// if a crash leaves it behind), flushed to disk and atomically renamed over
+    /// the original, which is never truncated or rewritten in place.
     /// </summary>
     internal static void RewriteArchive(
         string archivePath,
@@ -268,30 +271,41 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
             return;
         }
 
-        var tempFile = archivePath + ".cover.tmp";
+        var directory = Path.GetDirectoryName(archivePath)
+            ?? throw new IOException("Cannot determine the archive's directory.");
+        var tempFile = ArchiveWriteRecoveryService.CreateTempPath(directory);
         try
         {
-            using (var destination = File.Create(tempFile))
-            using (var writer = new ZipWriter(destination, new ZipWriterOptions(CompressionType.Deflate)))
+            using (var destination = new FileStream(tempFile, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                // Copy every non-managed-cover entry verbatim.
-                foreach (var entry in source.Entries.Where(e => !e.IsDirectory))
+                using (var writer = new ZipWriter(destination, new ZipWriterOptions(CompressionType.Deflate) { LeaveStreamOpen = true }))
                 {
-                    if (IsManagedCoverEntry(entry.Key))
+                    // Copy every non-managed-cover entry verbatim.
+                    foreach (var entry in source.Entries.Where(e => !e.IsDirectory))
                     {
-                        continue;
+                        if (IsManagedCoverEntry(entry.Key))
+                        {
+                            continue;
+                        }
+
+                        using var entryStream = entry.OpenEntryStream();
+                        writer.Write(entry.Key ?? "unknown", entryStream, entry.LastModifiedTime ?? DateTime.Now);
                     }
 
-                    using var entryStream = entry.OpenEntryStream();
-                    writer.Write(entry.Key ?? "unknown", entryStream, entry.LastModifiedTime ?? DateTime.Now);
+                    if (coverBytes is not null && !string.IsNullOrEmpty(coverEntryName))
+                    {
+                        using var coverStream = new MemoryStream(coverBytes, writable: false);
+                        writer.Write(coverEntryName, coverStream, DateTime.Now);
+                    }
                 }
 
-                if (coverBytes is not null && !string.IsNullOrEmpty(coverEntryName))
-                {
-                    using var coverStream = new MemoryStream(coverBytes, writable: false);
-                    writer.Write(coverEntryName, coverStream, DateTime.Now);
-                }
+                // The zip is complete once the writer has written its central directory. Make it
+                // durable before it is renamed over the original, so a power loss cannot leave an
+                // empty or partial file in its place.
+                destination.Flush(flushToDisk: true);
             }
+
+            CopyUnixFileMode(archivePath, tempFile);
 
             // Release the source handle before replacing the file on disk.
             source.Dispose();
@@ -311,6 +325,27 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
             try { if (File.Exists(tempFile)) File.Delete(tempFile); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best-effort */ }
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Gives the rewritten archive the original's permission bits, so replacing it does not
+    /// change who may read the file. Best effort; ownership stays with the application's user.
+    /// </summary>
+    private static void CopyUnixFileMode(string sourcePath, string destinationPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetUnixFileMode(destinationPath, File.GetUnixFileMode(sourcePath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The archive keeps the default permissions for new files.
         }
     }
 

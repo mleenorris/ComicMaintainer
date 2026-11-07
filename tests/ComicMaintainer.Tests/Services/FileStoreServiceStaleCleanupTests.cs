@@ -5,7 +5,9 @@ using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.Data.Sqlite;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -24,6 +26,7 @@ public sealed class FileStoreServiceStaleCleanupTests : IAsyncLifetime
     private readonly string _root = Path.Join(Path.GetTempPath(), $"fss_stale_{Guid.NewGuid():N}");
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
     private readonly Mock<IEventBroadcaster> _broadcaster = new();
+    private readonly BeforeDeleteInterceptor _beforeDelete = new();
     private readonly AppSettings _settings = new();
     private string _library = null!;
     private ServiceProvider _provider = null!;
@@ -37,7 +40,7 @@ public sealed class FileStoreServiceStaleCleanupTests : IAsyncLifetime
 
         await _connection.OpenAsync();
         var services = new ServiceCollection();
-        services.AddDbContextFactory<ComicMaintainerDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContextFactory<ComicMaintainerDbContext>(o => o.UseSqlite(_connection).AddInterceptors(_beforeDelete));
         _provider = services.BuildServiceProvider();
         _factory = _provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         await using var db = await _factory.CreateDbContextAsync();
@@ -302,6 +305,56 @@ public sealed class FileStoreServiceStaleCleanupTests : IAsyncLifetime
 
         Assert.Equal(StaleCleanupStatus.Cancelled, result.Status);
         await AssertRowsAsync(paths, missingSinceSet: false);
+    }
+
+    [Fact]
+    public async Task ScheduledRun_KeepsARowWhoseFileWasReAddedWhileTheDiskWasBeingChecked()
+    {
+        _settings.StaleCleanupMissingGraceHours = 1;
+        var paths = await TrackAsync(present: 10, missing: 2);
+        foreach (var path in paths.Missing)
+        {
+            await SetMissingSinceAsync(path, DateTime.UtcNow.AddDays(-1));
+        }
+        var service = await CreateServiceAsync();
+        var returned = paths.Missing[0];
+        // The watcher re-adds the file (clearing its stamp) just before the delete runs.
+        _beforeDelete.Action = command =>
+        {
+            using var clear = command.Connection!.CreateCommand();
+            clear.Transaction = command.Transaction;
+            clear.CommandText = "UPDATE ComicFiles SET MissingSince = NULL WHERE FilePath = $path";
+            clear.Parameters.Add(new SqliteParameter("$path", returned));
+            clear.ExecuteNonQuery();
+        };
+
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled);
+
+        Assert.Equal(StaleCleanupStatus.Completed, result.Status);
+        Assert.Equal(1, result.RemovedCount);
+        var rows = await RowsAsync();
+        Assert.Contains(returned, rows.Keys);
+        Assert.DoesNotContain(paths.Missing[1], rows.Keys);
+        // The in-memory copy agrees with the database.
+        Assert.True(await service.FileExistsAsync(returned));
+        Assert.False(await service.FileExistsAsync(paths.Missing[1]));
+    }
+
+    /// <summary>Runs <see cref="Action"/> once, just before the first DELETE from ComicFiles.</summary>
+    private sealed class BeforeDeleteInterceptor : DbCommandInterceptor
+    {
+        public Action<DbCommand>? Action { get; set; }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Action is { } action && command.CommandText.TrimStart().StartsWith("DELETE FROM \"ComicFiles\"", StringComparison.Ordinal))
+            {
+                Action = null;
+                action(command);
+            }
+            return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     private sealed record TrackedPaths(IReadOnlyList<string> Present, IReadOnlyList<string> Missing);

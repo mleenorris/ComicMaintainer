@@ -18,14 +18,17 @@ public class MarkReadConfirmationTests
     }
 
     [Theory]
-    [InlineData("markAllFilesRead", "EVERY file in the library as read", "overwrites the read status of all files and cannot be undone")]
-    [InlineData("markAllFilesUnread", "EVERY file in the library as unread", "clears the read status of all files and cannot be undone")]
-    [InlineData("markSelectedFilesRead", "selected file", "overwrites the current read status and cannot be undone")]
-    [InlineData("markSelectedFilesUnread", "selected file", "clears the current read status and cannot be undone")]
-    public void BulkReadStatusAction_ConfirmsBeforeSendingTheBatchRequest(
+    // The whole library is marked server-side (markWholeLibraryRead posts /api/files/read-all);
+    // a selection is sent to the read-batch endpoint.
+    [InlineData("markAllFilesRead", "EVERY file in the library as read", "overwrites the read status of all files and cannot be undone", "markWholeLibraryRead(true)")]
+    [InlineData("markAllFilesUnread", "EVERY file in the library as unread", "clears the read status of all files and cannot be undone", "markWholeLibraryRead(false)")]
+    [InlineData("markSelectedFilesRead", "selected file", "overwrites the current read status and cannot be undone", "read-batch")]
+    [InlineData("markSelectedFilesUnread", "selected file", "clears the current read status and cannot be undone", "read-batch")]
+    public void BulkReadStatusAction_ConfirmsBeforeSendingTheRequest(
         string functionName,
         string expectedScope,
-        string expectedImpact)
+        string expectedImpact,
+        string expectedRequest)
     {
         var contents = ReadMainJs();
 
@@ -36,8 +39,8 @@ public class MarkReadConfirmationTests
         var end = nextFunction >= 0 ? nextFunction : contents.Length;
         var body = contents[start..end];
 
-        var fetchIndex = body.IndexOf("read-batch", StringComparison.Ordinal);
-        Assert.True(fetchIndex >= 0, $"Expected {functionName} to call the read-batch endpoint");
+        var fetchIndex = body.IndexOf(expectedRequest, StringComparison.Ordinal);
+        Assert.True(fetchIndex >= 0, $"Expected {functionName} to send {expectedRequest}");
 
         var confirmation = Regex.Match(
             body,
@@ -48,7 +51,7 @@ public class MarkReadConfirmationTests
             $"{functionName} must return when its confirmation prompt is canceled.");
         Assert.True(
             confirmation.Index < fetchIndex,
-            $"{functionName} must confirm before calling the read-batch endpoint.");
+            $"{functionName} must confirm before sending {expectedRequest}.");
         Assert.Contains(expectedScope, confirmation.Groups["prompt"].Value);
         Assert.Contains(expectedImpact, confirmation.Groups["prompt"].Value);
     }

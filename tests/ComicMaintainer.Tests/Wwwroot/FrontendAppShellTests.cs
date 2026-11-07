@@ -146,7 +146,7 @@ public class FrontendAppShellTests
             "/api/settings/filename-format",
             "/api/settings/log-max-bytes",
             "/api/settings/issue-number-padding",
-            "/api/settings/database-cleanup-interval-hours",
+            "/api/settings/database-cleanup",
             "/api/settings/external-series-metadata"
         })
         {

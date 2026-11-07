@@ -178,7 +178,7 @@ public partial class FileStoreService
             // the meantime clears it (RefreshFromDisk), which keeps that row.
             cancellationToken.ThrowIfCancellationRequested();
             var deleteUnstamped = options.IsManual;
-            var removedCount = 0;
+            var deleted = new List<string>(toDelete.Count);
             await using (var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken))
             {
                 var deleteSet = new HashSet<string>(toDelete, StringComparer.Ordinal);
@@ -198,17 +198,32 @@ public partial class FileStoreService
 
                 foreach (var chunk in toDelete.Chunk(SqliteParameterChunkSize))
                 {
-                    removedCount += await dbContext.ComicFiles
+                    var removedInChunk = await dbContext.ComicFiles
                         .Where(e => chunk.Contains(e.FilePath) && (deleteUnstamped || e.MissingSince != null))
                         .ExecuteDeleteAsync(cancellationToken);
+                    if (removedInChunk == 0)
+                    {
+                        continue;
+                    }
+
+                    // Only the rows really deleted leave the in-memory copy; one kept because
+                    // its file came back stays in both.
+                    var kept = removedInChunk == chunk.Length
+                        ? new HashSet<string>(StringComparer.Ordinal)
+                        : (await dbContext.ComicFiles
+                            .Where(e => chunk.Contains(e.FilePath))
+                            .Select(e => e.FilePath)
+                            .ToListAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+                    deleted.AddRange(chunk.Where(path => !kept.Contains(path)));
                 }
 
                 await transaction.CommitAsync(cancellationToken);
             }
 
-            if (toDelete.Count > 0)
+            var removedCount = deleted.Count;
+            if (removedCount > 0)
             {
-                foreach (var path in toDelete)
+                foreach (var path in deleted)
                 {
                     ForgetCommittedRow(path);
                 }

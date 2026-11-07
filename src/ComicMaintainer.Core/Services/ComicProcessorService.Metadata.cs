@@ -100,18 +100,8 @@ public partial class ComicProcessorService
         }
     }
 
-    public async Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default)
-    {
-        await _processingSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            return await UpdateMetadataCoreAsync(filePath, metadata, cancellationToken);
-        }
-        finally
-        {
-            _processingSemaphore.Release();
-        }
-    }
+    public Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default) =>
+        RunExclusiveAsync(filePath, token => UpdateMetadataCoreAsync(filePath, metadata, token), cancellationToken);
 
     private async Task<bool> UpdateMetadataCoreAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken)
     {
@@ -200,18 +190,8 @@ public partial class ComicProcessorService
         }
     }
 
-    public async Task<bool> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default)
-    {
-        await _processingSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            return await RemoveMetadataCoreAsync(filePath, cancellationToken);
-        }
-        finally
-        {
-            _processingSemaphore.Release();
-        }
-    }
+    public Task<bool> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default) =>
+        RunExclusiveAsync(filePath, token => RemoveMetadataCoreAsync(filePath, token), cancellationToken);
 
     private async Task<bool> RemoveMetadataCoreAsync(string filePath, CancellationToken cancellationToken)
     {

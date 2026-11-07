@@ -14,19 +14,6 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class ComicProcessorService
 {
-    private async Task<bool> RenameFileAsync(string filePath, CancellationToken cancellationToken)
-    {
-        await _processingSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            return await RenameFileCoreAsync(filePath, false, cancellationToken);
-        }
-        finally
-        {
-            _processingSemaphore.Release();
-        }
-    }
-
     private async Task<bool> RenameFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
     {
         try

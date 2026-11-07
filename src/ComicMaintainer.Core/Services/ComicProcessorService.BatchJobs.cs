@@ -27,7 +27,8 @@ public partial class ComicProcessorService
             "processing",
             (filePath, token) => ProcessFileCoreAsync(filePath, forceReprocess, token),
             "Processing failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -43,7 +44,8 @@ public partial class ComicProcessorService
             "renaming",
             (filePath, token) => RenameFileCoreAsync(filePath, forceReprocess, token),
             "Rename failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -59,7 +61,8 @@ public partial class ComicProcessorService
             "normalizing",
             (filePath, token) => NormalizeFileCoreAsync(filePath, forceReprocess, token),
             "Normalize failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default)
@@ -70,7 +73,8 @@ public partial class ComicProcessorService
             "updating metadata for",
             (file, token) => UpdateMetadataCoreAsync(file, metadata, token),
             "Update metadata failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> RemoveMetadataFromFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -105,7 +109,8 @@ public partial class ComicProcessorService
                 return true;
             },
             "Remove metadata failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> DeleteFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -210,7 +215,8 @@ public partial class ComicProcessorService
                 }
             },
             "Delete failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> NormalizeAndRenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -234,7 +240,8 @@ public partial class ComicProcessorService
                 return await RenameFileCoreAsync(filePath, true, token);
             },
             "Normalize and rename failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> RunCustomBatchJobAsync(
@@ -252,7 +259,8 @@ public partial class ComicProcessorService
             itemOperation,
             failureMessage,
             cancellationToken,
-            postLoopAsync);
+            lockEachFile: false,
+            postLoopAsync: postLoopAsync);
     }
 
     private Task<Guid> QueueBatchJobAsync(
@@ -262,6 +270,7 @@ public partial class ComicProcessorService
         Func<string, CancellationToken, Task<bool>> fileOperation,
         string failureMessage,
         CancellationToken cancellationToken,
+        bool lockEachFile,
         Func<CancellationToken, Task>? postLoopAsync = null)
     {
         var jobId = Guid.NewGuid();
@@ -347,7 +356,14 @@ public partial class ComicProcessorService
                                 fileList.Count,
                                 LoggingHelper.SanitizePathForLog(item.file));
 
-                            var success = await fileOperation(item.file, token);
+                            // Built-in file operations run under the file's lock and a shared processing
+                            // slot (see RunExclusiveAsync), so a job never races the watcher, the API or
+                            // another job on the same archive, and concurrent jobs stay within MaxWorkers.
+                            // Custom items are not necessarily files and may call the public, locking
+                            // operations themselves, so they run as they are.
+                            var success = lockEachFile
+                                ? await RunExclusiveAsync(item.file, itemToken => fileOperation(item.file, itemToken), token)
+                                : await fileOperation(item.file, token);
                             _metrics?.RecordFileProcessed(operationName, success);
 
                             lock (jobSyncLock)

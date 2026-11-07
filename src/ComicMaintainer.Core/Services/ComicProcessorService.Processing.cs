@@ -22,17 +22,12 @@ public partial class ComicProcessorService
 
     public async Task<bool> ProcessFileAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken = default)
     {
-        await _processingSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            var success = await ProcessFileCoreAsync(filePath, forceReprocess, cancellationToken);
-            _metrics?.RecordFileProcessed("Process", success);
-            return success;
-        }
-        finally
-        {
-            _processingSemaphore.Release();
-        }
+        var success = await RunExclusiveAsync(
+            filePath,
+            token => ProcessFileCoreAsync(filePath, forceReprocess, token),
+            cancellationToken);
+        _metrics?.RecordFileProcessed("Process", success);
+        return success;
     }
 
     private async Task<bool> ProcessFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)

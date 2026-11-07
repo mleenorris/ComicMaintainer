@@ -118,6 +118,10 @@ public class ReaderController : ControllerBase
         return Ok(session);
     }
 
+    /// <summary>
+    /// Ends one of the caller's reading sessions. A session that belongs to
+    /// another user is answered with 404, the same as an unknown id.
+    /// </summary>
     [HttpPost("session/end")]
     public async Task<ActionResult<ReadingSession>> EndSession([FromBody] EndSessionRequest request, CancellationToken cancellationToken = default)
     {
@@ -127,7 +131,7 @@ public class ReaderController : ControllerBase
         if (request.EndPage < 1)
             return BadRequest(new { error = "EndPage must be at least 1." });
 
-        var session = await _sessionService.EndSessionAsync(request.SessionId, request.EndPage, cancellationToken);
+        var session = await _sessionService.EndSessionAsync(userId, request.SessionId, request.EndPage, cancellationToken);
         if (session is null) return NotFound(new { error = "Session not found." });
 
         return Ok(session);
@@ -135,8 +139,15 @@ public class ReaderController : ControllerBase
 
     // ─── Helpers ───────────────────────────────────────────────────────────────
 
-    private string? GetUserId() =>
-        User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    /// <summary>
+    /// The caller's user id, or <c>null</c> when the principal has none (an
+    /// empty claim counts as none, matching <c>HttpUserContextAccessor</c>).
+    /// </summary>
+    private string? GetUserId()
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return string.IsNullOrEmpty(userId) ? null : userId;
+    }
 
     // ─── Request DTOs ──────────────────────────────────────────────────────────
 

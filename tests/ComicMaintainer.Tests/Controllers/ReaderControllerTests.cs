@@ -182,7 +182,7 @@ public class ReaderControllerTests
     {
         var sessionId = Guid.NewGuid();
         var session = new ReadingSession { SessionId = sessionId, EndPage = 8, EndedAt = DateTime.UtcNow };
-        _sessionMock.Setup(s => s.EndSessionAsync(sessionId, 8, default)).ReturnsAsync(session);
+        _sessionMock.Setup(s => s.EndSessionAsync(TestUserId, sessionId, 8, default)).ReturnsAsync(session);
 
         var request = new ReaderController.EndSessionRequest { SessionId = sessionId, EndPage = 8 };
         var result = await _controller.EndSession(request);
@@ -195,12 +195,40 @@ public class ReaderControllerTests
     public async Task EndSession_UnknownSession_ReturnsNotFound()
     {
         var sessionId = Guid.NewGuid();
-        _sessionMock.Setup(s => s.EndSessionAsync(sessionId, It.IsAny<int>(), default)).ReturnsAsync(default(ReadingSession?));
+        _sessionMock.Setup(s => s.EndSessionAsync(TestUserId, sessionId, It.IsAny<int>(), default)).ReturnsAsync(default(ReadingSession?));
 
         var request = new ReaderController.EndSessionRequest { SessionId = sessionId, EndPage = 5 };
         var result = await _controller.EndSession(request);
 
         Assert.IsType<NotFoundObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task EndSession_IsScopedToTheCaller()
+    {
+        // The session service is asked for the caller's session only; it answers
+        // null for a session id that belongs to someone else, which is a 404.
+        var sessionId = Guid.NewGuid();
+        _sessionMock.Setup(s => s.EndSessionAsync(It.IsAny<string>(), sessionId, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(default(ReadingSession?));
+        SetAuthenticatedUser("someone-else");
+
+        var result = await _controller.EndSession(new ReaderController.EndSessionRequest { SessionId = sessionId, EndPage = 3 });
+
+        Assert.IsType<NotFoundObjectResult>(result.Result);
+        _sessionMock.Verify(s => s.EndSessionAsync("someone-else", sessionId, 3, It.IsAny<CancellationToken>()), Times.Once);
+        _sessionMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task EndSession_EmptyUserIdClaim_ReturnsUnauthorized()
+    {
+        SetAuthenticatedUser(string.Empty);
+
+        var result = await _controller.EndSession(new ReaderController.EndSessionRequest { SessionId = Guid.NewGuid(), EndPage = 3 });
+
+        Assert.IsType<UnauthorizedResult>(result.Result);
+        _sessionMock.VerifyNoOtherCalls();
     }
 
     [Fact]

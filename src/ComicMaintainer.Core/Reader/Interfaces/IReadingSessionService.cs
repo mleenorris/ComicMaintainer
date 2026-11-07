@@ -15,8 +15,11 @@ public interface IReadingSessionService
     Task<ReadingSession> StartSessionAsync(string userId, string contentId, int startPage, bool incognito = false, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Ends an existing session identified by <paramref name="sessionId"/>,
-    /// recording the final page reached.
+    /// Ends the session identified by <paramref name="sessionId"/> that belongs
+    /// to <paramref name="userId"/>, recording the final page reached.
+    /// Returns <c>null</c>, and changes nothing, when no such session exists or
+    /// it belongs to another user: a session id alone never lets a caller end
+    /// someone else's session or move their reading progress.
     /// </summary>
-    Task<ReadingSession?> EndSessionAsync(Guid sessionId, int endPage, CancellationToken cancellationToken = default);
+    Task<ReadingSession?> EndSessionAsync(string userId, Guid sessionId, int endPage, CancellationToken cancellationToken = default);
 }

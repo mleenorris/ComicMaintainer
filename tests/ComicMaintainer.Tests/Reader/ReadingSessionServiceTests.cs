@@ -54,7 +54,7 @@ public class ReadingSessionServiceTests
     [Fact]
     public async Task EndSessionAsync_UnknownSessionId_ReturnsNull()
     {
-        var result = await _sessionService.EndSessionAsync(Guid.NewGuid(), endPage: 5);
+        var result = await _sessionService.EndSessionAsync("user1", Guid.NewGuid(), endPage: 5);
         Assert.Null(result);
     }
 
@@ -63,7 +63,7 @@ public class ReadingSessionServiceTests
     {
         var session = await _sessionService.StartSessionAsync("user1", "content1", startPage: 1);
 
-        var ended = await _sessionService.EndSessionAsync(session.SessionId, endPage: 8);
+        var ended = await _sessionService.EndSessionAsync("user1", session.SessionId, endPage: 8);
 
         Assert.NotNull(ended);
         Assert.Equal(8, ended.EndPage);
@@ -75,7 +75,7 @@ public class ReadingSessionServiceTests
     {
         // No prior progress saved → session end should not crash and no progress row is created
         var session = await _sessionService.StartSessionAsync("user1", "content1", startPage: 1, incognito: false);
-        var ended = await _sessionService.EndSessionAsync(session.SessionId, endPage: 5);
+        var ended = await _sessionService.EndSessionAsync("user1", session.SessionId, endPage: 5);
 
         Assert.NotNull(ended);
 
@@ -99,7 +99,7 @@ public class ReadingSessionServiceTests
         });
 
         var session = await _sessionService.StartSessionAsync("user1", "content1", startPage: 3, incognito: false);
-        await _sessionService.EndSessionAsync(session.SessionId, endPage: 10);
+        await _sessionService.EndSessionAsync("user1", session.SessionId, endPage: 10);
 
         var progress = await _progressService.GetProgressAsync("user1", "content1");
         Assert.NotNull(progress);
@@ -122,7 +122,7 @@ public class ReadingSessionServiceTests
 
         // Session ends at page 5 (user went back) – should NOT overwrite
         var session = await _sessionService.StartSessionAsync("user1", "content1", startPage: 10, incognito: false);
-        await _sessionService.EndSessionAsync(session.SessionId, endPage: 5);
+        await _sessionService.EndSessionAsync("user1", session.SessionId, endPage: 5);
 
         var progress = await _progressService.GetProgressAsync("user1", "content1");
         Assert.NotNull(progress);
@@ -145,11 +145,53 @@ public class ReadingSessionServiceTests
 
         // Incognito session reads ahead to page 18
         var session = await _sessionService.StartSessionAsync("user1", "content1", startPage: 5, incognito: true);
-        await _sessionService.EndSessionAsync(session.SessionId, endPage: 18);
+        await _sessionService.EndSessionAsync("user1", session.SessionId, endPage: 18);
 
         // Durable progress must remain unchanged at page 5
         var progress = await _progressService.GetProgressAsync("user1", "content1");
         Assert.NotNull(progress);
         Assert.Equal(5, progress.CurrentPage);
+    }
+
+    [Fact]
+    public async Task EndSessionAsync_AnotherUsersSession_ReturnsNullAndChangesNothing()
+    {
+        // user1 has durable progress at page 3 and an open session.
+        await _progressService.SaveProgressAsync(new ReadingProgress
+        {
+            UserId = "user1",
+            ContentId = "content1",
+            CurrentPage = 3,
+            TotalPages = 20,
+            PercentComplete = 15.0,
+            LastReadAt = DateTime.UtcNow
+        });
+        var session = await _sessionService.StartSessionAsync("user1", "content1", startPage: 3);
+
+        // user2 learns the session id and tries to end it far ahead.
+        var result = await _sessionService.EndSessionAsync("user2", session.SessionId, endPage: 20);
+
+        Assert.Null(result);
+        var progress = await _progressService.GetProgressAsync("user1", "content1");
+        Assert.NotNull(progress);
+        Assert.Equal(3, progress.CurrentPage);
+        Assert.Null(progress.CompletedAt);
+
+        // The session is still open, and its owner can still end it.
+        var ended = await _sessionService.EndSessionAsync("user1", session.SessionId, endPage: 7);
+        Assert.NotNull(ended);
+        Assert.Equal("user1", ended.UserId);
+        Assert.Equal(7, ended.EndPage);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task EndSessionAsync_WithoutUserId_Throws(string? userId)
+    {
+        var session = await _sessionService.StartSessionAsync("user1", "content1", startPage: 1);
+
+        await Assert.ThrowsAnyAsync<ArgumentException>(
+            () => _sessionService.EndSessionAsync(userId!, session.SessionId, endPage: 2));
     }
 }

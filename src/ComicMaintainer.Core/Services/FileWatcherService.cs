@@ -291,10 +291,10 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         // new files landing at once) are less likely to overflow and be dropped by the OS.
         watcher.InternalBufferSize = ClampInternalBufferSize(_settings.WatcherInternalBufferSizeKB);
 
-        watcher.Created += OnFileCreated;
-        watcher.Changed += OnFileChanged;
-        watcher.Renamed += OnFileRenamed;
-        watcher.Deleted += OnFileDeleted;
+        watcher.Created += (sender, e) => HandleWatcherEvent(sender, () => OnFileCreated(sender, e));
+        watcher.Changed += (sender, e) => HandleWatcherEvent(sender, () => OnFileChanged(sender, e));
+        watcher.Renamed += (sender, e) => HandleWatcherEvent(sender, () => OnFileRenamed(sender, e));
+        watcher.Deleted += (sender, e) => HandleWatcherEvent(sender, () => OnFileDeleted(sender, e));
         watcher.Error += OnWatcherError;
 
         _startingWatcher = watcher;
@@ -513,6 +513,28 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         MarkSelfInducedChange(filePath);
     }
 
+    /// <summary>
+    /// Runs a file-system event handler, and treats an exception it throws as a watcher error.
+    /// <para>
+    /// FileSystemWatcher does not handle exceptions from its handlers the same way everywhere. On
+    /// Linux it reports them through its Error event and stops; on Windows the exception is
+    /// unhandled on the I/O thread and ends the whole process. Routing it to
+    /// <see cref="OnWatcherError"/> here gives both platforms the Linux behavior: the error is
+    /// logged and the watcher is recovered.
+    /// </para>
+    /// </summary>
+    private void HandleWatcherEvent(object? sender, Action handle)
+    {
+        try
+        {
+            handle();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            OnWatcherError(sender!, new ErrorEventArgs(ex));
+        }
+    }
+
     private void OnFileCreated(object sender, FileSystemEventArgs e)
     {
         // Ignore temporary files immediately to avoid unnecessary processing
@@ -624,7 +646,14 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
         _ = Task.Run(async () =>
         {
-            await _fileStore.RemoveFileAsync(e.FullPath);
+            try
+            {
+                await _fileStore.RemoveFileAsync(e.FullPath);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error removing deleted file from store: {Path}"), e.FullPath);
+            }
         });
     }
 

@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -45,7 +46,8 @@ public class AuthControllerTests
             _mockLogger.Object,
             _mockAutheliaSettings.Object,
             _mockAuthorizationService.Object,
-            _mockAppSettings.Object);
+            _mockAppSettings.Object,
+            ClientAddressResolver.Direct);
     }
 
     [Fact]
@@ -55,7 +57,7 @@ public class AuthControllerTests
         var request = new LoginRequest("testuser", "password123");
         var expectedToken = "test-jwt-token";
         _mockAuthService
-            .Setup(s => s.LoginAsync("testuser", "password123"))
+            .Setup(s => s.LoginAsync("testuser", "password123", It.IsAny<string?>()))
             .ReturnsAsync((true, expectedToken, null));
 
         // Act
@@ -77,7 +79,7 @@ public class AuthControllerTests
         // Arrange
         var request = new LoginRequest("testuser", "wrongpassword");
         _mockAuthService
-            .Setup(s => s.LoginAsync("testuser", "wrongpassword"))
+            .Setup(s => s.LoginAsync("testuser", "wrongpassword", It.IsAny<string?>()))
             .ReturnsAsync((false, string.Empty, "Invalid username or password"));
 
         // Act
@@ -99,7 +101,7 @@ public class AuthControllerTests
         // Arrange
         var request = new LoginRequest("nonexistent", "password123");
         _mockAuthService
-            .Setup(s => s.LoginAsync("nonexistent", "password123"))
+            .Setup(s => s.LoginAsync("nonexistent", "password123", It.IsAny<string?>()))
             .ReturnsAsync((false, string.Empty, "Invalid username or password"));
 
         // Act
@@ -400,7 +402,8 @@ public class AuthControllerTests
             _mockLogger.Object,
             _mockAutheliaSettings.Object,
             _mockAuthorizationService.Object,
-            _mockAppSettings.Object);
+            _mockAppSettings.Object,
+            ClientAddressResolver.Direct);
         SetupAuthenticatedUserOnController(controller, "user-id-123", "testuser");
 
         // Act
@@ -522,7 +525,8 @@ public class AuthControllerTests
             _mockLogger.Object,
             _mockAutheliaSettings.Object,
             _mockAuthorizationService.Object,
-            _mockAppSettings.Object);
+            _mockAppSettings.Object,
+            ClientAddressResolver.Direct);
         
         SetupAuthenticatedUserOnController(controller, "user-id-789", autheliaUsername);
 

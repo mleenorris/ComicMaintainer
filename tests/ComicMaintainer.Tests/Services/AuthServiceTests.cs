@@ -31,7 +31,7 @@ public class AuthServiceTests
         _mockJwtSettings = new Mock<IOptions<JwtSettings>>();
         _mockJwtSettings.Setup(x => x.Value).Returns(jwtSettings);
 
-        _authService = new AuthService(_mockUserManager.Object, _mockJwtSettings.Object);
+        _authService = new AuthService(_mockUserManager.Object, _mockJwtSettings.Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance);
     }
 
     [Fact]
@@ -120,14 +120,16 @@ public class AuthServiceTests
 
         _mockUserManager.Setup(x => x.FindByNameAsync("testuser"))
             .ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "password123"))
+            .ReturnsAsync(true);
 
         // Act
         var (success, token, error) = await _authService.LoginAsync("testuser", "password123");
 
-        // Assert
+        // Assert: the same answer as a wrong password, so it does not tell that the account exists.
         Assert.False(success);
         Assert.Empty(token);
-        Assert.Equal("Account is disabled", error);
+        Assert.Equal("Invalid username or password", error);
     }
 
     [Fact]

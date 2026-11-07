@@ -31,7 +31,7 @@ public class AuthServiceCoverageTests
             ExpirationMinutes = 60
         });
 
-        _authService = new AuthService(_userManager.Object, settings);
+        _authService = new AuthService(_userManager.Object, settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance);
     }
 
     [Fact]

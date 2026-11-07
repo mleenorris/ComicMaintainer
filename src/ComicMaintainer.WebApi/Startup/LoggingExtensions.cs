@@ -41,8 +41,9 @@ internal static class LoggingExtensions
         };
 
         // Auth-related sources: AuthController API surface, the AuthService that
-        // performs credential validation / user CRUD / token issuance, and the
-        // Authelia reverse-proxy authentication handler. Routes all of these to a
+        // performs credential validation / user CRUD / token issuance, the auth
+        // services next to it (Core.Services.Auth: sessions, API keys, setup) and the
+        // authentication handlers (WebApi.Authentication: Authelia, API keys). Routes all of these to a
         // dedicated auth.log so authentication activity can be audited without
         // sifting through the general application log.
         Func<Serilog.Events.LogEvent, bool> isAuthSource = e =>
@@ -51,7 +52,8 @@ internal static class LoggingExtensions
             var s = ctx.ToString();
             return s.Contains("AuthController")
                 || s.Contains("AuthService")
-                || s.Contains("AutheliaAuthenticationHandler");
+                || s.Contains("ComicMaintainer.Core.Services.Auth.")
+                || s.Contains("ComicMaintainer.WebApi.Authentication.");
         };
 
         builder.Host.UseSerilog((context, services, configuration) => configuration

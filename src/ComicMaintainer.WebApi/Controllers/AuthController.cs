@@ -1,8 +1,11 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -16,14 +19,17 @@ public class AuthController : ControllerBase
     private readonly AutheliaSettings _autheliaSettings;
     private readonly IAuthorizationService _authorizationService;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
+    private readonly ClientAddressResolver _clientAddresses;
 
     public AuthController(
         IAuthService authService, 
         ILogger<AuthController> logger,
         IOptions<AutheliaSettings> autheliaSettings,
         IAuthorizationService authorizationService,
-        IOptionsMonitor<AppSettings> appSettings)
+        IOptionsMonitor<AppSettings> appSettings,
+        ClientAddressResolver clientAddresses)
     {
+        _clientAddresses = clientAddresses;
         _authService = authService;
         _logger = logger;
         _autheliaSettings = autheliaSettings.Value;
@@ -31,10 +37,16 @@ public class AuthController : ControllerBase
         _appSettings = appSettings;
     }
 
+    /// <summary>
+    /// Signs in with a username and password. Failures all answer 401 with the same error, are logged to the auth
+    /// log, and lock the account out after repeated wrong passwords; each client address gets a few attempts per
+    /// window (<see cref="AuthenticationRateLimit"/>).
+    /// </summary>
     [HttpPost("login")]
+    [EnableRateLimiting(AuthenticationRateLimit.PolicyName)]
     public async Task<ActionResult> Login([FromBody] LoginRequest request)
     {
-        var (success, token, error) = await _authService.LoginAsync(request.Username, request.Password);
+        var (success, token, error) = await _authService.LoginAsync(request.Username, request.Password, _clientAddresses.Describe(HttpContext));
         
         if (!success)
         {
@@ -54,6 +66,7 @@ public class AuthController : ControllerBase
     /// </remarks>
     [AllowAnonymous]
     [HttpPost("register")]
+    [EnableRateLimiting(AuthenticationRateLimit.PolicyName)]
     public async Task<ActionResult> Register([FromBody] RegisterRequest request)
     {
         var isAdmin = (await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister)).Succeeded;
@@ -131,6 +144,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("setup")]
+    [EnableRateLimiting(AuthenticationRateLimit.PolicyName)]
     public async Task<ActionResult> SetupAdmin([FromBody] SetupRequest request)
     {
         if (!await _authService.IsSetupRequiredAsync()

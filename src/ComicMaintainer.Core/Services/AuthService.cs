@@ -5,7 +5,10 @@ using System.Text;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
+using ComicMaintainer.Core.Services.Auth;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
@@ -16,41 +19,114 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public class AuthService : IAuthService
 {
+    /// <summary>
+    /// The one error of a failed sign-in, whether the account does not exist, is locked out or disabled, or the
+    /// password is wrong, so that the answer does not tell which accounts exist.
+    /// </summary>
+    public const string InvalidCredentialsError = "Invalid username or password";
+
+    /// <summary>The error of a sign-in with the right password when that password is a <see cref="PublishedPasswords"/> one.</summary>
+    public const string PublishedPasswordError =
+        "This password was published as an example with ComicMaintainer, so it can no longer be used to sign in. " +
+        "If this is the administrator created from ADMIN_PASSWORD, set ADMIN_PASSWORD to a password of your own and " +
+        "restart ComicMaintainer to replace it.";
+
+    // A failed sign-in for an account that does not exist or is locked out still checks a password against a hash,
+    // with the cost of the app's own hasher, so that the response time does not tell those cases apart.
+    private static readonly PasswordHasher<ApplicationUser> TimingHasher = new();
+    private static readonly ApplicationUser TimingUser = new();
+    private static readonly Lazy<string> TimingHash =
+        new(() => TimingHasher.HashPassword(TimingUser, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))));
+
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly JwtSettings _jwtSettings;
+    private readonly ILogger<AuthService> _logger;
 
-    public AuthService(UserManager<ApplicationUser> userManager, IOptions<JwtSettings> jwtSettings)
+    public AuthService(UserManager<ApplicationUser> userManager, IOptions<JwtSettings> jwtSettings, ILogger<AuthService> logger)
     {
         _userManager = userManager;
         _jwtSettings = jwtSettings.Value;
+        _logger = logger;
     }
 
-    public async Task<(bool Success, string Token, string? Error)> LoginAsync(string username, string password)
+    /// <summary>
+    /// Signs in with a password. Every failed attempt is logged to the auth log with the client's address; after
+    /// <c>MaxFailedAccessAttempts</c> wrong passwords in a row the account is locked out for
+    /// <c>DefaultLockoutTimeSpan</c> (Identity's lockout options). The caller only ever sees
+    /// <see cref="InvalidCredentialsError"/>, so it cannot tell unknown, locked-out and disabled accounts apart.
+    /// </summary>
+    public async Task<(bool Success, string Token, string? Error)> LoginAsync(string username, string password, string? clientAddress = null)
     {
-        var user = await _userManager.FindByNameAsync(username);
-        if (user == null)
+        var safeUsername = LoggingHelper.SanitizeForLog(username);
+        var client = LoggingHelper.SanitizeForLog(string.IsNullOrEmpty(clientAddress) ? "unknown" : clientAddress);
+
+        var user = string.IsNullOrEmpty(username) ? null : await _userManager.FindByNameAsync(username);
+        if (user is null)
         {
-            return (false, string.Empty, "Invalid username or password");
+            SpendAPasswordCheck(password);
+            return FailedSignIn(safeUsername, client, "there is no such account");
+        }
+
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            SpendAPasswordCheck(password);
+            return FailedSignIn(safeUsername, client, "the account is locked out after too many failed sign-ins");
+        }
+
+        if (!await _userManager.CheckPasswordAsync(user, password))
+        {
+            await RecordFailedAttemptAsync(user, safeUsername, client);
+            return FailedSignIn(safeUsername, client, "wrong password");
         }
 
         if (!user.IsActive)
         {
-            return (false, string.Empty, "Account is disabled");
+            return FailedSignIn(safeUsername, client, "the account is disabled");
         }
 
-        var result = await _userManager.CheckPasswordAsync(user, password);
-        if (!result)
+        if (PublishedPasswords.IsPublished(password))
         {
-            return (false, string.Empty, "Invalid username or password");
+            _logger.LogError(
+                "Refused the sign-in of {Username} from {ClientAddress}: the account's password was published with " +
+                "ComicMaintainer. Set ADMIN_PASSWORD to a password of your own and restart to replace it.",
+                safeUsername, client);
+            return (false, string.Empty, PublishedPasswordError);
         }
 
-        // Update last login
+        await _userManager.ResetAccessFailedCountAsync(user);
         user.LastLoginAt = DateTime.UtcNow;
         await _userManager.UpdateAsync(user);
 
+        _logger.LogInformation("{Username} signed in from {ClientAddress}", safeUsername, client);
         var token = await GenerateJwtTokenAsync(user);
         return (true, token, null);
     }
+
+    private (bool Success, string Token, string? Error) FailedSignIn(string safeUsername, string client, string reason)
+    {
+        _logger.LogWarning("Failed sign-in for {Username} from {ClientAddress}: {Reason}", safeUsername, client, reason);
+        return (false, string.Empty, InvalidCredentialsError);
+    }
+
+    private async Task RecordFailedAttemptAsync(ApplicationUser user, string safeUsername, string client)
+    {
+        // Accounts created with lockout disabled (Identity's per-account LockoutEnabled flag) would never lock out.
+        if (!await _userManager.GetLockoutEnabledAsync(user))
+        {
+            await _userManager.SetLockoutEnabledAsync(user, true);
+        }
+
+        await _userManager.AccessFailedAsync(user);
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            _logger.LogWarning(
+                "Locked out {Username} until {LockoutEnd:u} after {MaxAttempts} failed sign-ins, the last from {ClientAddress}",
+                safeUsername, await _userManager.GetLockoutEndDateAsync(user), _userManager.Options.Lockout.MaxFailedAccessAttempts, client);
+        }
+    }
+
+    private static void SpendAPasswordCheck(string? password) =>
+        TimingHasher.VerifyHashedPassword(TimingUser, TimingHash.Value, password ?? string.Empty);
 
     public async Task<(bool Success, string? Error)> RegisterAsync(string username, string password, string email, string? fullName = null)
     {

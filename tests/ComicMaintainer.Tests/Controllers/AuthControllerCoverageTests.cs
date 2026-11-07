@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -41,7 +42,8 @@ public class AuthControllerCoverageTests
             NullLogger<AuthController>.Instance,
             Options.Create(_autheliaSettings),
             _authorization.Object,
-            new TestOptionsMonitor<AppSettings>(_appSettings))
+            new TestOptionsMonitor<AppSettings>(_appSettings),
+            ClientAddressResolver.Direct)
         {
             ControllerContext = new ControllerContext
             {

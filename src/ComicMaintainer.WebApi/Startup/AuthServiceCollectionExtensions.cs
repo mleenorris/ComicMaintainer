@@ -30,6 +30,12 @@ internal static class AuthServiceCollectionExtensions
             options.Password.RequireUppercase = true;
             options.Password.RequireNonAlphanumeric = false;
             options.Password.RequiredLength = 8;
+
+            // Lockout: five wrong passwords in a row lock the account for 15 minutes (AuthService.LoginAsync).
+            // New accounts have lockout enabled; AuthService enables it on older accounts at their first failure.
+            options.Lockout.AllowedForNewUsers = true;
+            options.Lockout.MaxFailedAccessAttempts = 5;
+            options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             
             // User settings
             options.User.RequireUniqueEmail = true;

@@ -84,6 +84,7 @@ public static class WebServiceCollectionExtensions
         // exhaust the anonymous limit for every visitor, and lock them all out of signing in.
         var trustedProxies = LoadRateLimiterTrustedProxies(configuration);
         var forwardedHopLimit = LoadRateLimiterForwardedHopLimit(configuration);
+        services.AddSingleton(new ClientAddressResolver(trustedProxies, forwardedHopLimit));
         if (trustedProxies.Networks.Count > 0)
         {
             services.AddSingleton<IStartupFilter>(serviceProvider =>
@@ -114,6 +115,18 @@ public static class WebServiceCollectionExtensions
                         QueueLimit = isAuthenticated ? 100 : 10
                     });
             });
+
+            // Sign-in, registration and first-run setup: few attempts per client address, whether or not
+            // the request is authenticated, so one client cannot guess passwords for many accounts.
+            options.AddPolicy(AuthenticationRateLimit.PolicyName, context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"ip:{ForwardedClientAddress.Resolve(context, trustedProxies, forwardedHopLimit)?.ToString() ?? "unknown"}",
+                    factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = AuthenticationRateLimit.PermitLimit,
+                        Window = AuthenticationRateLimit.Window,
+                        QueueLimit = 0
+                    }));
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
         });
 

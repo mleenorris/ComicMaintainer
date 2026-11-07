@@ -1551,7 +1551,7 @@ public class FileStoreServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ChangeVersion_BumpsOnFileAndReadStateMutations()
+    public async Task ChangeVersion_BumpsOnFileMutationsButReadStateHasItsOwnPerUserVersion()
     {
         var filePath = Path.Join(_testDirectory, "versioned.cbz");
         File.WriteAllText(filePath, "content");
@@ -1559,23 +1559,44 @@ public class FileStoreServiceTests : IDisposable
         var v0 = _service.ChangeVersion;
         await _service.AddFileAsync(filePath);
         var v1 = _service.ChangeVersion;
-        Assert.True(v1 > v0);
+        Assert.Equal(v0 + 1, v1);
 
         await _service.MarkFileRenamedAsync(filePath, true);
         var v2 = _service.ChangeVersion;
-        Assert.True(v2 > v1);
+        Assert.Equal(v1 + 1, v2);
 
+        var mine = _service.GetReadStateVersion("test-user");
+        var theirs = _service.GetReadStateVersion("other-user");
         await _service.MarkFileReadAsync(filePath, true);
-        var v3 = _service.ChangeVersion;
-        Assert.True(v3 > v2);
 
-        // Pure reads never bump the version.
+        // Regression: a read change bumped the shared version, so one user finishing an
+        // issue invalidated every other user's library snapshot and ETag.
+        Assert.Equal(v2, _service.ChangeVersion);
+        Assert.True(_service.GetReadStateVersion("test-user") > mine);
+        Assert.Equal(theirs, _service.GetReadStateVersion("other-user"));
+
+        // Pure reads never bump either version.
+        var readVersion = _service.GetReadStateVersion("test-user");
         await _service.GetAllFilesAsync();
         await _service.GetFilteredFilesAsync("read");
-        Assert.Equal(v3, _service.ChangeVersion);
+        Assert.Equal(v2, _service.ChangeVersion);
+        Assert.Equal(readVersion, _service.GetReadStateVersion("test-user"));
 
         await _service.RemoveFileAsync(filePath);
-        Assert.True(_service.ChangeVersion > v3);
+        Assert.True(_service.ChangeVersion > v2);
+    }
+
+    [Fact]
+    public async Task GetReadFilePathsAsync_ReflectsEachUsersOwnReadState()
+    {
+        var filePath = Path.Join(_testDirectory, "per-user.cbz");
+        File.WriteAllText(filePath, "content");
+        await _service.AddFileAsync(filePath);
+
+        await _service.MarkFileReadAsync(filePath, true);
+
+        Assert.Contains(filePath, await _service.GetReadFilePathsAsync("test-user"));
+        Assert.Empty(await _service.GetReadFilePathsAsync("other-user"));
     }
 
     [Fact]
@@ -1623,14 +1644,14 @@ public class FileStoreServiceTests : IDisposable
             userContext: _userContext);
         await service.AddFileAsync(filePath);
         await service.GetFilteredFilesAsync("unread");
-        var versionBeforeMarkingRead = service.ChangeVersion;
+        var versionBeforeMarkingRead = service.GetReadStateVersion("test-user");
         using var cancellationTokenSource = new CancellationTokenSource();
         interceptor.AfterNextSave = () => cancellationTokenSource.Cancel();
 
         await service.MarkFileReadAsync(filePath, true, cancellationTokenSource.Token);
 
         Assert.True(cancellationTokenSource.IsCancellationRequested);
-        Assert.True(service.ChangeVersion > versionBeforeMarkingRead);
+        Assert.True(service.GetReadStateVersion("test-user") > versionBeforeMarkingRead);
         var readFile = Assert.Single(await service.GetFilteredFilesAsync("read"));
         Assert.True(readFile.IsRead);
     }

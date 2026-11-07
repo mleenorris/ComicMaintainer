@@ -9,8 +9,9 @@ namespace ComicMaintainer.Core.Interfaces;
 /// <see cref="IChangeVersionSource.ChangeVersion"/> of such a store does not change when
 /// only read state changes; <see cref="GetReadStateVersion"/> does, for that user alone.
 /// One user marking an issue read therefore leaves every other user's cached library and
-/// ETag valid. Like <see cref="IChangeVersionSource"/> this is opt-in, so test doubles
-/// that do not implement it keep per-user, uncached behaviour.
+/// ETag valid. Like <see cref="IChangeVersionSource"/> this is opt-in: for a store that does
+/// not implement it (a test double), read state is taken from the files it returns and
+/// derived views are kept per user, as before.
 /// </remarks>
 public interface IUserReadStateSource
 {

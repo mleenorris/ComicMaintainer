@@ -280,6 +280,12 @@ public partial class SeriesLibraryService
             };
         }
 
+        var readPaths = await GetReadPathsForProjectionAsync(cancellationToken);
+        for (var i = 0; i < pageIssues.Count; i++)
+        {
+            pageIssues[i] = ProjectIssue(pageIssues[i], readPaths);
+        }
+
         return new SeriesIssuesResult
         {
             Id = accumulator.Id,

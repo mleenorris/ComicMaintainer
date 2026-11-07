@@ -115,9 +115,10 @@ public partial class FileStoreService
         query = ApplyEntityFilter(dbContext, query, filter);
         query = ApplyEntitySearch(query, search);
 
-        // Page-through requests for the same view re-ask for the same total,
-        // so memoize it against the store's change version.
-        var countCacheKey = $"FileStore.PageCount|{ChangeVersion}|{readUserId}|{filter}|{search}";
+        // Page-through requests for the same view re-ask for the same total, so memoize it
+        // against the store's change version and, because the read/unread filters depend on
+        // it, the caller's own read-state version (which ChangeVersion does not track).
+        var countCacheKey = $"FileStore.PageCount|{ChangeVersion}|{readUserId}|{GetReadStateVersion(readUserId)}|{filter}|{search}";
         if (_memoryCache == null || !_memoryCache.TryGetValue(countCacheKey, out int totalFiles))
         {
             totalFiles = await query.CountAsync(cancellationToken);

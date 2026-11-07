@@ -45,6 +45,12 @@ public class SeriesIssueDto
 
     [JsonPropertyName("read")]
     public bool Read { get; set; }
+
+    /// <summary>
+    /// A field-for-field copy. The series library shares one instance per issue between
+    /// every user's requests, so per-user values such as <see cref="Read"/> are set on a copy.
+    /// </summary>
+    public SeriesIssueDto ShallowCopy() => (SeriesIssueDto)MemberwiseClone();
 }
 
 /// <summary>

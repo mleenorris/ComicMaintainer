@@ -21,7 +21,7 @@ namespace ComicMaintainer.Core.Services;
 /// (<see cref="ApplyCommittedRow"/>), so a failed or cancelled write leaves both exactly
 /// as they were and every endpoint, whichever of the two it reads, reports the same state.
 /// </remarks>
-public partial class FileStoreService : IFileStoreService, IChangeVersionSource
+public partial class FileStoreService : IFileStoreService, IChangeVersionSource, IUserReadStateSource
 {
     private const string UnmarkedCountCacheKeyPrefix = "FileStore.UnmarkedCount";
     private static readonly TimeSpan UnmarkedCountCacheTtl = TimeSpan.FromSeconds(10);

@@ -42,7 +42,15 @@ public partial class SeriesLibraryService : ISeriesLibraryService
     private const int MaxSummaryViewsPerSnapshot = 32;
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<GroupsCacheKey, GroupsSnapshot> _snapshotCache = new();
-    private readonly SemaphoreSlim _snapshotBuildLock = new(1, 1);
+
+    /// <summary>
+    /// One build lock per snapshot key: concurrent requests for the same view share a single
+    /// build, while other filters (and other users' read-filtered views) build independently
+    /// instead of queueing behind one global lock. Bounded by the number of distinct keys.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<GroupsCacheKey, SemaphoreSlim> _snapshotBuildLocks = new();
+
+    private static readonly IReadOnlySet<string> NoReadPaths = new HashSet<string>(StringComparer.Ordinal);
 
     public SeriesLibraryService(
         IFileStoreService fileStore,

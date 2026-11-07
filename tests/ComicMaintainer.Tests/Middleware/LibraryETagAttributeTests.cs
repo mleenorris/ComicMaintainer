@@ -18,6 +18,7 @@ public class LibraryETagAttributeTests
 {
     private long _fileVersion = 1;
     private long _metadataVersion = 1;
+    private readonly Dictionary<string, long> _readVersions = new();
     private readonly TestUserContextAccessor _user = new("alice");
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
     private AppSettings _appSettings = new();
@@ -35,6 +36,9 @@ public class LibraryETagAttributeTests
         if (versioned)
         {
             fileStore.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(() => _fileVersion);
+            fileStore.As<IUserReadStateSource>()
+                .Setup(r => r.GetReadStateVersion(It.IsAny<string>()))
+                .Returns((string userId) => _readVersions.GetValueOrDefault(userId));
             metadata.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(() => _metadataVersion);
         }
 
@@ -163,6 +167,32 @@ public class LibraryETagAttributeTests
 
         Assert.True(executed);
         Assert.NotEqual(etag, second.Response.Headers.ETag.ToString());
+    }
+
+    [Fact]
+    public async Task ReadStateChange_InvalidatesOnlyThatUsersETag()
+    {
+        var services = BuildServices();
+        var (alicesFirst, _, _) = await InvokeAsync(services);
+        var alicesTag = alicesFirst.Response.Headers.ETag.ToString();
+        _user.UserId = "bob";
+        var (bobsFirst, _, _) = await InvokeAsync(services);
+        var bobsTag = bobsFirst.Response.Headers.ETag.ToString();
+
+        // Alice marks an issue read.
+        _readVersions["alice"] = 1;
+
+        // Regression: read state bumped the shared file version, so Bob's 304s became 200s.
+        var (bobsSecond, bobsResult, bobsExecuted) = await InvokeAsync(services, bobsTag);
+        Assert.False(bobsExecuted);
+        Assert.Equal(StatusCodes.Status304NotModified, Assert.IsType<StatusCodeResult>(bobsResult).StatusCode);
+        Assert.Equal(bobsTag, bobsSecond.Response.Headers.ETag.ToString());
+
+        // Alice's own responses show read flags, so her tag must change.
+        _user.UserId = "alice";
+        var (alicesSecond, _, alicesExecuted) = await InvokeAsync(services, alicesTag);
+        Assert.True(alicesExecuted);
+        Assert.NotEqual(alicesTag, alicesSecond.Response.Headers.ETag.ToString());
     }
 
     [Fact]

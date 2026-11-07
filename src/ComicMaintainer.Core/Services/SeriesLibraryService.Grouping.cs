@@ -18,9 +18,10 @@ public partial class SeriesLibraryService
     /// <remarks>
     /// Cache-only builds (<paramref name="allowDiskRead"/> = false) are served
     /// from a <see cref="GroupsSnapshot"/> that is reused until the file store,
-    /// read state, metadata cache or relevant settings change. The returned
-    /// dictionary and its accumulators are shared between requests and MUST be
-    /// treated as read-only by callers.
+    /// metadata cache or relevant settings change. The returned dictionary and
+    /// its accumulators are shared between requests and MUST be treated as
+    /// read-only by callers; per-user read state is applied when issues are
+    /// projected (see <see cref="ProjectIssue"/>).
     /// </remarks>
     private async Task<Dictionary<string, SeriesAccumulator>> BuildGroupsAsync(
         string? filter,
@@ -32,54 +33,70 @@ public partial class SeriesLibraryService
     /// Returns the grouped library for <paramref name="filter"/>, reusing a
     /// cached snapshot when the inputs have not changed since it was built.
     /// </summary>
+    /// <remarks>
+    /// When the file store keeps read state apart from the file list
+    /// (<see cref="IUserReadStateSource"/>), snapshots carry no read state at
+    /// all, so one snapshot per file filter serves every user and one user
+    /// marking an issue read invalidates nobody else's library. Only the
+    /// "read"/"unread" filters, whose file selection depends on the user, are
+    /// cached per user, keyed by that user's own read-state version. A store
+    /// without a separate read-state source bakes read state into the files it
+    /// returns, so its snapshots are kept per user.
+    /// </remarks>
     private async Task<GroupsSnapshot> GetGroupsSnapshotAsync(
         string? filter,
         bool allowDiskRead,
         CancellationToken cancellationToken)
     {
+        var normalizedFilter = string.IsNullOrWhiteSpace(filter) ? null : filter.Trim().ToLowerInvariant();
+        var bakeReadState = _fileStore is not IUserReadStateSource;
+        var perUser = bakeReadState || IsReadStateFilter(normalizedFilter);
+
         // Disk reads make the result depend on archive contents we don't
         // version, and sources that don't report change versions (e.g. test
-        // doubles) can't be validated — build fresh in both cases. Snapshots
-        // carry per-user read state, so without a user context to key on we
-        // can't tell users apart and must not share them either.
+        // doubles) can't be validated — build fresh in both cases. A per-user
+        // snapshot without a user context to key on can't tell users apart and
+        // must not be shared either.
         if (allowDiskRead
-            || _userContext is null
+            || (perUser && _userContext is null)
             || _fileStore is not IChangeVersionSource fileVersions
             || _metadataCache is not IChangeVersionSource metadataVersions)
         {
-            return await BuildGroupsSnapshotAsync(filter, allowDiskRead, default, cancellationToken);
+            return await BuildGroupsSnapshotAsync(filter, allowDiskRead, bakeReadState, default, cancellationToken);
         }
 
-        var cacheKey = new GroupsCacheKey(
-            string.IsNullOrWhiteSpace(filter) ? null : filter.Trim().ToLowerInvariant(),
-            _userContext.UserId);
+        var cacheKey = new GroupsCacheKey(normalizedFilter, perUser ? _userContext!.UserId : null);
 
         // Capture versions BEFORE reading any inputs: a write that lands while
         // we build bumps the version afterwards, so the stored snapshot is
         // detected as stale on the next request instead of being served forever.
-        var versions = CaptureSnapshotVersions(fileVersions, metadataVersions);
+        var versions = CaptureSnapshotVersions(cacheKey, fileVersions, metadataVersions);
         if (TryGetFreshSnapshot(cacheKey, versions, out var cached))
         {
             return cached;
         }
 
-        await _snapshotBuildLock.WaitAsync(cancellationToken);
+        var buildLock = _snapshotBuildLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+        await buildLock.WaitAsync(cancellationToken);
         try
         {
             // Another request may have rebuilt it while we waited.
-            versions = CaptureSnapshotVersions(fileVersions, metadataVersions);
+            versions = CaptureSnapshotVersions(cacheKey, fileVersions, metadataVersions);
             if (TryGetFreshSnapshot(cacheKey, versions, out cached))
             {
                 return cached;
             }
 
-            var snapshot = await BuildGroupsSnapshotAsync(filter, allowDiskRead: false, versions, cancellationToken);
+            var snapshot = await BuildGroupsSnapshotAsync(filter, allowDiskRead: false, bakeReadState, versions, cancellationToken);
 
-            // Drop snapshots that can never be served again so memory stays
-            // bounded to (filters x active users) live entries.
+            // Drop snapshots that can never be served again, each judged by its own
+            // versions (another user's read-filtered view survives as long as that
+            // user's read state is unchanged), so memory stays bounded to the live
+            // entries: one per file filter plus the read/unread views of active users.
+            var now = DateTime.UtcNow;
             foreach (var entry in _snapshotCache.Where(entry =>
-                         !entry.Value.Versions.Equals(versions)
-                         || DateTime.UtcNow - entry.Value.BuiltAtUtc >= SnapshotMaxAge))
+                         !entry.Value.Versions.Equals(CaptureSnapshotVersions(entry.Key, fileVersions, metadataVersions))
+                         || now - entry.Value.BuiltAtUtc >= SnapshotMaxAge))
             {
                 _snapshotCache.TryRemove(entry);
             }
@@ -88,15 +105,66 @@ public partial class SeriesLibraryService
         }
         finally
         {
-            _snapshotBuildLock.Release();
+            buildLock.Release();
         }
     }
 
-    private SnapshotVersions CaptureSnapshotVersions(IChangeVersionSource fileVersions, IChangeVersionSource metadataVersions)
+    /// <summary>True for the file filters whose selection depends on the requesting user's read state.</summary>
+    private static bool IsReadStateFilter(string? normalizedFilter)
+        => normalizedFilter is "read" or "unread";
+
+    private SnapshotVersions CaptureSnapshotVersions(
+        GroupsCacheKey key,
+        IChangeVersionSource fileVersions,
+        IChangeVersionSource metadataVersions)
         => new(
             fileVersions.ChangeVersion,
             metadataVersions.ChangeVersion,
-            _settings.CurrentValue?.DefaultPreferredLanguage);
+            _settings.CurrentValue?.DefaultPreferredLanguage,
+            key.UserId is not null && _fileStore is IUserReadStateSource readState
+                ? readState.GetReadStateVersion(key.UserId)
+                : 0);
+
+    /// <summary>
+    /// The read set to apply when projecting issues for the current request, or
+    /// <c>null</c> when the snapshot already carries read state (a store without a
+    /// separate read-state source). Background work with no user sees everything unread.
+    /// </summary>
+    private async Task<IReadOnlySet<string>?> GetReadPathsForProjectionAsync(CancellationToken cancellationToken)
+    {
+        if (_fileStore is not IUserReadStateSource readState)
+        {
+            return null;
+        }
+
+        var userId = _userContext?.UserId;
+        return string.IsNullOrEmpty(userId)
+            ? NoReadPaths
+            : await readState.GetReadFilePathsAsync(userId, cancellationToken);
+    }
+
+    /// <summary>
+    /// The issue as the requesting user sees it. Snapshot issues are shared by every
+    /// user and carry no read state, so a copy is made only for the issues this user
+    /// has read; the shared instance is never modified.
+    /// </summary>
+    private static SeriesIssueDto ProjectIssue(SeriesIssueDto issue, IReadOnlySet<string>? readPaths)
+    {
+        if (readPaths is null)
+        {
+            return issue;
+        }
+
+        var read = readPaths.Contains(issue.FilePath);
+        if (issue.Read == read)
+        {
+            return issue;
+        }
+
+        var copy = issue.ShallowCopy();
+        copy.Read = read;
+        return copy;
+    }
 
     private bool TryGetFreshSnapshot(GroupsCacheKey key, SnapshotVersions versions, out GroupsSnapshot snapshot)
     {
@@ -112,9 +180,15 @@ public partial class SeriesLibraryService
         return false;
     }
 
+    /// <param name="bakeReadState">
+    /// Copy each file's read flag into its issue. Only for stores without a separate
+    /// read-state source; otherwise the snapshot is shared by every user and must not carry
+    /// the read state of whichever user happened to trigger the build.
+    /// </param>
     private async Task<GroupsSnapshot> BuildGroupsSnapshotAsync(
         string? filter,
         bool allowDiskRead,
+        bool bakeReadState,
         SnapshotVersions versions,
         CancellationToken cancellationToken)
     {
@@ -331,7 +405,7 @@ public partial class SeriesLibraryService
                 Renamed = file.IsRenamed,
                 Normalized = file.IsNormalized,
                 Duplicate = file.IsDuplicate,
-                Read = file.IsRead
+                Read = bakeReadState && file.IsRead
             });
         }
 
@@ -598,13 +672,20 @@ public partial class SeriesLibraryService
         return true;
     }
 
+    /// <param name="UserId">The user a read-dependent view belongs to, or <c>null</c> for a view shared by every user.</param>
     private readonly record struct GroupsCacheKey(string? Filter, string? UserId);
 
-    private readonly record struct SnapshotVersions(long FileVersion, long MetadataVersion, string? DefaultPreferredLanguage);
+    /// <param name="ReadStateVersion">The owning user's read-state version for a per-user view; 0 for shared views.</param>
+    private readonly record struct SnapshotVersions(
+        long FileVersion,
+        long MetadataVersion,
+        string? DefaultPreferredLanguage,
+        long ReadStateVersion);
 
     /// <summary>
     /// An immutable (by convention) grouped view of the library for one file
-    /// filter and user. Shared across concurrent requests.
+    /// filter (and, for the read/unread filters, one user). Shared across
+    /// concurrent requests.
     /// </summary>
     private sealed class GroupsSnapshot
     {

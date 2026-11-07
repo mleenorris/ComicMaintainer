@@ -9,18 +9,24 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class FileStoreService
 {
-    private static string ReadPathsCacheKey(string userId, long changeVersion) =>
-        $"FileStore.ReadPaths.{userId}|{changeVersion}";
+    private static string ReadPathsCacheKey(string userId, long readStateVersion) =>
+        $"FileStore.ReadPaths.{userId}|{readStateVersion}";
+
+    /// <inheritdoc />
+    public async Task<IReadOnlySet<string>> GetReadFilePathsAsync(string userId, CancellationToken cancellationToken = default)
+        => await GetUserReadPathsAsync(userId, cancellationToken);
 
     /// <summary>
     /// Paths the given user has marked read. Cached because the in-memory file list
     /// (<see cref="GetFilteredFilesAsync"/>) has no way to join against the database, so
-    /// without a cache every library render would re-read the whole set.
+    /// without a cache every library render would re-read the whole set. The cache key is
+    /// the user's own read-state version, so another user's changes never evict it.
     /// </summary>
     private async Task<HashSet<string>> GetUserReadPathsAsync(string userId, CancellationToken cancellationToken)
     {
-        var changeVersion = ChangeVersion;
-        var cacheKey = ReadPathsCacheKey(userId, changeVersion);
+        // Captured before reading: a change committed while we read bumps the version, so
+        // whatever we cache here is never served for the newer version.
+        var cacheKey = ReadPathsCacheKey(userId, GetReadStateVersion(userId));
         if (_memoryCache != null &&
             _memoryCache.TryGetValue(cacheKey, out HashSet<string>? cached) &&
             cached != null)
@@ -41,13 +47,15 @@ public partial class FileStoreService
     }
 
     /// <summary>
-    /// Drops the cached read-path set for a user after their read state changes, so the
-    /// next library render reflects the change immediately rather than after the TTL.
+    /// Records that a user's read state changed (after the change was committed). Only that
+    /// user's read-state version moves: the shared <see cref="ChangeVersion"/>, and with it
+    /// every other user's cached library and ETag, is left alone.
     /// </summary>
     private void InvalidateUserReadPaths(string userId)
     {
-        _memoryCache?.Remove(ReadPathsCacheKey(userId, ChangeVersion));
-        MarkChanged();
+        var stale = ReadPathsCacheKey(userId, GetReadStateVersion(userId));
+        MarkReadStateChanged(userId);
+        _memoryCache?.Remove(stale);
     }
 
     /// <summary>

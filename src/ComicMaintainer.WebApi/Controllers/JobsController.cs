@@ -56,7 +56,8 @@ public class JobsController : ControllerBase
                 }
                 fileIndex++;
             }
-            
+            var trackedItems = new HashSet<string>(job.Files, StringComparer.Ordinal);
+
             return Ok(new
             {
                 job_id = job.JobId.ToString(),
@@ -72,7 +73,19 @@ public class JobsController : ControllerBase
                     file = f,
                     success = processedFilesList.Contains(f) && !job.Errors.ContainsKey(f),
                     error = job.Errors.GetValueOrDefault(f)
-                }).ToList()
+                })
+                // Problems a job's post-loop hook reported for things that were
+                // not tracked items (IBatchJobReport), e.g. a source folder that
+                // folder combine had to keep.
+                .Concat(job.Errors
+                    .Where(entry => !trackedItems.Contains(entry.Key))
+                    .Select(entry => new
+                    {
+                        file = entry.Key,
+                        success = false,
+                        error = (string?)entry.Value
+                    }))
+                .ToList()
             });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

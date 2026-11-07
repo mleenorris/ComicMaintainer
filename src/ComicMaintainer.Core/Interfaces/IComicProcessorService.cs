@@ -135,6 +135,20 @@ public interface IComicProcessorService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Same as the other <c>RunCustomBatchJobAsync</c> overload, but the
+    /// post-loop hook also receives an <see cref="IBatchJobReport"/> to add
+    /// results for things that were not tracked items (for example a source
+    /// folder that had to be kept).
+    /// </summary>
+    Task<Guid> RunCustomBatchJobAsync(
+        string operationName,
+        IEnumerable<string> trackedItems,
+        Func<string, CancellationToken, Task<bool>> itemOperation,
+        string failureMessage,
+        Func<IBatchJobReport, CancellationToken, Task> postLoopAsync,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Normalize metadata and then rename multiple comic files as a single batch job.
     /// For each file, normalization is performed first (so the series name reflects the
     /// containing folder) and the rename step uses the freshly normalized metadata.

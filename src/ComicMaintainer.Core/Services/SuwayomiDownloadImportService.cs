@@ -79,6 +79,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ISeriesLibraryService _seriesLibrary;
+    private readonly ILibraryMutationLock _libraryMutationLock;
     private readonly ILogger<SuwayomiDownloadImportService> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -86,11 +87,13 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     public SuwayomiDownloadImportService(
         IOptionsMonitor<AppSettings> settings,
         ISeriesLibraryService seriesLibrary,
+        ILibraryMutationLock libraryMutationLock,
         ILogger<SuwayomiDownloadImportService> logger,
         TimeProvider? timeProvider = null)
     {
         _settings = settings;
         _seriesLibrary = seriesLibrary;
+        _libraryMutationLock = libraryMutationLock;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
@@ -537,7 +540,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
     private MoveOutcome MoveIntoFolder(ImportRun run, string sourcePath, string targetFolder, out string destinationPath)
     {
-        var result = SuwayomiImportSynchronization.Execute(() =>
+        var result = _libraryMutationLock.Execute(() =>
         {
             var outcome = MoveIntoFolderCore(run, sourcePath, targetFolder, out var destination);
             return (Outcome: outcome, Destination: destination);
@@ -796,7 +799,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     /// </summary>
     private bool RecoverPendingMoves(ImportRun run, out string? error)
     {
-        var result = SuwayomiImportSynchronization.Execute(() =>
+        var result = _libraryMutationLock.Execute(() =>
         {
             var success = RecoverPendingMovesCore(run, out var recoveryError);
             return (Success: success, Error: recoveryError);

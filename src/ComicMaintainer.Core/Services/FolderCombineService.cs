@@ -139,10 +139,11 @@ public sealed partial class FolderCombineService : IFolderCombineService
         LibraryPathValidator.TryResolveWithin(path, out _, _settings.CurrentValue.WatchedDirectory);
 
     /// <summary>
-    /// The configured folders a combine must never remove, even when one of
-    /// them is a source folder or lies inside one.
+    /// The folders a combine must never remove, even when one of them is a
+    /// source folder or lies inside one: the configured library folders and
+    /// the combine's own <paramref name="destination"/>.
     /// </summary>
-    private IReadOnlyList<string> GetProtectedDirectories()
+    private IReadOnlyList<string> GetProtectedDirectories(string destination)
     {
         var settings = _settings.CurrentValue;
         return new[]
@@ -150,7 +151,8 @@ public sealed partial class FolderCombineService : IFolderCombineService
                 settings.WatchedDirectory,
                 settings.DuplicateDirectory,
                 settings.SuwayomiDownloadsDirectory,
-                settings.SuwayomiImportDirectory
+                settings.SuwayomiImportDirectory,
+                destination
             }
             .Where(directory => !string.IsNullOrWhiteSpace(directory))
             .Select(directory => directory!)

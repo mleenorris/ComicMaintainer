@@ -77,23 +77,29 @@ public sealed class FolderCombineMove
 /// </summary>
 public sealed class FolderCombineSourceCleanup
 {
-    /// <summary>At most this many entries are listed in <see cref="RemovableFiles"/> and <see cref="Leftovers"/>.</summary>
+    /// <summary>At most this many entries are listed in <see cref="DisposableFiles"/> and <see cref="Leftovers"/>.</summary>
     public const int MaxListedEntries = 25;
 
     public string Directory { get; set; } = string.Empty;
 
-    /// <summary>True when the folder will be (or was) deleted.</summary>
-    public bool Removed { get; set; }
+    /// <summary>
+    /// True when nothing but disposable entries is (or, in a preview, will
+    /// be) left, so the folder is removed.
+    /// </summary>
+    public bool Removable { get; set; }
 
     /// <summary>Why the folder is kept; null when it is removed.</summary>
     public string? KeptReason { get; set; }
 
     /// <summary>Disposable files deleted with the folder, relative to it (first <see cref="MaxListedEntries"/>).</summary>
-    public List<string> RemovableFiles { get; set; } = new();
+    public List<string> DisposableFiles { get; set; } = new();
 
-    public int RemovableFileCount { get; set; }
+    public int DisposableFileCount { get; set; }
 
-    /// <summary>Files that keep the folder, relative to it (first <see cref="MaxListedEntries"/>).</summary>
+    /// <summary>
+    /// Entries that keep the folder, relative to it (first
+    /// <see cref="MaxListedEntries"/>); a subfolder ends with a separator.
+    /// </summary>
     public List<string> Leftovers { get; set; } = new();
 
     public int LeftoverCount { get; set; }
@@ -108,8 +114,9 @@ public sealed class FolderCombinePlan
 
     /// <summary>
     /// Per source folder, what will be left once the planned moves succeed
-    /// and whether the folder will be removed. A move that fails at run time
-    /// leaves its file behind, which then keeps the folder.
+    /// and whether the folder will be removed (filled in by a preview). A move
+    /// that fails at run time leaves its file behind, which then keeps the
+    /// folder.
     /// </summary>
     public List<FolderCombineSourceCleanup> SourceCleanup { get; set; } = new();
 }

@@ -217,6 +217,7 @@ public partial class ComicProcessorService
                     // File already has correct name, no rename needed
                     _logger.LogDebug("File already has correct name: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken);
+                    await ClearDuplicateFlagAsync(filePath, cancellationToken);
                     var filename = Path.GetFileName(filePath);
                     await LogHistoryWithChangesAsync(filePath, "Rename", true, "File already correctly named", 
                         filename, filename, metadata, metadata, cancellationToken);
@@ -226,9 +227,7 @@ public partial class ComicProcessorService
                 {
                     // Target file already exists - treat as duplicate
                     _logger.LogInformation("ProcessFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newResolvedPath));
-                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                    await _fileStore.MarkFileDuplicateAsync(filePath, true, cancellationToken);
-                    await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
+                    await MarkDuplicateAsync(filePath, cancellationToken);
                     renameSuccess = false;
                     renameError = DuplicateTargetMessage;
                 }
@@ -243,7 +242,11 @@ public partial class ComicProcessorService
                 }
                 else
                 {
-                    var newFilePath = newResolvedPath;
+                    // A cancelled job leaves the file where it is rather than moving it. This is
+                    // the last point the job's cancellation is observed for this file.
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    string? newFilePath = null;
                     try
                     {
                         using var renameDirectoryHandle = OpenRenameDirectory(resolvedPath);
@@ -257,41 +260,15 @@ public partial class ComicProcessorService
                         else
                         {
                             _logger.LogDebug("ProcessFileAsync: Rename path validated: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                            var movedPath = MoveFileInRenameDirectory(renameDirectoryHandle, resolvedPath, newResolvedPath);
+                            var movedPath = RenameOnDisk(renameDirectoryHandle, resolvedPath, newResolvedPath);
                             newFilePath = GetAllowedLogicalPath(movedPath);
-                            var oldFilePath = filePath;
-                            var beforeFilename = Path.GetFileName(oldFilePath);
-                            var afterFilename = Path.GetFileName(newFilePath);
-
-                            // Atomically move the database record to the new path, preserving all
-                            // processing state so the FileSystemWatcher rename event sees the entry
-                            // as already tracked and does not re-queue it for processing.
-                            await _fileStore.UpdateFilePathAsync(oldFilePath, newFilePath, cancellationToken);
-                            await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
-
-                            // The normalize phase above marked the (old-path) row normalized. Re-assert
-                            // that on the new path so the move can't drop it if the watcher removed the
-                            // old row before UpdateFilePathAsync migrated it (Delete+Create race),
-                            // which would otherwise leave the file showing as unprocessed.
-                            if (normalizeSuccess)
-                            {
-                                await _fileStore.MarkFileNormalizedAsync(newFilePath, true, cancellationToken);
-                            }
-
-                            await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null,
-                                beforeFilename, afterFilename, metadata, metadata, cancellationToken);
-
-                            filePath = newFilePath;
-                            renameSuccess = true;
                         }
                     }
                     catch (IOException ex) when (TargetFileExists(newResolvedPath, resolvedPath))
                     {
                         // Target file already exists - treat as duplicate
-                        _logger.LogInformation(ex, "ProcessFileAsync: Duplicate detected - target file already exists during move: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
-                        await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                        await _fileStore.MarkFileDuplicateAsync(filePath, true, cancellationToken);
-                        await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
+                        _logger.LogInformation(ex, "ProcessFileAsync: Duplicate detected - target file already exists during move: {NewPath}", LoggingHelper.SanitizePathForLog(newResolvedPath));
+                        await MarkDuplicateAsync(filePath, cancellationToken);
                         renameSuccess = false;
                         renameError = DuplicateTargetMessage;
                     }
@@ -301,6 +278,18 @@ public partial class ComicProcessorService
                         await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                         await LogHistoryAsync(filePath, "Rename", false, ex.Message, cancellationToken);
                         renameError = $"Rename failed: {ex.Message}";
+                    }
+
+                    if (newFilePath is not null)
+                    {
+                        // The file has moved, so the rest of its processing (moving its row,
+                        // stamping it, queueing its delivery) runs to the end even if the job is
+                        // cancelled meanwhile; otherwise the row would keep pointing at the old
+                        // path. The job stops before its next file instead.
+                        cancellationToken = CancellationToken.None;
+                        await RecordRenameAsync(filePath, newFilePath, normalizeSuccess, metadata);
+                        filePath = newFilePath;
+                        renameSuccess = true;
                     }
                 }
             }

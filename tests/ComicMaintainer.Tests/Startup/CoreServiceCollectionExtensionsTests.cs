@@ -34,6 +34,10 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         .GetMethod("AddComicMaintainerData", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
 
+    private static readonly Func<IServiceCollection, IServiceCollection> AddComicMaintainerCore = ExtensionsType
+        .GetMethod("AddComicMaintainerCore", BindingFlags.Static | BindingFlags.Public)!
+        .CreateDelegate<Func<IServiceCollection, IServiceCollection>>();
+
     private static readonly Func<IServiceCollection, IServiceCollection> AddComicMaintainerHostedServices = ExtensionsType
         .GetMethod("AddComicMaintainerHostedServices", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IServiceCollection>>();
@@ -116,6 +120,30 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     public void ResolveSqliteDatabasePath_ResolvesAFileUriToTheFileItNames(string connectionString, string expectedPath)
     {
         Assert.Equal(Path.GetFullPath(expectedPath), ResolveSqliteDatabasePath(connectionString));
+    }
+
+    // SEC-4: the series-image client must follow no redirects (SeriesImageStore checks each hop itself) and check
+    // the address it connects to (DNS rebinding).
+    [Fact]
+    public void SeriesImageClient_UsesThePublicNetworkGuardHandler()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        AddComicMaintainerCore(services);
+        using var provider = services.BuildServiceProvider();
+
+        using var handler = provider.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(SeriesImageStore.HttpClientName);
+
+        HttpMessageHandler current = handler;
+        while (current is DelegatingHandler delegating)
+        {
+            current = delegating.InnerHandler!;
+        }
+
+        var primary = Assert.IsType<SocketsHttpHandler>(current);
+        Assert.False(primary.AllowAutoRedirect);
+        Assert.False(primary.UseProxy);
+        Assert.NotNull(primary.ConnectCallback);
     }
 
     [Fact]

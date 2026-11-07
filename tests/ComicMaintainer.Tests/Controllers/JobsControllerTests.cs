@@ -60,6 +60,40 @@ public class JobsControllerTests
     }
 
     [Fact]
+    public void GetJob_ProblemReportedForSomethingOtherThanAnItem_IsListedAfterTheItemsAsUnsuccessful()
+    {
+        // A folder combine reports a source folder it had to keep through
+        // IBatchJobReport; the job's items are the files it moved.
+        var jobId = Guid.NewGuid();
+        var job = new ProcessingJob
+        {
+            JobId = jobId,
+            Status = JobStatus.Completed,
+            Files = new List<string> { "/library/Old/a.cbz", "/library/Old/b.cbz" },
+            TotalFiles = 2,
+            ProcessedFiles = 1,
+            FailedFiles = 1,
+            Errors = new Dictionary<string, string>
+            {
+                ["/library/Old/b.cbz"] = "Combine folder move failed",
+                ["/library/Old"] = "Source folder kept. It still holds files that are not disposable. Remaining: b.cbz."
+            }
+        };
+        _mockProcessor.Setup(p => p.GetJob(jobId)).Returns(job);
+
+        var result = _controller.GetJob(jobId);
+
+        var json = JObject.FromObject(Assert.IsType<OkObjectResult>(result.Result).Value!);
+        Assert.Equal(1, json["failed_items"]!.Value<int>());
+        var results = json["results"]!.ToObject<List<JObject>>()!;
+        Assert.Equal(new[] { "/library/Old/a.cbz", "/library/Old/b.cbz", "/library/Old" }, results.Select(r => r["file"]!.ToString()));
+        Assert.True(results[0]["success"]!.Value<bool>());
+        Assert.False(results[1]["success"]!.Value<bool>());
+        Assert.False(results[2]["success"]!.Value<bool>());
+        Assert.Equal(job.Errors["/library/Old"], results[2]["error"]!.ToString());
+    }
+
+    [Fact]
     public void GetJob_NonExistentJob_ReturnsNotFound()
     {
         // Arrange

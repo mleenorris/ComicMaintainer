@@ -629,6 +629,36 @@ public class ComicProcessorServiceTests : IDisposable
             "post-loop hook must run after the per-item loop has completed");
     }
 
+    [Fact]
+    public async Task RunCustomBatchJobAsync_PostLoopReport_AddsTheProblemToTheJobWithoutChangingItsCounts()
+    {
+        var mockEventBroadcaster = new Mock<IEventBroadcaster>();
+        var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            mockEventBroadcaster.Object);
+        var folder = Path.Join(Path.GetTempPath(), "Berserk (Digital)") + Path.DirectorySeparatorChar;
+
+        var jobId = await service.RunCustomBatchJobAsync(
+            operationName: "TestCustomBatch",
+            trackedItems: new[] { "a", "b" },
+            itemOperation: (_, _) => Task.FromResult(true),
+            failureMessage: "test failure",
+            postLoopAsync: (report, _) => report.ReportProblemAsync(folder, "Source folder kept."));
+
+        var job = await WaitForJobCompletionAsync(service, jobId);
+
+        Assert.NotNull(job);
+        Assert.Equal(JobStatus.Completed, job!.Status);
+        Assert.Equal(2, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.Equal("Source folder kept.", Assert.Single(job.Errors, e => e.Key == folder).Value);
+        // Announced like a failed item, under the folder's name.
+        mockEventBroadcaster.Verify(b => b.BroadcastFileProcessedAsync("Berserk (Digital)", false, "Source folder kept."), Times.Once);
+    }
+
     private const int JobPollingIntervalMs = 50;
 
     // Returns as soon as the job finishes; the budget only matters when the whole

@@ -594,6 +594,44 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
     }
 
     [Fact]
+    public async Task PreviewCombineFolders_ListsTheSourceFoldersToRemoveAndToKeepWithTheirContents()
+    {
+        var files = new[]
+        {
+            MakeFile(Dir("Foo A"), "Foo 001.cbz", "Foo", T1),
+            MakeFile(Dir("Foo B"), "Foo 002.cbz", "Foo", T2),
+            MakeFile(Dir("Foo C"), "Foo 003.cbz", "Foo", T2)
+        };
+        foreach (var file in files)
+        {
+            Directory.CreateDirectory(file.Directory);
+            File.WriteAllText(file.FilePath, "x");
+        }
+        File.WriteAllText(Path.Join(Dir("Foo B"), "ComicInfo.xml"), "x");
+        File.WriteAllText(Path.Join(Dir("Foo C"), "notes.pdf"), "x");
+        SetupFiles(files);
+
+        var result = await CreateController().PreviewCombineFolders(new FilesController.CombineFoldersRequest
+        {
+            GroupKey = "foo",
+            DestinationDirectory = Dir("Foo A")
+        });
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var remove = Assert.Single(Items(Prop(ok.Value, "foldersToRemove")));
+        Assert.Equal(Dir("Foo B"), Prop(remove, "directory"));
+        Assert.Equal(new[] { "ComicInfo.xml" }, Assert.IsType<List<string>>(Prop(remove, "disposableFiles")));
+        Assert.Equal(1, Prop(remove, "disposableFileCount"));
+        var keep = Assert.Single(Items(Prop(ok.Value, "foldersToKeep")));
+        Assert.Equal(Dir("Foo C"), Prop(keep, "directory"));
+        Assert.Equal(FolderCombineSourceCleaner.LeftoverReason, Prop(keep, "reason"));
+        Assert.Equal(new[] { "notes.pdf" }, Assert.IsType<List<string>>(Prop(keep, "leftovers")));
+        Assert.Equal(1, Prop(keep, "leftoverCount"));
+        // The preview only reads the disk.
+        Assert.All(files, file => Assert.True(File.Exists(file.FilePath)));
+    }
+
+    [Fact]
     public async Task PreviewCombineFolders_NoGroupKey_InfersTheGroupFromNormalizedDestinationAndSources()
     {
         SetupFooGroup();

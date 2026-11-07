@@ -148,6 +148,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<int>("MetadataVersion")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("MissingSince")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("SeriesMetadataVersion")
                         .HasColumnType("INTEGER");
 

@@ -169,9 +169,12 @@ public interface IFileStoreService
     Task<int> RefreshFileStatsAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Remove stale entries from database where files no longer exist on disk
+    /// Remove stale entries from the database for files that no longer exist on disk,
+    /// guarded so a missing or unmounted library can never wipe it: see
+    /// <see cref="StaleCleanupResult"/> for the outcomes. Never throws; failures and
+    /// cancellation are reported through <see cref="StaleCleanupResult.Status"/>.
     /// </summary>
-    Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default);
+    Task<StaleCleanupResult> CleanupStaleEntriesAsync(StaleCleanupOptions options, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Stamp the given file with the series-metadata-cache version it was

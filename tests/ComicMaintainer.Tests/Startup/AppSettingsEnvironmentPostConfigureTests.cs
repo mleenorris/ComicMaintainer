@@ -57,6 +57,11 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
         "SMTP_PORT",
         "ERROR_REPORTING_MAX_ISSUES_PER_DAY",
         .. EmailRateLimitVariables,
+        "STALE_CLEANUP_MAX_REMOVAL_PERCENT",
+        "STALE_CLEANUP_MISSING_GRACE_HOURS",
+        "STALE_CLEANUP_SENTINEL_FILE",
+        "PROCESSING_HISTORY_RETENTION_DAYS",
+        "PROCESSING_HISTORY_MAX_ENTRIES",
     ];
 
     // AppSettingsEnvironmentPostConfigure is internal to the WebApi assembly (no InternalsVisibleTo).
@@ -269,6 +274,56 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
             _ => options.EmailMinSecondsBetweenSends,
         };
         Assert.Equal(expected, actual);
+    }
+
+    [Theory]
+    [InlineData("STALE_CLEANUP_MAX_REMOVAL_PERCENT", "0", 0)]
+    [InlineData("STALE_CLEANUP_MAX_REMOVAL_PERCENT", "100", 100)]
+    [InlineData("STALE_CLEANUP_MAX_REMOVAL_PERCENT", "101", 7)]
+    [InlineData("STALE_CLEANUP_MAX_REMOVAL_PERCENT", "-1", 7)]
+    [InlineData("STALE_CLEANUP_MISSING_GRACE_HOURS", "0", 0)]
+    [InlineData("STALE_CLEANUP_MISSING_GRACE_HOURS", "720", 720)]
+    [InlineData("STALE_CLEANUP_MISSING_GRACE_HOURS", "721", 7)]
+    [InlineData("STALE_CLEANUP_MISSING_GRACE_HOURS", "1.5", 7)]
+    [InlineData("PROCESSING_HISTORY_RETENTION_DAYS", "0", 0)]
+    [InlineData("PROCESSING_HISTORY_RETENTION_DAYS", "3650", 3650)]
+    [InlineData("PROCESSING_HISTORY_RETENTION_DAYS", "3651", 7)]
+    [InlineData("PROCESSING_HISTORY_MAX_ENTRIES", "0", 0)]
+    [InlineData("PROCESSING_HISTORY_MAX_ENTRIES", "10000000", 10_000_000)]
+    [InlineData("PROCESSING_HISTORY_MAX_ENTRIES", "10000001", 7)]
+    [InlineData("PROCESSING_HISTORY_MAX_ENTRIES", "many", 7)]
+    public void DatabaseCleanupVariables_AcceptZeroUpToTheirBound(string variable, string value, int expected)
+    {
+        _environment.Set(variable, value);
+        var options = new AppSettings
+        {
+            StaleCleanupMaxRemovalPercent = 7,
+            StaleCleanupMissingGraceHours = 7,
+            ProcessingHistoryRetentionDays = 7,
+            ProcessingHistoryMaxEntries = 7,
+        };
+
+        PostConfigure.PostConfigure(Options.DefaultName, options);
+
+        var actual = variable switch
+        {
+            "STALE_CLEANUP_MAX_REMOVAL_PERCENT" => options.StaleCleanupMaxRemovalPercent,
+            "STALE_CLEANUP_MISSING_GRACE_HOURS" => options.StaleCleanupMissingGraceHours,
+            "PROCESSING_HISTORY_RETENTION_DAYS" => options.ProcessingHistoryRetentionDays,
+            _ => options.ProcessingHistoryMaxEntries,
+        };
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void StaleCleanupSentinelFile_IsTakenFromTheEnvironment()
+    {
+        _environment.Set("STALE_CLEANUP_SENTINEL_FILE", ".library-mounted");
+        var options = new AppSettings { StaleCleanupSentinelFile = "from-settings" };
+
+        PostConfigure.PostConfigure(Options.DefaultName, options);
+
+        Assert.Equal(".library-mounted", options.StaleCleanupSentinelFile);
     }
 
     /// <summary>

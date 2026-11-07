@@ -190,6 +190,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     }
 
     // ---- CleanupStaleEntriesAsync -------------------------------------------------------
+    // The guards and the two-run rule are covered against SQLite in FileStoreServiceStaleCleanupTests.
 
     [Fact]
     public async Task CleanupStaleEntriesAsync_AlreadyCancelled_RemovesNothing()
@@ -198,49 +199,24 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
         await SeedAsync(Row(stale));
         var service = CreateService();
 
-        var removed = await service.CleanupStaleEntriesAsync(new CancellationToken(canceled: true));
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual, new CancellationToken(canceled: true));
 
-        Assert.Equal(0, removed);
+        Assert.Equal(StaleCleanupStatus.Cancelled, result.Status);
+        Assert.Equal(0, result.RemovedCount);
         Assert.True(_logger.Contains(LogLevel.Warning, "Cleanup of stale entries was cancelled"));
         Assert.NotNull(await FindRowAsync(stale));
     }
 
     [Fact]
-    public async Task CleanupStaleEntriesAsync_CancelledMidScan_LeavesUnvisitedEntriesAlone()
-    {
-        var first = Path.Join(_library, "Gone 1.cbz");
-        var second = Path.Join(_library, "Gone 2.cbz");
-        await SeedAsync(Row(first), Row(second));
-        var service = CreateService();
-        await service.InitializeFromDatabaseAsync();
-        using var cts = new CancellationTokenSource();
-        string? visited = null;
-        _logger.OnLog = (_, message) =>
-        {
-            if (visited == null && message.StartsWith("Marking stale entry for removal: ", StringComparison.Ordinal))
-            {
-                visited = message["Marking stale entry for removal: ".Length..];
-                cts.Cancel();
-            }
-        };
-
-        var removed = await service.CleanupStaleEntriesAsync(cts.Token);
-
-        Assert.NotNull(visited);
-        var unvisited = visited == first ? second : first;
-        Assert.Equal(0, removed);
-        Assert.True(_logger.Contains(LogLevel.Warning, "Cleanup of stale entries was cancelled"));
-        Assert.NotNull(await FindRowAsync(unvisited));
-        Assert.True(await service.FileExistsAsync(unvisited));
-    }
-
-    [Fact]
-    public async Task CleanupStaleEntriesAsync_DatabaseUnavailable_ReturnsZeroAndLogsError()
+    public async Task CleanupStaleEntriesAsync_DatabaseUnavailable_ReportsFailureAndLogsError()
     {
         var service = CreateService();
         _factory.FailAll();
 
-        Assert.Equal(0, await service.CleanupStaleEntriesAsync());
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual);
+
+        Assert.Equal(StaleCleanupStatus.Failed, result.Status);
+        Assert.Equal(0, result.RemovedCount);
         Assert.True(_logger.Contains(LogLevel.Error, "Error during cleanup of stale database entries"));
     }
 

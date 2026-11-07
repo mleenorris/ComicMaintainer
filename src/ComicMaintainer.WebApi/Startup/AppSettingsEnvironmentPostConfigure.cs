@@ -21,6 +21,32 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         if (!string.IsNullOrEmpty(duplicateDir))
             options.DuplicateDirectory = duplicateDir;
 
+        // Stale-entry cleanup guards. The sentinel is most useful from the environment: it
+        // names a file on the library share that only exists while the share is mounted.
+        var staleCleanupMaxRemovalPercent = Environment.GetEnvironmentVariable("STALE_CLEANUP_MAX_REMOVAL_PERCENT");
+        if (!string.IsNullOrEmpty(staleCleanupMaxRemovalPercent) && int.TryParse(staleCleanupMaxRemovalPercent, out var maxRemovalPercent)
+            && maxRemovalPercent is >= 0 and <= AppSettings.MaxStaleCleanupRemovalPercent)
+            options.StaleCleanupMaxRemovalPercent = maxRemovalPercent;
+
+        var staleCleanupGraceHours = Environment.GetEnvironmentVariable("STALE_CLEANUP_MISSING_GRACE_HOURS");
+        if (!string.IsNullOrEmpty(staleCleanupGraceHours) && int.TryParse(staleCleanupGraceHours, out var missingGraceHours)
+            && missingGraceHours is >= 0 and <= AppSettings.MaxStaleCleanupMissingGraceHours)
+            options.StaleCleanupMissingGraceHours = missingGraceHours;
+
+        var staleCleanupSentinel = Environment.GetEnvironmentVariable("STALE_CLEANUP_SENTINEL_FILE");
+        if (!string.IsNullOrEmpty(staleCleanupSentinel))
+            options.StaleCleanupSentinelFile = staleCleanupSentinel;
+
+        var historyRetentionDays = Environment.GetEnvironmentVariable("PROCESSING_HISTORY_RETENTION_DAYS");
+        if (!string.IsNullOrEmpty(historyRetentionDays) && int.TryParse(historyRetentionDays, out var retentionDays)
+            && retentionDays is >= 0 and <= AppSettings.MaxProcessingHistoryRetentionDays)
+            options.ProcessingHistoryRetentionDays = retentionDays;
+
+        var historyMaxEntries = Environment.GetEnvironmentVariable("PROCESSING_HISTORY_MAX_ENTRIES");
+        if (!string.IsNullOrEmpty(historyMaxEntries) && int.TryParse(historyMaxEntries, out var maxHistoryEntries)
+            && maxHistoryEntries is >= 0 and <= AppSettings.MaxProcessingHistoryEntries)
+            options.ProcessingHistoryMaxEntries = maxHistoryEntries;
+
         // CONFIG_DIR is not applied here: Program resolves it (see ConfigDirectoryResolver) and
         // publishes the directory it actually uses as AppSettings:ConfigDirectory, so the options,
         // the database and the DataProtection keys always agree.

@@ -104,6 +104,8 @@ public partial class FileStoreService
 
     /// <summary>
     /// Copies a file's on-disk details onto its row, leaving every stored state alone.
+    /// A file that is present is no longer missing, so its <c>MissingSince</c> stamp is
+    /// cleared too.
     /// </summary>
     private static void RefreshFromDisk(ComicFileEntity entity, FileInfo fileInfo)
     {
@@ -112,6 +114,7 @@ public partial class FileStoreService
         entity.FileSize = fileInfo.Length;
         entity.LastModified = fileInfo.LastWriteTime;
         entity.IsProcessed = ComputeProcessedState(entity.IsRenamed, entity.IsNormalized);
+        entity.MissingSince = null;
         entity.UpdatedAt = DateTime.UtcNow;
     }
 
@@ -237,6 +240,7 @@ public partial class FileStoreService
                         entity.FileSize = fileInfo.Length;
                         entity.LastModified = fileInfo.LastWriteTime;
                     }
+                    entity.MissingSince = null;
                     entity.UpdatedAt = DateTime.UtcNow;
 
                     try
@@ -341,6 +345,7 @@ public partial class FileStoreService
                     if (entity.CreatedAt < newEntity.CreatedAt)
                         newEntity.CreatedAt = entity.CreatedAt;
 
+                    newEntity.MissingSince = null;
                     newEntity.UpdatedAt = DateTime.UtcNow;
 
                     if (!oldRowDeleted)

@@ -2,7 +2,9 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -63,6 +65,11 @@ public class SettingsController : ControllerBase
             watcher_enable_normalize = _appSettings.CurrentValue.WatcherEnableNormalize,
             log_max_bytes = _appSettings.CurrentValue.LogMaxBytes,
             database_cleanup_interval_hours = _appSettings.CurrentValue.DatabaseCleanupIntervalHours,
+            stale_cleanup_max_removal_percent = _appSettings.CurrentValue.StaleCleanupMaxRemovalPercent,
+            stale_cleanup_missing_grace_hours = _appSettings.CurrentValue.StaleCleanupMissingGraceHours,
+            stale_cleanup_sentinel_file = _appSettings.CurrentValue.StaleCleanupSentinelFile ?? string.Empty,
+            processing_history_retention_days = _appSettings.CurrentValue.ProcessingHistoryRetentionDays,
+            processing_history_max_entries = _appSettings.CurrentValue.ProcessingHistoryMaxEntries,
             enable_external_series_metadata = _appSettings.CurrentValue.EnableExternalSeriesMetadata,
             // As with the SMTP password, the key itself is never returned; the
             // UI only needs to know whether one is stored.
@@ -449,6 +456,63 @@ public class SettingsController : ControllerBase
     public Task<ActionResult> SetDatabaseCleanupIntervalHours([FromBody] DatabaseCleanupIntervalRequest request, CancellationToken cancellationToken = default)
         => UpdateDatabaseCleanupIntervalHours(request, cancellationToken);
 
+    /// <summary>
+    /// Every database-cleanup setting: the interval, the guards that keep the stale-entry
+    /// cleanup from emptying the library, and the processing-history retention.
+    /// </summary>
+    [HttpGet("database-cleanup")]
+    public ActionResult<object> GetDatabaseCleanupSettings()
+    {
+        var settings = _appSettings.CurrentValue;
+        return Ok(new
+        {
+            intervalHours = settings.DatabaseCleanupIntervalHours,
+            staleCleanupMaxRemovalPercent = settings.StaleCleanupMaxRemovalPercent,
+            staleCleanupMissingGraceHours = settings.StaleCleanupMissingGraceHours,
+            staleCleanupSentinelFile = settings.StaleCleanupSentinelFile ?? string.Empty,
+            processingHistoryRetentionDays = settings.ProcessingHistoryRetentionDays,
+            processingHistoryMaxEntries = settings.ProcessingHistoryMaxEntries
+        });
+    }
+
+    /// <summary>Saves every database-cleanup setting in one write; 400 names the first value out of range.</summary>
+    [HttpPut("database-cleanup")]
+    public async Task<ActionResult> UpdateDatabaseCleanupSettings([FromBody] DatabaseCleanupSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        _logger.LogInformation(
+            "Database cleanup settings update requested: IntervalHours={IntervalHours}, MaxRemovalPercent={Percent}, MissingGraceHours={GraceHours}, HistoryRetentionDays={Days}, HistoryMaxEntries={MaxEntries}",
+            request.IntervalHours, request.StaleCleanupMaxRemovalPercent, request.StaleCleanupMissingGraceHours,
+            request.ProcessingHistoryRetentionDays, request.ProcessingHistoryMaxEntries);
+
+        try
+        {
+            await _settingsService.UpdateDatabaseCleanupSettingsAsync(
+                new DatabaseCleanupSettings(
+                    request.IntervalHours,
+                    request.StaleCleanupMaxRemovalPercent,
+                    request.StaleCleanupMissingGraceHours,
+                    request.StaleCleanupSentinelFile,
+                    request.ProcessingHistoryRetentionDays,
+                    request.ProcessingHistoryMaxEntries),
+                cancellationToken);
+            return Ok(new { message = "Database cleanup settings updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogError(ex, "Failed to update database cleanup settings");
+            return StatusCode(500, new { error = "Failed to update database cleanup settings" });
+        }
+    }
+
     [HttpGet("default-library-view")]
     public ActionResult<object> GetDefaultLibraryView()
     {
@@ -610,35 +674,19 @@ public class SettingsController : ControllerBase
     public Task<ActionResult> SetExternalSeriesMetadata([FromBody] ExternalSeriesMetadataSettingsRequest request, CancellationToken cancellationToken = default)
         => UpdateExternalSeriesMetadata(request, cancellationToken);
 
+    /// <summary>
+    /// Removes database rows for files that no longer exist on disk. Refuses (409) while the
+    /// library looks unmounted, and asks for confirmation (409 with
+    /// <c>requiresConfirmation</c>; repeat with <c>?confirm=true</c>) before removing more
+    /// than the configured share of the library; see <see cref="StaleCleanupResponses"/>.
+    /// The file store notifies clients when rows were removed.
+    /// </summary>
     [HttpPost("cleanup-database")]
-    public async Task<ActionResult> CleanupDatabase(CancellationToken cancellationToken = default)
+    public async Task<ActionResult> CleanupDatabase([FromQuery] bool confirm = false, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation("Manual database cleanup requested");
-            var removedCount = await _fileStore.CleanupStaleEntriesAsync(cancellationToken);
-            _logger.LogInformation("Database cleanup completed, removed {Count} stale entries", removedCount);
-
-            // Notify clients so the library refreshes in place.
-            if (removedCount > 0 && _eventBroadcaster is not null)
-            {
-                try
-                {
-                    await _eventBroadcaster.BroadcastFileListUpdateAsync();
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogWarning(ex, "Failed to broadcast file list update after manual database cleanup");
-                }
-            }
-
-            return Ok(new { success = true, message = $"Database cleanup completed. Removed {removedCount} stale entries.", removedCount = removedCount });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error during manual database cleanup");
-            return StatusCode(500, new { success = false, error = "Error during database cleanup: " + ex.Message });
-        }
+        _logger.LogInformation("Manual database cleanup requested (confirmed: {Confirmed})", confirm);
+        var result = await _fileStore.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: confirm), cancellationToken);
+        return StaleCleanupResponses.ToActionResult(this, result);
     }
 
     [HttpPost("reset")]
@@ -789,6 +837,30 @@ public class SettingsController : ControllerBase
     public class DatabaseCleanupIntervalRequest
     {
         public int Hours { get; set; }
+    }
+
+    /// <summary>
+    /// Body of <c>PUT /api/settings/database-cleanup</c>; an omitted value takes its default.
+    /// </summary>
+    public class DatabaseCleanupSettingsRequest
+    {
+        /// <summary>Hours between scheduled cleanups; 0 runs it only once after start-up.</summary>
+        public int IntervalHours { get; set; } = 12;
+
+        /// <summary>Largest share of the library (0-100 percent) one cleanup may remove without confirmation.</summary>
+        public int StaleCleanupMaxRemovalPercent { get; set; } = 10;
+
+        /// <summary>Hours a file must stay missing before a scheduled cleanup removes its row.</summary>
+        public int StaleCleanupMissingGraceHours { get; set; } = 6;
+
+        /// <summary>File that must exist before any cleanup runs (relative to the watched directory); empty disables it.</summary>
+        public string? StaleCleanupSentinelFile { get; set; }
+
+        /// <summary>Processing-history entries older than this many days are pruned; 0 keeps them regardless of age.</summary>
+        public int ProcessingHistoryRetentionDays { get; set; } = 90;
+
+        /// <summary>Only the newest this many processing-history entries are kept; 0 disables the cap.</summary>
+        public int ProcessingHistoryMaxEntries { get; set; } = 50000;
     }
 
     public class DefaultLibraryViewRequest

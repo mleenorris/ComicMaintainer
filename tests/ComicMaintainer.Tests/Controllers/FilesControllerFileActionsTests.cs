@@ -574,37 +574,103 @@ public sealed class FilesControllerFileActionsTests
     public async Task CleanupStaleEntries_ReportsRemovedCount()
     {
         using var cts = new CancellationTokenSource();
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(cts.Token)).ReturnsAsync(3);
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: false), cts.Token))
+            .ReturnsAsync(new StaleCleanupResult
+            {
+                Status = StaleCleanupStatus.Completed,
+                RemovedCount = 3,
+                TrackedCount = 40,
+                Message = "Removed 3 stale database entries.",
+            });
 
-        var result = await _controller.CleanupStaleEntries(cts.Token);
+        var result = await _controller.CleanupStaleEntries(cancellationToken: cts.Token);
 
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(true, Prop(ok.Value, "success"));
         Assert.Equal(3, Prop(ok.Value, "removedCount"));
-        Assert.Equal("Removed 3 stale database entries", Prop(ok.Value, "message"));
+        Assert.Equal(40, Prop(ok.Value, "trackedCount"));
+        Assert.Equal("Removed 3 stale database entries.", Prop(ok.Value, "message"));
+        Assert.Equal(false, Prop(ok.Value, "requiresConfirmation"));
+    }
+
+    [Fact]
+    public async Task CleanupStaleEntries_OverTheRemovalShare_AsksForConfirmation()
+    {
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult
+            {
+                Status = StaleCleanupStatus.ThresholdExceeded,
+                TrackedCount = 100,
+                RemovableCount = 60,
+                MaxRemovalPercent = 10,
+                Message = "60 of 100 tracked files are missing.",
+            });
+
+        var result = await _controller.CleanupStaleEntries();
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal(false, Prop(conflict.Value, "success"));
+        Assert.Equal(true, Prop(conflict.Value, "requiresConfirmation"));
+        Assert.Equal("ThresholdExceeded", Prop(conflict.Value, "status"));
+        Assert.Equal(60, Prop(conflict.Value, "removableCount"));
+        Assert.Equal(0, Prop(conflict.Value, "removedCount"));
+        Assert.Equal("60 of 100 tracked files are missing.", Prop(conflict.Value, "error"));
+    }
+
+    [Fact]
+    public async Task CleanupStaleEntries_Confirmed_PassesTheConfirmationToTheStore()
+    {
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed, RemovedCount = 60 });
+
+        var result = await _controller.CleanupStaleEntries(confirm: true);
+
+        Assert.IsType<OkObjectResult>(result);
+        _fileStore.Verify(f => f.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: true), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CleanupStaleEntries_LibraryUnavailable_IsRefusedWithoutAConfirmationOffer()
+    {
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.WatchedDirectoryUnavailable, Message = "unmounted" });
+
+        var result = await _controller.CleanupStaleEntries(confirm: true);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal(false, Prop(conflict.Value, "requiresConfirmation"));
+        Assert.Equal("WatchedDirectoryUnavailable", Prop(conflict.Value, "status"));
     }
 
     [Fact]
     public async Task CleanupStaleEntries_Cancelled_Returns499()
     {
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new OperationCanceledException());
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Cancelled, Message = "The cleanup was cancelled. No rows were removed." });
 
         var result = await _controller.CleanupStaleEntries();
 
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
+        var objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(499, objectResult.StatusCode);
-        Assert.Equal("Cleanup operation was cancelled", Prop(objectResult.Value, "error"));
+        Assert.Equal("The cleanup was cancelled. No rows were removed.", Prop(objectResult.Value, "error"));
     }
 
     [Fact]
-    public async Task CleanupStaleEntries_StoreThrows_Returns500()
+    public async Task CleanupStaleEntries_StoreFailed_Returns500()
     {
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("db locked"));
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Failed, Message = "The cleanup failed. No rows were removed." });
 
         var result = await _controller.CleanupStaleEntries();
 
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
+        var objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, objectResult.StatusCode);
-        Assert.Equal("Failed to cleanup stale entries", Prop(objectResult.Value, "error"));
+        Assert.Equal("The cleanup failed. No rows were removed.", Prop(objectResult.Value, "error"));
     }
 }

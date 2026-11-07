@@ -71,7 +71,7 @@ public class AppSettings
     /// cannot find the file only stamps <c>MissingSince</c>; a file that reappears in the
     /// meantime keeps its row and everything stored on it. A manual cleanup does not wait.
     /// </summary>
-    public int StaleCleanupMissingGraceHours { get; set; } = 1;
+    public int StaleCleanupMissingGraceHours { get; set; } = 6;
 
     /// <summary>
     /// Optional path of a file that must exist before any stale-entry cleanup runs, relative

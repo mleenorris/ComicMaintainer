@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -459,8 +460,8 @@ public class SettingsControllerTests
     public async Task CleanupDatabase_RemovesStaleEntries_ReturnsOk()
     {
         // Arrange
-        _fileStoreMock.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(5); // Simulate 5 stale entries removed
+        _fileStoreMock.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed, RemovedCount = 5 }); // Simulate 5 stale entries removed
 
         // Act
         var result = await _controller.CleanupDatabase();
@@ -478,6 +479,6 @@ public class SettingsControllerTests
         Assert.NotNull(removedCountProperty);
         Assert.Equal(5, removedCountProperty.GetValue(value));
         
-        _fileStoreMock.Verify(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _fileStoreMock.Verify(f => f.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

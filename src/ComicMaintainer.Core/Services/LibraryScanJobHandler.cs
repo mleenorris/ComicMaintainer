@@ -20,7 +20,10 @@ namespace ComicMaintainer.Core.Services;
 ///     </item>
 ///   <item><b>Reconcile deletions</b> — when enabled, removes tracked rows
 ///     whose files no longer exist on disk (replacing the live
-///     <c>OnFileDeleted</c> handler).</item>
+///     <c>OnFileDeleted</c> handler) through the guarded
+///     <see cref="IFileStoreService.CleanupStaleEntriesAsync"/>, so an
+///     unmounted share never empties the library and a row is only
+///     deleted once its file has been missing on two runs.</item>
 ///   <item><b>Stale-metadata retag</b> — when enabled, compares each
 ///     tracked file's <c>SeriesMetadataVersion</c> stamp to the matching
 ///     cache record's current <c>MetadataVersion</c> and forces a
@@ -102,7 +105,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         // a full ProcessFileAsync for additions (the watcher's scan path
         // only adds rows; live FS events were what triggered processing).
         HashSet<string>? diskPaths = null;
-        if (options.ScanForNew || options.ReconcileDeletions || options.ReprocessModified)
+        if (options.ScanForNew || options.ReprocessModified)
         {
             diskPaths = new HashSet<string>(
                 Directory.EnumerateFiles(watchedDir, "*.*", SearchOption.AllDirectories)
@@ -146,29 +149,28 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         }
 
         // Pass 2: reconcile deletions. Drop rows whose files no longer
-        // exist on disk so the in-memory store and DB don't accumulate
-        // ghosts when the live watcher is off.
-        if (options.ReconcileDeletions && diskPaths is not null)
+        // exist on disk so the DB doesn't accumulate ghosts when the live
+        // watcher is off. This is the guarded stale-entry cleanup, not a
+        // diff against the enumeration above: an empty or unmounted share
+        // enumerates as "no files", and must not delete the library.
+        var deletionNote = string.Empty;
+        if (options.ReconcileDeletions)
         {
-            foreach (var path in tracked.Keys.ToList())
+            var cleanup = await _fileStore.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, cancellationToken);
+            if (cleanup.Status == StaleCleanupStatus.Cancelled)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (diskPaths.Contains(path)) continue;
-                try
-                {
-                    await _fileStore.RemoveFileAsync(path, cancellationToken);
-                    tracked.Remove(path);
-                    removedCount++;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogWarning(ex, "Library scan: failed to remove deleted file {Path}",
-                        LoggingHelper.SanitizePathForLog(path));
-                }
+            }
+
+            removedCount = cleanup.RemovedCount;
+            if (cleanup.Status != StaleCleanupStatus.Completed)
+            {
+                deletionNote = $" Deletions not reconciled ({cleanup.Status}).";
+            }
+
+            if (removedCount > 0)
+            {
+                tracked = await LoadTrackedSnapshotAsync(cancellationToken);
             }
         }
 
@@ -277,7 +279,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         }
 
         var modifiedPart = options.ReprocessModified ? $", {modifiedCount} modified reprocessed" : string.Empty;
-        return $"Library scan: +{addedCount} added, -{removedCount} removed, {staleCount} stale retagged{modifiedPart}.{newProcessedSummary}{staleProcessedSummary}{modifiedProcessedSummary}";
+        return $"Library scan: +{addedCount} added, -{removedCount} removed, {staleCount} stale retagged{modifiedPart}.{deletionNote}{newProcessedSummary}{staleProcessedSummary}{modifiedProcessedSummary}";
     }
 
     /// <summary>

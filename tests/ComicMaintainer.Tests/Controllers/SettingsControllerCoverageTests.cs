@@ -760,56 +760,141 @@ public class SettingsControllerCoverageTests
     // ---------------------------------------------------------------- cleanup-database
 
     [Fact]
-    public async Task CleanupDatabase_RemovedEntries_BroadcastsFileListUpdate()
+    public async Task CleanupDatabase_RemovedEntries_ReportsTheCount()
     {
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(4);
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: false), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed, RemovedCount = 4, Message = "Removed 4 stale database entries." });
 
         var result = await CreateController(withBroadcaster: true).CleanupDatabase();
 
         var json = OkJson(result);
         Assert.True(json.GetProperty("success").GetBoolean());
         Assert.Equal(4, json.GetProperty("removedCount").GetInt32());
-        Assert.Equal("Database cleanup completed. Removed 4 stale entries.", json.GetProperty("message").GetString());
-        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once());
-    }
-
-    [Fact]
-    public async Task CleanupDatabase_NothingRemoved_DoesNotBroadcast()
-    {
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
-
-        var result = await CreateController(withBroadcaster: true).CleanupDatabase();
-
-        Assert.Equal(0, OkJson(result).GetProperty("removedCount").GetInt32());
+        Assert.Equal("Removed 4 stale database entries.", json.GetProperty("message").GetString());
+        // The file store notifies clients itself, so the controller does not broadcast again.
         _broadcaster.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task CleanupDatabase_BroadcastFailure_IsLoggedButStillSucceeds()
+    public async Task CleanupDatabase_OverTheRemovalShare_Returns409AskingForConfirmation()
     {
-        var failure = new InvalidOperationException("hub down");
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(2);
-        _broadcaster.Setup(b => b.BroadcastFileListUpdateAsync()).ThrowsAsync(failure);
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult
+            {
+                Status = StaleCleanupStatus.ThresholdExceeded,
+                TrackedCount = 1000,
+                RemovableCount = 300,
+                MaxRemovalPercent = 10,
+                Message = "300 of 1000 tracked files are missing.",
+            });
 
-        var result = await CreateController(withBroadcaster: true).CleanupDatabase();
+        var result = await CreateController().CleanupDatabase();
 
-        Assert.True(OkJson(result).GetProperty("success").GetBoolean());
-        VerifyLogged(LogLevel.Warning, "Failed to broadcast file list update after manual database cleanup", Times.Once(), failure);
+        var json = JsonSerializer.SerializeToElement(Assert.IsType<ConflictObjectResult>(result).Value);
+        Assert.False(json.GetProperty("success").GetBoolean());
+        Assert.True(json.GetProperty("requiresConfirmation").GetBoolean());
+        Assert.Equal(300, json.GetProperty("removableCount").GetInt32());
+        Assert.Equal(10, json.GetProperty("maxRemovalPercent").GetInt32());
+        Assert.Equal("300 of 1000 tracked files are missing.", json.GetProperty("message").GetString());
     }
 
     [Fact]
-    public async Task CleanupDatabase_StoreFailure_Returns500WithReason()
+    public async Task CleanupDatabase_Confirmed_RunsAConfirmedManualCleanup()
     {
-        var failure = new InvalidOperationException("database is locked");
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed, RemovedCount = 300 });
+
+        var result = await CreateController().CleanupDatabase(confirm: true);
+
+        Assert.Equal(300, OkJson(result).GetProperty("removedCount").GetInt32());
+        _fileStore.Verify(
+            f => f.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: true), It.IsAny<CancellationToken>()),
+            Times.Once());
+    }
+
+    [Fact]
+    public async Task CleanupDatabase_StoreFailure_Returns500WithoutInternals()
+    {
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Failed, Message = "The cleanup failed. No rows were removed." });
 
         var result = await CreateController(withBroadcaster: true).CleanupDatabase();
 
         var json = ServerErrorJson(result);
         Assert.False(json.GetProperty("success").GetBoolean());
-        Assert.Equal("Error during database cleanup: database is locked", json.GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Error during manual database cleanup", Times.Once(), failure);
+        Assert.Equal("The cleanup failed. No rows were removed.", json.GetProperty("error").GetString());
         _broadcaster.VerifyNoOtherCalls();
+    }
+
+    // ---------------------------------------------------------------- database-cleanup settings
+
+    [Fact]
+    public void GetDatabaseCleanupSettings_ReturnsEveryCleanupSetting()
+    {
+        _settings.StaleCleanupMaxRemovalPercent = 15;
+        _settings.StaleCleanupMissingGraceHours = 24;
+        _settings.StaleCleanupSentinelFile = ".mounted";
+        _settings.ProcessingHistoryRetentionDays = 30;
+        _settings.ProcessingHistoryMaxEntries = 20000;
+
+        var json = OkJson(CreateController().GetDatabaseCleanupSettings());
+
+        Assert.Equal(6, json.GetProperty("intervalHours").GetInt32());
+        Assert.Equal(15, json.GetProperty("staleCleanupMaxRemovalPercent").GetInt32());
+        Assert.Equal(24, json.GetProperty("staleCleanupMissingGraceHours").GetInt32());
+        Assert.Equal(".mounted", json.GetProperty("staleCleanupSentinelFile").GetString());
+        Assert.Equal(30, json.GetProperty("processingHistoryRetentionDays").GetInt32());
+        Assert.Equal(20000, json.GetProperty("processingHistoryMaxEntries").GetInt32());
+    }
+
+    [Fact]
+    public async Task UpdateDatabaseCleanupSettings_SavesEveryValueInOneWrite()
+    {
+        var result = await CreateController().UpdateDatabaseCleanupSettings(new()
+        {
+            IntervalHours = 24,
+            StaleCleanupMaxRemovalPercent = 20,
+            StaleCleanupMissingGraceHours = 12,
+            StaleCleanupSentinelFile = ".mounted",
+            ProcessingHistoryRetentionDays = 0,
+            ProcessingHistoryMaxEntries = 1000,
+        });
+
+        Assert.Equal("Database cleanup settings updated successfully", OkJson(result).GetProperty("message").GetString());
+        _settingsService.Verify(
+            s => s.UpdateDatabaseCleanupSettingsAsync(new DatabaseCleanupSettings(24, 20, 12, ".mounted", 0, 1000), It.IsAny<CancellationToken>()),
+            Times.Once());
+    }
+
+    [Fact]
+    public async Task UpdateDatabaseCleanupSettings_OutOfRange_Returns400WithTheReason()
+    {
+        _settingsService
+            .Setup(s => s.UpdateDatabaseCleanupSettingsAsync(It.IsAny<DatabaseCleanupSettings>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("Max removal percent must be between 0 and 100"));
+
+        var result = await CreateController().UpdateDatabaseCleanupSettings(new() { StaleCleanupMaxRemovalPercent = 101 });
+
+        Assert.Equal("Max removal percent must be between 0 and 100", BadRequestError(result));
+        VerifyLogged(LogLevel.Error, "Failed to update database cleanup settings", Times.Never());
+    }
+
+    [Fact]
+    public async Task UpdateDatabaseCleanupSettings_ServiceFailure_Returns500()
+    {
+        var failure = new IOException("disk full");
+        _settingsService
+            .Setup(s => s.UpdateDatabaseCleanupSettingsAsync(It.IsAny<DatabaseCleanupSettings>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        var result = await CreateController().UpdateDatabaseCleanupSettings(new());
+
+        Assert.Equal("Failed to update database cleanup settings", ServerErrorJson(result).GetProperty("error").GetString());
+        VerifyLogged(LogLevel.Error, "Failed to update database cleanup settings", Times.Once(), failure);
     }
 
     // ---------------------------------------------------------------- reset

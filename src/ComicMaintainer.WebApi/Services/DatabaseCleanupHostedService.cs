@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -10,12 +11,25 @@ namespace ComicMaintainer.WebApi.Services;
 /// Hosted service that periodically cleans up stale database entries and refreshes the
 /// SQLite query-planner statistics.
 /// </summary>
+/// <remarks>
+/// The stale-entry cleanup is guarded by the file store (see
+/// <see cref="IFileStoreService.CleanupStaleEntriesAsync"/>): it never deletes anything
+/// while the library looks unmounted, waits for a file to stay missing across two runs, and
+/// refuses mass deletions. On top of that the first run waits
+/// <see cref="DefaultStartupDelay"/> after start-up instead of running inside
+/// <see cref="StartAsync"/>, so it neither delays the application's start nor races the
+/// file watcher's initial scan of a share that is still being mounted.
+/// </remarks>
 public class DatabaseCleanupHostedService : IHostedService, IDisposable
 {
+    /// <summary>How long after start-up the first cleanup runs.</summary>
+    public static readonly TimeSpan DefaultStartupDelay = TimeSpan.FromMinutes(2);
+
     private readonly IFileStoreService _fileStore;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<DatabaseCleanupHostedService> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
+    private readonly TimeSpan _startupDelay;
     private Timer? _timer;
     private readonly SemaphoreSlim _cleanupLock = new(1, 1);
     private CancellationTokenSource? _cancellationTokenSource;
@@ -23,29 +37,38 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     private int _activeIntervalHours = int.MinValue;
     private readonly object _timerLock = new();
     private bool _started;
+    private Task _startupRun = Task.CompletedTask;
 
     public DatabaseCleanupHostedService(
         IFileStoreService fileStore,
         IOptionsMonitor<AppSettings> appSettings,
         ILogger<DatabaseCleanupHostedService> logger,
-        IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null)
+        IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
+        TimeSpan? startupDelay = null)
     {
         _fileStore = fileStore;
         _appSettings = appSettings;
         _logger = logger;
         _dbContextFactory = dbContextFactory;
+        _startupDelay = startupDelay is { } delay
+            ? (delay > TimeSpan.Zero ? delay : TimeSpan.Zero)
+            : DefaultStartupDelay;
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>The start-up cleanup run (completed once it has finished or was cancelled).</summary>
+    public Task StartupRun => _startupRun;
+
+    public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Starting Database Cleanup Hosted Service");
-        
+
         _cancellationTokenSource = new CancellationTokenSource();
         _started = true;
-        
-        // Run cleanup on startup
-        await RunCleanupAsync(cancellationToken);
-        
+
+        // The start-up cleanup runs in the background after a delay rather than here.
+        var stopping = _cancellationTokenSource.Token;
+        _startupRun = Task.Run(() => RunStartupCleanupAsync(stopping), CancellationToken.None);
+
         // Schedule periodic cleanup based on configuration and subscribe to changes so the
         // schedule is updated live without restarting the service.
         ConfigureTimer(_appSettings.CurrentValue.DatabaseCleanupIntervalHours);
@@ -60,6 +83,25 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
                 _logger.LogError(ex, "Failed to reconfigure database cleanup timer after settings change");
             }
         });
+
+        return Task.CompletedTask;
+    }
+
+    private async Task RunStartupCleanupAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            if (_startupDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(_startupDelay, stoppingToken);
+            }
+
+            await RunCleanupAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Stopped before the first run was due.
+        }
     }
 
     private void ConfigureTimer(int intervalHours)
@@ -107,7 +149,7 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Stopping Database Cleanup Hosted Service");
         _started = false;
@@ -130,14 +172,33 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
                 // Already disposed, ignore
             }
         }
-        
-        return Task.CompletedTask;
+
+        // The start-up run observes the cancellation and finishes promptly; wait for it so
+        // nothing is still using the service once it is disposed.
+        try
+        {
+            await _startupRun.WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The host stopped waiting.
+        }
     }
 
     private async Task RunCleanupAsync(CancellationToken cancellationToken)
     {
         // Prevent concurrent cleanup operations
-        if (!await _cleanupLock.WaitAsync(0, cancellationToken))
+        bool acquired;
+        try
+        {
+            acquired = await _cleanupLock.WaitAsync(0, cancellationToken);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+        {
+            return;
+        }
+
+        if (!acquired)
         {
             _logger.LogDebug("Database cleanup already in progress, skipping this run");
             return;
@@ -146,8 +207,21 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
         try
         {
             _logger.LogInformation("Starting scheduled database cleanup");
-            var removedCount = await _fileStore.CleanupStaleEntriesAsync(cancellationToken);
-            _logger.LogInformation("Database cleanup completed, removed {Count} stale entries", removedCount);
+            var result = await _fileStore.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, cancellationToken);
+            switch (result.Status)
+            {
+                case StaleCleanupStatus.Completed:
+                    _logger.LogInformation("Database cleanup completed, removed {Count} stale entries", result.RemovedCount);
+                    break;
+                case StaleCleanupStatus.Cancelled:
+                    _logger.LogInformation("Database cleanup was cancelled");
+                    return;
+                default:
+                    // The file store has already logged why; this ties it to the schedule.
+                    _logger.LogWarning("Scheduled database cleanup removed nothing ({Status}): {Message}", result.Status, result.Message);
+                    break;
+            }
+
             await RefreshPlannerStatisticsAsync(cancellationToken);
         }
         catch (OperationCanceledException)
@@ -160,7 +234,14 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
         }
         finally
         {
-            _cleanupLock.Release();
+            try
+            {
+                _cleanupLock.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Disposed while a timer run was finishing; nothing waits on the lock any more.
+            }
         }
     }
 

@@ -25,6 +25,8 @@ public class LibraryScanJobHandlerTests : IDisposable
         _options.Setup(o => o.CurrentValue).Returns(_settings);
         _cache.Setup(c => c.NormalizeKey(It.IsAny<string?>()))
               .Returns<string?>(s => string.IsNullOrWhiteSpace(s) ? "unknown-series" : s.ToLowerInvariant().Replace(' ', '-'));
+        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed });
     }
 
     public void Dispose()
@@ -92,9 +94,9 @@ public class LibraryScanJobHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_ReconcileDeletions_RemovesGhostFiles()
+    public async Task ExecuteAsync_ReconcileDeletions_RemovesGhostFilesThroughTheGuardedCleanup()
     {
-        // No disk files, but DB has one tracked file -> should be removed.
+        // No disk files, but DB has one tracked file -> the guarded cleanup removes it.
         var ghostPath = Path.Join(_watchDir, "Ghost", "missing.cbz");
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[]
         {
@@ -104,11 +106,14 @@ public class LibraryScanJobHandlerTests : IDisposable
         _fileStore.Setup(f => f.GetFilesWithStaleSeriesMetadataAsync(
             It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<string>());
+        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed, RemovedCount = 1 });
 
         var handler = BuildHandler();
         var summary = await handler.ExecuteAsync(null, CancellationToken.None);
 
-        _fileStore.Verify(f => f.RemoveFileAsync(ghostPath, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Contains("-1 removed", summary);
     }
 

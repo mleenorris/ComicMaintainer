@@ -364,6 +364,11 @@
                 
                 // Load database cleanup interval
                 document.getElementById('dbCleanupInterval').value = settingsData.database_cleanup_interval_hours;
+                document.getElementById('staleCleanupMaxRemovalPercent').value = settingsData.stale_cleanup_max_removal_percent ?? 10;
+                document.getElementById('staleCleanupMissingGraceHours').value = settingsData.stale_cleanup_missing_grace_hours ?? 6;
+                document.getElementById('staleCleanupSentinelFile').value = settingsData.stale_cleanup_sentinel_file || '';
+                document.getElementById('processingHistoryRetentionDays').value = settingsData.processing_history_retention_days ?? 90;
+                document.getElementById('processingHistoryMaxEntries').value = settingsData.processing_history_max_entries ?? 50000;
 
                 // Load external metadata settings
                 document.getElementById('enableExternalSeriesMetadata').checked = !!settingsData.enable_external_series_metadata;
@@ -1279,8 +1284,25 @@
             logMaxSizeMB: 2047,
             emailMaxAttachmentMB: 200,
             errorReportingMaxPerDay: 100,
-            errorReportingDedupeHours: 720
+            errorReportingDedupeHours: 720,
+            staleCleanupMaxRemovalPercent: 100,
+            staleCleanupMissingGraceHours: 720,
+            processingHistoryRetentionDays: 3650,
+            processingHistoryMaxEntries: 10000000
         });
+
+        /** A whole number from a settings input, or NaN when it is blank or not a whole number. */
+        function parseWholeNumberInput(id) {
+            const value = (document.getElementById(id)?.value ?? '').trim();
+            if (!value) return NaN;
+            const number = Number(value);
+            return Number.isInteger(number) ? number : NaN;
+        }
+
+        /** Whether `value` is a whole number from 0 to `max`. */
+        function isWholeNumberInRange(value, max) {
+            return Number.isInteger(value) && value >= 0 && value <= max;
+        }
 
         /**
          * A whole number from an email rate-limit input. Blank means 0 (no
@@ -1299,6 +1321,11 @@
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
             const issueNumberPadding = document.getElementById('issueNumberPadding').valueAsNumber;
             const dbCleanupInterval = parseInt(document.getElementById('dbCleanupInterval').value);
+            const staleCleanupMaxRemovalPercent = parseWholeNumberInput('staleCleanupMaxRemovalPercent');
+            const staleCleanupMissingGraceHours = parseWholeNumberInput('staleCleanupMissingGraceHours');
+            const staleCleanupSentinelFile = document.getElementById('staleCleanupSentinelFile').value.trim();
+            const processingHistoryRetentionDays = parseWholeNumberInput('processingHistoryRetentionDays');
+            const processingHistoryMaxEntries = parseWholeNumberInput('processingHistoryMaxEntries');
             const enableExternalSeriesMetadata = document.getElementById('enableExternalSeriesMetadata').checked;
             const comicVineApiKey = document.getElementById('comicVineApiKey').value.trim();
             const comicVineClearApiKey = document.getElementById('comicVineClearApiKeyCheckbox').checked;
@@ -1363,6 +1390,26 @@
             
             if (isNaN(dbCleanupInterval) || dbCleanupInterval < 0) {
                 showMessage('Database cleanup interval must be 0 or greater', 'error');
+                return;
+            }
+
+            if (!isWholeNumberInRange(staleCleanupMaxRemovalPercent, SETTINGS_SERVER_LIMITS.staleCleanupMaxRemovalPercent)) {
+                showMessage(`Largest share removed without confirmation must be a whole number from 0 to ${SETTINGS_SERVER_LIMITS.staleCleanupMaxRemovalPercent}`, 'error');
+                return;
+            }
+
+            if (!isWholeNumberInRange(staleCleanupMissingGraceHours, SETTINGS_SERVER_LIMITS.staleCleanupMissingGraceHours)) {
+                showMessage(`Remove missing files after must be a whole number of hours from 0 to ${SETTINGS_SERVER_LIMITS.staleCleanupMissingGraceHours}`, 'error');
+                return;
+            }
+
+            if (!isWholeNumberInRange(processingHistoryRetentionDays, SETTINGS_SERVER_LIMITS.processingHistoryRetentionDays)) {
+                showMessage(`Processing history retention must be a whole number of days from 0 to ${SETTINGS_SERVER_LIMITS.processingHistoryRetentionDays}`, 'error');
+                return;
+            }
+
+            if (!isWholeNumberInRange(processingHistoryMaxEntries, SETTINGS_SERVER_LIMITS.processingHistoryMaxEntries)) {
+                showMessage(`Maximum processing history entries must be a whole number from 0 to ${SETTINGS_SERVER_LIMITS.processingHistoryMaxEntries}`, 'error');
                 return;
             }
             
@@ -1439,7 +1486,19 @@
                 },
                 { name: 'log max size', method: 'POST', path: '/api/settings/log-max-bytes', body: { maxMB: logMaxSize } },
                 { name: 'issue number padding', method: 'POST', path: '/api/settings/issue-number-padding', body: { padding: issueNumberPadding } },
-                { name: 'database cleanup interval', method: 'POST', path: '/api/settings/database-cleanup-interval-hours', body: { hours: dbCleanupInterval } },
+                {
+                    name: 'database cleanup settings',
+                    method: 'PUT',
+                    path: '/api/settings/database-cleanup',
+                    body: {
+                        intervalHours: dbCleanupInterval,
+                        staleCleanupMaxRemovalPercent,
+                        staleCleanupMissingGraceHours,
+                        staleCleanupSentinelFile,
+                        processingHistoryRetentionDays,
+                        processingHistoryMaxEntries
+                    }
+                },
                 {
                     name: 'external metadata settings',
                     method: 'POST',
@@ -1608,26 +1667,46 @@
             }
         }
         
+        /**
+         * "Clean Database Now". The server refuses (409) while the library looks
+         * unmounted, and asks for confirmation (409 with requiresConfirmation)
+         * before removing more than the configured share of the library or when
+         * the watched folder holds no comics; the request is then repeated with
+         * ?confirm=true only if the administrator agrees.
+         */
         async function cleanupDatabaseNow() {
             try {
                 showMessage('Starting database cleanup...', 'info');
-                
-                const response = await fetch(apiUrl('/api/settings/cleanup-database'), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
+
+                const post = confirmed => fetch(
+                    apiUrl('/api/settings/cleanup-database' + (confirmed ? '?confirm=true' : '')),
+                    { method: 'POST', headers: getAuthHeaders() });
+
+                let response = await post(false);
                 if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                let result = await response.json().catch(() => ({}));
+
+                if (response.status === 409 && result.requiresConfirmation) {
+                    if (!confirm(`${result.message}\n\nRemove these entries anyway?`)) {
+                        showMessage('Database cleanup cancelled. No entries were removed.', 'info');
+                        return;
+                    }
+                    response = await post(true);
+                    if (handleAuthError(response)) return;
+                    result = await response.json().catch(() => ({}));
                 }
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    showMessage(`Database cleanup completed. Removed ${result.removedCount} stale entries.`, 'success');
+
+                if (response.ok) {
+                    if (result.success) {
+                        showMessage(result.message || `Database cleanup completed. Removed ${result.removedCount} stale entries.`, 'success');
+                    } else {
+                        showMessage(result.error || 'Failed to cleanup database', 'error');
+                    }
+                } else if (response.status === 409) {
+                    // Refused (the library looks unmounted); nothing was removed.
+                    showMessage(result.message || 'Database cleanup was skipped. No entries were removed.', 'warning');
                 } else {
-                    showMessage(result.error || 'Failed to cleanup database', 'error');
+                    throw new Error(result.error || `HTTP error! status: ${response.status}`);
                 }
             } catch (error) {
                 showMessage('Failed to cleanup database: ' + error.message, 'error');

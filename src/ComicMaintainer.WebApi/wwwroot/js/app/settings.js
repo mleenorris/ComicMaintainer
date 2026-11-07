@@ -616,6 +616,9 @@
         }
         
         async function openLogsModal() {
+            // The logs API is administrator-only; its entry points are hidden
+            // for everyone else (see applyCapabilities in shell.js).
+            if (!userCapabilities.canAdminister) return;
             document.getElementById('logsModal').classList.add('active');
             await loadLogFiles();
         }

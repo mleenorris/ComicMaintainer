@@ -313,12 +313,14 @@
             document.body.classList.toggle('user-read-only', !userCapabilities.canModifyLibrary);
 
             // /api/diagnostics reports host paths, disk space and process
-            // memory, and scheduled jobs are server administration (backups,
-            // library-wide scans and auto-corrections), so both APIs are
-            // administrator-only. Hide the entry points rather than let them
-            // open a page or panel that can only say "403".
+            // memory, the raw logs (/api/logs) name every user, role and
+            // failed sign-in, and scheduled jobs are server administration
+            // (backups, library-wide scans and auto-corrections), so these
+            // APIs are administrator-only. Hide the entry points rather than
+            // let them open a page or panel that can only say "403".
             [
                 'diagnosticsMenuItem', 'sidebarDiagnosticsItem',
+                'logsMenuItem', 'sidebarLogsItem',
                 'scheduledJobsMenuItem', 'sidebarJobsBtn', 'scheduledJobsShortcutItem'
             ].forEach(id => {
                 const adminItem = document.getElementById(id);

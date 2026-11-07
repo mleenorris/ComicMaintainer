@@ -175,7 +175,7 @@
             <button type="button" class="sidebar-link" onclick="openEmailDeliveryHistoryModal()"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span>Delivery History</span></button>
 
             <div class="sidebar-section-label">System</div>
-            <button type="button" class="sidebar-link" onclick="openLogsModal()"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Logs</span></button>
+            <button type="button" class="sidebar-link" id="sidebarLogsItem" onclick="openLogsModal()"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Logs</span></button>
             <button type="button" class="sidebar-link" onclick="openExternalProvidersModal()"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>External Providers</span></button>
             <button type="button" class="sidebar-link" id="sidebarDiagnosticsItem" onclick="openDiagnosticsModal()"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg><span>Diagnostics</span></button>
             <button type="button" class="sidebar-link" id="installAppSidebarButton" onclick="installApp()" style="display: none;">
@@ -244,7 +244,7 @@
                         <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-history"/></svg> Processing History
                         </button>
-                        <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
+                        <button class="settings-dropdown-item" id="logsMenuItem" onclick="openLogsModal(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg> View Logs
                         </button>
                         <button class="settings-dropdown-item" onclick="openExternalProvidersModal(); closeSettingsMenu();">

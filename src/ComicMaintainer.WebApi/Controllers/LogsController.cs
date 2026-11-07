@@ -1,14 +1,20 @@
 using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.WebApi.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
+/// <summary>
+/// Serves the raw application, watcher, metadata, auth and debug logs. They name every user and their roles,
+/// failed sign-ins and client addresses, host paths and exception details, so, like the diagnostics, they are
+/// administrator-only.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = AuthorizationPolicies.CanAdminister)]
 public class LogsController : ControllerBase
 {
     private readonly IOptionsMonitor<AppSettings> _settings;

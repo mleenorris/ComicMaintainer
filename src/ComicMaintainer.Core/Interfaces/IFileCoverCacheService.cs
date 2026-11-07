@@ -7,15 +7,27 @@ namespace ComicMaintainer.Core.Interfaces;
 /// associated content type, the underlying file's last-write timestamp at
 /// the moment the cache entry was generated, and the thumbnail
 /// <paramref name="Variant"/> token (format/width/quality, or <c>orig</c>
-/// for untouched page bytes). Timestamp + variant are suitable for
-/// ETag/Last-Modified headers because cache entries are invalidated whenever
-/// the source file's mtime or length, or the thumbnail settings, change.
+/// for untouched page bytes). HTTP validators come from
+/// <see cref="IFileCoverCacheService.GetValidator"/>, which needs no payload.
 /// </summary>
 public readonly record struct FileCoverCacheEntry(
     byte[] Data,
     string ContentType,
     DateTimeOffset LastModified,
     string Variant = "orig");
+
+/// <summary>
+/// What determines the cover <see cref="IFileCoverCacheService"/> serves for a
+/// file right now: the source archive's length and last-write time and the
+/// current thumbnail <see cref="Variant"/>. A cover is a function of these
+/// alone (cache entries are regenerated whenever any of them changes), so
+/// they are a sound HTTP validator for ETag/Last-Modified and are obtained
+/// from a <c>stat</c> of the source file, without reading the thumbnail.
+/// </summary>
+public readonly record struct FileCoverValidator(
+    long SourceLength,
+    DateTimeOffset SourceLastModified,
+    string Variant);
 
 /// <summary>
 /// Persistent, on-disk cache of comic-file cover thumbnails (page 1 of each
@@ -29,12 +41,24 @@ public readonly record struct FileCoverCacheEntry(
 public interface IFileCoverCacheService
 {
     /// <summary>
+    /// Returns the validator for the cover of <paramref name="filePath"/>, built
+    /// from the file's metadata and the current thumbnail settings. Neither the
+    /// archive nor the cache directory is read. Returns <c>null</c> when the
+    /// file does not exist or cannot be inspected. Use it to answer conditional
+    /// requests before calling <see cref="GetOrCreateAsync"/>.
+    /// </summary>
+    FileCoverValidator? GetValidator(string filePath);
+
+    /// <summary>
     /// Returns the cached cover for <paramref name="filePath"/>, generating
     /// and persisting it on first access. Returns <c>null</c> when the
     /// underlying archive does not exist or has no extractable page.
     /// Concurrent calls for the same file are coalesced so the archive is
     /// only opened once.
     /// </summary>
+    /// <exception cref="ComicMaintainer.Core.Utilities.ArchiveLimitExceededException">
+    /// The archive or its first page is over the archive read limits.
+    /// </exception>
     Task<FileCoverCacheEntry?> GetOrCreateAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>

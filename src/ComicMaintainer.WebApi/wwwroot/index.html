@@ -19,8 +19,13 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     
-    <!-- PWA Manifest -->
-    <link rel="manifest" id="manifestLink">
+    <!-- PWA Manifest. A real same-origin file: the CSP's manifest-src 'self'
+         does not match blob: URLs, and the manifest's root-relative start_url,
+         scope and icon paths only resolve against an http(s) manifest URL.
+         use-credentials lets the request carry the session cookie of an
+         authenticating reverse proxy (manifests are fetched without
+         credentials otherwise). -->
+    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials">
     
     <!-- Favicons and Icons -->
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
@@ -34,45 +39,7 @@
          service worker) from ever fetching/caching the unversioned URL. -->
     <link rel="stylesheet" href="/css/main.css?v=__APP_VERSION__" id="mainCss">
 
-    <!-- PWA manifest blob (kept inline so installation works without an extra request) -->
     <script>
-        const manifestLink = document.getElementById('manifestLink');
-        const manifestData = {
-            name: 'Comic Maintainer',
-            short_name: 'ComicMaintainer',
-            id: '/',
-            lang: 'en',
-            description: 'Manage and process your comic archive files with ComicTagger',
-            start_url: '/',
-            scope: '/',
-            display: 'standalone',
-            background_color: '#241c17',
-            theme_color: '#241c17',
-            orientation: 'any',
-            prefer_related_applications: false,
-            icons: [
-                {
-                    src: '/icons/icon-192x192-maskable.png',
-                    sizes: '192x192',
-                    type: 'image/png',
-                    purpose: 'any maskable'
-                },
-                {
-                    src: '/icons/icon-512x512-maskable.png',
-                    sizes: '512x512',
-                    type: 'image/png',
-                    purpose: 'any maskable'
-                }
-            ],
-            categories: ['utilities', 'productivity'],
-            screenshots: []
-        };
-
-        if (manifestLink && window.URL && typeof window.URL.createObjectURL === 'function') {
-            const manifestBlob = new Blob([JSON.stringify(manifestData)], { type: 'application/manifest+json' });
-            manifestLink.href = window.URL.createObjectURL(manifestBlob);
-        }
-
         // Expose the server-injected version to the rest of the app.
         window.APP_VERSION = '__APP_VERSION__';
     </script>

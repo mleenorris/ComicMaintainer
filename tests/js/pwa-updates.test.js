@@ -208,6 +208,44 @@ test('the very first install is not announced: there is no older version to repl
     assert.ok(logged(page, 'PWA: Service worker installed for the first time'));
 });
 
+test('the very first install taking control of the page does not reload it', async () => {
+    const { page, registration } = await bootWithWorker({ controlled: false });
+    newVersionInstalled(registration);
+
+    // activate's clients.claim() makes the new worker this page's controller.
+    page.window.navigator.serviceWorker.emit('controllerchange');
+
+    assert.deepEqual(reloads(page), []);
+    assert.ok(logged(page, 'PWA: Service worker now controls this page (first install), no reload needed'));
+});
+
+test('after the first install has claimed the page, a later version taking control reloads it', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { page, registration } = await bootWithWorker({ controlled: false });
+    page.window.navigator.serviceWorker.emit('controllerchange');
+    page.window.navigator.serviceWorker.controller = fakeWorker('activated');
+    assert.deepEqual(reloads(page), []);
+
+    // A newer release is announced in the same session and the user applies it.
+    const worker = newVersionInstalled(registration);
+    page.click('#appUpdateBanner .btn-primary');
+    assert.deepEqual(worker.posted, [{ type: 'SKIP_WAITING' }]);
+    page.window.navigator.serviceWorker.emit('controllerchange');
+
+    assert.equal(reloads(page).length, 1);
+    assert.ok(logged(page, 'PWA: New service worker took control, reloading page...'));
+});
+
+test('after the first install has claimed the page, a version applied from another tab reloads it', async () => {
+    const { page } = await bootWithWorker({ controlled: false });
+    page.window.navigator.serviceWorker.emit('controllerchange');
+    assert.deepEqual(reloads(page), []);
+
+    page.window.navigator.serviceWorker.emit('controllerchange');
+
+    assert.equal(reloads(page).length, 1);
+});
+
 test('an update notice without an installing worker is ignored', async () => {
     const { page, registration } = await bootWithWorker();
     registration.found(null);

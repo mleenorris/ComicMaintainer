@@ -525,7 +525,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
         Assert.IsType<NotSupportedException>(error.Exception);
-        Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
+        Assert.Empty(TempFilesNextTo(path));
         _fileStore.Verify(
             f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -549,7 +549,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
         Assert.NotNull(error.Exception);
-        Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
+        Assert.Empty(TempFilesNextTo(path));
     }
 
     [Fact]
@@ -566,7 +566,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Equal("Error updating metadata for {FilePath}", error.Template);
         Assert.IsType<InvalidDataException>(error.Exception);
-        Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
+        Assert.Empty(TempFilesNextTo(path));
     }
 
     [Fact]
@@ -1775,11 +1775,10 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     [Fact]
     public async Task RenameFilesAsync_RecoveredChapterCannotBeWritten_WarnsAndStillRenames()
     {
-        var tempAsFile = Path.Join(_root, "temp-is-a-file");
-        await File.WriteAllTextAsync(tempAsFile, "blocking");
-        _settings.TempFileDirectory = tempAsFile;
+        // The archive's ComicInfo.xml is readable, but one of its entries cannot be copied, so
+        // writing the recovered chapter into it fails.
         var service = CreateService();
-        var path = WriteCbz("Series/Series - Ch 5.cbz", Xml("Series", number: null, title: null));
+        var path = WriteCbzWithUnreadableEntry("Series/Series - Ch 5.cbz", Xml("Series", number: null, title: null));
 
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
 
@@ -1851,18 +1850,18 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     [Fact]
     public async Task NormalizeFilesAsync_MetadataWriteFails_ReportsFailure()
     {
-        var tempAsFile = Path.Join(_root, "temp-is-a-file");
-        await File.WriteAllTextAsync(tempAsFile, "blocking");
-        _settings.TempFileDirectory = tempAsFile;
+        // An archive entry without a name cannot be copied, so the rewrite fails after the
+        // file has been read and found to need normalizing.
         var service = CreateService();
-        var path = WriteCbz("Series X/Series X Ch 7.cbz", Xml("Series X", number: null, title: "Wrong"));
+        var path = WriteNamelessGzipCbz("Series X/Series X Ch 7.cbz");
+        var before = await File.ReadAllBytesAsync(path);
 
         var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.FailedFiles);
         Assert.True(_logger.Has(LogLevel.Warning, "NormalizeFileAsync: Failed to normalize file: {FilePath}"));
         Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == "Failed to update metadata");
-        Assert.Null(ReadComicInfo(path)!.Element("Number"));
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
     }
 
     [Fact]
@@ -2263,13 +2262,13 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     /// A valid archive whose "unreadable.bin" entry declares the reserved compression method 11
     /// in its local and central directory headers, so no reader can decompress it.
     /// </summary>
-    private string WriteCbzWithUnreadableEntry(string relativePath)
+    private string WriteCbzWithUnreadableEntry(string relativePath, string? comicInfo = null)
     {
         var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
         {
-            AddEntry(zip, "ComicInfo.xml", Encoding.UTF8.GetBytes(Xml("Old", "1", "Chapter 1")), FixtureTimestamp);
+            AddEntry(zip, "ComicInfo.xml", Encoding.UTF8.GetBytes(comicInfo ?? Xml("Old", "1", "Chapter 1")), FixtureTimestamp);
             AddEntry(zip, "page001.jpg", new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }, FixtureTimestamp);
             AddEntry(zip, "unreadable.bin", new byte[] { 1, 2, 3, 4 }, FixtureTimestamp, CompressionLevel.NoCompression);
         }
@@ -2467,6 +2466,10 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         using var stream = entry.Open();
         return XElement.Load(stream);
     }
+
+    /// <summary>Unfinished rewritten archives left next to <paramref name="path"/>.</summary>
+    private static string[] TempFilesNextTo(string path) =>
+        Directory.GetFiles(Path.GetDirectoryName(path)!).Where(ArchiveWriteRecoveryService.IsTempPath).ToArray();
 
     private static List<string> EntryNames(string path)
     {

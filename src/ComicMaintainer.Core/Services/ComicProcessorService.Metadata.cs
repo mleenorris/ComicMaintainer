@@ -283,20 +283,23 @@ public partial class ComicProcessorService
     /// Writes the archive at <paramref name="physicalPath"/> again with <paramref name="comicInfoXml"/>
     /// as its ComicInfo.xml (none when null) and puts it in place of the original.
     /// </summary>
+    /// <remarks>
+    /// The new archive is built in the original's own directory, under a temp name the file
+    /// watcher and the library scan ignore, and flushed to disk before a same-directory rename
+    /// replaces the original. A rename never crosses a mount point, so there is no copy fallback
+    /// that truncates the original, and a crash at any point leaves either the old or the new
+    /// archive intact (plus, at worst, a temp file that <see cref="ArchiveWriteRecoveryService"/>
+    /// removes at the next startup).
+    /// </remarks>
     private async Task<MetadataWriteResult> RewriteArchiveAsync(
         string logicalPath,
         string physicalPath,
         byte[]? comicInfoXml,
         CancellationToken cancellationToken)
     {
-        // Ensure the temp directory exists
-        if (!Directory.Exists(_settings.TempFileDirectory))
-        {
-            Directory.CreateDirectory(_settings.TempFileDirectory);
-            _logger.LogInformation("Created temp directory: {TempDir}", LoggingHelper.SanitizePathForLog(_settings.TempFileDirectory));
-        }
-
-        var tempFile = Path.Join(_settings.TempFileDirectory, $".tmp_{Guid.NewGuid()}.cbz");
+        var directory = Path.GetDirectoryName(physicalPath)
+            ?? throw new IOException("Cannot determine the archive's directory.");
+        var tempFile = ArchiveWriteRecoveryService.CreateTempPath(directory);
 
         try
         {
@@ -307,8 +310,8 @@ public partial class ComicProcessorService
             // Give a brief moment for any file handles to be fully released
             await Task.Delay(FileHandleReleaseDelayMs, cancellationToken);
 
-            // Replace original file with updated one using retry logic
-            // to handle transient file locks from file system watchers or antivirus
+            // Atomically replace the original, retrying transient file locks
+            // from file system watchers, readers or antivirus.
             await ReplaceFileWithRetryAsync(tempFile, physicalPath, cancellationToken);
             await RefreshStoredFileStatsAsync(logicalPath, cancellationToken);
             return new MetadataWriteResult(MetadataWriteOutcome.Written, logicalPath);
@@ -372,34 +375,62 @@ public partial class ComicProcessorService
     /// followed by <paramref name="comicInfoXml"/> as ComicInfo.xml when it is not null.
     /// Entries are streamed one at a time, so memory use does not grow with entry or archive size.
     /// Throws if any entry cannot be copied, so callers never replace the original with an
-    /// archive that is missing pages.
+    /// archive that is missing pages. The destination is created new (never overwritten), gets
+    /// the source's Unix permissions, and is flushed to disk before this returns.
     /// </summary>
-    private static void RewriteArchive(string sourcePath, string destinationPath, byte[]? comicInfoXml)
+    private void RewriteArchive(string sourcePath, string destinationPath, byte[]? comicInfoXml)
     {
         using var sourceArchive = ArchiveFactory.OpenArchive(sourcePath);
-        using var destination = File.Create(destinationPath);
-        using var writer = new ZipWriter(destination, new ZipWriterOptions(CompressionType.Deflate));
-
-        foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
+        using var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        using (var writer = new ZipWriter(destination, new ZipWriterOptions(CompressionType.Deflate) { LeaveStreamOpen = true }))
         {
-            if (entry.Key == null)
+            foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
             {
-                throw new InvalidDataException("The archive contains an entry without a name, which cannot be copied.");
+                if (entry.Key == null)
+                {
+                    throw new InvalidDataException("The archive contains an entry without a name, which cannot be copied.");
+                }
+
+                if (entry.Key.Equals(ComicInfoXml.EntryName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                using var entryStream = entry.OpenEntryStream();
+                writer.Write(entry.Key, entryStream, entry.LastModifiedTime);
             }
 
-            if (entry.Key.Equals(ComicInfoXml.EntryName, StringComparison.OrdinalIgnoreCase))
+            if (comicInfoXml != null)
             {
-                continue;
+                using var xmlStream = new MemoryStream(comicInfoXml);
+                writer.Write(ComicInfoXml.EntryName, xmlStream, DateTime.Now);
             }
-
-            using var entryStream = entry.OpenEntryStream();
-            writer.Write(entry.Key, entryStream, entry.LastModifiedTime);
         }
 
-        if (comicInfoXml != null)
+        // The zip is complete once the writer has written its central directory. Make it durable
+        // before it is renamed over the original, so a power loss cannot leave an empty file there.
+        destination.Flush(flushToDisk: true);
+        CopyUnixFileMode(sourcePath, destinationPath);
+    }
+
+    /// <summary>
+    /// Gives the rewritten archive the original's permission bits, so a replace does not change
+    /// who may read the file. Best effort; ownership stays with the application's user.
+    /// </summary>
+    private void CopyUnixFileMode(string sourcePath, string destinationPath)
+    {
+        if (OperatingSystem.IsWindows())
         {
-            using var xmlStream = new MemoryStream(comicInfoXml);
-            writer.Write(ComicInfoXml.EntryName, xmlStream, DateTime.Now);
+            return;
+        }
+
+        try
+        {
+            File.SetUnixFileMode(destinationPath, File.GetUnixFileMode(sourcePath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Could not copy the permissions of {FilePath} to its rewritten archive", LoggingHelper.SanitizePathForLog(sourcePath));
         }
     }
 

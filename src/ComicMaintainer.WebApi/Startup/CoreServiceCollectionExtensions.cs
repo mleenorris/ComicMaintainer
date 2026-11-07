@@ -233,6 +233,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ISeriesNameResolver, SeriesNameResolver>();
         services.AddSingleton<IJobStateStore, JobStateStore>();
         services.AddSingleton<IComicProcessorService, ComicProcessorService>();
+        services.AddSingleton<ArchiveWriteRecoveryService>();
         services.AddSingleton<IFileWatcherService, FileWatcherService>();
         services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
         services.AddSingleton<ISettingsService, SettingsService>();
@@ -372,6 +373,10 @@ internal static class CoreServiceCollectionExtensions
 
     public static IServiceCollection AddComicMaintainerHostedServices(this IServiceCollection services)
     {
+        // Clean up after archive writes a previous run was stopped in the middle of. Registered
+        // first so its sweep starts before the file watcher begins processing.
+        services.AddHostedService<ArchiveWriteRecoveryHostedService>();
+
         // Add hosted service for file watcher
         services.AddHostedService<FileWatcherHostedService>();
 

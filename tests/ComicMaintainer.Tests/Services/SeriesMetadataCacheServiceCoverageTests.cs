@@ -820,6 +820,40 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         Assert.Equal(new[] { "My Custom Alias" }, record.UserAliases);
     }
 
+    [Fact]
+    public async Task GetByTitleAsync_ReusesOneTitleIndex_UntilTheCacheChanges()
+    {
+        var aliased = Entity("folder-title", "Canonical Title", "success");
+        aliased.Aliases = new List<string> { "Provider Alias" };
+        aliased.LocalizedTitlesJson = SharedTitleJson;
+        await SeedAsync(aliased, Entity("other-series", "Other Series", "success"));
+
+        // Every lookup that misses the exact key (one per processed file of a
+        // series whose files use another title) is answered from one index.
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.Equal("folder-title", (await _service.GetByTitleAsync("Provider Alias"))!.NormalizedKey);
+            Assert.Equal("folder-title", (await _service.GetByTitleAsync("Shared Title"))!.NormalizedKey);
+            Assert.Null(await _service.GetByTitleAsync("Unknown Title"));
+        }
+        Assert.Equal(1, _service.TitleIndexBuildCount);
+
+        // A change through the service invalidates it, so new titles are found.
+        await _service.SetUserAliasesAsync("Canonical Title", new[] { "Brand New Alias" });
+        Assert.Equal("folder-title", (await _service.GetByTitleAsync("brand new alias"))!.NormalizedKey);
+        Assert.Equal(2, _service.TitleIndexBuildCount);
+    }
+
+    [Fact]
+    public async Task GetByTitleAsync_ExactKeyHit_DoesNotBuildTheTitleIndex()
+    {
+        await SeedAsync(Entity("series-a", "Series A"));
+
+        Assert.NotNull(await _service.GetByTitleAsync("SERIES  A"));
+
+        Assert.Equal(0, _service.TitleIndexBuildCount);
+    }
+
     private sealed class ListLogger : ILogger<SeriesMetadataCacheService>
     {
         private readonly List<(LogLevel Level, string Message, Exception? Exception)> _entries = new();

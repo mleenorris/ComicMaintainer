@@ -23,6 +23,23 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
 
     private void MarkChanged() => Interlocked.Increment(ref _changeVersion);
 
+    /// <summary>
+    /// Longest time a title index is reused even though the cache reports no
+    /// change, as a safety net for changes made to the table outside this
+    /// service.
+    /// </summary>
+    internal static readonly TimeSpan TitleIndexMaxAge = TimeSpan.FromMinutes(10);
+
+    private readonly SemaphoreSlim _titleIndexLock = new(1, 1);
+    private TitleIndex? _titleIndex;
+    private int _titleIndexBuilds;
+
+    /// <summary>How many times the title index has been built (diagnostics and tests).</summary>
+    internal int TitleIndexBuildCount => Volatile.Read(ref _titleIndexBuilds);
+
+    /// <summary>Series key of a title to the key of the record that owns it, as of <paramref name="Version"/>.</summary>
+    private sealed record TitleIndex(long Version, DateTime BuiltUtc, IReadOnlyDictionary<string, string> OwnerKeyByTitleKey);
+
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ISeriesImageStore _imageStore;
@@ -84,27 +101,32 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         }
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken, tracked: false);
         return entity is null ? null : ToRecord(entity);
     }
 
     /// <summary>
     /// Resolves the cache entity for a free-form series title. Tries an exact
-    /// normalized-key lookup first, then falls back to scanning every record's
-    /// known titles (canonical title, user-selected name, provider/user
-    /// aliases, and localized titles). The fallback is what keeps a series
-    /// editable after a manual match: applying a match leaves the record keyed
-    /// by the original folder title while the UI now refers to the series by
-    /// its matched canonical title, so an exact-key lookup on that new title
-    /// would otherwise miss the record.
+    /// normalized-key lookup first, then falls back to every record's known
+    /// titles (canonical title, user-selected name, provider/user aliases, and
+    /// localized titles) through the in-memory title index. The fallback is
+    /// what keeps a series editable after a manual match: applying a match
+    /// leaves the record keyed by the original folder title while the UI now
+    /// refers to the series by its matched canonical title, so an exact-key
+    /// lookup on that new title would otherwise miss the record.
     /// </summary>
+    /// <param name="tracked">
+    /// False for read-only callers, so the entity is not change-tracked.
+    /// </param>
     private async Task<SeriesMetadataCacheEntity?> ResolveEntityByTitleAsync(
         ComicMaintainerDbContext db,
         string seriesTitle,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool tracked = true)
     {
+        var entities = tracked ? db.SeriesMetadataCache : db.SeriesMetadataCache.AsNoTracking();
         var key = NormalizeKey(seriesTitle);
-        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var entity = await entities.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
         if (entity is not null)
         {
             return entity;
@@ -112,25 +134,99 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
 
         // Exact-key miss: the record may be keyed by an older title (typically
         // the original folder name) while the caller refers to the series by
-        // its matched canonical title or one of its aliases. Resolve by
-        // scanning known titles. Exact key is always preferred above.
-        //
-        // A single logical series can be described by several cache records
-        // (e.g. a folder refresh issues a separate lookup for the canonical
-        // title AND each alias, leaving one authoritative "success" record and
-        // one or more stale "not_found" siblings). The library renders the
-        // series using the most authoritative record (see
-        // SeriesLibraryService.ResolveRecordForGroup). We must mirror that
-        // ranking here so mutations (e.g. pinning a series name) land on the
-        // SAME record the library displays — otherwise the change is written to
-        // a stale sibling and the displayed name never updates.
-        var candidates = await db.SeriesMetadataCache.ToListAsync(cancellationToken);
-        return candidates
-            .Where(e => EntityMatchesTitleKey(e, key))
-            .OrderByDescending(e => RankLookupStatus(e.LookupStatus))
-            .ThenByDescending(e => e.LastLookupUtc ?? DateTime.MinValue)
-            .ThenByDescending(e => e.UpdatedAt)
-            .FirstOrDefault();
+        // its matched canonical title or one of its aliases. Exact key is
+        // always preferred above.
+        var titleIndex = await GetTitleIndexAsync(cancellationToken);
+        return titleIndex.TryGetValue(key, out var ownerKey)
+            ? await entities.FirstOrDefaultAsync(e => e.NormalizedKey == ownerKey, cancellationToken)
+            : null;
+    }
+
+    /// <summary>
+    /// Returns the title index: for the series key of every title a record is
+    /// known by, the key of the record that owns it. Built from one untracked
+    /// read of the table and reused until the cache changes
+    /// (<see cref="ChangeVersion"/>) or <see cref="TitleIndexMaxAge"/> passes,
+    /// so resolving a series name for each processed file no longer loads and
+    /// JSON-parses the whole table.
+    /// </summary>
+    /// <remarks>
+    /// A single logical series can be described by several cache records
+    /// (e.g. a folder refresh issues a separate lookup for the canonical title
+    /// AND each alias, leaving one authoritative "success" record and one or
+    /// more stale "not_found" siblings). The library renders the series using
+    /// the most authoritative record (see
+    /// <c>SeriesLibraryService.ResolveRecordForGroup</c>). The index mirrors
+    /// that ranking so mutations (e.g. pinning a series name) land on the SAME
+    /// record the library displays — otherwise the change is written to a
+    /// stale sibling and the displayed name never updates.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<string, string>> GetTitleIndexAsync(CancellationToken cancellationToken)
+    {
+        var current = Volatile.Read(ref _titleIndex);
+        if (IsCurrent(current))
+        {
+            return current!.OwnerKeyByTitleKey;
+        }
+
+        await _titleIndexLock.WaitAsync(cancellationToken);
+        try
+        {
+            current = _titleIndex;
+            if (IsCurrent(current))
+            {
+                return current!.OwnerKeyByTitleKey;
+            }
+
+            // Read the version before the rows: a change committed meanwhile
+            // leaves the index one version behind, so the next lookup rebuilds.
+            var version = ChangeVersion;
+            await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var entities = await db.SeriesMetadataCache.AsNoTracking().ToListAsync(cancellationToken);
+            var owners = new Dictionary<string, SeriesMetadataCacheEntity>(StringComparer.Ordinal);
+            foreach (var entity in entities)
+            {
+                foreach (var titleKey in TitleKeysOf(entity))
+                {
+                    if (!owners.TryGetValue(titleKey, out var owner) || IsMoreAuthoritative(entity, owner))
+                    {
+                        owners[titleKey] = entity;
+                    }
+                }
+            }
+
+            var index = new TitleIndex(
+                version,
+                DateTime.UtcNow,
+                owners.ToDictionary(pair => pair.Key, pair => pair.Value.NormalizedKey, StringComparer.Ordinal));
+            Volatile.Write(ref _titleIndex, index);
+            Interlocked.Increment(ref _titleIndexBuilds);
+            return index.OwnerKeyByTitleKey;
+        }
+        finally
+        {
+            _titleIndexLock.Release();
+        }
+
+        bool IsCurrent(TitleIndex? index)
+            => index is not null
+               && index.Version == ChangeVersion
+               && DateTime.UtcNow - index.BuiltUtc < TitleIndexMaxAge;
+    }
+
+    /// <summary>
+    /// True when <paramref name="candidate"/> represents a series better than
+    /// <paramref name="current"/>: a higher-ranked lookup status, then the more
+    /// recent lookup, then the more recent update. On a full tie the record
+    /// seen first is kept.
+    /// </summary>
+    private static bool IsMoreAuthoritative(SeriesMetadataCacheEntity candidate, SeriesMetadataCacheEntity current)
+    {
+        var byStatus = RankLookupStatus(candidate.LookupStatus).CompareTo(RankLookupStatus(current.LookupStatus));
+        if (byStatus != 0) return byStatus > 0;
+        var byLookup = (candidate.LastLookupUtc ?? DateTime.MinValue).CompareTo(current.LastLookupUtc ?? DateTime.MinValue);
+        if (byLookup != 0) return byLookup > 0;
+        return candidate.UpdatedAt > current.UpdatedAt;
     }
 
     /// <summary>
@@ -158,22 +254,29 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         };
     }
 
-    private bool EntityMatchesTitleKey(SeriesMetadataCacheEntity entity, string requestedKey)
+    /// <summary>
+    /// The series keys of every title <paramref name="entity"/> is known by:
+    /// canonical title, user-selected name, provider/user aliases and
+    /// localized titles. Blank titles are skipped.
+    /// </summary>
+    private static HashSet<string> TitleKeysOf(SeriesMetadataCacheEntity entity)
     {
-        if (KeyEquals(entity.CanonicalTitle, requestedKey)) return true;
-        if (KeyEquals(entity.SeriesName, requestedKey)) return true;
-        if (entity.Aliases is not null && entity.Aliases.Any(a => KeyEquals(a, requestedKey))) return true;
-        if (entity.UserAliases is not null && entity.UserAliases.Any(a => KeyEquals(a, requestedKey))) return true;
-        foreach (var localized in DeserializeLocalizedTitles(entity.LocalizedTitlesJson))
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        void Add(string? title)
         {
-            if (localized is not null && KeyEquals(localized.Title, requestedKey)) return true;
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                keys.Add(SeriesKey.Normalize(title));
+            }
         }
-        return false;
-    }
 
-    private bool KeyEquals(string? value, string requestedKey)
-        => !string.IsNullOrWhiteSpace(value)
-           && string.Equals(NormalizeKey(value), requestedKey, StringComparison.Ordinal);
+        Add(entity.CanonicalTitle);
+        Add(entity.SeriesName);
+        foreach (var alias in entity.Aliases ?? Enumerable.Empty<string>()) Add(alias);
+        foreach (var alias in entity.UserAliases ?? Enumerable.Empty<string>()) Add(alias);
+        foreach (var localized in DeserializeLocalizedTitles(entity.LocalizedTitlesJson)) Add(localized?.Title);
+        return keys;
+    }
 
     public async Task<SeriesMetadataCacheRecord> SetUserAliasesAsync(
         string seriesTitle,
@@ -713,7 +816,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         }
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken, tracked: false);
         if (entity is null
             || string.IsNullOrWhiteSpace(entity.LocalImageFile)
             || string.IsNullOrWhiteSpace(entity.ImageContentType)
@@ -1243,6 +1346,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             return 0;
         }
 
+        var titleKeys = entities.ToDictionary(e => e.NormalizedKey, TitleKeysOf, StringComparer.Ordinal);
         var toRemove = new List<SeriesMetadataCacheEntity>();
         foreach (var candidate in entities)
         {
@@ -1259,7 +1363,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                 !ReferenceEquals(other, candidate)
                 && !string.Equals(other.NormalizedKey, candidate.NormalizedKey, StringComparison.Ordinal)
                 && RankLookupStatus(other.LookupStatus) > RankLookupStatus(candidate.LookupStatus)
-                && EntityMatchesTitleKey(other, candidate.NormalizedKey));
+                && titleKeys[other.NormalizedKey].Contains(candidate.NormalizedKey));
 
             if (subsumed)
             {

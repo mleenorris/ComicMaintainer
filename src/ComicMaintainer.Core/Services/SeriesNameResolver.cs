@@ -56,10 +56,14 @@ public class SeriesNameResolver : ISeriesNameResolver
         }
         var globalPreferred = _settings.CurrentValue.DefaultPreferredLanguage;
 
+        // Steps 1-4 each consult the cache record of the same candidates; look
+        // each one up once per resolution.
+        var lookups = new RecordLookups();
+
         // Step 1: user-selected name cache record (the sticky "pinned" name).
         foreach (var candidate in candidates)
         {
-            var record = await LookupUserSelectedRecordAsync(candidate, cancellationToken);
+            var record = await LookupUserSelectedRecordAsync(candidate, lookups, cancellationToken);
             if (record is not null && !string.IsNullOrWhiteSpace(record.SeriesName))
             {
                 var resolved = ResolveDisplayTitle(record, globalPreferred);
@@ -84,7 +88,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         // Step 2: matched cache record (successful or manual match).
         foreach (var candidate in candidates)
         {
-            var record = await LookupMatchedRecordAsync(candidate, cancellationToken);
+            var record = await LookupMatchedRecordAsync(candidate, lookups, cancellationToken);
             if (record is not null && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
             {
                 var resolved = ResolveDisplayTitle(record, globalPreferred);
@@ -121,8 +125,8 @@ public class SeriesNameResolver : ISeriesNameResolver
             && !string.IsNullOrWhiteSpace(folderSeries)
             && !string.Equals(metadata!.Series, folderSeries, StringComparison.OrdinalIgnoreCase))
         {
-            var folderRecord = await LookupMatchedRecordAsync(folderSeries, cancellationToken)
-                                ?? await LookupUserSelectedRecordAsync(folderSeries, cancellationToken);
+            var folderRecord = await LookupMatchedRecordAsync(folderSeries, lookups, cancellationToken)
+                                ?? await LookupUserSelectedRecordAsync(folderSeries, lookups, cancellationToken);
             if (folderRecord is not null
                 && folderRecord.LocalizedTitles is { Count: > 0 }
                 && folderRecord.LocalizedTitles.Any(lt =>
@@ -162,7 +166,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         // metadata for this candidate — a "cleared" record must not be
         // silently re-populated by an automatic lookup. Only explicit user
         // actions (refresh / manual match) may repopulate external metadata.
-        var hasClearedRecord = await AnyCandidateClearedAsync(candidates, cancellationToken);
+        var hasClearedRecord = await AnyCandidateClearedAsync(candidates, lookups, cancellationToken);
         foreach (var candidate in hasClearedRecord ? (IEnumerable<string>)Array.Empty<string>() : candidates)
         {
             var external = await LookupExternalSeriesMetadataAsync(candidate, cancellationToken);
@@ -310,26 +314,44 @@ public class SeriesNameResolver : ISeriesNameResolver
     /// now hold the matched/user-selected name. Without it the exact-key lookup
     /// misses and the resolver falls through to a fresh external lookup that
     /// returns the provider's canonical title, wrongly overriding the
-    /// user-selected name.
+    /// user-selected name. Each title is looked up once per resolution
+    /// (<paramref name="lookups"/>).
     /// </summary>
-    private async Task<SeriesMetadataCacheRecord?> ResolveRecordByTitleAsync(string seriesName, CancellationToken cancellationToken)
+    private async Task<SeriesMetadataCacheRecord?> ResolveRecordByTitleAsync(
+        string seriesName,
+        RecordLookups lookups,
+        CancellationToken cancellationToken)
     {
         if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
+        if (lookups.TryGetValue(seriesName, out var known)) return known;
 
         var key = _cache.NormalizeKey(seriesName);
         var record = string.IsNullOrWhiteSpace(key)
             ? null
             : await _cache.GetAsync(key, cancellationToken);
         record ??= await _cache.GetByTitleAsync(seriesName, cancellationToken);
+        lookups[seriesName] = record;
         return record;
     }
 
-    private async Task<SeriesMetadataCacheRecord?> LookupUserSelectedRecordAsync(string seriesName, CancellationToken cancellationToken)
+    /// <summary>
+    /// The cache records already looked up during one resolution, by
+    /// candidate title (null when the title has no record).
+    /// </summary>
+    private sealed class RecordLookups : Dictionary<string, SeriesMetadataCacheRecord?>
+    {
+        public RecordLookups()
+            : base(StringComparer.Ordinal)
+        {
+        }
+    }
+
+    private async Task<SeriesMetadataCacheRecord?> LookupUserSelectedRecordAsync(string seriesName, RecordLookups lookups, CancellationToken cancellationToken)
     {
         if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
         try
         {
-            var record = await ResolveRecordByTitleAsync(seriesName, cancellationToken);
+            var record = await ResolveRecordByTitleAsync(seriesName, lookups, cancellationToken);
             return record is not null && !string.IsNullOrWhiteSpace(record.SeriesName)
                 ? record
                 : null;
@@ -348,12 +370,12 @@ public class SeriesNameResolver : ISeriesNameResolver
         }
     }
 
-    private async Task<SeriesMetadataCacheRecord?> LookupMatchedRecordAsync(string seriesName, CancellationToken cancellationToken)
+    private async Task<SeriesMetadataCacheRecord?> LookupMatchedRecordAsync(string seriesName, RecordLookups lookups, CancellationToken cancellationToken)
     {
         if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
         try
         {
-            var record = await ResolveRecordByTitleAsync(seriesName, cancellationToken);
+            var record = await ResolveRecordByTitleAsync(seriesName, lookups, cancellationToken);
             if (record is null || string.IsNullOrWhiteSpace(record.CanonicalTitle)) return null;
 
             var status = record.LookupStatus;
@@ -415,14 +437,14 @@ public class SeriesNameResolver : ISeriesNameResolver
     /// explicit refresh or manual match (which set a non-cleared status)
     /// may bring external metadata back.
     /// </summary>
-    private async Task<bool> AnyCandidateClearedAsync(IReadOnlyList<string> candidates, CancellationToken cancellationToken)
+    private async Task<bool> AnyCandidateClearedAsync(IReadOnlyList<string> candidates, RecordLookups lookups, CancellationToken cancellationToken)
     {
         if (_cache is null || candidates.Count == 0) return false;
         foreach (var candidate in candidates.Where(candidate => !string.IsNullOrWhiteSpace(candidate)))
         {
             try
             {
-                var record = await ResolveRecordByTitleAsync(candidate, cancellationToken);
+                var record = await ResolveRecordByTitleAsync(candidate, lookups, cancellationToken);
                 if (record is not null
                     && string.Equals(record.LookupStatus, "cleared", StringComparison.OrdinalIgnoreCase))
                 {

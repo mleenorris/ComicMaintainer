@@ -16,12 +16,20 @@ public class MetadataBackfillJobHandlerCoverageTests
     private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<ISeriesNameResolver> _resolver = new();
 
+    /// <summary>A write that put the metadata into the archive at its own path.</summary>
+    private static readonly Func<string, ComicMetadata, ComicMetadataFieldFlags, CancellationToken, MetadataWriteResult> Written =
+        (path, _, _, _) => new MetadataWriteResult(MetadataWriteOutcome.Written, path);
+
+    /// <summary>A write that failed.</summary>
+    private static readonly Func<string, ComicMetadata, ComicMetadataFieldFlags, CancellationToken, MetadataWriteResult> Failed =
+        (path, _, _, _) => MetadataWriteResult.Failed(path);
+
     public MetadataBackfillJobHandlerCoverageTests()
     {
         _resolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesNameResolution { ResolvedSeries = "Resolved Series" });
-        _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+        _processor.Setup(p => p.WriteMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Written);
         SetupBatch();
     }
 
@@ -50,9 +58,9 @@ public class MetadataBackfillJobHandlerCoverageTests
         var unresolvable = Pending("/library/A/c003.cbz");
         var written = Pending("/library/A/c004.cbz", version: 7);
         SetupBatch(rejected, throwing, unresolvable, written);
-        _processor.Setup(p => p.UpdateMetadataAsync(rejected.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-        _processor.Setup(p => p.UpdateMetadataAsync(throwing.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+        _processor.Setup(p => p.WriteMetadataAsync(rejected.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed);
+        _processor.Setup(p => p.WriteMetadataAsync(throwing.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("archive is read-only"));
         _resolver.Setup(r => r.ResolveAsync(unresolvable.FilePath, It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("resolver offline"));
@@ -62,7 +70,7 @@ public class MetadataBackfillJobHandlerCoverageTests
         Assert.Equal("Backfill: 1 files updated, 3 failed (queue size was 4).", summary);
         _fileStore.Verify(f => f.MarkFileBackfilledAsync(written.FilePath, 7, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(f => f.MarkFileBackfilledAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
-        _processor.Verify(p => p.UpdateMetadataAsync(unresolvable.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.WriteMetadataAsync(unresolvable.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -84,9 +92,9 @@ public class MetadataBackfillJobHandlerCoverageTests
         var file = new ComicFile { FilePath = "/library/A/c001.cbz", MetadataVersion = 4, Metadata = null };
         SetupBatch(file);
         ComicMetadata? written = null;
-        _processor.Setup(p => p.UpdateMetadataAsync(file.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
-            .Callback<string, ComicMetadata, CancellationToken>((_, metadata, _) => written = metadata)
-            .ReturnsAsync(true);
+        _processor.Setup(p => p.WriteMetadataAsync(file.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .Callback<string, ComicMetadata, ComicMetadataFieldFlags, CancellationToken>((_, metadata, _, _) => written = metadata)
+            .ReturnsAsync(Written);
 
         var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
 
@@ -109,9 +117,9 @@ public class MetadataBackfillJobHandlerCoverageTests
         _resolver.Setup(r => r.ResolveAsync(file.FilePath, It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesNameResolution { ResolvedSeries = "   " });
         ComicMetadata? written = null;
-        _processor.Setup(p => p.UpdateMetadataAsync(file.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
-            .Callback<string, ComicMetadata, CancellationToken>((_, metadata, _) => written = metadata)
-            .ReturnsAsync(true);
+        _processor.Setup(p => p.WriteMetadataAsync(file.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .Callback<string, ComicMetadata, ComicMetadataFieldFlags, CancellationToken>((_, metadata, _, _) => written = metadata)
+            .ReturnsAsync(Written);
 
         await CreateHandler().ExecuteAsync(null, CancellationToken.None);
 
@@ -130,9 +138,10 @@ public class MetadataBackfillJobHandlerCoverageTests
 
         await CreateHandler().ExecuteAsync(null, CancellationToken.None);
 
-        _processor.Verify(p => p.UpdateMetadataAsync(
+        _processor.Verify(p => p.WriteMetadataAsync(
             file.FilePath,
             It.Is<ComicMetadata>(m => m.Series == "Resolved Series" && !ReferenceEquals(m, file.Metadata)),
+            It.IsAny<ComicMetadataFieldFlags>(),
             It.IsAny<CancellationToken>()), Times.Once);
         Assert.Equal("DB Series", file.Metadata!.Series);
     }
@@ -207,8 +216,8 @@ public class MetadataBackfillJobHandlerCoverageTests
         var failing = new[] { "/library/A/c001.cbz", "/library/A/c002.cbz" };
         foreach (var path in failing)
         {
-            _processor.Setup(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
+            _processor.Setup(p => p.WriteMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Failed);
         }
 
         var summary = await CreateHandler().ExecuteAsync("""{"maxBatch":2}""", CancellationToken.None);
@@ -217,7 +226,7 @@ public class MetadataBackfillJobHandlerCoverageTests
         Assert.Equal(failing.Order(), queue.Select(f => f.FilePath).Order());
         foreach (var path in failing)
         {
-            _processor.Verify(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()), Times.Once);
+            _processor.Verify(p => p.WriteMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
         // Regression: each read grew by the earlier failures, so a failure backlog made reads
@@ -237,7 +246,7 @@ public class MetadataBackfillJobHandlerCoverageTests
 
         Assert.Equal("Backfill: 3 files updated, 0 failed (queue size was 3).", summary);
         Assert.Single(queue);
-        _processor.Verify(p => p.UpdateMetadataAsync("/library/A/c002.cbz", It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()), Times.Once);
+        _processor.Verify(p => p.WriteMetadataAsync("/library/A/c002.cbz", It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -247,15 +256,76 @@ public class MetadataBackfillJobHandlerCoverageTests
         var second = Pending("/library/A/c002.cbz");
         SetupBatch(first, second);
         using var cts = new CancellationTokenSource();
-        _processor.Setup(p => p.UpdateMetadataAsync(first.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+        _processor.Setup(p => p.WriteMetadataAsync(first.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
             .Callback(() => cts.Cancel())
-            .ReturnsAsync(true);
+            .ReturnsAsync(Written);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => CreateHandler().ExecuteAsync(null, cts.Token));
 
         _fileStore.Verify(f => f.MarkFileBackfilledAsync(first.FilePath, first.MetadataVersion, It.IsAny<CancellationToken>()), Times.Once);
-        _processor.Verify(p => p.UpdateMetadataAsync(second.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.WriteMetadataAsync(second.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ArchiveNotWritable_StaysQueuedWithoutCountingAsFailed()
+    {
+        // A CBR edited while converting to CBZ is turned off: the archive is not written, so the
+        // file stays queued for the run after the setting is turned on.
+        var kept = Pending("/library/A/c001.cbr");
+        var written = Pending("/library/A/c002.cbz");
+        SetupBatch(kept, written);
+        _processor.Setup(p => p.WriteMetadataAsync(kept.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.NotWritable, kept.FilePath));
+
+        var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Equal(
+            "Backfill: 1 files updated, 0 failed, 1 kept in the database (converting CBR/RAR/ZIP to CBZ is turned off) (queue size was 2).",
+            summary);
+        _fileStore.Verify(f => f.MarkFileBackfilledAsync(kept.FilePath, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        _fileStore.Verify(f => f.MarkFileBackfilledAsync(written.FilePath, written.MetadataVersion, It.IsAny<CancellationToken>()), Times.Once);
+        _processor.Verify(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ArchiveConvertedToCbz_MarksTheNewPathWritten()
+    {
+        var file = Pending("/library/A/c001.cbr", version: 5);
+        SetupBatch(file);
+        _processor.Setup(p => p.WriteMetadataAsync(file.FilePath, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.ConvertedToCbz, "/library/A/c001.cbz"));
+
+        var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Equal("Backfill: 1 files updated, 0 failed (queue size was 1).", summary);
+        _fileStore.Verify(f => f.MarkFileBackfilledAsync("/library/A/c001.cbz", 5, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.MarkFileBackfilledAsync(file.FilePath, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WritesEveryLockedFieldIncludingOneTheUserCleared()
+    {
+        var file = new ComicFile
+        {
+            FilePath = "/library/A/c001.cbz",
+            MetadataVersion = 2,
+            Metadata = new ComicMetadata
+            {
+                Series = "DB Series",
+                Summary = null,
+                UserLockedFieldsMask = (long)(ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Summary)
+            }
+        };
+        SetupBatch(file);
+
+        await CreateHandler().ExecuteAsync(null, CancellationToken.None);
+
+        _processor.Verify(p => p.WriteMetadataAsync(
+            file.FilePath,
+            It.Is<ComicMetadata>(m => m.Series == "DB Series" && m.Summary == null),
+            ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Summary,
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

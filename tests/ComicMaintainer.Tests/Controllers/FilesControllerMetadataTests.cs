@@ -631,15 +631,15 @@ public sealed class FilesControllerMetadataTests : IDisposable
         var finishFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writes = 0;
         _processor
-            .Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
-            .Returns(async () =>
+            .Setup(p => p.WriteMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string path, ComicMetadata _, ComicMetadataFieldFlags _, CancellationToken _) =>
             {
                 if (Interlocked.Increment(ref writes) == 1)
                 {
                     writingFirst.TrySetResult();
                     await finishFirst.Task;
                 }
-                return true;
+                return new MetadataWriteResult(MetadataWriteOutcome.Written, path);
             });
         _resolver
             .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
@@ -663,8 +663,8 @@ public sealed class FilesControllerMetadataTests : IDisposable
         Assert.IsType<AcceptedResult>(firstResult);
         Assert.IsType<AcceptedResult>(secondResult);
         await secondWrittenBack.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        _processor.Verify(p => p.UpdateMetadataAsync(
-            second, It.Is<ComicMetadata>(m => m.Title == "Two"), It.IsAny<CancellationToken>()), Times.Once);
+        _processor.Verify(p => p.WriteMetadataAsync(
+            second, It.Is<ComicMetadata>(m => m.Title == "Two"), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()), Times.Once);
         lock (pending)
         {
             Assert.Empty(pending);
@@ -869,7 +869,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     public async Task RemoveFileMetadata_ProcessorReportsFailure_ReturnsBadRequestAndRecordsFailure()
     {
         var path = CreateRealFile("Saga 001.cbz");
-        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(MetadataWriteResult.Failed(path));
 
         var result = await CreateController(_broadcaster.Object).RemoveFileMetadata(Encode(path));
 
@@ -885,7 +885,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     {
         var path = CreateRealFile("Saga 001.cbz");
         using var cts = new CancellationTokenSource();
-        _processor.Setup(p => p.RemoveMetadataAsync(path, cts.Token)).ReturnsAsync(true);
+        _processor.Setup(p => p.RemoveMetadataAsync(path, cts.Token)).ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.Written, path));
         _fileStore
             .Setup(f => f.ClearProcessedStatusAsync(It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { path })), cts.Token))
             .ReturnsAsync(1);
@@ -901,10 +901,31 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoveFileMetadata_ArchiveConvertedToCbz_UsesTheNewPathForStateHistoryAndBroadcast()
+    {
+        var path = CreateRealFile("Saga 005.cbr");
+        var converted = Path.ChangeExtension(path, ".cbz");
+        _processor
+            .Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.ConvertedToCbz, converted));
+        _fileStore
+            .Setup(f => f.ClearProcessedStatusAsync(It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { converted })), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+
+        var result = await CreateController(_broadcaster.Object).RemoveFileMetadata(Encode(path));
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(1, Prop(ok.Value, "cleared"));
+        Assert.Equal(converted, Prop(ok.Value, "filePath"));
+        Assert.Equal(converted, SingleHistoryEntry().FilePath);
+        _broadcaster.Verify(b => b.BroadcastFileProcessedAsync("Saga 005.cbz", true, null), Times.Once);
+    }
+
+    [Fact]
     public async Task RemoveFileMetadata_SuccessWithoutBroadcaster_ReturnsOk()
     {
         var path = CreateRealFile("Saga 002.cbz");
-        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.Written, path));
         _fileStore.Setup(f => f.ClearProcessedStatusAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var result = await CreateController().RemoveFileMetadata(Encode(path));
@@ -918,7 +939,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     public async Task RemoveFileMetadata_SuccessButBroadcastThrows_StillReturnsOk()
     {
         var path = CreateRealFile("Saga 003.cbz");
-        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.Written, path));
         _broadcaster
             .Setup(b => b.BroadcastFileProcessedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
             .ThrowsAsync(new InvalidOperationException("hub down"));

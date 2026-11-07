@@ -172,6 +172,19 @@ public class SettingsControllerTests
     }
 
     [Fact]
+    public void GetAllSettings_IncludesConvertRarToCbzOnWrite_OnByDefault()
+    {
+        var result = _controller.GetAllSettings();
+
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        var prop = objectResult.Value!.GetType().GetProperty("convert_rar_to_cbz_on_write");
+        Assert.NotNull(prop);
+        Assert.Equal(true, prop!.GetValue(objectResult.Value));
+        Assert.True(new AppSettings().ConvertRarToCbzOnWrite);
+    }
+
+    [Fact]
     public void GetAllSettings_IncludesWriteCoverToFirstArchive()
     {
         // Act

@@ -500,7 +500,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var before = SnapshotEntries(path);
         Assert.Contains(before, e => e.Name == "big.bin" && e.Length == LargeEntrySize);
 
-        var result = await service.RemoveMetadataAsync(path);
+        var result = (await service.RemoveMetadataAsync(path)).Succeeded;
 
         Assert.True(result);
         Assert.Equal(before.Where(e => e.Name != "ComicInfo.xml"), SnapshotEntries(path));
@@ -517,7 +517,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var before = await File.ReadAllBytesAsync(path);
 
         var result = removeMetadata
-            ? await service.RemoveMetadataAsync(path)
+            ? (await service.RemoveMetadataAsync(path)).Succeeded
             : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
 
         Assert.False(result);
@@ -541,7 +541,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var before = await File.ReadAllBytesAsync(path);
 
         var result = removeMetadata
-            ? await service.RemoveMetadataAsync(path)
+            ? (await service.RemoveMetadataAsync(path)).Succeeded
             : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
 
         Assert.False(result);
@@ -576,7 +576,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var path = WriteNamelessGzipCbz("Series/nameless.cbz");
         var before = await File.ReadAllBytesAsync(path);
 
-        var result = await service.RemoveMetadataAsync(path);
+        var result = (await service.RemoveMetadataAsync(path)).Succeeded;
 
         Assert.True(result);
         Assert.Equal(before, await File.ReadAllBytesAsync(path));
@@ -589,7 +589,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var service = CreateService();
         var path = WriteCorrupt("Series/bad.cbz");
 
-        var result = await service.RemoveMetadataAsync(path);
+        var result = (await service.RemoveMetadataAsync(path)).Succeeded;
 
         Assert.False(result);
         Assert.True(_logger.Has(LogLevel.Error, "Error removing metadata for {FilePath}"));
@@ -603,7 +603,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var outside = WriteCbzAt(Path.Join(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
         var before = await File.ReadAllBytesAsync(outside);
 
-        var result = await service.RemoveMetadataAsync(outside);
+        var result = (await service.RemoveMetadataAsync(outside)).Succeeded;
 
         Assert.False(result);
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot remove metadata: file is outside the allowed directories: {FilePath}"));
@@ -627,7 +627,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var before = await File.ReadAllBytesAsync(outside);
         Directory.CreateSymbolicLink(Path.Join(_library, "linked"), outsideDir);
 
-        var result = await service.RemoveMetadataAsync(Path.Join(_library, "linked", "book.cbz"));
+        var result = (await service.RemoveMetadataAsync(Path.Join(_library, "linked", "book.cbz"))).Succeeded;
 
         Assert.False(result);
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot remove metadata: file is outside the allowed directories: {FilePath}"));
@@ -647,7 +647,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var alias = Path.Join(_library, "alias");
         Directory.CreateSymbolicLink(alias, Path.Join(_library, "Series"));
 
-        var result = await service.RemoveMetadataAsync(Path.Join(alias, "book.cbz"));
+        var result = (await service.RemoveMetadataAsync(Path.Join(alias, "book.cbz"))).Succeeded;
 
         Assert.True(result);
         Assert.Null(ReadComicInfo(physical));

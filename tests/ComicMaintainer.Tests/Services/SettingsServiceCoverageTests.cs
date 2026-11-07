@@ -79,6 +79,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
 
     [Theory]
     [InlineData("WatcherEnableNormalize")]
+    [InlineData("ConvertRarToCbzOnWrite")]
     [InlineData("WriteCoverToFirstArchive")]
     [InlineData("WriteCoverToSeriesFolder")]
     [InlineData("DownloadExternalSeriesImages")]
@@ -91,6 +92,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         Func<bool, Task> update = settingName switch
         {
             "WatcherEnableNormalize" => v => _service.UpdateWatcherEnableNormalizeAsync(v),
+            "ConvertRarToCbzOnWrite" => v => _service.UpdateConvertRarToCbzOnWriteAsync(v),
             "WriteCoverToFirstArchive" => v => _service.UpdateWriteCoverToFirstArchiveAsync(v),
             "WriteCoverToSeriesFolder" => v => _service.UpdateWriteCoverToSeriesFolderAsync(v),
             "DownloadExternalSeriesImages" => v => _service.UpdateDownloadExternalSeriesImagesAsync(v),

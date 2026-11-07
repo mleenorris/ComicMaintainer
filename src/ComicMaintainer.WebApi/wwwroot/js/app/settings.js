@@ -135,7 +135,37 @@
                 document.getElementById('watcherEnableNormalizeCheckbox').checked = !enabled;
             }
         }
-        
+
+        async function updateConvertRarToCbzOnWrite() {
+            const enabled = document.getElementById('convertRarToCbzOnWriteCheckbox').checked;
+
+            try {
+                const response = await fetch(apiUrl('/api/settings/convert-rar-to-cbz-on-write'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+
+                if (handleAuthError(response)) {
+                    document.getElementById('convertRarToCbzOnWriteCheckbox').checked = !enabled;
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const statusText = enabled ? 'enabled' : 'disabled';
+                showMessage(`Convert CBR/RAR to CBZ when writing tags ${statusText} successfully!`, 'success');
+            } catch (error) {
+                showMessage('Failed to update CBR/RAR conversion setting: ' + error.message, 'error');
+                document.getElementById('convertRarToCbzOnWriteCheckbox').checked = !enabled;
+            }
+        }
+
         async function updateWriteCoverToFirstArchive() {
             const enabled = document.getElementById('writeCoverToFirstArchiveCheckbox').checked;
             
@@ -313,7 +343,13 @@
                 
                 // Load watcher enable normalize status
                 document.getElementById('watcherEnableNormalizeCheckbox').checked = settingsData.watcher_enable_normalize;
-                
+
+                // Load CBR/RAR to CBZ conversion status (on unless the server says otherwise)
+                const convertRarCheckbox = document.getElementById('convertRarToCbzOnWriteCheckbox');
+                if (convertRarCheckbox) {
+                    convertRarCheckbox.checked = settingsData.convert_rar_to_cbz_on_write !== false;
+                }
+
                 // Load series cover embed status
                 const writeCoverCheckbox = document.getElementById('writeCoverToFirstArchiveCheckbox');
                 if (writeCoverCheckbox) {

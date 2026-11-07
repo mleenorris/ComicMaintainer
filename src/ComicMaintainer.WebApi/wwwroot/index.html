@@ -703,6 +703,16 @@
                                 When enabled, metadata will be normalized during processing.
                             </small>
                         </div>
+
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="convertRarToCbzOnWriteCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="convertRarToCbzOnWriteCheckbox" name="convertRarToCbzOnWrite" onchange="updateConvertRarToCbzOnWrite()">
+                                <span>Convert CBR/RAR to CBZ when writing tags</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                Only CBZ files can be rewritten in place. When enabled, writing tags (normalize, tag edits, batch updates) to a CBR, RAR or ZIP file saves it as a CBZ with the same name and removes the original; its read status and reading progress move with it. When disabled, those files are never modified: tag edits are kept in the database only and normalize leaves them as they are.
+                            </small>
+                        </div>
                     </section>
                     <section class="settings-card" id="settings-ereader" aria-labelledby="settings-ereader-title">
                         <header class="settings-card-header">

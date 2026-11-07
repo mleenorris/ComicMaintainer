@@ -130,7 +130,7 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
         });
 
         var result = removeMetadata
-            ? await service.RemoveMetadataAsync(path, cts.Token)
+            ? (await service.RemoveMetadataAsync(path, cts.Token)).Succeeded
             : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, cts.Token);
 
         Assert.False(result);

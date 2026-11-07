@@ -26,6 +26,7 @@ function formValues(page) {
         theme: value('themeSelect'),
         rename: checked('watcherEnableRenameCheckbox'),
         normalize: checked('watcherEnableNormalizeCheckbox'),
+        convertRarToCbz: checked('convertRarToCbzOnWriteCheckbox'),
         coverToArchive: checked('writeCoverToFirstArchiveCheckbox'),
         coverToFolder: checked('writeCoverToSeriesFolderCheckbox'),
         allowRegistration: checked('allowRegistrationCheckbox'),
@@ -103,6 +104,7 @@ test('the settings page fills every group from GET /api/settings', async () => {
         theme: 'light',
         rename: true,
         normalize: false,
+        convertRarToCbz: false,
         coverToArchive: true,
         coverToFolder: false,
         allowRegistration: true,
@@ -219,6 +221,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
             default_library_view: 'files',
             allow_registration: false,
             default_preferred_language: null,
+            convert_rar_to_cbz_on_write: undefined,
             write_cover_to_first_archive: false,
             download_external_series_images: false,
             series_image_max_bytes: null,
@@ -261,6 +264,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
     assert.equal(values.suwayomiPasswordHint, 'Enter a password only if your Suwayomi server requires one.');
     assert.equal(values.suwayomiDownloadsDirectory, '');
     assert.equal(values.defaultView, 'files');
+    assert.equal(values.convertRarToCbz, true, 'converting CBR/RAR to CBZ defaults to on');
     assert.equal(values.preferredLanguage, '');
     // Image limits that are not numbers leave the inputs untouched (blank).
     assert.equal(values.seriesImageMaxMB, '');
@@ -436,6 +440,7 @@ test('non-administrators see server-wide settings read-only', async () => {
 const TOGGLES = [
     ['watcherEnableRenameCheckbox', 'POST', '/api/settings/watcher-enable-rename', 'File rename', 'Failed to update rename setting: '],
     ['watcherEnableNormalizeCheckbox', 'POST', '/api/settings/watcher-enable-normalize', 'Metadata normalize', 'Failed to update normalize setting: '],
+    ['convertRarToCbzOnWriteCheckbox', 'POST', '/api/settings/convert-rar-to-cbz-on-write', 'Convert CBR/RAR to CBZ when writing tags', 'Failed to update CBR/RAR conversion setting: '],
     ['writeCoverToFirstArchiveCheckbox', 'POST', '/api/settings/write-cover-to-first-archive', 'Embed cover into first issue archive', 'Failed to update cover embed setting: '],
     ['writeCoverToSeriesFolderCheckbox', 'POST', '/api/settings/write-cover-to-series-folder', 'Write cover into series folder', 'Failed to update cover folder setting: '],
     ['allowRegistrationCheckbox', 'PUT', '/api/settings/allow-registration', 'Self-service registration', 'Failed to update registration setting: '],

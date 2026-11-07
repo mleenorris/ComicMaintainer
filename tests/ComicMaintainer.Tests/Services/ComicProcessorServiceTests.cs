@@ -228,7 +228,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.Equal("Series With Metadata", before!.Series);
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert
         Assert.True(result);
@@ -252,7 +252,7 @@ public class ComicProcessorServiceTests : IDisposable
         var filePath = Path.Join(_testDirectory, "missing.cbz");
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert
         Assert.False(result);
@@ -266,7 +266,7 @@ public class ComicProcessorServiceTests : IDisposable
         await File.WriteAllTextAsync(filePath, "hello");
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert
         Assert.False(result);
@@ -279,7 +279,7 @@ public class ComicProcessorServiceTests : IDisposable
         var filePath = CreateTestComicArchiveNoMetadata("nometa.cbz");
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert — the operation is a no-op for the metadata layer but should
         // still succeed so callers can rely on idempotent behaviour.

@@ -192,6 +192,7 @@ public class SettingsControllerCoverageTests
     {
         "watcher-enable-rename",
         "watcher-enable-normalize",
+        "convert-rar-to-cbz-on-write",
         "write-cover-to-first-archive",
         "write-cover-to-series-folder",
         "download-external-series-images",
@@ -201,6 +202,7 @@ public class SettingsControllerCoverageTests
     private static string ToggleError(string toggle) => toggle switch
     {
         "allow-registration" => "Failed to update self-service registration setting",
+        "convert-rar-to-cbz-on-write" => "Failed to update convert CBR/RAR to CBZ on write",
         _ => "Failed to update " + toggle.Replace('-', ' '),
     };
 
@@ -210,6 +212,7 @@ public class SettingsControllerCoverageTests
         {
             case "watcher-enable-rename": _settings.WatcherEnableRename = value; break;
             case "watcher-enable-normalize": _settings.WatcherEnableNormalize = value; break;
+            case "convert-rar-to-cbz-on-write": _settings.ConvertRarToCbzOnWrite = value; break;
             case "write-cover-to-first-archive": _settings.WriteCoverToFirstArchive = value; break;
             case "write-cover-to-series-folder": _settings.WriteCoverToSeriesFolder = value; break;
             case "download-external-series-images": _settings.DownloadExternalSeriesImages = value; break;
@@ -222,6 +225,7 @@ public class SettingsControllerCoverageTests
     {
         "watcher-enable-rename" => c.GetWatcherEnableRename(),
         "watcher-enable-normalize" => c.GetWatcherEnableNormalize(),
+        "convert-rar-to-cbz-on-write" => c.GetConvertRarToCbzOnWrite(),
         "write-cover-to-first-archive" => c.GetWriteCoverToFirstArchive(),
         "write-cover-to-series-folder" => c.GetWriteCoverToSeriesFolder(),
         "download-external-series-images" => c.GetDownloadExternalSeriesImages(),
@@ -236,6 +240,8 @@ public class SettingsControllerCoverageTests
             ("watcher-enable-rename", true) => c.SetWatcherEnableRename(new() { Enabled = enabled }),
             ("watcher-enable-normalize", false) => c.UpdateWatcherEnableNormalize(new() { Enabled = enabled }),
             ("watcher-enable-normalize", true) => c.SetWatcherEnableNormalize(new() { Enabled = enabled }),
+            ("convert-rar-to-cbz-on-write", false) => c.UpdateConvertRarToCbzOnWrite(new() { Enabled = enabled }),
+            ("convert-rar-to-cbz-on-write", true) => c.SetConvertRarToCbzOnWrite(new() { Enabled = enabled }),
             ("write-cover-to-first-archive", false) => c.UpdateWriteCoverToFirstArchive(new() { Enabled = enabled }),
             ("write-cover-to-first-archive", true) => c.SetWriteCoverToFirstArchive(new() { Enabled = enabled }),
             ("write-cover-to-series-folder", false) => c.UpdateWriteCoverToSeriesFolder(new() { Enabled = enabled }),
@@ -251,6 +257,7 @@ public class SettingsControllerCoverageTests
     {
         "watcher-enable-rename" => s => s.UpdateWatcherEnableRenameAsync(enabled, It.IsAny<CancellationToken>()),
         "watcher-enable-normalize" => s => s.UpdateWatcherEnableNormalizeAsync(enabled, It.IsAny<CancellationToken>()),
+        "convert-rar-to-cbz-on-write" => s => s.UpdateConvertRarToCbzOnWriteAsync(enabled, It.IsAny<CancellationToken>()),
         "write-cover-to-first-archive" => s => s.UpdateWriteCoverToFirstArchiveAsync(enabled, It.IsAny<CancellationToken>()),
         "write-cover-to-series-folder" => s => s.UpdateWriteCoverToSeriesFolderAsync(enabled, It.IsAny<CancellationToken>()),
         "download-external-series-images" => s => s.UpdateDownloadExternalSeriesImagesAsync(enabled, It.IsAny<CancellationToken>()),

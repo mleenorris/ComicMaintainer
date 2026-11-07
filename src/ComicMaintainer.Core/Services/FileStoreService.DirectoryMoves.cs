@@ -39,6 +39,14 @@ public partial class FileStoreService
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+            // The watcher calls this for every rename it cannot tell is a file's, most of them of
+            // files that are not comics; don't take SQLite's write lock for those.
+            if (cachedPaths.Count == 0 && !await AnyRowUnderAsync(dbContext.ComicFiles, e => e.FilePath, oldPrefix, cancellationToken))
+            {
+                return 0;
+            }
+
             await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
             var rows = await RowsUnderAsync(dbContext.ComicFiles, e => e.FilePath, oldPrefix, cachedPaths, cancellationToken);
@@ -300,14 +308,10 @@ public partial class FileStoreService
         CancellationToken cancellationToken)
         where T : class
     {
-        // Every path that starts with "dir/" sorts at or after "dir/" and before "dir0", the
-        // separator's successor, in SQLite's binary order as in ordinal order.
-        var lower = prefix;
-        var upper = prefix[..^1] + (char)(prefix[^1] + 1);
         var path = pathOf.Compile();
 
         var found = await rows
-            .Where(BuildRange(pathOf, lower, upper))
+            .Where(BuildRange(pathOf, prefix))
             .ToListAsync(cancellationToken);
 
         foreach (var chunk in Chunk(cachedPaths, SqliteParameterChunkSize))
@@ -321,9 +325,30 @@ public partial class FileStoreService
             .ToList();
     }
 
+    /// <summary>
+    /// Whether any row's path (<paramref name="pathOf"/>) starts with <paramref name="prefix"/>
+    /// exactly, found with a range scan of the path index. Paths spelled in another case are
+    /// not found; callers look for those in the in-memory store.
+    /// </summary>
+    private static Task<bool> AnyRowUnderAsync<T>(
+        IQueryable<T> rows,
+        System.Linq.Expressions.Expression<Func<T, string>> pathOf,
+        string prefix,
+        CancellationToken cancellationToken)
+        where T : class =>
+        rows.AnyAsync(BuildRange(pathOf, prefix), cancellationToken);
+
+    /// <summary>
+    /// The paths that start with <paramref name="prefix"/>, which ends with a separator, as a
+    /// range the path index serves: every such path sorts at or after "dir/" and before "dir0"
+    /// (the separator's successor), in SQLite's binary order as in ordinal order.
+    /// </summary>
     private static System.Linq.Expressions.Expression<Func<T, bool>> BuildRange<T>(
-        System.Linq.Expressions.Expression<Func<T, string>> pathOf, string lower, string upper)
+        System.Linq.Expressions.Expression<Func<T, string>> pathOf, string prefix)
     {
+        var lower = prefix;
+        var upper = prefix[..^1] + (char)(prefix[^1] + 1);
+
         // string.Compare(path, bound) translates to a plain comparison in SQL.
         var compare = typeof(string).GetMethod(nameof(string.Compare), [typeof(string), typeof(string)])!;
         var body = System.Linq.Expressions.Expression.AndAlso(

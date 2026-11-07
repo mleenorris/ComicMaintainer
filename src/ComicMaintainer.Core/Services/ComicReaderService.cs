@@ -16,11 +16,12 @@ namespace ComicMaintainer.Core.Services;
 /// them) used to happen on every page request, every page count and every
 /// progress save. The sorted page list of each archive version is now kept in a
 /// small, size-bounded in-memory cache keyed on the file path and validated
-/// against the file's length and last-write time, so a page turn costs one
-/// <c>stat</c> plus the read of the one entry it shows, and counting pages costs
-/// only the <c>stat</c>. Concurrent requests for an archive that is not cached
-/// yet (the reader asks for the page count and prefetches several pages at once)
-/// share one listing.
+/// against the file's length and last-write time. Counting pages costs only a
+/// <c>stat</c>; a page turn opens the archive only to read the one entry it
+/// shows, at the position the list recorded (for a CBR, enumeration stops at
+/// that entry), with no filtering or sorting. Concurrent requests for an
+/// archive that is not cached yet (the reader asks for the page count and
+/// prefetches several pages at once) share one listing.
 /// </para>
 /// <para>
 /// Entries are read through <see cref="ArchiveEntryReader"/>, which refuses

@@ -6,27 +6,61 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
-        // Server-Sent Events connection for real-time updates
+        // Server-Sent Events connection for real-time updates.
+        //
+        // EventSource cannot send an Authorization header, so every connection
+        // is opened with a stream token: a one-minute, single-use token from
+        // POST /api/auth/stream-token that the server accepts on the event
+        // stream only (never the session token, which proxies would log with
+        // the URL). Because the token is single-use, the browser's own
+        // reconnect, which reuses the URL, cannot succeed: every error closes
+        // the stream and the app reconnects itself, with backoff and a fresh
+        // token.
+        //
+        // Job progress and the library must never silently stop updating:
+        //  - the server sends a heartbeat event every 30 seconds, and a stream
+        //    that stays quiet for EVENT_SOURCE_STALE_AFTER (dropped by a proxy
+        //    or the network without being closed) is replaced;
+        //  - while the stream is down, the active job's status is polled;
+        //  - after EVENT_SOURCE_MAX_RETRIES failures the user is told, but the
+        //    app keeps retrying at the longest delay, and reconnects at once
+        //    when the browser comes back online, the tab becomes visible or the
+        //    page is restored from the back/forward cache;
+        //  - a reconnected stream catches up on the job, the watcher status and
+        //    the library, whose events were lost while it was down.
         let eventSource = null;
         let eventSourceReconnectTimer = null;
+        let eventSourceWatchdogTimer = null;
         const EVENT_SOURCE_RECONNECT_DELAY = 5000; // Initial delay: 5 seconds
         const EVENT_SOURCE_MAX_RETRY_DELAY = 60000; // Maximum delay: 60 seconds
-        const EVENT_SOURCE_MAX_RETRIES = 20; // Stop trying after 20 consecutive failures
+        const EVENT_SOURCE_MAX_RETRIES = 20; // Tell the user after 20 consecutive failures (and keep retrying)
+        const EVENT_SOURCE_WATCHDOG_INTERVAL = 5000; // How often the watchdog checks the stream and polls a job
+        const EVENT_SOURCE_STALE_AFTER = 75000; // Two and a half missed heartbeats (EventsController.HeartbeatInterval)
+        const EVENT_SOURCE_UNAVAILABLE_MESSAGE = 'Real-time updates unavailable. Retrying in the background...';
         let eventSourceRetryCount = 0;
         let eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
-        
+        // Milliseconds of watchdog ticks since the open stream last said anything.
+        let eventSourceQuietTime = 0;
+        // Bumped by cleanupEventSource(), so a connection attempt it interrupts does not open a stream afterwards.
+        let eventSourceGeneration = 0;
+        let eventSourceConnecting = false;
+        let eventSourceHasConnected = false;
+        let eventSourceUnavailableReported = false;
+        // Set when the page is put into the back/forward cache with a stream, so it is reopened on return.
+        let eventSourceSuspended = false;
+
         // Helper function to check if user is still authenticated (supports both JWT and Authelia)
         async function checkAuthenticationStatus() {
             try {
                 // First check if using Authelia authentication
                 const isAutheliaAuth = isAutheliaAuthenticated();
-                
+
                 if (isAutheliaAuth) {
                     // For Authelia, check server auth status to verify session is still valid
                     const response = await fetch(apiUrl('/api/auth/status'), {
                         credentials: 'include' // Important for Authelia cookies
                     });
-                    
+
                     if (response.ok) {
                         const authStatus = await response.json();
                         if (authStatus.autheliaEnabled && authStatus.isAuthenticated) {
@@ -43,12 +77,12 @@
                         console.warn('[AUTH] No JWT token found');
                         return false;
                     }
-                    
+
                     if (isTokenExpired(token)) {
                         console.warn('[AUTH] JWT token expired');
                         return false;
                     }
-                    
+
                     return true; // JWT token is valid
                 }
             } catch (error) {
@@ -56,100 +90,80 @@
                 return false;
             }
         }
-        
-        // Initialize SSE connection
-        async function initEventSource() {
-            // Close existing connection if any
-            if (eventSource) {
-                eventSource.close();
-            }
-            
-            try {
-                // Check if we've exceeded max retry attempts
-                if (eventSourceRetryCount >= EVENT_SOURCE_MAX_RETRIES) {
-                    console.error('SSE: Maximum retry attempts reached. Please refresh the page or check your connection.');
-                    showMessage('Real-time updates unavailable. Please refresh the page.', 'error');
-                    return;
+
+        /**
+         * A stream token for opening the event stream, or null when the session
+         * has ended (the user is then sent to the login page). Throws when no
+         * token can be had right now, so the caller retries later.
+         */
+        async function fetchStreamToken() {
+            const isAutheliaAuth = isAutheliaAuthenticated();
+            console.log('SSE: Authentication mode -', isAutheliaAuth ? 'Authelia' : 'JWT');
+            const response = await fetch(apiUrl('/api/auth/stream-token'), {
+                method: 'POST',
+                credentials: 'include', // Authelia sessions are cookies
+                headers: getAuthHeaders()
+            });
+            if (!response.ok) {
+                console.error('SSE: Failed to get a stream token - status:', response.status);
+                if (response.status === 401 && !isAutheliaAuth) {
+                    // The stored session token no longer stands for a session: it was signed
+                    // out, or the password, role or account changed.
+                    console.warn('SSE: The session has ended');
+                    return null;
                 }
-                
+                throw new Error(`No stream token (${response.status})`);
+            }
+            const data = await response.json();
+            if (!data || !data.token) {
+                throw new Error('No stream token in the response');
+            }
+            return data.token;
+        }
+
+        // Initialize SSE connection (also used to reconnect: it replaces any existing stream)
+        async function initEventSource() {
+            if (eventSourceConnecting) {
+                return;
+            }
+            eventSourceConnecting = true;
+            const generation = eventSourceGeneration;
+            if (eventSourceReconnectTimer) {
+                clearTimeout(eventSourceReconnectTimer);
+                eventSourceReconnectTimer = null;
+            }
+            closeEventSource();
+            startEventSourceWatchdog();
+
+            try {
                 // Check authentication status for both JWT and Authelia before connecting
                 console.log('SSE: Checking authentication status...');
                 const isAuthenticated = await checkAuthenticationStatus();
+                if (generation !== eventSourceGeneration) return;
                 if (!isAuthenticated) {
                     console.error('SSE: Authentication check failed - cannot establish SSE connection');
                     console.error('SSE: User will be redirected to login page');
-                    redirectToLogin();
+                    endEventSourceForSignOut();
                     return;
                 }
                 console.log('SSE: Authentication check passed');
-                
-                // Get token for SSE connection
-                // For JWT auth, use the stored token
-                // For Authelia auth, request a JWT token specifically for SSE
-                let token = localStorage.getItem('jwt_token');
-                const isAutheliaAuth = isAutheliaAuthenticated();
-                
-                console.log('SSE: Authentication mode -', isAutheliaAuth ? 'Authelia' : 'JWT');
-                console.log('SSE: Existing token -', token ? 'Present' : 'None');
-                
-                if (isAutheliaAuth && !token) {
-                    // For Authelia users, get an SSE token from the backend
-                    console.log('SSE: Fetching token for Authelia-authenticated user');
-                    try {
-                        const response = await fetch(apiUrl('/api/auth/sse-token'), {
-                            credentials: 'include',
-                            headers: getAuthHeaders()
-                        });
-                        if (response.ok) {
-                            const data = await response.json();
-                            token = data.token;
-                            console.log('SSE: Received SSE token for Authelia user');
-                        } else {
-                            console.error('SSE: Failed to get SSE token - status:', response.status);
-                            console.error('SSE: This may indicate an authentication issue with Authelia');
-                            // Don't retry immediately if we get auth errors
-                            if (response.status === 401 || response.status === 403) {
-                                console.error('SSE: Authentication failed. SSE connection cannot be established.');
-                                throw new Error(`Authentication failed (${response.status}). Please check Authelia configuration.`);
-                            }
-                        }
-                    } catch (error) {
-                        console.error('SSE: Error fetching SSE token:', error);
-                        // Re-throw to be caught by outer try-catch for proper error handling
-                        throw error;
-                    }
+
+                const token = await fetchStreamToken();
+                if (generation !== eventSourceGeneration) return;
+                if (token === null) {
+                    endEventSourceForSignOut();
+                    return;
                 }
-                
-                // Ensure we have a token before attempting connection
-                if (!token) {
-                    console.error('SSE: No authentication token available. Cannot establish SSE connection.');
-                    console.error('SSE: For JWT auth, check if jwt_token exists in localStorage');
-                    console.error('SSE: For Authelia auth, check if /api/auth/sse-token endpoint is accessible');
-                    throw new Error('No authentication token available for SSE connection');
-                }
-                
-                // EventSource doesn't support custom headers, so we pass the token as a query parameter
-                const streamUrl = apiUrl(`/api/events/stream?access_token=${encodeURIComponent(token)}`);
-                
-                console.log('SSE: Connecting to event stream with authentication token...');
-                eventSource = new EventSource(streamUrl);
-                
-                eventSource.onopen = () => {
-                    console.log('SSE: Connected to event stream');
-                    
-                    // Reset retry counters on successful connection
-                    eventSourceRetryCount = 0;
-                    eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
-                    
-                    // When SSE reconnects and we have an active job, poll for its current status
-                    // This ensures we don't miss updates that occurred while disconnected
-                    if (hasActiveJob && currentJobId) {
-                        console.log(`SSE: Reconnected with active job ${currentJobId}, fetching current status...`);
-                        pollJobStatusOnce(currentJobId);
-                    }
-                };
-                
-                eventSource.onmessage = (event) => {
+
+                // EventSource doesn't support custom headers, so the stream token goes in the URL
+                console.log('SSE: Connecting to event stream with a stream token...');
+                const source = new EventSource(apiUrl(`/api/events/stream?access_token=${encodeURIComponent(token)}`));
+                eventSource = source;
+                eventSourceQuietTime = 0;
+
+                source.onopen = () => handleEventSourceOpen(source);
+                source.onmessage = (event) => {
+                    markEventSourceActivity(source);
                     try {
                         const data = JSON.parse(event.data);
                         handleServerEvent(data);
@@ -157,61 +171,166 @@
                         console.error('SSE: Error parsing event data:', error);
                     }
                 };
-                
-                eventSource.onerror = async (error) => {
-                    // EventSource automatically attempts to reconnect, but readyState tells us the status
-                    // readyState 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
-                    const state = eventSource.readyState;
-                    
-                    if (state === EventSource.CLOSED) {
-                        eventSourceRetryCount++;
-                        console.warn(`SSE: Connection closed (attempt ${eventSourceRetryCount}/${EVENT_SOURCE_MAX_RETRIES}), will retry in ${eventSourceRetryDelay/1000}s`);
-                        
-                        // Close the connection to stop automatic retry attempts
-                        eventSource.close();
-                        
-                        // Check authentication status for both JWT and Authelia
-                        const isAuthenticated = await checkAuthenticationStatus();
-                        if (!isAuthenticated) {
-                            console.warn('SSE: Authentication expired during connection');
-                            redirectToLogin();
-                            return;
-                        }
-                        
-                        // Schedule reconnection with exponential backoff
-                        if (eventSourceReconnectTimer) {
-                            clearTimeout(eventSourceReconnectTimer);
-                        }
-                        eventSourceReconnectTimer = setTimeout(() => {
-                            initEventSource();
-                            // Increase delay for next retry (exponential backoff)
-                            eventSourceRetryDelay = Math.min(eventSourceRetryDelay * 1.5, EVENT_SOURCE_MAX_RETRY_DELAY);
-                        }, eventSourceRetryDelay);
-                    } else if (state === EventSource.CONNECTING) {
-                        // EventSource is attempting to reconnect automatically
-                        console.log('SSE: Reconnecting...');
-                    }
-                };
+                // Sent every 30 seconds: proof that the stream is still alive.
+                source.addEventListener('heartbeat', () => markEventSourceActivity(source));
+                source.onerror = () => handleEventSourceError(source);
             } catch (error) {
+                if (generation !== eventSourceGeneration) return;
                 console.error('SSE: Failed to initialize EventSource:', error);
-                eventSourceRetryCount++;
-                
-                // Retry with exponential backoff
-                if (eventSourceRetryCount < EVENT_SOURCE_MAX_RETRIES) {
-                    console.log(`SSE: Will retry in ${eventSourceRetryDelay/1000}s (attempt ${eventSourceRetryCount}/${EVENT_SOURCE_MAX_RETRIES})`);
-                    if (eventSourceReconnectTimer) {
-                        clearTimeout(eventSourceReconnectTimer);
-                    }
-                    eventSourceReconnectTimer = setTimeout(() => {
-                        initEventSource();
-                        eventSourceRetryDelay = Math.min(eventSourceRetryDelay * 1.5, EVENT_SOURCE_MAX_RETRY_DELAY);
-                    }, eventSourceRetryDelay);
-                } else {
-                    console.error('SSE: Maximum retry attempts reached');
-                    showMessage('Real-time updates unavailable. Please refresh the page.', 'error');
+                scheduleEventSourceReconnect();
+            } finally {
+                // An attempt cleanupEventSource() interrupted no longer owns the flag.
+                if (generation === eventSourceGeneration) {
+                    eventSourceConnecting = false;
                 }
             }
         }
+
+        function handleEventSourceOpen(source) {
+            if (source !== eventSource) return;
+            console.log('SSE: Connected to event stream');
+            const reconnected = eventSourceHasConnected;
+            eventSourceHasConnected = true;
+            eventSourceQuietTime = 0;
+
+            // Reset retry counters on successful connection
+            eventSourceRetryCount = 0;
+            eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
+            if (eventSourceUnavailableReported) {
+                eventSourceUnavailableReported = false;
+                showMessage('Real-time updates are back.', 'success');
+            }
+
+            // When SSE reconnects and we have an active job, poll for its current status
+            // This ensures we don't miss updates that occurred while disconnected
+            if (hasActiveJob && currentJobId) {
+                console.log(`SSE: Reconnected with active job ${currentJobId}, fetching current status...`);
+                pollJobStatusOnce(currentJobId);
+            }
+
+            if (reconnected) {
+                // Watcher and library events sent while the stream was down are lost: catch up.
+                console.log('SSE: Catching up on events missed while disconnected');
+                updateWatcherStatus();
+                handleFileListUpdatedEvent({});
+            }
+        }
+
+        async function handleEventSourceError(source) {
+            if (source !== eventSource) return;
+            // The stream token was single-use, so the browser's own retry, which reuses the URL, cannot
+            // succeed: close the stream and reconnect with a fresh token.
+            console.warn(`SSE: Connection lost (readyState ${source.readyState})`);
+            closeEventSource();
+            const generation = eventSourceGeneration;
+
+            // Check authentication status for both JWT and Authelia
+            const isAuthenticated = await checkAuthenticationStatus();
+            if (generation !== eventSourceGeneration || eventSource || eventSourceConnecting) return;
+            if (!isAuthenticated) {
+                console.warn('SSE: Authentication expired during connection');
+                endEventSourceForSignOut();
+                return;
+            }
+            scheduleEventSourceReconnect();
+        }
+
+        // Schedules the next attempt with exponential backoff. Retries never stop; after
+        // EVENT_SOURCE_MAX_RETRIES consecutive failures the user is told once.
+        function scheduleEventSourceReconnect() {
+            eventSourceRetryCount++;
+            const delay = eventSourceRetryDelay;
+            console.warn(`SSE: Will retry in ${delay / 1000}s (attempt ${eventSourceRetryCount})`);
+            if (eventSourceRetryCount >= EVENT_SOURCE_MAX_RETRIES && !eventSourceUnavailableReported) {
+                eventSourceUnavailableReported = true;
+                console.error(`SSE: ${eventSourceRetryCount} consecutive connection failures; still retrying every ${EVENT_SOURCE_MAX_RETRY_DELAY / 1000}s at most`);
+                showMessage(EVENT_SOURCE_UNAVAILABLE_MESSAGE, 'error');
+            }
+            if (eventSourceReconnectTimer) {
+                clearTimeout(eventSourceReconnectTimer);
+            }
+            eventSourceReconnectTimer = setTimeout(() => {
+                eventSourceReconnectTimer = null;
+                initEventSource();
+            }, delay);
+            eventSourceRetryDelay = Math.min(eventSourceRetryDelay * 1.5, EVENT_SOURCE_MAX_RETRY_DELAY);
+        }
+
+        function markEventSourceActivity(source) {
+            if (source === eventSource) {
+                eventSourceQuietTime = 0;
+            }
+        }
+
+        function isEventSourceOpen() {
+            return Boolean(eventSource) && eventSource.readyState === EventSource.OPEN;
+        }
+
+        function startEventSourceWatchdog() {
+            if (!eventSourceWatchdogTimer) {
+                eventSourceWatchdogTimer = setInterval(checkEventSource, EVENT_SOURCE_WATCHDOG_INTERVAL);
+            }
+        }
+
+        // Every EVENT_SOURCE_WATCHDOG_INTERVAL: replace a stream that has gone quiet (open, or stuck
+        // connecting), and while there is no open stream keep the active job's progress moving by polling it.
+        function checkEventSource() {
+            if (eventSource) {
+                eventSourceQuietTime += EVENT_SOURCE_WATCHDOG_INTERVAL;
+                if (eventSourceQuietTime >= EVENT_SOURCE_STALE_AFTER) {
+                    console.warn(`SSE: No heartbeat for ${eventSourceQuietTime / 1000}s, replacing the stream`);
+                    initEventSource();
+                    return;
+                }
+            }
+            if (!isEventSourceOpen() && hasActiveJob && currentJobId) {
+                console.log(`SSE: Stream is down, polling job ${currentJobId}`);
+                pollJobStatusOnce(currentJobId);
+            }
+        }
+
+        // Reconnects at once (resetting the backoff) when something suggests the connection can work
+        // again: only while the app wants a stream and has none open.
+        function reconnectEventSourceNow(reason) {
+            if (!eventSourceWatchdogTimer || eventSourceConnecting || isEventSourceOpen()) {
+                return;
+            }
+            console.log(`SSE: ${reason}, reconnecting now`);
+            eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
+            initEventSource();
+        }
+
+        function closeEventSource() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+        }
+
+        function endEventSourceForSignOut() {
+            cleanupEventSource();
+            redirectToLogin();
+        }
+
+        window.addEventListener('online', () => reconnectEventSourceNow('Back online'));
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                reconnectEventSourceNow('Page visible again');
+            }
+        });
+        // Close the stream when the page really goes away. Not in beforeunload: the user can still
+        // choose to stay on the page there (jobs.js asks while a job runs).
+        window.addEventListener('pagehide', (event) => {
+            eventSourceSuspended = Boolean(event.persisted && eventSourceWatchdogTimer);
+            cleanupEventSource();
+        });
+        window.addEventListener('pageshow', (event) => {
+            if (event.persisted && eventSourceSuspended) {
+                eventSourceSuspended = false;
+                initEventSource();
+            }
+        });
+
         
         // Handle different types of server events
         function handleServerEvent(data) {
@@ -390,24 +509,30 @@
             }
         }
         
-        // Clean up SSE connection on page unload
+        // Stops real-time updates: cancels a pending reconnect and the watchdog and closes the stream
+        // (when the page goes away, before a service worker update reloads it, on sign-out).
         function cleanupEventSource() {
+            eventSourceGeneration++;
+            eventSourceConnecting = false;
             if (eventSourceReconnectTimer) {
                 clearTimeout(eventSourceReconnectTimer);
                 eventSourceReconnectTimer = null;
             }
-            if (eventSource) {
-                eventSource.close();
-                eventSource = null;
+            if (eventSourceWatchdogTimer) {
+                clearInterval(eventSourceWatchdogTimer);
+                eventSourceWatchdogTimer = null;
             }
+            closeEventSource();
             // Reset retry counters
             eventSourceRetryCount = 0;
             eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
+            eventSourceQuietTime = 0;
         }
+
         
-        // Watcher status management - no polling, using SSE events only
+        // Watcher status management: fetched at page load and after the stream reconnects, SSE events in between
         async function updateWatcherStatus() {
-            // Fetch initial status on page load only, then rely on SSE for updates
+            // Fetch the current status; SSE watcher_status events keep it up to date
             try {
                 const response = await fetch(apiUrl('/api/watcher/status'), {
                     headers: getAuthHeaders()

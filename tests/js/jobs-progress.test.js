@@ -525,7 +525,7 @@ test('a bare job status still updates the modal, and a signed-out poll goes to t
     assert.deepEqual(page.errors, []);
 });
 
-test('leaving the page closes the event stream and warns only while a job runs', async (t) => {
+test('leaving the page warns only while a job runs, and staying keeps the progress updating', async (t) => {
     const job = h.trackedJob();
     const page = await h.bootJobsApp(t, { routes: job.routes });
     const leave = () => {
@@ -536,14 +536,21 @@ test('leaving the page closes the event stream and warns only while a job runs',
     const stream = page.eventSources.at(-1);
 
     assert.equal(leave().defaultPrevented, false);
-    assert.equal(stream.readyState, 2, 'the event stream is closed');
 
     await h.startTrackedJob(page);
     assert.equal(leave().defaultPrevented, true, 'the browser asks before leaving a running job');
+    // The user chose to stay: the stream was not closed by asking, so the job's updates still arrive.
+    assert.equal(page.eventSources.at(-1), stream);
+    assert.notEqual(stream.readyState, 2, 'the event stream stays open');
 
     h.jobUpdate(page, 'completed', h.progress(4, 4));
     await h.tick(t, page, 500);
+    h.assertProgress(page, { open: true, title: 'Completed! All 4 items processed (4 succeeded, 0 failed)', closeVisible: true });
     assert.equal(leave().defaultPrevented, false);
+
+    // The stream is closed when the page really goes away.
+    page.window.dispatchEvent(new page.window.Event('pagehide'));
+    assert.equal(stream.readyState, 2, 'the event stream is closed');
     assert.deepEqual(page.errors, []);
 });
 

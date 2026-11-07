@@ -277,9 +277,12 @@ function installBrowserStubs(window, page, options) {
             this.listeners.get(type)?.delete(listener);
         }
         close() { this.readyState = 2; }
-        /** Test hook: deliver an event (`data` objects are JSON-encoded like the server does). */
+        /**
+         * Test hook: deliver an event (`data` objects are JSON-encoded like the server does). Only an open
+         * stream delivers events, so any event but an error marks a connecting stream open (without 'open').
+         */
         emit(type, data) {
-            if (type === 'open') this.readyState = 1;
+            if (type === 'open' || (type !== 'error' && this.readyState === 0)) this.readyState = 1;
             const event = { type, data: typeof data === 'string' || data === undefined ? data : JSON.stringify(data), target: this };
             const handler = this[`on${type}`];
             if (typeof handler === 'function') handler.call(this, event);

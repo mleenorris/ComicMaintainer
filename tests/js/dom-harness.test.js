@@ -49,7 +49,8 @@ test('the SPA boots against the real index.html with a valid session', async () 
     const page = loadPage({
         localStorage: { jwt_token: validToken(), username: 'alice' },
         routes: {
-            'GET /api/auth/status': { autheliaEnabled: false, isAuthenticated: false }
+            'GET /api/auth/status': { autheliaEnabled: false, isAuthenticated: false },
+            'POST /api/auth/stream-token': { token: 'stream-token-1', expiresIn: 60 }
         }
     });
     await page.settle();
@@ -60,6 +61,7 @@ test('the SPA boots against the real index.html with a valid session', async () 
     assert.ok(page.fetchCalls.some(c => c.path === '/api/files/series'));
     assert.equal(page.fetchCalls.find(c => c.path === '/api/auth/user').headers.authorization.startsWith('Bearer '), true);
     assert.equal(page.eventSources.length, 1);
+    assert.equal(page.eventSources[0].url, '/api/events/stream?access_token=stream-token-1', 'a stream token, never the session token, goes in the URL');
     assert.deepEqual(page.serviceWorkerRegistrations.map(r => r.url), ['/sw.js']);
 });
 

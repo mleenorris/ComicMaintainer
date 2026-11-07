@@ -22,7 +22,7 @@ public class EventsControllerTests
         var broadcasterLoggerMock = new Mock<ILogger<EventBroadcasterService>>();
         _eventBroadcaster = new EventBroadcasterService(broadcasterLoggerMock.Object);
         
-        _controller = new EventsController(_loggerMock.Object, _eventBroadcaster);
+        _controller = new EventsController(_loggerMock.Object, _eventBroadcaster, Mock.Of<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator>());
         
         // Setup HTTP context
         var httpContext = new DefaultHttpContext();

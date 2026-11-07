@@ -1126,9 +1126,14 @@
                 const data = await response.json();
                 
                 if (response.ok) {
+                    // Changing the password signed every session out, this one included;
+                    // carry on with the new session token the server returned.
+                    if (data.token) {
+                        localStorage.setItem('jwt_token', data.token);
+                    }
                     successEl.textContent = 'Password changed successfully!';
                     successEl.classList.add('show');
-                    
+
                     // Clear form
                     document.getElementById('changePasswordForm').reset();
                     

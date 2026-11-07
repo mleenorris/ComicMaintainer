@@ -301,9 +301,18 @@
             return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         }
         
-        // Add logout function
+        // Signs out: the server revokes this session's token (POST /api/auth/logout), so a copy of it
+        // stops working too. keepalive lets the request finish while the page goes to the login screen.
         function logout() {
             if (confirm('Are you sure you want to logout?')) {
+                const token = localStorage.getItem('jwt_token');
+                if (token && !isAutheliaAuthenticated()) {
+                    fetch(apiUrl('/api/auth/logout'), {
+                        method: 'POST',
+                        keepalive: true,
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    }).catch(error => console.warn('[AUTH] Sign-out request failed:', error));
+                }
                 redirectToLogin();
             }
         }

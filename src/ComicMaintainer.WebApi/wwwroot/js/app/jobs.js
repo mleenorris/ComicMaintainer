@@ -43,9 +43,8 @@
         // finished-job dialog may remain visible while another start is pending.
         let progressModalStartGeneration = null;
         window.addEventListener('beforeunload', function(event) {
-            // Clean up SSE connection
-            cleanupEventSource();
-            
+            // The event stream is closed on pagehide (events.js), not here: the user may
+            // choose to stay, and the job's progress must keep updating if they do.
             if (hasActiveJob) {
                 // Show warning to prevent accidental navigation during batch processing
                 const message = 'A batch processing job is still running. If you leave, you can resume it when you return, but progress tracking will be interrupted.';
@@ -464,7 +463,7 @@
         }
         
         async function trackJobStatus(jobId, title) {
-            // Job progress updates via SSE only - purely event-based, no polling
+            // Job progress updates come from SSE events; events.js polls the job while the stream is down
             console.log(`[JOB ${jobId}] Tracking job status via SSE events: ${title}`);
             
             // Set active job state IMMEDIATELY to avoid race condition where
@@ -484,7 +483,7 @@
             await pollJobStatusOnce(jobId);
             
             // From this point on, all updates come from SSE events via handleJobUpdatedEvent
-            // Purely event-based - no polling, no watchdog timers
+            // (events.js polls the job instead whenever the stream is down)
             console.log(`[JOB ${jobId}] Waiting for real-time SSE updates...`);
         }
         

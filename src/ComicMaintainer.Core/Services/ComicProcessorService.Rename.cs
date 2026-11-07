@@ -270,9 +270,93 @@ public partial class ComicProcessorService
     /// Renames <paramref name="sourcePath"/> to <paramref name="targetPath"/> in the directory
     /// opened as <paramref name="directoryHandle"/>, never replacing another file, and returns
     /// the physical path of the renamed file.
+    /// <para>
+    /// On a file system that ignores case (Windows, macOS, most network shares and Docker
+    /// Desktop bind mounts) a target that differs from the source only in case names the source
+    /// itself, and a move that refuses to replace an existing file refuses to move a file onto
+    /// itself. Such a rename goes through a unique temporary name instead: first to it, then
+    /// from it to the target.
+    /// </para>
     /// </summary>
-    private string RenameOnDisk(SafeFileHandle? directoryHandle, string sourcePath, string targetPath) =>
-        MoveFileInRenameDirectory(directoryHandle, sourcePath, targetPath);
+    private string RenameOnDisk(SafeFileHandle? directoryHandle, string sourcePath, string targetPath)
+    {
+        if (!IsCaseOnlyRename(sourcePath, targetPath) || !File.Exists(targetPath))
+        {
+            return MoveFileInRenameDirectory(directoryHandle, sourcePath, targetPath);
+        }
+
+        // ".tmp_" names are ignored by the watcher and the library scans, so the intermediate
+        // step is never tracked as a file of its own.
+        var intermediatePath = Path.Join(
+            Path.GetDirectoryName(sourcePath),
+            $".tmp_rename_{Guid.NewGuid():N}{Path.GetExtension(sourcePath)}");
+        var intermediate = MoveFileInRenameDirectory(directoryHandle, sourcePath, intermediatePath);
+        try
+        {
+            return MoveFileInRenameDirectory(directoryHandle, intermediate, targetPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Give the file its original name back rather than leave it under the hidden one.
+            try
+            {
+                MoveFileInRenameDirectory(directoryHandle, intermediate, sourcePath);
+            }
+            catch (Exception restoreEx) when (restoreEx is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogError(restoreEx,
+                    "Case-only rename of {SourcePath} failed and the file could not be given its name back; it is at {IntermediatePath}",
+                    LoggingHelper.SanitizePathForLog(sourcePath),
+                    LoggingHelper.SanitizePathForLog(intermediate));
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="targetPath"/> only changes the case of <paramref name="sourcePath"/>.
+    /// </summary>
+    private static bool IsCaseOnlyRename(string sourcePath, string targetPath) =>
+        !string.Equals(sourcePath, targetPath, StringComparison.Ordinal)
+        && string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when <paramref name="targetPath"/>, which exists, is <paramref name="sourcePath"/>
+    /// itself under another case of its name, as on a file system that ignores case. The
+    /// directory listing decides it: it shows every entry under its stored name, so a directory
+    /// that keeps case apart and holds both files lists both names, while one that ignores case
+    /// can only hold the one file. (Distinct names, or another directory, are never the same file.)
+    /// </summary>
+    internal static bool IsSameFileUnderAnotherCase(string sourcePath, string targetPath, IEnumerable<string> directoryEntryNames)
+    {
+        if (!string.Equals(Path.GetDirectoryName(sourcePath), Path.GetDirectoryName(targetPath), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var sourceName = Path.GetFileName(sourcePath);
+        var targetName = Path.GetFileName(targetPath);
+        if (!string.Equals(sourceName, targetName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(sourceName, targetName, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var listsSource = false;
+        var listsTarget = false;
+        foreach (var name in directoryEntryNames)
+        {
+            listsSource |= string.Equals(name, sourceName, StringComparison.Ordinal);
+            listsTarget |= string.Equals(name, targetName, StringComparison.Ordinal);
+        }
+
+        return !(listsSource && listsTarget);
+    }
 
     private const string FilenameGenerationFailedMessage = "Failed to generate new filename";
 
@@ -446,15 +530,44 @@ public partial class ComicProcessorService
         return integerFormatted;
     }
 
+    /// <summary>
+    /// True when renaming <paramref name="sourcePath"/> to <paramref name="targetPath"/> would
+    /// collide with another file: one with the target's name or, so a library behaves the same
+    /// whether or not its file system ignores case, one whose name differs from it only in case.
+    /// The source itself never counts. In particular a target that only changes the source's
+    /// case "exists" on a file system that ignores case because it names the source, and
+    /// treating that as a collision flagged the only copy of the file as a duplicate.
+    /// </summary>
     private bool TargetFileExists(string targetPath, string? sourcePath = null)
     {
-        if (File.Exists(targetPath))
-        {
-            return true;
-        }
-
         var directory = Path.GetDirectoryName(targetPath);
         var targetFileName = Path.GetFileName(targetPath);
+
+        if (File.Exists(targetPath))
+        {
+            if (sourcePath is null || !IsCaseOnlyRename(sourcePath, targetPath))
+            {
+                return true;
+            }
+
+            try
+            {
+                return !IsSameFileUnderAnotherCase(
+                    sourcePath,
+                    targetPath,
+                    Directory.EnumerateFiles(directory!).Select(Path.GetFileName).OfType<string>());
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Without a listing the target cannot be told apart from the source. Don't flag
+                // the file: the move itself never replaces another file, so a real collision
+                // still fails the rename rather than losing a file.
+                _logger.LogDebug(ex, "Unable to enumerate directory while checking a case-only rename: {TargetPath}",
+                    LoggingHelper.SanitizePathForLog(targetPath));
+                return false;
+            }
+        }
+
         if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(targetFileName) || !Directory.Exists(directory))
         {
             return false;

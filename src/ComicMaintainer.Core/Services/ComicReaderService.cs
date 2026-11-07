@@ -228,6 +228,13 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
     private async Task<PageIndex> ListAndCacheAsync(FileVersion version)
     {
+        // A request that missed the cache just before another listing of this
+        // version finished (and left the in-progress set) finds it cached here.
+        if (_pageIndexes.TryGetValue(version.Path, out PageIndex? cached) && cached?.Version == version)
+        {
+            return cached;
+        }
+
         PageIndex index;
         try
         {

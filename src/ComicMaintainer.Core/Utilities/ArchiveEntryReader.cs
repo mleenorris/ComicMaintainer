@@ -102,34 +102,47 @@ public static class ArchiveEntryReader
     }
 
     /// <summary>
-    /// Counts the central-directory records of the ZIP archive in
-    /// <paramref name="stream"/>, stopping with an error once there are more than
-    /// <see cref="MaxEntries"/>. A stream without a recognisable end-of-central-
-    /// directory record is left for <see cref="ZipArchive"/> to reject.
+    /// Refuses the ZIP archive in <paramref name="stream"/> when its central
+    /// directory holds more than <see cref="MaxEntries"/> records.
     /// </summary>
     /// <exception cref="ArchiveLimitExceededException">The archive has too many entries.</exception>
-    internal static void EnsureZipEntryCountWithinLimit(Stream stream, string archiveName)
+    internal static void EnsureZipEntryCountWithinLimit(Stream stream, string archiveName) =>
+        EnsureEntryCountWithinLimit(CountZipEntries(stream, stopAfter: MaxEntries), archiveName);
+
+    /// <summary>
+    /// Counts the central-directory records of the ZIP archive in
+    /// <paramref name="stream"/> the way <see cref="ZipArchive"/> reads them
+    /// (record after record until the signature stops matching, whatever count
+    /// the archive declares), but stops once the count exceeds
+    /// <paramref name="stopAfter"/>, so a hostile directory costs a bounded walk.
+    /// Returns 0 for a stream without a recognisable end-of-central-directory
+    /// record, which <see cref="ZipArchive"/> then rejects itself.
+    /// </summary>
+    internal static long CountZipEntries(Stream stream, long stopAfter)
     {
         ArgumentNullException.ThrowIfNull(stream);
         var directoryStart = TryLocateZipCentralDirectory(stream);
         if (directoryStart is null || directoryStart.Value < 0 || directoryStart.Value >= stream.Length)
         {
-            return;
+            return 0;
         }
 
         stream.Position = directoryStart.Value;
         Span<byte> header = stackalloc byte[ZipCentralHeaderLength];
         long count = 0;
-        while (stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) == header.Length
+        while (count <= stopAfter
+            && stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) == header.Length
             && BinaryPrimitives.ReadUInt32LittleEndian(header) == ZipCentralHeaderSignature)
         {
-            EnsureEntryCountWithinLimit(++count, archiveName);
+            count++;
             // Skip the variable part: file name, extra field and comment.
             var variableLength = BinaryPrimitives.ReadUInt16LittleEndian(header[28..])
                 + BinaryPrimitives.ReadUInt16LittleEndian(header[30..])
                 + BinaryPrimitives.ReadUInt16LittleEndian(header[32..]);
             stream.Seek(variableLength, SeekOrigin.Current);
         }
+
+        return count;
     }
 
     /// <summary>

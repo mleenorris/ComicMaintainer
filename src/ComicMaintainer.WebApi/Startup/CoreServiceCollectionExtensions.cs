@@ -327,7 +327,8 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ComicEmailQueue>(sp => new ComicEmailQueue(
             () => sp.GetRequiredService<IComicEmailService>(),
             sp.GetRequiredService<ILogger<ComicEmailQueue>>(),
-            sp.GetService<ComicMaintainerMetrics>()));
+            sp.GetService<ComicMaintainerMetrics>(),
+            sp.GetService<TimeProvider>()));
         services.AddSingleton<IComicEmailQueue>(sp => sp.GetRequiredService<ComicEmailQueue>());
         services.AddSingleton<IComicEmailService, ComicEmailService>();
         // Condensed EPUB downloads run detached from the request that asked for them so

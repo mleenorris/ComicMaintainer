@@ -1184,6 +1184,39 @@ public class ComicEmailService : IComicEmailService
         await db.SaveChangesAsync(CancellationToken.None);
     }
 
+    public async Task<int> ResumePendingDeliveriesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var pending = await db.ComicEmailDeliveries
+            .AsNoTracking()
+            .Where(d => d.Status == EmailDeliveryStatus.Pending)
+            .OrderBy(d => d.Id)
+            .Select(d => d.Id)
+            .ToListAsync(cancellationToken);
+
+        var resumed = 0;
+        foreach (var deliveryId in pending)
+        {
+            // Being worked on, or already waiting its turn: nothing to resume.
+            if (_inFlight.ContainsKey(deliveryId) || _queue.IsQueued(deliveryId))
+            {
+                continue;
+            }
+
+            _queue.Enqueue(deliveryId);
+            resumed++;
+        }
+
+        if (resumed > 0)
+        {
+            _logger.LogInformation(
+                "Re-queued {Count} pending comic email deliveries that were not waiting in the queue",
+                resumed);
+        }
+
+        return resumed;
+    }
+
     public async Task SendTestEmailAsync(int deviceId, CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);

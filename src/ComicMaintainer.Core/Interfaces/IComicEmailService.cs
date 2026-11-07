@@ -121,6 +121,17 @@ public interface IComicEmailService
     /// </summary>
     Task ProcessDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Queues every pending delivery the queue does not already hold, oldest
+    /// first. The queue calls this when it starts, so deliveries that a restart
+    /// or a crash left pending are sent instead of staying pending (which would
+    /// also make the already-delivered check skip their files for good), and
+    /// periodically while it runs. A message whose sending was cut off by a
+    /// shutdown may therefore be sent a second time. Returns how many
+    /// deliveries were queued.
+    /// </summary>
+    Task<int> ResumePendingDeliveriesAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Sends a short test email to a device so the user can verify SMTP settings.</summary>
     Task SendTestEmailAsync(int deviceId, CancellationToken cancellationToken = default);
 

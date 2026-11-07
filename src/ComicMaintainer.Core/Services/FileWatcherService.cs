@@ -786,6 +786,12 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         else if (IsComicFile(e.FullPath))
         {
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File created: {Path}"), e.FullPath);
+
+            // Debounce and process (coalesces with any other pending events for this path). The
+            // request is recorded below, once the file has a row to record it on; it is
+            // registered first so that the recording finds it.
+            ScheduleProcessing(e.FullPath, recordPending: false);
+
             _ = Task.Run(async () =>
             {
                 try
@@ -800,10 +806,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
                 await RecordPendingOnceTrackedAsync(e.FullPath);
             });
-
-            // Debounce and process (coalesces with any other pending events for this path). The
-            // request is recorded above, once the file has a row to record it on.
-            ScheduleProcessing(e.FullPath, recordPending: false);
         }
     }
 
@@ -850,6 +852,11 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             // Any work still pending for the old path is now stale.
             CancelPending(e.OldFullPath);
 
+            // Debounce and process the new path. Scheduling consults the (now updated) state only
+            // after the stability delay, so a rename performed by the processor itself is skipped.
+            // The request is recorded below, once the row is at the new path.
+            ScheduleProcessing(e.FullPath, recordPending: false);
+
             _ = Task.Run(async () =>
             {
                 try
@@ -866,11 +873,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
                 await RecordPendingOnceTrackedAsync(e.FullPath);
             });
-
-            // Debounce and process the new path. Scheduling consults the (now updated) state only
-            // after the stability delay, so a rename performed by the processor itself is skipped.
-            // The request is recorded above, once the row is at the new path.
-            ScheduleProcessing(e.FullPath, recordPending: false);
             return;
         }
 

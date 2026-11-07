@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -2279,8 +2280,8 @@ public class ComicProcessorServiceTests : IDisposable
         // the chapter number "7".
         _mockFileStore.Verify(
             f => f.MarkFileRenamedAsync(
-                It.Is<string>(p => ComicFileProcessor.ChapterNumbersEquivalent(
-                    ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(p)),
+                It.Is<string>(p => IssueNumberParser.AreEquivalent(
+                    IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(p)),
                     "7")),
                 true,
                 It.IsAny<CancellationToken>()),
@@ -2322,8 +2323,8 @@ public class ComicProcessorServiceTests : IDisposable
         // number cannot be lost.
         _mockFileStore.Verify(
             f => f.MarkFileRenamedAsync(
-                It.Is<string>(p => ComicFileProcessor.ChapterNumbersEquivalent(
-                    ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(p)),
+                It.Is<string>(p => IssueNumberParser.AreEquivalent(
+                    IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(p)),
                     "7")),
                 true,
                 It.IsAny<CancellationToken>()),

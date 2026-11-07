@@ -56,7 +56,7 @@ public partial class ComicProcessorService
             return Task.FromResult<ComicMetadata?>(new ComicMetadata
             {
                 Series = ExtractSeriesFromFilename(fallbackFilePath),
-                Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(fallbackFilePath))
+                Issue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(fallbackFilePath))
             });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -89,7 +89,7 @@ public partial class ComicProcessorService
             return Task.FromResult<SeriesMetadata?>(new SeriesMetadata
             {
                 Series = ExtractSeriesFromFilename(filePath),
-                Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(filePath)),
+                Issue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filePath)),
                 SeriesGroup = Path.GetFileName(Path.GetDirectoryName(filePath))
             });
         }

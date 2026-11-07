@@ -75,16 +75,6 @@ public class ComicFileProcessorCoverageTests : IDisposable
         Assert.Equal(expected, result);
     }
 
-    [Theory]
-    [InlineData(null, null, true)]
-    [InlineData("", null, true)]
-    [InlineData("", "1", false)]
-    [InlineData("1", null, false)]
-    public void ChapterNumbersEquivalent_MissingValues_OnlyMatchWhenBothMissing(string? a, string? b, bool expected)
-    {
-        Assert.Equal(expected, ComicFileProcessor.ChapterNumbersEquivalent(a, b));
-    }
-
     [Fact]
     public void IsFileAlreadyNormalized_NilComicInfoRoot_ReturnsFalse()
     {

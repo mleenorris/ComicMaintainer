@@ -13,16 +13,6 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class ComicProcessorService
 {
-    private static string? ParseIssueNumber(string filename)
-    {
-        // Simple pattern matching for issue numbers
-        var match = Regex.Match(filename, @"(?i)(?:ch|chapter|issue|#)?\s*(\d+(?:\.\d+)?)", RegexOptions.IgnoreCase);
-        // Strip leading zero padding so the per-file metadata issue field holds
-        // the bare issue number (e.g. "0012" -> "12"); only the generated
-        // filename is zero padded.
-        return match.Success ? ComicFileProcessor.StripLeadingZeros(match.Groups[1].Value) : null;
-    }
-
     private static bool IsComicArchive(string filePath)
     {
         return ComicFileExtensions.IsComicArchive(filePath);

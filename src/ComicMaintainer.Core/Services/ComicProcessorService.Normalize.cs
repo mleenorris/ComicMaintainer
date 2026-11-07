@@ -162,7 +162,7 @@ public partial class ComicProcessorService
         var expectedIssue = metadata.Issue;
         if (string.IsNullOrEmpty(expectedIssue))
         {
-            var parsedIssue = ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(filePath));
+            var parsedIssue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filePath));
             if (!string.IsNullOrEmpty(parsedIssue))
             {
                 expectedIssue = parsedIssue;
@@ -174,7 +174,7 @@ public partial class ComicProcessorService
         // re-processed so both <Number> and <Title> become unpadded.
         if (!string.IsNullOrEmpty(expectedIssue))
         {
-            var strippedIssue = ComicFileProcessor.StripLeadingZeros(expectedIssue);
+            var strippedIssue = IssueNumberParser.StripLeadingZeros(expectedIssue);
             if (!string.Equals(strippedIssue, expectedIssue, StringComparison.Ordinal))
             {
                 return false;
@@ -229,7 +229,7 @@ public partial class ComicProcessorService
         }
 
         var originalNameStem = Path.GetFileNameWithoutExtension(filePath);
-        var parsedChapter = ComicFileProcessor.ParseChapterKeyword(originalNameStem);
+        var parsedChapter = IssueNumberParser.ParseMarked(originalNameStem);
         if (string.IsNullOrEmpty(parsedChapter))
         {
             return false;
@@ -277,7 +277,7 @@ public partial class ComicProcessorService
         // normalized title becomes "Chapter <n>" instead of "Chapter Unknown".
         if (string.IsNullOrEmpty(normalizedMetadata.Issue))
         {
-            var parsedIssue = ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(filePath));
+            var parsedIssue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filePath));
             if (!string.IsNullOrEmpty(parsedIssue))
             {
                 _logger.LogDebug("Setting issue number from filename: {Issue}", LoggingHelper.SanitizeForLog(parsedIssue));
@@ -291,7 +291,7 @@ public partial class ComicProcessorService
         // "0012.5" -> "12.5".
         if (!string.IsNullOrEmpty(normalizedMetadata.Issue))
         {
-            var strippedIssue = ComicFileProcessor.StripLeadingZeros(normalizedMetadata.Issue);
+            var strippedIssue = IssueNumberParser.StripLeadingZeros(normalizedMetadata.Issue);
             if (!string.Equals(strippedIssue, normalizedMetadata.Issue, StringComparison.Ordinal))
             {
                 _logger.LogDebug("Stripping issue padding: {Before} -> {After}",

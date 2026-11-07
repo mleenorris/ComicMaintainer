@@ -498,7 +498,7 @@ public sealed partial class FolderCombineService
                         ? "it was empty"
                         : $"deleted {cleanup.DisposableFileCount} disposable file(s): {string.Join(", ", cleanup.DisposableFiles)}";
                     _owner._logger.LogInformation("Removed source folder {Directory} after folder combine ({Deleted})",
-                        LoggingHelper.SanitizePathForLog(sourceDir), deleted);
+                        LoggingHelper.SanitizePathForLog(sourceDir), LoggingHelper.SanitizeForLog(deleted));
                     await _owner.LogHistoryAsync(sourceDir, HistoryAction, true, $"Removed the emptied source folder; {deleted}");
                     continue;
                 }
@@ -506,7 +506,7 @@ public sealed partial class FolderCombineService
                 var message = FolderCombineSourceCleaner.DescribeKeptFolder(cleanup);
                 _owner._logger.LogInformation("Kept source folder {Directory} after folder combine: {Reason} ({LeftoverCount} leftover item(s))",
                     LoggingHelper.SanitizePathForLog(sourceDir),
-                    cleanup.KeptReason,
+                    LoggingHelper.SanitizeForLog(cleanup.KeptReason),
                     cleanup.LeftoverCount);
                 await _owner.LogHistoryAsync(sourceDir, HistoryAction, false, message);
                 await report.ReportProblemAsync(sourceDir, message);

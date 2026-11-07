@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Services.Auth;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Infrastructure;
@@ -98,6 +99,10 @@ public class AuthController : ControllerBase
         return Ok(new { message = "User registered successfully" });
     }
 
+    /// <summary>
+    /// Changes the password. This signs every session of the account out; the response carries a new session
+    /// token (<c>token</c>) for the caller.
+    /// </summary>
     [Authorize]
     [HttpPost("change-password")]
     public async Task<ActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
@@ -115,7 +120,9 @@ public class AuthController : ControllerBase
             return BadRequest(new { error });
         }
 
-        return Ok(new { message = "Password changed successfully" });
+        // The change signed every session out, this one included; hand the caller a new session token.
+        var (_, token, _) = await _authService.GenerateTokenForUserAsync(userId);
+        return Ok(new { message = "Password changed successfully", token = string.IsNullOrEmpty(token) ? null : token });
     }
 
     [Authorize]
@@ -205,32 +212,59 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Get a JWT token for SSE connections when authenticated via Authelia
-    /// This allows Authelia-authenticated users to establish SSE connections
-    /// which cannot send custom headers
+    /// A stream token for opening the event stream (<c>GET /api/events/stream?access_token=…</c>), which
+    /// EventSource cannot send an Authorization header to. It is valid for a minute, once, and for nothing else
+    /// (see <see cref="StreamTokenAuthentication"/>), so fetch a new one for every (re)connection.
     /// </summary>
     [Authorize]
-    [HttpGet("sse-token")]
-    public async Task<ActionResult> GetSseToken()
+    [HttpPost("stream-token")]
+    public async Task<ActionResult> GetStreamToken()
     {
         var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        var username = User.Identity?.Name;
-        
-        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(username))
+        if (string.IsNullOrEmpty(userId))
         {
             return Unauthorized();
         }
 
-        // Generate a JWT token for this user
-        var (success, token, error) = await _authService.GenerateTokenForUserAsync(userId);
-        
+        var (success, token, error) = await _authService.GenerateStreamTokenAsync(userId);
         if (!success)
         {
-            _logger.LogError("Failed to generate SSE token for user {Username}: {Error}", username, error);
-            return StatusCode(500, new { error = "Failed to generate token" });
+            _logger.LogWarning("Could not issue a stream token for {UserId}: {Error}", LoggingHelper.SanitizeForLog(userId), error);
+            return Unauthorized();
         }
 
-        return Ok(new { token });
+        return Ok(new { token, expiresIn = (int)AuthTokens.StreamTokenLifetime.TotalSeconds });
+    }
+
+    /// <summary>
+    /// Before 3.0.0 this returned a full session token for the event stream. It now returns a stream token, like
+    /// <see cref="GetStreamToken"/>; use <c>POST /api/auth/stream-token</c> instead.
+    /// </summary>
+    [Authorize]
+    [HttpGet("sse-token")]
+    [Obsolete("Use POST /api/auth/stream-token.")]
+    public Task<ActionResult> GetSseToken() => GetStreamToken();
+
+    /// <summary>
+    /// Signs out: the session token this request was made with is refused from now on. With
+    /// <c>allSessions</c>, every session token of the account is (as after a password change).
+    /// </summary>
+    [Authorize]
+    [HttpPost("logout")]
+    public async Task<ActionResult> Logout([FromBody] LogoutRequest? request = null)
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        var tokenId = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti)?.Value;
+        var expiresAt = long.TryParse(User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Exp)?.Value, out var exp)
+            ? DateTimeOffset.FromUnixTimeSeconds(exp).UtcDateTime
+            : DateTime.UtcNow.AddDays(1);
+        await _authService.LogoutAsync(userId, tokenId, expiresAt, request?.AllSessions == true);
+        return NoContent();
     }
 
     [Authorize]
@@ -268,4 +302,6 @@ public record LoginRequest(string Username, string Password);
 public record RegisterRequest(string Username, string Password, string Email, string? FullName);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 /// <param name="SetupToken">The one-time setup code from the server log, or <c>SETUP_TOKEN</c>.</param>
+/// <param name="AllSessions">Sign out every session of the account, not just this one.</param>
+public record LogoutRequest(bool AllSessions = false);
 public record SetupRequest(string Username, string Password, string? Email, string? SetupToken = null);

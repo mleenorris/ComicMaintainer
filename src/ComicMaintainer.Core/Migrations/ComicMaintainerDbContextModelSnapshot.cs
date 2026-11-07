@@ -988,6 +988,30 @@ namespace ComicMaintainer.Core.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("ComicMaintainer.Core.Models.Auth.RevokedTokenEntity", b =>
+                {
+                    b.Property<string>("TokenId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TokenId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("RevokedTokens", (string)null);
+                });
+
             modelBuilder.Entity("ComicMaintainer.Core.Models.MetadataAuditFindingEntity", b =>
                 {
                     b.Property<int>("Id")

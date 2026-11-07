@@ -5,6 +5,7 @@ using System.Text.Encodings.Web;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models.Auth;
+using ComicMaintainer.Core.Services.Auth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +38,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly RoleManager<ApplicationRole> _roleManager;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
+    private readonly IAuthSessionValidator _sessions;
     private readonly ILogger<AutheliaAuthenticationHandler> _logger;
 
     // Untrusted peers already reported at Warning level (later requests log at Debug); bounded so that
@@ -51,9 +53,11 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         IOptions<AutheliaSettings> autheliaSettings,
         UserManager<ApplicationUser> userManager,
         RoleManager<ApplicationRole> roleManager,
-        IDbContextFactory<ComicMaintainerDbContext> dbContextFactory)
+        IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
+        IAuthSessionValidator sessions)
         : base(options, logger, encoder)
     {
+        _sessions = sessions;
         _autheliaSettings = autheliaSettings.Value;
         _userManager = userManager;
         _roleManager = roleManager;
@@ -285,6 +289,11 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         }
 
         await _userManager.AddToRoleAsync(user, targetRole);
+
+        // Tokens carry the roles they were issued with: a new security stamp ends the account's sessions
+        // (session and stream tokens), so a demoted user cannot keep acting with the old role.
+        await _userManager.UpdateSecurityStampAsync(user);
+        _sessions.Invalidate(user.Id);
         _logger.LogInformation("Assigned role {Role} to Authelia user: {Username}", targetRole, user.UserName);
     }
 

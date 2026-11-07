@@ -34,10 +34,14 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<SeriesEmailSubscriptionEntity> SeriesEmailSubscriptions { get; set; } = null!;
     public DbSet<ComicEmailDeliveryEntity> ComicEmailDeliveries { get; set; } = null!;
     public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
+    public DbSet<RevokedTokenEntity> RevokedTokens { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // Signed-out session tokens (AuthSessionValidator).
+        modelBuilder.ApplyConfiguration(new RevokedTokenEntityConfiguration());
 
         // Index ApiKey for fast lookup in AuthService.GetUserByApiKeyAsync.
         // ApiKey is nullable, so this is a sparse index on a low-cardinality

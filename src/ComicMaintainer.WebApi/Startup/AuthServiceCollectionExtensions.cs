@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models.Auth;
@@ -101,7 +100,10 @@ internal static class AuthServiceCollectionExtensions
             Log.Information("Authelia authentication configured with fallback to JWT for SSE connections");
         }
 
-        // Always add JWT Bearer for backward compatibility and API access
+        // Session tokens: signed in with a password (or minted for a password change), sent in the Authorization
+        // header. Never read from the query string: proxies log URLs. Every request checks that the session has not
+        // ended (IAuthSessionValidator): sign-out, password or role changes and disabled or deleted accounts revoke.
+        services.AddSingleton<IAuthSessionValidator, AuthSessionValidator>();
         authBuilder.AddJwtBearer(options =>
         {
             options.TokenValidationParameters = new TokenValidationParameters
@@ -114,39 +116,30 @@ internal static class AuthServiceCollectionExtensions
                 ValidAudience = jwtSettings.Audience,
                 IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret.Value))
             };
-            
-            // Configure events to return JSON for authentication failures and support token in query string
-            options.Events = new JwtBearerEvents
+
+            // JSON 401/403 bodies instead of redirects, and the per-request session check.
+            options.Events = JwtSessionEvents.SessionTokens();
+        });
+
+        // Stream tokens: one-minute, single-use tokens with their own audience, accepted only in the query string of
+        // the event stream, the one endpoint EventSource cannot send a header to (see StreamTokenAuthentication).
+        authBuilder.AddJwtBearer(StreamTokenAuthentication.SchemeName, options =>
+        {
+            options.TokenValidationParameters = new TokenValidationParameters
             {
-                OnMessageReceived = context =>
-                {
-                    // Allow token to be passed via query string for EventSource/SSE connections
-                    // EventSource API doesn't support custom headers, so we need this for SSE endpoints
-                    if (string.IsNullOrEmpty(context.Token) && context.Request.Query.TryGetValue("access_token", out var accessToken))
-                    {
-                        context.Token = accessToken;
-                    }
-                    return Task.CompletedTask;
-                },
-                OnChallenge = context =>
-                {
-                    // Override the default behavior to return JSON instead of redirecting
-                    context.HandleResponse();
-                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                    context.Response.ContentType = "application/json; charset=utf-8";
-                    
-                    var result = JsonSerializer.Serialize(new { error = "Unauthorized", message = "Authentication required" });
-                    return context.Response.WriteAsync(result);
-                },
-                OnForbidden = context =>
-                {
-                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    context.Response.ContentType = "application/json; charset=utf-8";
-                    
-                    var result = JsonSerializer.Serialize(new { error = "Forbidden", message = "Insufficient permissions" });
-                    return context.Response.WriteAsync(result);
-                }
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                RequireExpirationTime = true,
+                ValidIssuer = jwtSettings.Issuer,
+                ValidAudience = AuthTokens.StreamAudience(jwtSettings.Audience),
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret.Value)),
+                // The default five minutes of clock skew would let a one-minute token live six.
+                ClockSkew = TimeSpan.FromSeconds(5)
             };
+
+            options.Events = JwtSessionEvents.StreamTokens();
         });
 
         // Configure authorization policies to support multiple authentication schemes

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Timeouts;
+using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Services;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -21,7 +22,13 @@ public class EventsController : ControllerBase
         _eventBroadcaster = eventBroadcaster;
     }
 
+    /// <summary>
+    /// The server-sent event stream. Besides the usual schemes it accepts a stream token in the
+    /// <c>access_token</c> query parameter (<see cref="StreamTokenAuthentication"/>), because EventSource cannot
+    /// send an Authorization header; no other endpoint accepts a token in its URL.
+    /// </summary>
     [HttpGet("stream")]
+    [Authorize(AuthenticationSchemes = StreamTokenAuthentication.SchemeName)]
     // The stream is open for as long as the page is; it is never a timeout.
     [DisableRequestTimeout]
     public async Task Stream()

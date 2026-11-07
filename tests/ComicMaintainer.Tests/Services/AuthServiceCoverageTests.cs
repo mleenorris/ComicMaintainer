@@ -36,6 +36,7 @@ public class AuthServiceCoverageTests
             settings,
             Options.Create(new AutheliaSettings()),
             new ComicMaintainer.Core.Services.Auth.SetupTokenProvider(null),
+            Mock.Of<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator>(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance);
     }
 

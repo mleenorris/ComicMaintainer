@@ -53,6 +53,7 @@ public class AuthService : IAuthService
     private readonly JwtSettings _jwtSettings;
     private readonly AutheliaSettings _autheliaSettings;
     private readonly ISetupTokenProvider _setupToken;
+    private readonly IAuthSessionValidator _sessions;
     private readonly ILogger<AuthService> _logger;
 
     public AuthService(
@@ -60,8 +61,10 @@ public class AuthService : IAuthService
         IOptions<JwtSettings> jwtSettings,
         IOptions<AutheliaSettings> autheliaSettings,
         ISetupTokenProvider setupToken,
+        IAuthSessionValidator sessions,
         ILogger<AuthService> logger)
     {
+        _sessions = sessions;
         _userManager = userManager;
         _jwtSettings = jwtSettings.Value;
         _autheliaSettings = autheliaSettings.Value;
@@ -184,6 +187,10 @@ public class AuthService : IAuthService
             return (false, string.Join(", ", result.Errors.Select(e => e.Description)));
         }
 
+        // Identity changed the security stamp, which ends every session token of the account.
+        _sessions.Invalidate(user.Id);
+        _logger.LogInformation("{Username} changed their password; their other sessions are signed out", LoggingHelper.SanitizeForLog(user.UserName));
+
         return (true, null);
     }
 
@@ -252,20 +259,88 @@ public class AuthService : IAuthService
             new Claim(ClaimTypes.NameIdentifier, user.Id),
             new Claim(ClaimTypes.Name, user.UserName ?? string.Empty),
             new Claim(ClaimTypes.Email, user.Email ?? string.Empty),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim(AuthTokens.SecurityStampClaim, await GetStampFingerprintAsync(user))
         };
 
         // Add roles
         var roles = await _userManager.GetRolesAsync(user);
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
 
+        return WriteToken(claims, _jwtSettings.Audience, DateTime.UtcNow.AddMinutes(_jwtSettings.ExpirationMinutes));
+    }
+
+    /// <summary>
+    /// Issues a stream token for <paramref name="userId"/>: valid for <see cref="AuthTokens.StreamTokenLifetime"/>, once,
+    /// and only for opening the event stream (its audience is <see cref="AuthTokens.StreamAudience"/>). It carries no
+    /// roles; it only says who is listening.
+    /// </summary>
+    public async Task<(bool Success, string Token, string? Error)> GenerateStreamTokenAsync(string userId)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null || !user.IsActive)
+        {
+            return (false, string.Empty, "User not found");
+        }
+
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id),
+            new(ClaimTypes.Name, user.UserName ?? string.Empty),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new(AuthTokens.SecurityStampClaim, await GetStampFingerprintAsync(user)),
+            new(AuthTokens.TokenUseClaim, AuthTokens.StreamTokenUse),
+        };
+
+        var token = WriteToken(claims, AuthTokens.StreamAudience(_jwtSettings.Audience), DateTime.UtcNow.Add(AuthTokens.StreamTokenLifetime));
+        return (true, token, null);
+    }
+
+    /// <summary>
+    /// Signs out: revokes the session token <paramref name="tokenId"/> (valid until <paramref name="expiresAtUtc"/>),
+    /// or, with <paramref name="allSessions"/>, every token of the account, by changing its security stamp.
+    /// </summary>
+    public async Task LogoutAsync(string userId, string? tokenId, DateTime expiresAtUtc, bool allSessions)
+    {
+        if (allSessions)
+        {
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user is not null)
+            {
+                await _userManager.UpdateSecurityStampAsync(user);
+                _sessions.Invalidate(userId);
+                _logger.LogInformation("{Username} signed out of every session", LoggingHelper.SanitizeForLog(user.UserName));
+            }
+
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(tokenId))
+        {
+            await _sessions.RevokeTokenAsync(tokenId, userId, expiresAtUtc);
+            _logger.LogInformation("Signed out session {TokenId} of {UserId}", LoggingHelper.SanitizeForLog(tokenId), LoggingHelper.SanitizeForLog(userId));
+        }
+    }
+
+    // Accounts always get a security stamp when Identity creates them; one written into the database without it gets
+    // one here, so that its tokens can be revoked.
+    private async Task<string> GetStampFingerprintAsync(ApplicationUser user)
+    {
+        if (string.IsNullOrEmpty(user.SecurityStamp))
+        {
+            await _userManager.UpdateSecurityStampAsync(user);
+        }
+
+        return AuthTokens.Fingerprint(user.SecurityStamp);
+    }
+
+    private string WriteToken(IEnumerable<Claim> claims, string audience, DateTime expires)
+    {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        var expires = DateTime.UtcNow.AddMinutes(_jwtSettings.ExpirationMinutes);
-
         var token = new JwtSecurityToken(
             issuer: _jwtSettings.Issuer,
-            audience: _jwtSettings.Audience,
+            audience: audience,
             claims: claims,
             expires: expires,
             signingCredentials: creds

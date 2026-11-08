@@ -141,6 +141,10 @@ public partial class FileStoreService
     {
         try
         {
+            // A row whose file is missing may be a file the watcher is about to follow to its
+            // new path; see SuspendStaleCleanup.
+            await WaitForStaleCleanupToResumeAsync(cancellationToken);
+
             _logger.LogInformation("Starting cleanup of stale database entries");
             
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);

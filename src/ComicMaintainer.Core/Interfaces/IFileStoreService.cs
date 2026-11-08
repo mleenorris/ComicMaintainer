@@ -195,13 +195,27 @@ public interface IFileStoreService
     Task RecordLibraryScannedAsync(string directory, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Holds off <see cref="CleanupStaleEntriesAsync"/> until the returned lease is disposed.
-    /// The file watcher takes it while it matches the files it finds on disk with the tracked
-    /// files missing from their paths (files moved while it was not watching): until it has
-    /// moved their rows to the new paths, those rows look stale, and pruning them would lose
-    /// their processing state, user metadata edits and read state.
+    /// Forgets the recorded scan (see <see cref="RecordLibraryScannedAsync"/>). The file watcher
+    /// calls it when the tracked library is missing from the disk, as when its volume is not
+    /// mounted, so that the files found when it comes back are not taken for new arrivals.
+    /// </summary>
+    Task ForgetLibraryScanAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Holds off <see cref="CleanupStaleEntriesAsync"/> until the returned lease is disposed:
+    /// a cleanup started meanwhile waits for it. The file watcher takes it while it matches the
+    /// files it finds on disk with the tracked files missing from their paths (files moved
+    /// while it was not watching): until it has moved their rows to the new paths, those rows
+    /// look stale, and pruning them would lose their processing state, user metadata edits and
+    /// read state.
     /// </summary>
     IDisposable SuspendStaleCleanup();
+
+    /// <summary>
+    /// Whether a <see cref="SuspendStaleCleanup"/> lease is active, in which case
+    /// <see cref="CleanupStaleEntriesAsync"/> does not complete before the lease ends.
+    /// </summary>
+    bool IsStaleCleanupSuspended { get; }
 
     /// <summary>
     /// Re-reads the on-disk size and last-write time of each tracked file in

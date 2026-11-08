@@ -89,7 +89,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
     /// with the database instead of ahead of it.
     /// </summary>
     private void ApplyCommittedRow(ComicFileEntity entity)
-        => _files[entity.FilePath] = ToComicFile(entity);
+        => _files[entity.FilePath] = ToInMemoryCopy(entity);
 
     /// <summary>Drops the in-memory copy of a row whose deletion was just committed.</summary>
     private void ForgetCommittedRow(string filePath)
@@ -257,6 +257,26 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
             LastWriteAt = entity.LastWriteAt,
             MetadataSource = source
         };
+    }
+
+    /// <summary>
+    /// The row as kept in <see cref="_files"/>: without the free-text archive fields
+    /// (summary, authors, tags) of a row whose metadata the scan cached, which nothing reads
+    /// from memory and which would otherwise sit on the heap for every issue in the library.
+    /// <see cref="GetFileAsync"/> reads them from the database. A user's edits are kept whole,
+    /// because a row can be restored from this copy after a concurrent delete (a restored
+    /// scanned row loses its scan stamp, so the background scan fills those fields back in).
+    /// </summary>
+    private static ComicFile ToInMemoryCopy(ComicFileEntity entity)
+    {
+        var file = ToComicFile(entity);
+        if (file.Metadata is { IsUserEdited: false } metadata)
+        {
+            metadata.Summary = null;
+            metadata.Authors = new List<string>();
+            metadata.Tags = new List<string>();
+        }
+        return file;
     }
 
     private static void CopyNonNullMetadataFields(ComicMetadata target, ComicMetadata patch)

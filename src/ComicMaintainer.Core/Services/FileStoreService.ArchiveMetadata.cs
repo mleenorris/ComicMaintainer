@@ -78,13 +78,11 @@ public partial class FileStoreService
         ArgumentNullException.ThrowIfNull(candidate);
         ArgumentNullException.ThrowIfNull(metadata);
 
-        var recorded = await RecordArchiveMetadataCoreAsync(candidate.FilePath, metadata, candidate, cancellationToken);
-        if (recorded)
-        {
-            MarkChanged();
-        }
-        return recorded;
+        return await RecordArchiveMetadataCoreAsync(candidate.FilePath, metadata, candidate, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public void PublishScannedArchiveMetadata() => MarkChanged();
 
     /// <summary>
     /// Stores <paramref name="metadata"/> as the file's cached archive metadata, stamped with

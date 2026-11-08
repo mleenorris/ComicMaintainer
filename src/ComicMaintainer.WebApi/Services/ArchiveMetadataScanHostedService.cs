@@ -12,7 +12,10 @@ namespace ComicMaintainer.WebApi.Services;
 /// watcher's initial scan has had time to add new files). After that a pass runs whenever
 /// the file store reports a change (checked every <see cref="DefaultPollInterval"/>, which
 /// costs nothing while the library is idle) and at least every <see cref="FullRescanInterval"/>
-/// to pick up changes made outside the application.
+/// to retry files an earlier pass could not record. A pass compares the cached stamps with
+/// the sizes and modification times stored in the database and does not read the disk, so
+/// an archive changed outside the application is re-read once the file watcher or a
+/// library scan has refreshed those stored values.
 /// </remarks>
 public sealed class ArchiveMetadataScanHostedService : BackgroundService
 {

@@ -189,8 +189,18 @@ public interface IFileStoreService
     /// Cache the metadata the background scan read from <paramref name="candidate"/>'s
     /// archive. Returns false, recording nothing, when the row changed since it was selected
     /// (the file was modified, replaced or edited meanwhile); a later scan reads it again.
+    /// Library views built from the cached metadata see the new value only after
+    /// <see cref="PublishScannedArchiveMetadata"/>.
     /// </summary>
     Task<bool> RecordScannedArchiveMetadataAsync(ArchiveMetadataScanCandidate candidate, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tells the library views that metadata has been recorded by
+    /// <see cref="RecordScannedArchiveMetadataAsync"/>, so they are rebuilt once per batch of
+    /// scanned files. While a whole library is being backfilled, a change notification per
+    /// file would rebuild the library snapshot and change its ETag on every request.
+    /// </summary>
+    void PublishScannedArchiveMetadata();
 
     /// <summary>
     /// Remove stale entries from the database for files that no longer exist on disk,

@@ -213,6 +213,69 @@ public sealed class FileStoreServiceArchiveMetadataTests : IAsyncLifetime
         Assert.Equal(new[] { "Chapter One", "Chapter Two" }, series.Issues.Select(i => i.Title));
     }
 
+    [Fact]
+    public async Task RecordScannedArchiveMetadataAsync_ReachesTheLibraryViewsOnlyWhenPublished()
+    {
+        // During a backfill each scanned file must not change the version the library
+        // snapshot and its ETag depend on; the scan publishes once per batch.
+        var path = await TrackAsync("Saga/Saga 001.cbz");
+        var candidate = Assert.Single(await _store.GetFilesNeedingMetadataScanAsync(0, 10));
+        var before = _store.ChangeVersion;
+
+        Assert.True(await _store.RecordScannedArchiveMetadataAsync(candidate, Archive("Saga", "1", "Chapter One")));
+
+        Assert.Equal(before, _store.ChangeVersion);
+        Assert.Equal("Chapter One", (await RowAsync(path)).Metadata!.Title);
+
+        _store.PublishScannedArchiveMetadata();
+
+        Assert.Equal(before + 1, _store.ChangeVersion);
+    }
+
+    [Fact]
+    public async Task InMemoryCopy_LeavesOutTheFreeTextFieldsOfACachedRow()
+    {
+        var path = await TrackAsync("Saga/Saga 001.cbz");
+        await _store.InitializeFromDatabaseAsync();
+        var archive = Archive("Saga", "1", "Chapter One");
+        archive.Summary = "A long synopsis that nothing reads from memory.";
+        archive.Tags = new List<string> { "Space" };
+
+        await _store.RecordArchiveMetadataAsync(path, archive);
+
+        var inMemory = Assert.Single(await _store.GetAllFilesAsync()).Metadata!;
+        Assert.Equal("Saga", inMemory.Series);
+        Assert.Equal("Chapter One", inMemory.Title);
+        Assert.Equal("Image", inMemory.Publisher);
+        Assert.Null(inMemory.Summary);
+        Assert.Empty(inMemory.Authors);
+        Assert.Empty(inMemory.Tags);
+
+        // The database row keeps them, and that is what single-file reads return.
+        var stored = (await _store.GetFileAsync(path))!.Metadata!;
+        Assert.Equal(archive.Summary, stored.Summary);
+        Assert.Equal(new[] { "Vaughan" }, stored.Authors);
+        Assert.Equal(new[] { "Space" }, stored.Tags);
+    }
+
+    [Fact]
+    public async Task InMemoryCopy_KeepsAUsersEditWhole()
+    {
+        // A row can be restored from the in-memory copy after a concurrent delete, and the
+        // background scan could never bring a user's edit back.
+        var path = await TrackAsync("Saga/Saga 001.cbz");
+        await _store.InitializeFromDatabaseAsync();
+
+        await _store.ApplyUserMetadataEditAsync(
+            path,
+            new ComicMetadata { Summary = "My own synopsis", Tags = new List<string> { "Favourite" } },
+            ComicMetadataFieldFlags.Summary | ComicMetadataFieldFlags.Tags);
+
+        var inMemory = Assert.Single(await _store.GetAllFilesAsync()).Metadata!;
+        Assert.Equal("My own synopsis", inMemory.Summary);
+        Assert.Equal(new[] { "Favourite" }, inMemory.Tags);
+    }
+
     private static ComicMetadata Archive(string series, string issue, string title) => new()
     {
         Series = series,

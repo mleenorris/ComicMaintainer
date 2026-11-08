@@ -61,6 +61,44 @@ public sealed class ArchiveMetadataScanServiceTests
     }
 
     [Fact]
+    public async Task ScanAsync_TellsTheLibraryViewsOncePerBatchNotPerFile()
+    {
+        _pending = Enumerable.Range(1, ArchiveMetadataScanService.BatchSize + 5).Select(id => Candidate(id)).ToList();
+
+        await CreateScanner().ScanAsync(CancellationToken.None);
+
+        _fileStore.Verify(f => f.PublishScannedArchiveMetadata(), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ScanAsync_NothingRecorded_DoesNotDisturbTheLibraryViews()
+    {
+        _pending = new List<ArchiveMetadataScanCandidate> { Candidate(1) };
+        _fileStore
+            .Setup(f => f.RecordScannedArchiveMetadataAsync(It.IsAny<ArchiveMetadataScanCandidate>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        await CreateScanner().ScanAsync(CancellationToken.None);
+
+        _fileStore.Verify(f => f.PublishScannedArchiveMetadata(), Times.Never);
+    }
+
+    [Fact]
+    public async Task ScanAsync_Cancelled_StillPublishesWhatItRecorded()
+    {
+        _pending = Enumerable.Range(1, 3).Select(id => Candidate(id)).ToList();
+        using var cts = new CancellationTokenSource();
+        _processor
+            .Setup(p => p.GetMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback(() => cts.Cancel())
+            .ReturnsAsync(new ComicMetadata { Series = "Saga" });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CreateScanner().ScanAsync(cts.Token));
+
+        _fileStore.Verify(f => f.PublishScannedArchiveMetadata(), Times.Once);
+    }
+
+    [Fact]
     public async Task ScanAsync_SkipsAnUnreadableArchiveUntilItChanges()
     {
         var damaged = Candidate(1);

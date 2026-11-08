@@ -51,35 +51,49 @@ public sealed class ArchiveMetadataScanService
         while (true)
         {
             var batch = await _fileStore.GetFilesNeedingMetadataScanAsync(afterId, BatchSize, cancellationToken);
-            foreach (var candidate in batch)
+            var recordedInBatch = 0;
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                afterId = candidate.Id;
+                foreach (var candidate in batch)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    afterId = candidate.Id;
 
-                var stats = (candidate.FileSize, candidate.LastModified);
-                if (_unreadable.TryGetValue(candidate.FilePath, out var failedAt) && failedAt == stats)
-                {
-                    continue;
-                }
+                    var stats = (candidate.FileSize, candidate.LastModified);
+                    if (_unreadable.TryGetValue(candidate.FilePath, out var failedAt) && failedAt == stats)
+                    {
+                        continue;
+                    }
 
-                var metadata = await _processor.GetMetadataAsync(candidate.FilePath, cancellationToken);
-                if (metadata is null)
-                {
-                    _unreadable[candidate.FilePath] = stats;
-                    unreadable++;
-                    _logger.LogDebug("Archive metadata scan could not read {FilePath}; it is skipped until it changes",
-                        LoggingHelper.SanitizePathForLog(candidate.FilePath));
-                    continue;
-                }
+                    var metadata = await _processor.GetMetadataAsync(candidate.FilePath, cancellationToken);
+                    if (metadata is null)
+                    {
+                        _unreadable[candidate.FilePath] = stats;
+                        unreadable++;
+                        _logger.LogDebug("Archive metadata scan could not read {FilePath}; it is skipped until it changes",
+                            LoggingHelper.SanitizePathForLog(candidate.FilePath));
+                        continue;
+                    }
 
-                _unreadable.TryRemove(candidate.FilePath, out _);
-                if (await _fileStore.RecordScannedArchiveMetadataAsync(candidate, metadata, cancellationToken))
-                {
-                    recorded++;
+                    _unreadable.TryRemove(candidate.FilePath, out _);
+                    if (await _fileStore.RecordScannedArchiveMetadataAsync(candidate, metadata, cancellationToken))
+                    {
+                        recorded++;
+                        recordedInBatch++;
+                    }
+                    else
+                    {
+                        skipped++;
+                    }
                 }
-                else
+            }
+            finally
+            {
+                // Once per batch rather than per file, and also when the pass stops early:
+                // what was recorded stays, so the library views must learn about it.
+                if (recordedInBatch > 0)
                 {
-                    skipped++;
+                    _fileStore.PublishScannedArchiveMetadata();
                 }
             }
 

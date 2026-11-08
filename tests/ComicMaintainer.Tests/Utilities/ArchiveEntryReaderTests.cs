@@ -22,6 +22,62 @@ public sealed class ArchiveEntryReaderTests : IDisposable
 
     public void Dispose() => TestIO.TryDeleteDirectory(_dir);
 
+    // ---- EnumerateEntries / ReadText --------------------------------------------------
+
+    [Fact]
+    public void EnumerateEntries_PastTheEntryLimit_IsRefusedOnlyWhenItGetsThere()
+    {
+        var path = Path.Join(_dir, "many.cbz");
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            for (var i = 0; i <= ArchiveEntryReader.MaxEntries; i++)
+            {
+                zip.CreateEntry($"p{i}.jpg");
+            }
+        }
+
+        using var archive = SharpCompress.Archives.Zip.ZipArchive.OpenArchive(path);
+
+        // Lazy, so a caller that finds what it wants early pays nothing for the rest.
+        Assert.Equal("p0.jpg", ArchiveEntryReader.EnumerateEntries(archive, "many.cbz").First().Key);
+        var ex = Assert.Throws<ArchiveLimitExceededException>(
+            () => ArchiveEntryReader.EnumerateEntries(archive, "many.cbz").ToList());
+        Assert.Contains("many.cbz", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReadText_DecodesUtf8WithOrWithoutAByteOrderMark(bool withBom)
+    {
+        var path = Path.Join(_dir, "tags.cbz");
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            using var writer = new StreamWriter(zip.CreateEntry("ComicInfo.xml").Open(), new UTF8Encoding(withBom));
+            writer.Write("<ComicInfo>Caf\u00e9</ComicInfo>");
+        }
+
+        using var archive = SharpCompress.Archives.Zip.ZipArchive.OpenArchive(path);
+
+        Assert.Equal("<ComicInfo>Caf\u00e9</ComicInfo>", ArchiveEntryReader.ReadText(archive.Entries.Single()));
+    }
+
+    [Fact]
+    public void ReadText_OverTheLimit_IsRefused()
+    {
+        var path = Path.Join(_dir, "huge.cbz");
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            using var entry = zip.CreateEntry("ComicInfo.xml").Open();
+            entry.Write(new byte[ArchiveEntryReader.MaxComicInfoBytes + 1]);
+        }
+
+        using var archive = SharpCompress.Archives.Zip.ZipArchive.OpenArchive(path);
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => ArchiveEntryReader.ReadText(archive.Entries.Single()));
+        Assert.Contains("ComicInfo.xml", ex.Message);
+    }
+
     // ---- ReadBounded ----------------------------------------------------------------
 
     [Fact]

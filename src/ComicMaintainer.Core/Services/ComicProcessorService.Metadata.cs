@@ -51,7 +51,7 @@ public partial class ComicProcessorService
             using var archive = ArchiveFactory.OpenArchive(resolvedPath);
 
             // Look for ComicInfo.xml
-            var comicInfoEntry = FindComicInfoEntry(archive);
+            var comicInfoEntry = FindComicInfoEntry(archive, resolvedPath);
 
             var metadata = comicInfoEntry != null
                 ? ParseComicInfoXml(ReadComicInfoXml(comicInfoEntry))
@@ -65,6 +65,11 @@ public partial class ComicProcessorService
             return ComicFileExtensions.IsWritableArchive(resolvedPath)
                 ? Task.FromResult(metadata)
                 : ApplyPendingDatabaseEditAsync(fallbackFilePath, metadata, cancellationToken);
+        }
+        catch (ArchiveLimitExceededException ex)
+        {
+            LogArchiveRefused(fallbackFilePath, ex);
+            return Task.FromResult<ComicMetadata?>(null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -86,7 +91,7 @@ public partial class ComicProcessorService
             SeriesMetadata? metadata;
             using (var archive = ArchiveFactory.OpenArchive(resolvedPath))
             {
-                var comicInfoEntry = FindComicInfoEntry(archive);
+                var comicInfoEntry = FindComicInfoEntry(archive, resolvedPath);
                 metadata = comicInfoEntry != null
                     ? ParseSeriesMetadataXml(ReadComicInfoXml(comicInfoEntry))
                     : new SeriesMetadata
@@ -115,6 +120,11 @@ public partial class ComicProcessorService
             }
 
             return metadata;
+        }
+        catch (ArchiveLimitExceededException ex)
+        {
+            LogArchiveRefused(filePath, ex);
+            return null;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -312,6 +322,11 @@ public partial class ComicProcessorService
 
             _logger.LogInformation("Successfully updated metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(result.FilePath));
             return result;
+        }
+        catch (ArchiveLimitExceededException ex)
+        {
+            LogArchiveRefused(filePath, ex);
+            return MetadataWriteResult.Failed(filePath);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -642,7 +657,7 @@ public partial class ComicProcessorService
     private static XDocument? ReadComicInfoDocument(string physicalPath)
     {
         using var archive = ArchiveFactory.OpenArchive(physicalPath);
-        var entry = FindComicInfoEntry(archive);
+        var entry = FindComicInfoEntry(archive, physicalPath);
         if (entry is null)
         {
             return null;
@@ -663,11 +678,11 @@ public partial class ComicProcessorService
     private static bool HasComicInfoEntry(string physicalPath)
     {
         using var archive = ArchiveFactory.OpenArchive(physicalPath);
-        return FindComicInfoEntry(archive) is not null;
+        return FindComicInfoEntry(archive, physicalPath) is not null;
     }
 
-    private static IArchiveEntry? FindComicInfoEntry(IArchive archive) =>
-        archive.Entries.FirstOrDefault(e =>
+    private static IArchiveEntry? FindComicInfoEntry(IArchive archive, string archivePath) =>
+        ArchiveEntryReader.EnumerateEntries(archive, Path.GetFileName(archivePath)).FirstOrDefault(e =>
             e.Key?.Equals(ComicInfoXml.EntryName, StringComparison.OrdinalIgnoreCase) == true);
 
     /// <summary>

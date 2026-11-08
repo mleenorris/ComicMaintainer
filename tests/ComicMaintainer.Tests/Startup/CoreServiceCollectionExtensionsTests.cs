@@ -329,7 +329,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
             hostedServiceTypes.IndexOf(typeof(ArchiveWriteRecoveryHostedService)) is >= 0 and var sweep &&
             sweep < hostedServiceTypes.IndexOf(typeof(FileWatcherHostedService)));
         // The scheduled-jobs runner is registered through a factory so it is a single instance.
-        Assert.Equal(8, hostedServiceTypes.Count);
+        Assert.Equal(9, hostedServiceTypes.Count);
     }
 
     private static IConfiguration BuildConfiguration(params (string Key, string? Value)[] settings)

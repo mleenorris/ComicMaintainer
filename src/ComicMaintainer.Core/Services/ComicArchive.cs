@@ -1,4 +1,3 @@
-using System.Text;
 using System.Xml.Serialization;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
@@ -62,7 +61,7 @@ public class ComicArchive : IDisposable
         try
         {
             // Look for ComicInfo.xml in the archive
-            var comicInfoEntry = _archive.Entries
+            var comicInfoEntry = ArchiveEntryReader.EnumerateEntries(_archive, Path.GetFileName(_filePath))
                 .FirstOrDefault(e => e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
 
             if (comicInfoEntry == null)
@@ -72,13 +71,16 @@ public class ComicArchive : IDisposable
             }
 
             // Read and deserialize ComicInfo.xml
-            using var stream = comicInfoEntry.OpenEntryStream();
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            var xmlContent = reader.ReadToEnd();
+            var xmlContent = ArchiveEntryReader.ReadText(comicInfoEntry);
 
             var serializer = new XmlSerializer(typeof(ComicInfo));
             using var stringReader = new StringReader(xmlContent);
             return serializer.Deserialize(stringReader) as ComicInfo;
+        }
+        catch (ArchiveLimitExceededException)
+        {
+            // Not a damaged file to treat as untagged: the caller decides what a refusal means.
+            throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

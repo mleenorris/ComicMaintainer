@@ -85,10 +85,17 @@ public partial class ComicProcessorService
         }
     }
 
-    private static string ReadComicInfoXml(IArchiveEntry comicInfoEntry)
-    {
-        using var stream = comicInfoEntry.OpenEntryStream();
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
-    }
+    private static string ReadComicInfoXml(IArchiveEntry comicInfoEntry) =>
+        ArchiveEntryReader.ReadText(comicInfoEntry);
+
+    /// <summary>
+    /// Logs why an archive over the read limits was refused. A warning, because such a file is
+    /// library content for the operator to deal with, not a defect of the application. The
+    /// operation fails for this one file; a batch carries on with the next.
+    /// </summary>
+    private void LogArchiveRefused(string filePath, ArchiveLimitExceededException refusal) =>
+        _logger.LogWarning(
+            "Refused to read {FilePath}: {Reason}",
+            LoggingHelper.SanitizePathForLog(filePath),
+            LoggingHelper.SanitizeForLog(refusal.Message));
 }

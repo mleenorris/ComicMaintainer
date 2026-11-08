@@ -141,7 +141,7 @@ public class EpubConversionService : IEpubConversionService
 
             using var archive = OpenArchive(comicFilePath);
 
-            var pages = archive.Entries
+            var pages = ArchiveEntryReader.EnumerateEntries(archive, Path.GetFileName(comicFilePath))
                 .Where(e => !e.IsDirectory && IsImageFile(e.Key))
                 .Select(e => e.Key!)
                 .OrderBy(key => key, new NaturalStringComparer())
@@ -155,7 +155,7 @@ public class EpubConversionService : IEpubConversionService
 
             ApplyCoverEntries(archive, pages, seriesCoverHash, comicFilePath);
 
-            issues.Add(new IssueSource(comicFilePath, pages, ReadComicInfo(archive)));
+            issues.Add(new IssueSource(comicFilePath, pages, ReadComicInfo(archive, Path.GetFileName(comicFilePath))));
         }
 
         return Convert(issues, outputDirectory, options, cancellationToken);
@@ -385,8 +385,8 @@ public class EpubConversionService : IEpubConversionService
     {
         try
         {
-            using var stream = entry.OpenEntryStream();
-            return SHA256.HashData(stream).AsSpan().SequenceEqual(hash);
+            return SHA256.HashData(ArchiveEntryReader.ReadAllBytes(entry, ArchiveEntryReader.MaxPageBytes))
+                .AsSpan().SequenceEqual(hash);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or ZlibException or (InvalidOperationException and not ObjectDisposedException))
         {
@@ -486,7 +486,8 @@ public class EpubConversionService : IEpubConversionService
                 // condensed book spans.
                 using var archive = OpenArchive(issue.FilePath);
                 var entriesByKey = new Dictionary<string, IArchiveEntry>(StringComparer.Ordinal);
-                foreach (var entry in archive.Entries.Where(e => !e.IsDirectory && e.Key is not null))
+                foreach (var entry in ArchiveEntryReader.EnumerateEntries(archive, Path.GetFileName(issue.FilePath))
+                             .Where(e => !e.IsDirectory && e.Key is not null))
                 {
                     entriesByKey.TryAdd(entry.Key!, entry);
                 }
@@ -512,10 +513,7 @@ public class EpubConversionService : IEpubConversionService
                     byte[] imageBytes;
                     try
                     {
-                        using var entryStream = page.OpenEntryStream();
-                        using var buffer = new MemoryStream();
-                        entryStream.CopyTo(buffer);
-                        imageBytes = buffer.ToArray();
+                        imageBytes = ArchiveEntryReader.ReadAllBytes(page, ArchiveEntryReader.MaxPageBytes);
                     }
                     catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or ZlibException or (InvalidOperationException and not ObjectDisposedException))
                     {
@@ -652,9 +650,9 @@ public class EpubConversionService : IEpubConversionService
         };
     }
 
-    private ComicInfo? ReadComicInfo(IArchive archive)
+    private ComicInfo? ReadComicInfo(IArchive archive, string comicFileName)
     {
-        var entry = archive.Entries.FirstOrDefault(e =>
+        var entry = ArchiveEntryReader.EnumerateEntries(archive, comicFileName).FirstOrDefault(e =>
             !e.IsDirectory &&
             string.Equals(Path.GetFileName(e.Key ?? string.Empty), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase));
 
@@ -665,10 +663,14 @@ public class EpubConversionService : IEpubConversionService
 
         try
         {
-            using var stream = entry.OpenEntryStream();
-            using var reader = new StreamReader(stream, Encoding.UTF8);
+            using var reader = new StringReader(ArchiveEntryReader.ReadText(entry));
             var serializer = new XmlSerializer(typeof(ComicInfo));
             return serializer.Deserialize(reader) as ComicInfo;
+        }
+        catch (ArchiveLimitExceededException)
+        {
+            // A ComicInfo.xml this large is not a damaged tag to skip: the issue is refused.
+            throw;
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException)
         {

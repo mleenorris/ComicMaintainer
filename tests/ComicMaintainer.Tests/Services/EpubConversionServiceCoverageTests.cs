@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using ImageMagick;
 using Microsoft.Extensions.Logging;
 
@@ -172,6 +173,44 @@ public class EpubConversionServiceCoverageTests : IDisposable
             $"Page '002.jpg' in Unreadable Page.cbz could not be read: {ex.InnerException.Message}",
             ex.Message);
         Assert.Empty(Directory.GetFiles(outputDir));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WhenAPageIsOverTheReadLimits_FailsNamingThePageAndTheLimit()
+    {
+        var cbz = Path.Join(_workDir, "Bomb.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            foreach (var (name, data) in new[] { Page("001.jpg"), ("002.jpg", new byte[20 * 1024 * 1024]) })
+            {
+                using var entry = zip.CreateEntry(name, CompressionLevel.Optimal).Open();
+                entry.Write(data);
+            }
+        }
+
+        var outputDir = Path.Join(_workDir, "bomb");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.ConvertToEpubAsync(new[] { cbz }, outputDir));
+
+        Assert.IsType<ArchiveLimitExceededException>(ex.InnerException);
+        Assert.Contains("Page '002.jpg' in Bomb.cbz could not be read", ex.Message);
+        Assert.Contains("100:1", ex.Message);
+        Assert.Empty(Directory.GetFiles(outputDir));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WhenTheComicInfoIsOverTheReadLimits_RefusesTheIssue()
+    {
+        var cbz = CreateCbz(
+            "Huge Tags.cbz",
+            Page("001.jpg"),
+            ("ComicInfo.xml", Encoding.ASCII.GetBytes($"<ComicInfo><Notes>{new string('x', (int)ArchiveEntryReader.MaxComicInfoBytes)}</Notes></ComicInfo>")));
+
+        var ex = await Assert.ThrowsAsync<ArchiveLimitExceededException>(
+            () => _service.ConvertToEpubAsync(new[] { cbz }, Path.Join(_workDir, "huge-tags")));
+
+        Assert.Contains("ComicInfo.xml", ex.Message);
     }
 
     [Fact]

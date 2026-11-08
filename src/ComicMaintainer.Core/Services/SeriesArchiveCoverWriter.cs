@@ -280,7 +280,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
     {
         using var source = ZipArchive.OpenArchive(archivePath);
 
-        var existingCoverEntries = source.Entries
+        var existingCoverEntries = ArchiveEntryReader.EnumerateEntries(source, Path.GetFileName(archivePath))
             .Where(e => !e.IsDirectory && IsManagedCoverEntry(e.Key))
             .ToList();
 
@@ -413,10 +413,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
                 return false;
             }
 
-            using var stream = entry.OpenEntryStream();
-            using var memStream = new MemoryStream();
-            stream.CopyTo(memStream);
-            return memStream.ToArray().AsSpan().SequenceEqual(expected);
+            return ArchiveEntryReader.ReadAllBytes(entry, Math.Max(expected.Length, 1)).AsSpan().SequenceEqual(expected);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

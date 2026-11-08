@@ -196,7 +196,7 @@
                         window.location.href = '/login.html';
                         return;
                     }
-                    throw new Error('Failed to load comic info');
+                    throw new Error(await refusalMessage(response, 'Failed to load comic info'));
                 }
 
                 const data = await response.json();
@@ -461,9 +461,20 @@
                 buildFetchOptions()
             );
             if (!response.ok) {
-                throw new Error('Failed to load page');
+                throw new Error(await refusalMessage(response, 'Failed to load page'));
             }
             return response.blob();
+        }
+
+        // What to tell the reader about a failed page or info request: the server's own text
+        // for an archive over the read limits (422), otherwise the fallback.
+        async function refusalMessage(response, fallback) {
+            if (response.status !== 422) return fallback;
+            try {
+                const body = await response.json();
+                if (body && typeof body.error === 'string' && body.error) return body.error;
+            } catch (_e) { /* not JSON */ }
+            return fallback;
         }
 
         function revokeObjectUrlQuietly(url) {
@@ -1276,6 +1287,9 @@
         // Fetch a manga page Blob, caching the resulting Blob URL so subsequent
         // visits / preloads are instant. Returns the blob URL on success or
         // null on failure (the caller handles UI / error messages).
+        // Why the server refused a page (422), by page number, for loadPage to show.
+        const mangaPageRefusals = new Map();
+
         async function fetchMangaPageUrl(pageNum) {
             if (pageNum < 1 || pageNum > totalPages) return null;
             if (mangaPageCache.has(pageNum)) return mangaPageCache.get(pageNum);
@@ -1287,6 +1301,9 @@
                 if (!response.ok) {
                     if (response.status === 401) {
                         window.location.href = '/login.html';
+                    }
+                    if (response.status === 422) {
+                        mangaPageRefusals.set(pageNum, await refusalMessage(response, 'Failed to load page'));
                     }
                     return null;
                 }
@@ -1392,7 +1409,7 @@
                     return;
                 }
                 if (!imageUrl) {
-                    throw new Error('Failed to load page');
+                    throw new Error(mangaPageRefusals.get(pageNum) || 'Failed to load page');
                 }
 
                 content.innerHTML = `<img src="${imageUrl}" class="page-image page-fade" alt="Page ${pageNum}" decoding="async" fetchpriority="high">`

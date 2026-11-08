@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using System.IO.Compression;
 
 namespace ComicMaintainer.Tests.Services;
@@ -64,6 +65,24 @@ public class ComicArchiveTests : IDisposable
         Assert.Equal("Batman", tags.Series);
         Assert.Equal("12", tags.Number);
         Assert.Equal(2023, tags.Year);
+    }
+
+    [Fact]
+    public void ReadTags_WithComicInfoOverTheReadLimit_IsRefused()
+    {
+        var filePath = Path.Join(_testDirectory, "huge-tags.cbz");
+        using (var zip = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            using var writer = new StreamWriter(zip.CreateEntry("ComicInfo.xml").Open());
+            writer.Write($"<ComicInfo><Notes>{new string('x', (int)ArchiveEntryReader.MaxComicInfoBytes)}</Notes></ComicInfo>");
+        }
+
+        _createdFiles.Add(filePath);
+
+        using var archive = new ComicArchive(filePath);
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => archive.ReadTags("cr"));
+
+        Assert.Contains("ComicInfo.xml", ex.Message);
     }
 
     [Fact]

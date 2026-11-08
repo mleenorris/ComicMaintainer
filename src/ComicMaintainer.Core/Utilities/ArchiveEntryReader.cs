@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Compression;
+using System.Text;
 using SharpCompress.Archives;
 
 namespace ComicMaintainer.Core.Utilities;
@@ -26,6 +27,12 @@ public static class ArchiveEntryReader
 {
     /// <summary>Largest page image, uncompressed, that is read into memory: 100 MiB.</summary>
     public const long MaxPageBytes = 100L * 1024 * 1024;
+
+    /// <summary>
+    /// Largest ComicInfo.xml, uncompressed, that is read into memory: 8 MiB. Even a
+    /// 2,000-page omnibus with a page list takes a few hundred kilobytes.
+    /// </summary>
+    public const long MaxComicInfoBytes = 8L * 1024 * 1024;
 
     /// <summary>Most entries (files and directories) an archive may list: 20,000.</summary>
     public const int MaxEntries = 20_000;
@@ -302,6 +309,37 @@ public static class ArchiveEntryReader
 
         var directoryOffset = BinaryPrimitives.ReadUInt64LittleEndian(zip64Record[48..]);
         return directoryOffset > long.MaxValue ? null : (long)directoryOffset;
+    }
+
+    /// <summary>
+    /// The entries of a SharpCompress archive, enumerated lazily, refusing the
+    /// archive as soon as more than <see cref="MaxEntries"/> have been listed. A
+    /// caller that stops early (looking for ComicInfo.xml) reads no further.
+    /// </summary>
+    /// <param name="archive">The open archive.</param>
+    /// <param name="archiveName">File name used in the error message.</param>
+    /// <exception cref="ArchiveLimitExceededException">The archive has too many entries.</exception>
+    public static IEnumerable<IArchiveEntry> EnumerateEntries(IArchive archive, string archiveName)
+    {
+        ArgumentNullException.ThrowIfNull(archive);
+        long count = 0;
+        foreach (var entry in archive.Entries)
+        {
+            EnsureEntryCountWithinLimit(++count, archiveName);
+            yield return entry;
+        }
+    }
+
+    /// <summary>
+    /// Reads a text entry such as ComicInfo.xml under <see cref="MaxComicInfoBytes"/>,
+    /// decoding it as UTF-8 unless a byte order mark says otherwise.
+    /// </summary>
+    /// <exception cref="ArchiveLimitExceededException">The entry exceeds a limit.</exception>
+    public static string ReadText(IArchiveEntry entry)
+    {
+        using var buffer = new MemoryStream(ReadAllBytes(entry, MaxComicInfoBytes), writable: false);
+        using var reader = new StreamReader(buffer, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 
     /// <summary>

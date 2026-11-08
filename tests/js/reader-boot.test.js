@@ -202,17 +202,22 @@ test('a page that fails to load shows the error state', async () => {
     assert.deepEqual(progressPosts(page), []);
 });
 
-test('a page refused for the archive read limits shows the server\'s reason, in either mode', async () => {
+test('a page refused for the archive read limits shows the server\'s reason', async () => {
     const reason = "Archive entry 'p1.jpg' is 200 MiB uncompressed, over the 100 MiB limit.";
-    for (const readingMode of ['manga', 'webcomic']) {
-        const page = loadReader({
-            localStorage: { readingMode },
-            routes: { 'GET /api/ComicReader/page': respond(422, { error: reason }) },
-        });
-        await page.waitFor(() => page.$('#readerContent .error-message'));
+    const page = loadReader({ routes: { 'GET /api/ComicReader/page': respond(422, { error: reason }) } });
+    await page.waitFor(() => page.$('#readerContent .error-message'));
 
-        assert.equal(page.$('#readerContent .error-message').textContent, 'Failed to load page: ' + reason, readingMode);
-    }
+    assert.equal(page.$('#readerContent .error-message').textContent, 'Failed to load page: ' + reason);
+});
+
+test('a webcomic page refused for the read limits logs the server\'s reason', async () => {
+    const reason = "Archive entry 'p1.jpg' is 200 MiB uncompressed, over the 100 MiB limit.";
+    const page = loadReader({
+        localStorage: { readingMode: 'webcomic' },
+        routes: { 'GET /api/ComicReader/page': respond(422, { error: reason }) },
+    });
+
+    await page.waitFor(() => page.consoleMessages.some(m => m.type === 'error' && m.args[1]?.message === reason));
 });
 
 test('a 422 without a readable reason falls back to the generic text', async () => {

@@ -83,7 +83,7 @@ public class ComicEmailDeliveryRetryTests : IDisposable
         Assert.Equal(new[] { (id, expectedRetry) }, _scheduled);
 
         // The history shows it is waiting for a retry.
-        var dto = Assert.Single((await service.GetDeliveriesPageAsync(0, 10)).Deliveries);
+        var dto = Assert.Single((await service.GetDeliveriesPageAsync(TestEmailScopes.Everyone, 0, 10)).Deliveries);
         Assert.Equal(1, dto.AttemptCount);
         Assert.Equal(expectedRetry.UtcDateTime, dto.NextAttemptAt);
     }
@@ -191,12 +191,12 @@ public class ComicEmailDeliveryRetryTests : IDisposable
     {
         FailSendsWith(Transient421());
         var service = CreateService(_queue.Object);
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
         var file = CreateComic("Series 001.cbz");
-        var first = await service.QueueFilesAsync(new[] { file }, device.Id, null, EmailDeliverySource.Auto, true);
+        var first = await service.QueueFilesAsync(TestEmailScopes.Everyone, new[] { file }, device.Id, null, EmailDeliverySource.Auto, true);
         await service.ProcessDeliveryAsync(Assert.Single(first.Queued).Id);
 
-        var second = await service.QueueFilesAsync(new[] { file }, device.Id, null, EmailDeliverySource.Auto, true);
+        var second = await service.QueueFilesAsync(TestEmailScopes.Everyone, new[] { file }, device.Id, null, EmailDeliverySource.Auto, true);
 
         Assert.Empty(second.Queued);
         Assert.Equal("Already delivered to this device", second.Skipped[file]);
@@ -298,11 +298,12 @@ public class ComicEmailDeliveryRetryTests : IDisposable
 
     private async Task<int> QueueAsync(ComicEmailService service, string fileName)
     {
-        var devices = await _devices.GetDevicesAsync();
+        var devices = await _devices.GetDevicesAsync(TestEmailScopes.Everyone);
         var deviceId = devices.Count > 0
             ? devices[0].Id
-            : (await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original)).Id;
+            : (await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original)).Id;
         var result = await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { CreateComic(fileName) }, deviceId, null, EmailDeliverySource.Manual, skipAlreadyDelivered: false);
         return Assert.Single(result.Queued).Id;
     }

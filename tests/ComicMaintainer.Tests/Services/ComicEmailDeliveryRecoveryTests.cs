@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -75,7 +76,7 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
     [Fact]
     public async Task ResumePendingDeliveriesAsync_QueuesOnlyPendingDeliveriesTheQueueDoesNotHold_OldestFirst()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
         var sent = await AddDeliveryAsync(device.Id, "Series 001.cbz", EmailDeliveryStatus.Sent);
         var first = await AddDeliveryAsync(device.Id, "Series 002.cbz", EmailDeliveryStatus.Pending);
         var failed = await AddDeliveryAsync(device.Id, "Series 003.cbz", EmailDeliveryStatus.Failed);
@@ -103,8 +104,8 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
     {
         // An earlier process queued an automatic delivery and stopped before
         // its queue got to it: the row is pending and nothing holds its id.
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
-        await _devices.UpsertSubscriptionAsync("My Series", device.Id, EmailDeliveryFormat.Device, enabled: true);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        await _devices.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "My Series", device.Id, EmailDeliveryFormat.Device, enabled: true);
         var file = CreateComic("My Series", "My Series - Chapter 0005.cbz");
         var previousRun = CreateService(new Mock<IComicEmailQueue>().Object);
         Assert.Equal(1, await previousRun.QueueAutoSendAsync(file, "My Series"));
@@ -132,10 +133,11 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
     [Fact]
     public async Task QueueStart_DoesNotSendADeliveryTwiceWhenItIsAlsoQueuedByARequest()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
         var (service, queue) = CreateServiceWithRealQueue();
         var file = CreateComic("Series", "Series 001.cbz");
         var result = await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, skipAlreadyDelivered: true);
         var id = Assert.Single(result.Queued).Id;
 

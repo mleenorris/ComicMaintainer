@@ -272,7 +272,11 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Name).IsRequired().HasMaxLength(128);
             entity.Property(e => e.EmailAddress).IsRequired().HasMaxLength(320);
             entity.Property(e => e.DeliveryFormat).IsRequired().HasMaxLength(16);
-            entity.HasIndex(e => e.EmailAddress).IsUnique();
+            entity.Property(e => e.OwnerUserId).HasMaxLength(450);
+            // Unique per owner: users cannot see each other's devices, so a
+            // global constraint would reveal another user's address through
+            // the conflict error.
+            entity.HasIndex(e => new { e.OwnerUserId, e.EmailAddress }).IsUnique();
         });
 
         // Configure SeriesEmailSubscriptionEntity
@@ -302,6 +306,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Source).IsRequired().HasMaxLength(16);
             entity.Property(e => e.ErrorMessage).HasMaxLength(1024);
             entity.Property(e => e.DisplayName).HasMaxLength(512);
+            entity.Property(e => e.OwnerUserId).HasMaxLength(450);
+            // The delivery history is listed per owner, newest first.
+            entity.HasIndex(e => new { e.OwnerUserId, e.CreatedAt });
             // Auto-send dedupe looks up "was this file already delivered to this device".
             entity.HasIndex(e => new { e.FilePath, e.DeviceId, e.Status });
             entity.HasIndex(e => e.CreatedAt);
@@ -677,6 +684,15 @@ public class EreaderDeviceEntity
 {
     public int Id { get; set; }
 
+    /// <summary>
+    /// Id of the user who saved the device. Only that user (and administrators)
+    /// can see it, send to it, change it or subscribe it to series; its
+    /// subscriptions and deliveries belong to the same user. Null only for
+    /// devices saved before devices had owners when no administrator existed
+    /// to inherit them, which only administrators can reach.
+    /// </summary>
+    public string? OwnerUserId { get; set; }
+
     /// <summary>Friendly device name shown in the UI.</summary>
     public string Name { get; set; } = string.Empty;
 
@@ -730,6 +746,14 @@ public class SeriesEmailSubscriptionEntity
 public class ComicEmailDeliveryEntity
 {
     public int Id { get; set; }
+
+    /// <summary>
+    /// Owner of the device the delivery was sent to, copied when it was queued
+    /// so the history stays private to that user after the device is deleted.
+    /// Null only for unowned legacy rows, which only administrators can reach.
+    /// </summary>
+    public string? OwnerUserId { get; set; }
+
     public string FilePath { get; set; } = string.Empty;
     public int DeviceId { get; set; }
     public string DeviceName { get; set; } = string.Empty;

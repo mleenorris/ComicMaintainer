@@ -15,6 +15,7 @@ namespace ComicMaintainer.Tests.Services;
 public class CondensedBookBuildTrackerTests : IDisposable
 {
     private const string Owner = "user-1";
+    private static readonly EmailAccessScope OwnerScope = EmailAccessScope.ForUser(Owner);
 
     private readonly string _workDir;
     private readonly Mock<IComicEmailService> _email = new(MockBehavior.Strict);
@@ -28,10 +29,12 @@ public class CondensedBookBuildTrackerTests : IDisposable
 
         _email
             .Setup(e => e.ResolveCondensedFormatAsync(
+                It.IsAny<EmailAccessScope>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
+                EmailAccessScope _,
                 string? format,
                 int? deviceId,
                 CancellationToken _) => Task.FromResult(
@@ -58,7 +61,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
             return new CondensedBookFile(epub, Path.GetFileName(epub));
         });
 
-        var started = await _tracker.StartAsync(Request(), Owner).WaitAsync(TimeSpan.FromSeconds(10));
+        var started = await _tracker.StartAsync(Request(), OwnerScope).WaitAsync(TimeSpan.FromSeconds(10));
         // StartAsync returns without waiting for the build, which its worker
         // may already have picked up.
         Assert.Contains(started.Status, new[] { CondensedBookBuildStatus.Queued, CondensedBookBuildStatus.Running });
@@ -94,7 +97,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
             return new CondensedBookFile(epub, Path.GetFileName(epub));
         });
 
-        var started = await _tracker.StartAsync(Request(), Owner);
+        var started = await _tracker.StartAsync(Request(), OwnerScope);
         await reported.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         var running = await WaitForAsync(started.BuildId, b => b.Progress.CompletedPages == 3);
@@ -115,7 +118,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
         SetupBuild((_, _) => Task.FromException<CondensedBookFile>(
             new InvalidOperationException("Archive contains no page images")));
 
-        var started = await _tracker.StartAsync(Request(), Owner);
+        var started = await _tracker.StartAsync(Request(), OwnerScope);
 
         var finished = await WaitForTerminalAsync(started.BuildId);
         Assert.Equal(CondensedBookBuildStatus.Failed, finished.Status);
@@ -129,7 +132,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
         SetupPlan();
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => _tracker.StartAsync(Request(bookIndex: 5), Owner));
+            () => _tracker.StartAsync(Request(bookIndex: 5), OwnerScope));
     }
 
     [Fact]
@@ -137,6 +140,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
     {
         _email
             .Setup(e => e.PlanCondensedDeliveryAsync(
+                It.IsAny<EmailAccessScope>(),
                 It.IsAny<IEnumerable<string>>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
@@ -160,12 +164,13 @@ public class CondensedBookBuildTrackerTests : IDisposable
                 },
                 new Dictionary<string, string>()));
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _tracker.StartAsync(Request(), Owner));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _tracker.StartAsync(Request(), OwnerScope));
 
         Assert.Contains("Condense fewer issues per book", ex.Message);
         Assert.Empty(_tracker.List(Owner));
         _email.Verify(
             e => e.CreateCondensedBookAsync(
+                It.IsAny<EmailAccessScope>(),
                 It.IsAny<IEnumerable<string>>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
@@ -191,8 +196,8 @@ public class CondensedBookBuildTrackerTests : IDisposable
             return new CondensedBookFile(epub, Path.GetFileName(epub));
         });
 
-        var first = await _tracker.StartAsync(Request(), Owner);
-        var second = await _tracker.StartAsync(Request(), Owner);
+        var first = await _tracker.StartAsync(Request(), OwnerScope);
+        var second = await _tracker.StartAsync(Request(), OwnerScope);
 
         Assert.Equal(first.BuildId, second.BuildId);
         Assert.Single(_tracker.List(Owner));
@@ -228,7 +233,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
         });
 
         var requests = Enumerable.Range(0, requestCount)
-            .Select(_ => Task.Run(() => _tracker.StartAsync(Request(), Owner)))
+            .Select(_ => Task.Run(() => _tracker.StartAsync(Request(), OwnerScope)))
             .ToArray();
         await allPlansStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
         releasePlans.SetResult();
@@ -240,6 +245,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
 
         Assert.All(started, build => Assert.Equal(started[0].BuildId, build.BuildId));
         _email.Verify(e => e.CreateCondensedBookAsync(
+            It.IsAny<EmailAccessScope>(),
             It.IsAny<IEnumerable<string>>(),
             It.IsAny<string?>(),
             It.IsAny<int?>(),
@@ -265,7 +271,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
             return new CondensedBookFile("unreachable", "unreachable");
         });
 
-        var started = await _tracker.StartAsync(Request(), Owner);
+        var started = await _tracker.StartAsync(Request(), OwnerScope);
         await WaitForAsync(started.BuildId, b => b.Status == CondensedBookBuildStatus.Running);
 
         Assert.True(_tracker.Cancel(started.BuildId, Owner));
@@ -291,7 +297,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
             return new CondensedBookFile(epub, Path.GetFileName(epub));
         });
 
-        await _tracker.StartAsync(Request(), Owner);
+        await _tracker.StartAsync(Request(), OwnerScope);
         await buildStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         var disposal = Task.Run(_tracker.Dispose);
@@ -316,7 +322,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
         var epub = CreateBook("Series 001-002");
         SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(epub, Path.GetFileName(epub))));
 
-        var started = await _tracker.StartAsync(Request(), Owner);
+        var started = await _tracker.StartAsync(Request(), OwnerScope);
         await WaitForTerminalAsync(started.BuildId);
 
         Assert.True(_tracker.Discard(started.BuildId, Owner));
@@ -331,7 +337,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
         var epub = CreateBook("Series 001-002");
         SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(epub, Path.GetFileName(epub))));
 
-        var started = await _tracker.StartAsync(Request(), Owner);
+        var started = await _tracker.StartAsync(Request(), OwnerScope);
         await WaitForTerminalAsync(started.BuildId);
 
         _clock.Advance(TimeSpan.FromMinutes(31));
@@ -347,7 +353,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
         var epub = CreateBook("Series 001-002");
         SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(epub, Path.GetFileName(epub))));
 
-        var started = await _tracker.StartAsync(Request(), Owner);
+        var started = await _tracker.StartAsync(Request(), OwnerScope);
         await WaitForTerminalAsync(started.BuildId);
 
         Assert.Null(_tracker.Get(started.BuildId, "user-2"));
@@ -364,7 +370,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
         var azw3 = CreateBook("Series 001-002", "azw3");
         SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(azw3, Path.GetFileName(azw3))));
 
-        var started = await _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Azw3), Owner);
+        var started = await _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Azw3), OwnerScope);
         Assert.Equal(EmailDeliveryFormat.Azw3, started.DeliveryFormat);
 
         var finished = await WaitForTerminalAsync(started.BuildId);
@@ -381,7 +387,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
 
         var started = await _tracker.StartAsync(
             Request(deviceId: 42),
-            Owner);
+            OwnerScope);
 
         Assert.Equal(EmailDeliveryFormat.Azw3, started.DeliveryFormat);
         Assert.Equal(EmailDeliveryFormat.Azw3, (await WaitForTerminalAsync(started.BuildId)).DeliveryFormat);
@@ -394,8 +400,8 @@ public class CondensedBookBuildTrackerTests : IDisposable
         var book = CreateBook("Series 001-002");
         SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(book, Path.GetFileName(book))));
 
-        var epub = await _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Epub), Owner);
-        var azw3 = await _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Azw3), Owner);
+        var epub = await _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Epub), OwnerScope);
+        var azw3 = await _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Azw3), OwnerScope);
 
         // Two formats of the same selection are two different books, so the
         // second request must not join the first build.
@@ -409,7 +415,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
     public async Task StartAsync_RejectsAFormatThatCannotBeCondensed()
     {
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Original), Owner));
+            _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Original), OwnerScope));
     }
 
     private static CondensedBookBuildRequest Request(
@@ -431,6 +437,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
 
         _email
             .Setup(e => e.PlanCondensedDeliveryAsync(
+                It.IsAny<EmailAccessScope>(),
                 It.IsAny<IEnumerable<string>>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
@@ -460,6 +467,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
     {
         _email
             .Setup(e => e.CreateCondensedBookAsync(
+                It.IsAny<EmailAccessScope>(),
                 It.IsAny<IEnumerable<string>>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
@@ -471,6 +479,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
+                EmailAccessScope _,
                 IEnumerable<string> _,
                 string? _,
                 int? _,

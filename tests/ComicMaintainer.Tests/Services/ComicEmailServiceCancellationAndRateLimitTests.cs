@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -108,7 +109,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     {
         var delivery = await QueueAsync("Series - Chapter 0001.cbz");
 
-        var result = await _service.CancelDeliveryAsync(delivery.Id);
+        var result = await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, delivery.Id);
 
         Assert.Equal(EmailDeliveryCancelOutcome.Cancelled, result.Outcome);
         Assert.Equal(EmailDeliveryStatus.Cancelled, result.Delivery?.Status);
@@ -123,7 +124,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     [Fact]
     public async Task CancelDeliveryAsync_ReportsAnUnknownDelivery()
     {
-        var result = await _service.CancelDeliveryAsync(12345);
+        var result = await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, 12345);
 
         Assert.Equal(EmailDeliveryCancelOutcome.NotFound, result.Outcome);
         Assert.Null(result.Delivery);
@@ -135,10 +136,10 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         var sent = await QueueAsync("Series - Chapter 0001.cbz");
         await _service.ProcessDeliveryAsync(sent.Id);
         var cancelled = await QueueAsync("Series - Chapter 0002.cbz");
-        await _service.CancelDeliveryAsync(cancelled.Id);
+        await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, cancelled.Id);
 
-        var sentResult = await _service.CancelDeliveryAsync(sent.Id);
-        var cancelledResult = await _service.CancelDeliveryAsync(cancelled.Id);
+        var sentResult = await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, sent.Id);
+        var cancelledResult = await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, cancelled.Id);
 
         Assert.Equal(EmailDeliveryCancelOutcome.AlreadyFinished, sentResult.Outcome);
         Assert.Equal(EmailDeliveryStatus.Sent, sentResult.Delivery?.Status);
@@ -156,7 +157,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         var processing = _service.ProcessDeliveryAsync(delivery.Id);
         await conversion.Started.Task.WaitAsync(Patience);
 
-        var result = await _service.CancelDeliveryAsync(delivery.Id).WaitAsync(Patience);
+        var result = await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, delivery.Id).WaitAsync(Patience);
         await processing.WaitAsync(Patience);
 
         Assert.Equal(EmailDeliveryCancelOutcome.Cancelled, result.Outcome);
@@ -174,7 +175,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         var processing = _service.ProcessDeliveryAsync(delivery.Id);
         await sending.Started.Task.WaitAsync(Patience);
 
-        var result = await _service.CancelDeliveryAsync(delivery.Id).WaitAsync(Patience);
+        var result = await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, delivery.Id).WaitAsync(Patience);
 
         Assert.Equal(EmailDeliveryCancelOutcome.Sending, result.Outcome);
         Assert.Equal(EmailDeliveryStatus.Pending, result.Delivery?.Status);
@@ -194,7 +195,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         var processing = _service.ProcessDeliveryAsync(delivery.Id);
         await conversion.Started.Task.WaitAsync(Patience);
 
-        var cancelling = _service.CancelDeliveryAsync(delivery.Id);
+        var cancelling = _service.CancelDeliveryAsync(TestEmailScopes.Everyone, delivery.Id);
         await AdvanceUntilAsync(() => cancelling.IsCompleted, TimeSpan.FromSeconds(1));
         var result = await cancelling;
 
@@ -218,7 +219,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         var processing = _service.ProcessDeliveryAsync(deliveries[0].Id);
         await conversion.Started.Task.WaitAsync(Patience);
 
-        var result = await _service.CancelPendingDeliveriesAsync().WaitAsync(Patience);
+        var result = await _service.CancelPendingDeliveriesAsync(TestEmailScopes.Everyone).WaitAsync(Patience);
         await processing.WaitAsync(Patience);
 
         Assert.Equal(new EmailDeliveryBulkCancelResult(Cancelled: 3, Stopping: 0, Sending: 0), result);
@@ -243,7 +244,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         var processing = _service.ProcessDeliveryAsync(inProgress.Id);
         await sending.Started.Task.WaitAsync(Patience);
 
-        var result = await _service.CancelPendingDeliveriesAsync().WaitAsync(Patience);
+        var result = await _service.CancelPendingDeliveriesAsync(TestEmailScopes.Everyone).WaitAsync(Patience);
 
         Assert.Equal(new EmailDeliveryBulkCancelResult(Cancelled: 1, Stopping: 0, Sending: 1), result);
 
@@ -266,7 +267,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
 
         // Hold the bulk cancel just after it has read the delivery as pending.
         PendingLoadGate.Arm(delivery.Id);
-        var cancelling = Task.Run(() => _service.CancelPendingDeliveriesAsync());
+        var cancelling = Task.Run(() => _service.CancelPendingDeliveriesAsync(TestEmailScopes.Everyone));
         await PendingLoadGate.Reached.Task.WaitAsync(Patience);
 
         // Let the message go out and give the processor time to finish.
@@ -290,7 +291,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
 
         var cancelling = await HoldCancelWhileShutdownLeavesTheDeliveryPendingAsync(
             delivery.Id,
-            () => _service.CancelDeliveryAsync(delivery.Id));
+            () => _service.CancelDeliveryAsync(TestEmailScopes.Everyone, delivery.Id));
 
         var result = await cancelling.WaitAsync(Patience);
         Assert.Equal(EmailDeliveryCancelOutcome.Cancelled, result.Outcome);
@@ -306,7 +307,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
 
         var cancelling = await HoldCancelWhileShutdownLeavesTheDeliveryPendingAsync(
             delivery.Id,
-            () => _service.CancelPendingDeliveriesAsync());
+            () => _service.CancelPendingDeliveriesAsync(TestEmailScopes.Everyone));
 
         var result = await cancelling.WaitAsync(Patience);
         Assert.Equal(new EmailDeliveryBulkCancelResult(Cancelled: 1, Stopping: 0, Sending: 0), result);
@@ -317,7 +318,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     [Fact]
     public async Task CancelPendingDeliveriesAsync_ReportsWhenNothingIsPending()
     {
-        var result = await _service.CancelPendingDeliveriesAsync();
+        var result = await _service.CancelPendingDeliveriesAsync(TestEmailScopes.Everyone);
 
         Assert.Equal(new EmailDeliveryBulkCancelResult(Cancelled: 0, Stopping: 0, Sending: 0), result);
     }
@@ -328,10 +329,12 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         var file = CreateComic("Series - Chapter 0001.cbz");
         var deviceId = await GetDeviceIdAsync(EmailDeliveryFormat.Original);
         var first = await _service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, deviceId, null, EmailDeliverySource.Manual, skipAlreadyDelivered: false);
-        await _service.CancelDeliveryAsync(Assert.Single(first.Queued).Id);
+        await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, Assert.Single(first.Queued).Id);
 
         var again = await _service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file },
             deviceId,
             null,
@@ -357,7 +360,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         Assert.Equal(EmailDeliveryStatus.Pending, (await GetDeliveryAsync(delivery.Id)).Status);
 
         // No longer in progress, so it can be cancelled outright.
-        var result = await _service.CancelDeliveryAsync(delivery.Id);
+        var result = await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, delivery.Id);
         Assert.Equal(EmailDeliveryCancelOutcome.Cancelled, result.Outcome);
     }
 
@@ -365,9 +368,9 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     public async Task GetDeliveriesPageAsync_ReturnsTheRequestedPageNewestFirst()
     {
         var deliveries = await QueueManyAsync(5);
-        await _service.CancelDeliveryAsync(deliveries[0].Id);
+        await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, deliveries[0].Id);
 
-        var page = await _service.GetDeliveriesPageAsync(offset: 1, limit: 2);
+        var page = await _service.GetDeliveriesPageAsync(TestEmailScopes.Everyone, offset: 1, limit: 2);
 
         Assert.Equal(new[] { deliveries[3].Id, deliveries[2].Id }, page.Deliveries.Select(d => d.Id));
         Assert.Equal(5, page.Total);
@@ -389,7 +392,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     {
         await QueueManyAsync(3);
 
-        var page = await _service.GetDeliveriesPageAsync(offset, limit);
+        var page = await _service.GetDeliveriesPageAsync(TestEmailScopes.Everyone, offset, limit);
 
         Assert.Equal(expectedOffset, page.Offset);
         Assert.Equal(expectedLimit, page.Limit);
@@ -402,7 +405,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     {
         await QueueManyAsync(2);
 
-        var page = await _service.GetDeliveriesPageAsync(offset: 50, limit: 50);
+        var page = await _service.GetDeliveriesPageAsync(TestEmailScopes.Everyone, offset: 50, limit: 50);
 
         Assert.Empty(page.Deliveries);
         Assert.Equal(2, page.Total);
@@ -436,7 +439,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         await WaitUntilAsync(() => _service.RateLimitedUntil is not null);
 
         Assert.Equal(expectedSlot.UtcDateTime, _service.RateLimitedUntil);
-        var page = await _service.GetDeliveriesPageAsync(0, 50);
+        var page = await _service.GetDeliveriesPageAsync(TestEmailScopes.Everyone, 0, 50);
         Assert.Equal(expectedSlot.UtcDateTime, page.RateLimitedUntil);
         Assert.Equal(1, page.PendingCount);
         Assert.Equal(0, SendCount);
@@ -512,7 +515,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         var processing = _service.ProcessDeliveryAsync(delivery.Id);
         await WaitUntilAsync(() => _service.RateLimitedUntil is not null);
 
-        var result = await _service.CancelDeliveryAsync(delivery.Id).WaitAsync(Patience);
+        var result = await _service.CancelDeliveryAsync(TestEmailScopes.Everyone, delivery.Id).WaitAsync(Patience);
         await processing.WaitAsync(Patience);
 
         Assert.Equal(EmailDeliveryCancelOutcome.Cancelled, result.Outcome);
@@ -737,7 +740,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     {
         if (!_deviceIds.TryGetValue(format, out var id))
         {
-            id = (await _devices.CreateDeviceAsync($"Reader {format}", $"{format}@kindle.com", format)).Id;
+            id = (await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, $"Reader {format}", $"{format}@kindle.com", format)).Id;
             _deviceIds[format] = id;
         }
 
@@ -747,6 +750,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     private async Task<ComicEmailDeliveryDto> QueueAsync(string fileName, string format = EmailDeliveryFormat.Original)
     {
         var result = await _service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { CreateComic(fileName) },
             await GetDeviceIdAsync(format),
             null,
@@ -762,6 +766,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
             .Select(i => CreateComic($"Series - Chapter {i:D4}.cbz"))
             .ToList();
         var result = await _service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             files,
             await GetDeviceIdAsync(format),
             null,

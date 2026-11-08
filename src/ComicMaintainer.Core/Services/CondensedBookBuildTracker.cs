@@ -72,16 +72,21 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
 
     public async Task<CondensedBookBuildDto> StartAsync(
         CondensedBookBuildRequest request,
-        string? ownerUserId,
+        EmailAccessScope scope,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // Builds are private to the user who started them.
+        var ownerUserId = scope.UserId;
 
         PruneExpired();
 
         // Resolve the format before registering the build so inherited device
         // defaults are reflected in queued/running snapshots and signatures.
         var format = await _email.ResolveCondensedFormatAsync(
+            scope,
             request.DeliveryFormat,
             request.DeviceId,
             cancellationToken);
@@ -90,6 +95,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         // request fails while the caller is still waiting for a response rather
         // than minutes later inside a background build.
         var plan = await _email.PlanCondensedDeliveryAsync(
+            scope,
             request.FilePaths,
             request.CondenseMode,
             request.IssuesPerBook,
@@ -134,7 +140,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
 
             _builds[entry.BuildId] = entry;
             var worker = Task.Run(
-                () => RunAsync(entry, request with { DeliveryFormat = format }),
+                () => RunAsync(entry, request with { DeliveryFormat = format }, scope),
                 CancellationToken.None);
             _workers[entry.BuildId] = worker;
             _ = worker.ContinueWith(
@@ -216,7 +222,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         return file;
     }
 
-    private async Task RunAsync(BuildEntry entry, CondensedBookBuildRequest request)
+    private async Task RunAsync(BuildEntry entry, CondensedBookBuildRequest request, EmailAccessScope scope)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             entry.CancellationToken,
@@ -237,6 +243,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
             entry.MarkRunning(_timeProvider.GetUtcNow().UtcDateTime);
 
             var book = await _email.CreateCondensedBookAsync(
+                scope,
                 request.FilePaths,
                 request.CondenseMode,
                 request.IssuesPerBook,

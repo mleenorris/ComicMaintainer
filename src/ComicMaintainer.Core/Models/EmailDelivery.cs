@@ -328,15 +328,18 @@ public static class EmailMessageSize
 }
 
 /// <summary>A saved ereader destination.</summary>
+/// <param name="OwnerUserId">The user the device belongs to; null for an unowned legacy device.</param>
 public record EreaderDeviceDto(
     int Id,
     string Name,
     string EmailAddress,
     string DeliveryFormat,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    string? OwnerUserId = null);
 
 /// <summary>An automatic-delivery subscription for a series.</summary>
+/// <param name="OwnerUserId">Owner of the subscribed device, to whom the subscription belongs.</param>
 public record SeriesEmailSubscriptionDto(
     int Id,
     string NormalizedSeriesKey,
@@ -346,7 +349,8 @@ public record SeriesEmailSubscriptionDto(
     string DeviceEmail,
     string DeliveryFormat,
     bool Enabled,
-    DateTime? LastSentAt);
+    DateTime? LastSentAt,
+    string? OwnerUserId = null);
 
 /// <summary>A single (attempted) comic email.</summary>
 /// <param name="ErrorMessage">
@@ -355,6 +359,7 @@ public record SeriesEmailSubscriptionDto(
 /// </param>
 /// <param name="AttemptCount">How many times the message has been handed to the mail server.</param>
 /// <param name="NextAttemptAt">When a pending delivery is retried after a temporary failure (UTC).</param>
+/// <param name="OwnerUserId">Owner of the device it was sent to, to whom the delivery belongs.</param>
 public record ComicEmailDeliveryDto(
     int Id,
     string FilePath,
@@ -370,7 +375,8 @@ public record ComicEmailDeliveryDto(
     DateTime? SentAt,
     int IssueCount = 1,
     int AttemptCount = 0,
-    DateTime? NextAttemptAt = null);
+    DateTime? NextAttemptAt = null,
+    string? OwnerUserId = null);
 
 /// <summary>One page of the delivery history, newest first.</summary>
 /// <param name="Total">Number of deliveries in the whole history.</param>

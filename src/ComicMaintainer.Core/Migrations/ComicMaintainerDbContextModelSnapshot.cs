@@ -66,6 +66,10 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<DateTime?>("NextAttemptAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OwnerUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("TEXT");
 
@@ -85,6 +89,8 @@ namespace ComicMaintainer.Core.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt");
+
+                    b.HasIndex("OwnerUserId", "CreatedAt");
 
                     b.HasIndex("Status", "SentAt");
 
@@ -219,12 +225,16 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OwnerUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EmailAddress")
+                    b.HasIndex("OwnerUserId", "EmailAddress")
                         .IsUnique();
 
                     b.ToTable("EreaderDevices");

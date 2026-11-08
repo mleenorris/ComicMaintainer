@@ -171,6 +171,7 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<EmailQueueResult> QueueFilesAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         int deviceId,
         string? deliveryFormat,
@@ -179,6 +180,7 @@ public class ComicEmailService : IComicEmailService
         int? subscriptionId = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(filePaths);
 
         if (!IsConfigured)
@@ -193,11 +195,7 @@ public class ComicEmailService : IComicEmailService
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
-        var device = await db.EreaderDevices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
-        if (device is null)
-        {
-            throw new InvalidOperationException($"Ereader device {deviceId} was not found.");
-        }
+        var device = await FindDeviceAsync(db, scope, deviceId, cancellationToken);
 
         var format = EmailDeliveryFormat.NormalizeOrThrow(deliveryFormat, device.DeliveryFormat, nameof(deliveryFormat));
 
@@ -301,6 +299,7 @@ public class ComicEmailService : IComicEmailService
 
             var delivery = new ComicEmailDeliveryEntity
             {
+                OwnerUserId = device.OwnerUserId,
                 FilePath = fullPath,
                 DeviceId = device.Id,
                 DeviceName = device.Name,
@@ -325,6 +324,7 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<EmailQueueResult> QueueCondensedFilesAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         int deviceId,
         string? condenseMode,
@@ -335,6 +335,7 @@ public class ComicEmailService : IComicEmailService
         string? deliveryFormat = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(filePaths);
 
         if (!IsConfigured)
@@ -357,11 +358,7 @@ public class ComicEmailService : IComicEmailService
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
-        var device = await db.EreaderDevices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
-        if (device is null)
-        {
-            throw new InvalidOperationException($"Ereader device {deviceId} was not found.");
-        }
+        var device = await FindDeviceAsync(db, scope, deviceId, cancellationToken);
 
         var format = EmailDeliveryFormat.NormalizeCondensedOrThrow(
             deliveryFormat,
@@ -407,6 +404,7 @@ public class ComicEmailService : IComicEmailService
 
                 var delivery = new ComicEmailDeliveryEntity
                 {
+                    OwnerUserId = device.OwnerUserId,
                     FilePath = group[0],
                     DeviceId = device.Id,
                     DeviceName = device.Name,
@@ -453,6 +451,7 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<CondensePlanDto> PlanCondensedDeliveryAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         string? condenseMode,
         int? issuesPerBook,
@@ -461,6 +460,7 @@ public class ComicEmailService : IComicEmailService
         bool skipAlreadyDelivered = false,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(filePaths);
 
         var mode = EmailCondenseMode.NormalizeOrThrow(condenseMode, nameof(condenseMode));
@@ -475,11 +475,16 @@ public class ComicEmailService : IComicEmailService
         var issues = ResolveIssues(filePaths, skipped);
 
         // The plan must describe the books the send would actually queue, so it
-        // drops the same already-delivered issues the queueing path does.
+        // drops the same already-delivered issues the queueing path does. Only
+        // for a device the caller may use: another user's delivery history is
+        // not theirs to see.
         if (skipAlreadyDelivered && deviceId is int device && issues.Count > 0)
         {
             await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-            issues = await FilterAlreadyDeliveredAsync(db, device, issues, skipped, cancellationToken);
+            if (await db.EreaderDevices.AccessibleTo(scope).AnyAsync(d => d.Id == device, cancellationToken))
+            {
+                issues = await FilterAlreadyDeliveredAsync(db, device, issues, skipped, cancellationToken);
+            }
         }
 
         var perBook = EmailCondenseMode.NormalizeIssuesPerBookOrThrow(
@@ -505,6 +510,7 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<CondensedBookFile> CreateCondensedBookAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         string? condenseMode,
         int? issuesPerBook,
@@ -516,9 +522,10 @@ public class ComicEmailService : IComicEmailService
         string? deliveryFormat = null,
         CancellationToken cancellationToken = default)
     {
-        var format = await ResolveCondensedFormatAsync(deliveryFormat, deviceId, cancellationToken);
+        var format = await ResolveCondensedFormatAsync(scope, deliveryFormat, deviceId, cancellationToken);
 
         var plan = await PlanCondensedDeliveryAsync(
+            scope,
             filePaths,
             condenseMode,
             issuesPerBook,
@@ -567,13 +574,16 @@ public class ComicEmailService : IComicEmailService
     /// <summary>
     /// Resolves the format a condensed book is generated in. A download can be
     /// requested without a device, in which case there is no default to inherit
-    /// and EPUB is used.
+    /// and EPUB is used; so is a device <paramref name="scope"/> cannot reach.
     /// </summary>
     public async Task<string> ResolveCondensedFormatAsync(
+        EmailAccessScope scope,
         string? deliveryFormat,
         int? deviceId,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         string? deviceDefault = null;
         var inheritsDevice = string.IsNullOrWhiteSpace(deliveryFormat) ||
             string.Equals(deliveryFormat.Trim(), EmailDeliveryFormat.Device, StringComparison.OrdinalIgnoreCase);
@@ -583,6 +593,7 @@ public class ComicEmailService : IComicEmailService
             await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
             deviceDefault = await db.EreaderDevices
                 .AsNoTracking()
+                .AccessibleTo(scope)
                 .Where(d => d.Id == id)
                 .Select(d => d.DeliveryFormat)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -967,7 +978,10 @@ public class ComicEmailService : IComicEmailService
 
             try
             {
+                // On behalf of the subscription's owner, whoever's file
+                // processing produced the issue.
                 var result = await QueueFilesAsync(
+                    EmailAccessScope.System,
                     new[] { filePath },
                     row.device.Id,
                     format,
@@ -1321,14 +1335,12 @@ public class ComicEmailService : IComicEmailService
         return resumed;
     }
 
-    public async Task SendTestEmailAsync(int deviceId, CancellationToken cancellationToken = default)
+    public async Task SendTestEmailAsync(EmailAccessScope scope, int deviceId, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var device = await db.EreaderDevices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
-        if (device is null)
-        {
-            throw new InvalidOperationException($"Ereader device {deviceId} was not found.");
-        }
+        var device = await FindDeviceAsync(db, scope, deviceId, cancellationToken);
 
         await _sender.SendAsync(
             new ComicEmailMessage(
@@ -1339,14 +1351,18 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<IReadOnlyList<ComicEmailDeliveryDto>> GetRecentDeliveriesAsync(
+        EmailAccessScope scope,
         int limit,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         var take = Math.Clamp(limit, 1, 500);
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var deliveries = await db.ComicEmailDeliveries
             .AsNoTracking()
+            .ListedFor(scope)
             .OrderByDescending(d => d.Id)
             .Take(take)
             .ToListAsync(cancellationToken);
@@ -1355,19 +1371,22 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<ComicEmailDeliveryPage> GetDeliveriesPageAsync(
+        EmailAccessScope scope,
         int offset,
         int limit,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         var take = Math.Clamp(limit, 1, 500);
         var skip = Math.Max(0, offset);
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var total = await db.ComicEmailDeliveries.CountAsync(cancellationToken);
-        var pending = await db.ComicEmailDeliveries
+        var visible = db.ComicEmailDeliveries.AsNoTracking().ListedFor(scope);
+        var total = await visible.CountAsync(cancellationToken);
+        var pending = await visible
             .CountAsync(d => d.Status == EmailDeliveryStatus.Pending, cancellationToken);
-        var deliveries = await db.ComicEmailDeliveries
-            .AsNoTracking()
+        var deliveries = await visible
             .OrderByDescending(d => d.Id)
             .Skip(skip)
             .Take(take)
@@ -1383,9 +1402,22 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<EmailDeliveryCancelResult> CancelDeliveryAsync(
+        EmailAccessScope scope,
         int deliveryId,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // Another user's delivery is reported like one that does not exist. Its
+        // owner never changes, so checking once up front is enough.
+        await using (var db = await _dbFactory.CreateDbContextAsync(cancellationToken))
+        {
+            if (!await db.ComicEmailDeliveries.AccessibleTo(scope).AnyAsync(d => d.Id == deliveryId, cancellationToken))
+            {
+                return new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.NotFound, null);
+            }
+        }
+
         var (direct, inFlight) = await CancelUnclaimedDeliveryAsync(deliveryId, cancellationToken);
         if (inFlight is null)
         {
@@ -1433,9 +1465,13 @@ public class ComicEmailService : IComicEmailService
         return new EmailDeliveryCancelResult(outcome, latest);
     }
 
-    public async Task<EmailDeliveryBulkCancelResult> CancelPendingDeliveriesAsync(CancellationToken cancellationToken = default)
+    public async Task<EmailDeliveryBulkCancelResult> CancelPendingDeliveriesAsync(
+        EmailAccessScope scope,
+        CancellationToken cancellationToken = default)
     {
-        var (cancelled, claimed) = await CancelUnclaimedPendingDeliveriesAsync(null, cancellationToken);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var (cancelled, claimed) = await CancelUnclaimedPendingDeliveriesAsync(scope, null, cancellationToken);
 
         var requests = claimed
             .Select(c => (c.Id, c.Delivery, Request: c.Delivery.TryRequestCancel()))
@@ -1472,7 +1508,7 @@ public class ComicEmailService : IComicEmailService
         // being worked on and are cancelled directly.
         if (finishedIds.Count > 0)
         {
-            await CancelUnclaimedPendingDeliveriesAsync(finishedIds, cancellationToken);
+            await CancelUnclaimedPendingDeliveriesAsync(scope, finishedIds, cancellationToken);
         }
 
         var stillStopping = 0;
@@ -1549,9 +1585,11 @@ public class ComicEmailService : IComicEmailService
     /// Cancels pending deliveries the processor is not working on, under the
     /// state lock so none can be claimed or finished meanwhile.
     /// </summary>
+    /// <param name="scope">Whose pending deliveries are cancelled (see <see cref="EmailAccessScope.Lists"/>).</param>
     /// <param name="ids">Deliveries to consider; null for every pending one.</param>
     /// <returns>How many were cancelled, and those the processor is working on.</returns>
     private async Task<(int Cancelled, List<(int Id, InFlightDelivery Delivery)> Claimed)> CancelUnclaimedPendingDeliveriesAsync(
+        EmailAccessScope scope,
         List<int>? ids,
         CancellationToken cancellationToken)
     {
@@ -1562,7 +1600,9 @@ public class ComicEmailService : IComicEmailService
         try
         {
             await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-            var query = db.ComicEmailDeliveries.Where(d => d.Status == EmailDeliveryStatus.Pending);
+            var query = db.ComicEmailDeliveries
+                .ListedFor(scope)
+                .Where(d => d.Status == EmailDeliveryStatus.Pending);
             if (ids is not null)
             {
                 query = query.Where(d => ids.Contains(d.Id));
@@ -1940,7 +1980,24 @@ public class ComicEmailService : IComicEmailService
         entity.SentAt,
         Math.Max(1, DeserializeCondensedPaths(entity.CondensedFilePaths).Count),
         entity.AttemptCount,
-        entity.NextAttemptAt is DateTime nextAttempt ? DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc) : null);
+        entity.NextAttemptAt is DateTime nextAttempt ? DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc) : null,
+        entity.OwnerUserId);
+
+    /// <summary>
+    /// The device <paramref name="scope"/> wants to send to. Another user's
+    /// device is reported exactly like one that does not exist.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No such device within the scope.</exception>
+    private static async Task<EreaderDeviceEntity> FindDeviceAsync(
+        ComicMaintainerDbContext db,
+        EmailAccessScope scope,
+        int deviceId,
+        CancellationToken cancellationToken)
+        => await db.EreaderDevices
+               .AsNoTracking()
+               .AccessibleTo(scope)
+               .FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken)
+           ?? throw new InvalidOperationException($"Ereader device {deviceId} was not found.");
 
     /// <summary>What became of a request to stop an in-flight delivery.</summary>
     private enum InFlightCancelRequest

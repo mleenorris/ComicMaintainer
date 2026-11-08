@@ -4,7 +4,9 @@ using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
@@ -81,12 +83,104 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task GetDevices_ReturnsTheSavedDevices()
     {
-        _devices.Setup(d => d.GetDevicesAsync(It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.GetDevicesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { Device(3), Device(4) });
 
-        var json = OkJson(await CreateController().GetDevices(CancellationToken.None));
+        var json = OkJson(await CreateController().GetDevices(cancellationToken: CancellationToken.None));
 
         Assert.Equal(new[] { 3, 4 }, json.GetProperty("devices").EnumerateArray().Select(d => d.GetProperty("Id").GetInt32()));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetDevices_ListsOnlyTheCallersOwnEvenWhenAskedForEveryones(bool all)
+    {
+        _devices.Setup(d => d.GetDevicesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<EreaderDeviceDto>());
+
+        await CreateController().GetDevices(all, CancellationToken.None);
+
+        _devices.Verify(d => d.GetDevicesAsync(
+            It.Is<EmailAccessScope>(s => s.UserId == UserId && !s.IsAdministrator && !s.ListsEveryone),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetDevices_ListsEveryonesForAnAdministratorWhoAsks(bool all)
+    {
+        _devices.Setup(d => d.GetDevicesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<EreaderDeviceDto>());
+
+        await CreateController(Administrator()).GetDevices(all, CancellationToken.None);
+
+        _devices.Verify(d => d.GetDevicesAsync(
+            It.Is<EmailAccessScope>(s => s.UserId == "admin-1" && s.IsAdministrator && s.ListsEveryone == all),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DevicesSubscriptionsAndDeliveries_AreRefusedWithoutAUserId()
+    {
+        var controller = CreateController(Anonymous());
+
+        var responses = new[]
+        {
+            (await controller.GetDevices(cancellationToken: CancellationToken.None)).Result,
+            (await controller.CreateDevice(new EmailController.DeviceRequest { Name = "Kindle", EmailAddress = "me@kindle.test" }, CancellationToken.None)).Result,
+            await controller.DeleteDevice(3, CancellationToken.None),
+            await controller.SendTestEmail(3, CancellationToken.None),
+            (await controller.SendFiles(new EmailController.SendFilesRequest { Files = new() { "/lib/a.cbz" }, DeviceId = 3 }, CancellationToken.None)).Result,
+            (await controller.GetSubscriptions(null, cancellationToken: CancellationToken.None)).Result,
+            await controller.DeleteSubscription(5, CancellationToken.None),
+            (await controller.GetDeliveries(cancellationToken: CancellationToken.None)).Result,
+            (await controller.CancelDelivery(7, CancellationToken.None)).Result,
+            (await controller.CancelPendingDeliveries(cancellationToken: CancellationToken.None)).Result
+        };
+
+        Assert.All(responses, response =>
+            Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(response).StatusCode));
+        _devices.VerifyNoOtherCalls();
+        _email.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateDevice_OfAnotherUser_IsNotFound()
+    {
+        // The service answers null for a device outside the caller's scope.
+        _devices.Setup(d => d.UpdateDeviceAsync(It.IsAny<EmailAccessScope>(), 3, "Mine", null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((EreaderDeviceDto?)null);
+
+        var result = await CreateController().UpdateDevice(
+            3,
+            new EmailController.DeviceRequest { Name = "Mine" },
+            CancellationToken.None);
+
+        Assert.Equal("Device not found", ErrorOf<NotFoundObjectResult>(result.Result));
+        _devices.Verify(d => d.UpdateDeviceAsync(
+            It.Is<EmailAccessScope>(s => s.UserId == UserId && !s.IsAdministrator),
+            3,
+            "Mine",
+            null,
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetDeliveries_ForAnAdministratorWhoAsks_CoversEveryUser()
+    {
+        _email.Setup(e => e.GetDeliveriesPageAsync(It.IsAny<EmailAccessScope>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicEmailDeliveryPage(Array.Empty<ComicEmailDeliveryDto>(), 0, 0, 50, 0, null));
+
+        await CreateController(Administrator()).GetDeliveries(all: true, cancellationToken: CancellationToken.None);
+        await CreateController().GetDeliveries(all: true, cancellationToken: CancellationToken.None);
+
+        _email.Verify(e => e.GetDeliveriesPageAsync(
+            It.Is<EmailAccessScope>(s => s.UserId == "admin-1" && s.ListsEveryone), 0, 50, It.IsAny<CancellationToken>()), Times.Once);
+        _email.Verify(e => e.GetDeliveriesPageAsync(
+            It.Is<EmailAccessScope>(s => s.UserId == UserId && !s.ListsEveryone), 0, 50, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -102,7 +196,7 @@ public sealed class EmailControllerTests : IDisposable
     public async Task CreateDevice_ReturnsTheCreatedDevice()
     {
         var created = Device(9);
-        _devices.Setup(d => d.CreateDeviceAsync("Kindle", "me@kindle.test", "azw3", It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.CreateDeviceAsync(It.IsAny<EmailAccessScope>(), "Kindle", "me@kindle.test", "azw3", It.IsAny<CancellationToken>()))
             .ReturnsAsync(created);
 
         var result = await CreateController().CreateDevice(
@@ -115,7 +209,7 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task CreateDevice_MissingFieldsAreSentAsEmptyStringsForTheServiceToValidate()
     {
-        _devices.Setup(d => d.CreateDeviceAsync(string.Empty, string.Empty, null, It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.CreateDeviceAsync(It.IsAny<EmailAccessScope>(), string.Empty, string.Empty, null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Name is required"));
 
         var result = await CreateController().CreateDevice(new EmailController.DeviceRequest(), CancellationToken.None);
@@ -126,7 +220,7 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task CreateDevice_DuplicateAddressIsConflict()
     {
-        _devices.Setup(d => d.CreateDeviceAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.CreateDeviceAsync(It.IsAny<EmailAccessScope>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("A device with that address already exists"));
 
         var result = await CreateController().CreateDevice(
@@ -149,7 +243,7 @@ public sealed class EmailControllerTests : IDisposable
     public async Task UpdateDevice_PassesOmittedFieldsAsNullSoTheyAreLeftUntouched()
     {
         var updated = Device(5);
-        _devices.Setup(d => d.UpdateDeviceAsync(5, "Renamed", null, null, It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.UpdateDeviceAsync(It.IsAny<EmailAccessScope>(), 5, "Renamed", null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(updated);
 
         var result = await CreateController().UpdateDevice(
@@ -163,7 +257,7 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task UpdateDevice_UnknownDeviceIsNotFound()
     {
-        _devices.Setup(d => d.UpdateDeviceAsync(77, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.UpdateDeviceAsync(It.IsAny<EmailAccessScope>(), 77, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(default(EreaderDeviceDto?));
 
         var result = await CreateController().UpdateDevice(77, new EmailController.DeviceRequest { Name = "x" }, CancellationToken.None);
@@ -177,11 +271,11 @@ public sealed class EmailControllerTests : IDisposable
         var controller = CreateController();
         var request = new EmailController.DeviceRequest { EmailAddress = "not-an-address" };
 
-        _devices.Setup(d => d.UpdateDeviceAsync(1, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.UpdateDeviceAsync(It.IsAny<EmailAccessScope>(), 1, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Invalid email address"));
         Assert.Equal("Invalid email address", ErrorOf<BadRequestObjectResult>((await controller.UpdateDevice(1, request, CancellationToken.None)).Result));
 
-        _devices.Setup(d => d.UpdateDeviceAsync(1, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.UpdateDeviceAsync(It.IsAny<EmailAccessScope>(), 1, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Address already in use"));
         Assert.Equal("Address already in use", ErrorOf<ConflictObjectResult>((await controller.UpdateDevice(1, request, CancellationToken.None)).Result));
     }
@@ -189,8 +283,8 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task DeleteDevice_ReportsWhetherTheDeviceExisted()
     {
-        _devices.Setup(d => d.DeleteDeviceAsync(1, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        _devices.Setup(d => d.DeleteDeviceAsync(2, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _devices.Setup(d => d.DeleteDeviceAsync(It.IsAny<EmailAccessScope>(), 1, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _devices.Setup(d => d.DeleteDeviceAsync(It.IsAny<EmailAccessScope>(), 2, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         var controller = CreateController();
 
         var deleted = Assert.IsType<OkObjectResult>(await controller.DeleteDevice(1, CancellationToken.None));
@@ -201,18 +295,18 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task SendTestEmail_ConfirmsDelivery()
     {
-        _email.Setup(e => e.SendTestEmailAsync(4, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        _email.Setup(e => e.SendTestEmailAsync(It.IsAny<EmailAccessScope>(), 4, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         var ok = Assert.IsType<OkObjectResult>(await CreateController().SendTestEmail(4, CancellationToken.None));
 
         Assert.Equal("Test email sent", ToJson(ok.Value).GetProperty("message").GetString());
-        _email.Verify(e => e.SendTestEmailAsync(4, It.IsAny<CancellationToken>()), Times.Once);
+        _email.Verify(e => e.SendTestEmailAsync(It.IsAny<EmailAccessScope>(), 4, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task SendTestEmail_ConfigurationProblemIsBadRequest()
     {
-        _email.Setup(e => e.SendTestEmailAsync(4, It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.SendTestEmailAsync(It.IsAny<EmailAccessScope>(), 4, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("SMTP host is not configured"));
 
         var result = await CreateController().SendTestEmail(4, CancellationToken.None);
@@ -225,7 +319,7 @@ public sealed class EmailControllerTests : IDisposable
     public async Task SendTestEmail_DeliveryFailureIsBadGatewayAndLogged()
     {
         var failure = new IOException("Connection refused");
-        _email.Setup(e => e.SendTestEmailAsync(4, It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+        _email.Setup(e => e.SendTestEmailAsync(It.IsAny<EmailAccessScope>(), 4, It.IsAny<CancellationToken>())).ThrowsAsync(failure);
 
         var result = Assert.IsType<ObjectResult>(await CreateController().SendTestEmail(4, CancellationToken.None));
 
@@ -280,6 +374,7 @@ public sealed class EmailControllerTests : IDisposable
         Assert.Equal(files[0], Assert.Single(json.GetProperty("queued").EnumerateArray()).GetProperty("FilePath").GetString());
         Assert.Equal("Already delivered", json.GetProperty("skipped").GetProperty(files[1]).GetString());
         _email.Verify(e => e.QueueFilesAsync(
+            It.IsAny<EmailAccessScope>(),
             files, 7, "epub", EmailDeliverySource.Manual, false, null, It.IsAny<CancellationToken>()), Times.Once);
         VerifyNoCondensedQueue();
     }
@@ -305,6 +400,7 @@ public sealed class EmailControllerTests : IDisposable
         Assert.Empty(json.GetProperty("skipped").EnumerateObject());
         // A free selection can span series, so the service regroups it by folder.
         _email.Verify(e => e.QueueCondensedFilesAsync(
+            It.IsAny<EmailAccessScope>(),
             files, 2, EmailCondenseMode.Count, 5, EmailDeliverySource.Manual, true, false, "azw3", It.IsAny<CancellationToken>()), Times.Once);
         VerifyNoPlainQueue();
     }
@@ -326,11 +422,11 @@ public sealed class EmailControllerTests : IDisposable
         var controller = CreateController();
         var request = new EmailController.SendFilesRequest { Files = new List<string> { "/lib/a.cbz" }, DeviceId = 99 };
 
-        _email.Setup(e => e.QueueFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.QueueFilesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Unsupported delivery format"));
         Assert.Equal("Unsupported delivery format", ErrorOf<BadRequestObjectResult>((await controller.SendFiles(request, CancellationToken.None)).Result));
 
-        _email.Setup(e => e.QueueFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.QueueFilesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Device not found"));
         Assert.Equal("Device not found", ErrorOf<BadRequestObjectResult>((await controller.SendFiles(request, CancellationToken.None)).Result));
     }
@@ -402,6 +498,7 @@ public sealed class EmailControllerTests : IDisposable
         Assert.Equal("Saga", json.GetProperty("series").GetString());
         Assert.Equal(2, json.GetProperty("queued").GetArrayLength());
         _email.Verify(e => e.QueueFilesAsync(
+            It.IsAny<EmailAccessScope>(),
             It.Is<IEnumerable<string>>(f => f.SequenceEqual(new[] { "/lib/Saga/Saga 001.cbz", "/lib/Saga/Saga 002.cbz" })),
             3, "original", EmailDeliverySource.Manual, true, null, It.IsAny<CancellationToken>()), Times.Once);
         VerifyNoCondensedQueue();
@@ -425,6 +522,7 @@ public sealed class EmailControllerTests : IDisposable
 
         Assert.Equal("Saga", json.GetProperty("series").GetString());
         _email.Verify(e => e.QueueCondensedFilesAsync(
+            It.IsAny<EmailAccessScope>(),
             It.Is<IEnumerable<string>>(f => f.SequenceEqual(new[] { "/lib/Saga/Saga 002.cbz", "/lib/Saga/Saga 001.cbz" })),
             3, EmailCondenseMode.All, null, EmailDeliverySource.Manual, false, true, null, It.IsAny<CancellationToken>()), Times.Once);
         VerifyNoPlainQueue();
@@ -451,11 +549,11 @@ public sealed class EmailControllerTests : IDisposable
         var controller = CreateController();
         var request = new EmailController.SendSeriesRequest { SeriesId = SeriesId, CondenseMode = "count" };
 
-        _email.Setup(e => e.QueueCondensedFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.QueueCondensedFilesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Condensing by count requires at least 2 issues per book."));
         Assert.Equal("Condensing by count requires at least 2 issues per book.", ErrorOf<BadRequestObjectResult>((await controller.SendSeries(request, CancellationToken.None)).Result));
 
-        _email.Setup(e => e.QueueCondensedFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.QueueCondensedFilesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Device not found"));
         Assert.Equal("Device not found", ErrorOf<BadRequestObjectResult>((await controller.SendSeries(request, CancellationToken.None)).Result));
     }
@@ -498,7 +596,7 @@ public sealed class EmailControllerTests : IDisposable
                 new CondensedBookDto("Saga #3", files.Skip(2).ToList(), 400, ExceedsAttachmentLimit: false)
             },
             Skipped: new Dictionary<string, string> { ["/lib/missing.cbz"] = "File not found" });
-        _email.Setup(e => e.PlanCondensedDeliveryAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.PlanCondensedDeliveryAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(plan);
 
         var json = OkJson(await CreateController().PlanCondense(
@@ -529,7 +627,7 @@ public sealed class EmailControllerTests : IDisposable
         Assert.True(books[0].GetProperty("exceeds_book_size_limit").GetBoolean());
         Assert.False(books[1].GetProperty("exceeds_book_size_limit").GetBoolean());
         Assert.Equal("File not found", json.GetProperty("skipped").GetProperty("/lib/missing.cbz").GetString());
-        _email.Verify(e => e.PlanCondensedDeliveryAsync(files, "count", 2, false, 8, false, It.IsAny<CancellationToken>()), Times.Once);
+        _email.Verify(e => e.PlanCondensedDeliveryAsync(It.IsAny<EmailAccessScope>(), files, "count", 2, false, 8, false, It.IsAny<CancellationToken>()), Times.Once);
         _seriesLibrary.VerifyNoOtherCalls();
     }
 
@@ -537,7 +635,7 @@ public sealed class EmailControllerTests : IDisposable
     public async Task PlanCondense_ForASeriesUsesItsIssuesInSeriesOrder()
     {
         SetupSeries(Series("/lib/Saga/Saga 001.cbz", "/lib/Saga/Saga 002.cbz"));
-        _email.Setup(e => e.PlanCondensedDeliveryAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.PlanCondensedDeliveryAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CondensePlanDto("all", 2, 2, 1000, Array.Empty<CondensedBookDto>(), new Dictionary<string, string>()));
 
         var json = OkJson(await CreateController().PlanCondense(
@@ -553,6 +651,7 @@ public sealed class EmailControllerTests : IDisposable
         // No books means nothing can be emailed.
         Assert.False(json.GetProperty("can_email").GetBoolean());
         _email.Verify(e => e.PlanCondensedDeliveryAsync(
+            It.IsAny<EmailAccessScope>(),
             It.Is<IEnumerable<string>>(f => f.SequenceEqual(new[] { "/lib/Saga/Saga 001.cbz", "/lib/Saga/Saga 002.cbz" })),
             "all", null, true, null, true, It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -585,7 +684,7 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task PlanCondense_InvalidSettingsAreBadRequest()
     {
-        _email.Setup(e => e.PlanCondensedDeliveryAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.PlanCondensedDeliveryAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("At most 500 issues can be condensed into a single book."));
 
         var result = await CreateController().PlanCondense(
@@ -647,6 +746,7 @@ public sealed class EmailControllerTests : IDisposable
         Assert.Equal("application/epub+zip", file.ContentType);
         Assert.Equal("Saga 001-002.epub", file.FileDownloadName);
         _email.Verify(e => e.CreateCondensedBookAsync(
+            It.IsAny<EmailAccessScope>(),
             files, "count", 2, 1, false, 6, false, null, "epub", It.IsAny<CancellationToken>()), Times.Once);
 
         using (var reader = new StreamReader(file.FileStream))
@@ -685,6 +785,7 @@ public sealed class EmailControllerTests : IDisposable
         Assert.Equal("application/x-mobi8-ebook", file.ContentType);
         Assert.Equal("Saga.AZW3", file.FileDownloadName);
         _email.Verify(e => e.CreateCondensedBookAsync(
+            It.IsAny<EmailAccessScope>(),
             It.Is<IEnumerable<string>>(f => f.SequenceEqual(new[] { "/lib/Saga/Saga 002.cbz", "/lib/Saga/Saga 001.cbz" })),
             "all", null, 0, true, null, true, null, "azw3", It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -814,8 +915,8 @@ public sealed class EmailControllerTests : IDisposable
     {
         var buildId = Guid.NewGuid();
         CondensedBookBuildRequest? captured = null;
-        _builds.Setup(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .Callback<CondensedBookBuildRequest, string?, CancellationToken>((request, _, _) => captured = request)
+        _builds.Setup(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), It.IsAny<EmailAccessScope>(), It.IsAny<CancellationToken>()))
+            .Callback<CondensedBookBuildRequest, EmailAccessScope, CancellationToken>((request, _, _) => captured = request)
             .ReturnsAsync(Build(buildId, CondensedBookBuildStatus.Queued));
         var files = new List<string> { "/lib/Saga/Saga 001.cbz", "/lib/Saga/Saga 002.cbz" };
 
@@ -836,7 +937,7 @@ public sealed class EmailControllerTests : IDisposable
         var json = ToJson(accepted.Value);
         Assert.Equal(buildId.ToString(), json.GetProperty("build_id").GetString());
         Assert.Equal("queued", json.GetProperty("status").GetString());
-        _builds.Verify(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), UserId, It.IsAny<CancellationToken>()), Times.Once);
+        _builds.Verify(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), It.Is<EmailAccessScope>(s => s.UserId == UserId && !s.IsAdministrator), It.IsAny<CancellationToken>()), Times.Once);
         Assert.NotNull(captured);
         Assert.Equal(files, captured!.FilePaths);
         Assert.Equal("count", captured.CondenseMode);
@@ -853,19 +954,31 @@ public sealed class EmailControllerTests : IDisposable
     {
         SetupSeries(Series("/lib/Saga/Saga 001.cbz"));
         CondensedBookBuildRequest? captured = null;
-        _builds.Setup(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .Callback<CondensedBookBuildRequest, string?, CancellationToken>((request, _, _) => captured = request)
+        _builds.Setup(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), It.IsAny<EmailAccessScope>(), It.IsAny<CancellationToken>()))
+            .Callback<CondensedBookBuildRequest, EmailAccessScope, CancellationToken>((request, _, _) => captured = request)
             .ReturnsAsync(Build(Guid.NewGuid()));
 
-        var result = await CreateController(Anonymous()).StartCondenseBuild(
+        var result = await CreateController().StartCondenseBuild(
             new EmailController.CondenseRequest { SeriesId = SeriesId, CondenseMode = "all" },
             CancellationToken.None);
 
         Assert.IsType<AcceptedResult>(result.Result);
         Assert.True(captured!.PreserveIssueOrder);
         Assert.Equal(new[] { "/lib/Saga/Saga 001.cbz" }, captured.FilePaths);
-        // A caller without a user id still gets a build, owned by nobody.
-        _builds.Verify(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task StartCondenseBuild_RefusesACallerWithoutAUserId()
+    {
+        // Builds, devices and deliveries are per user: a caller that is nobody
+        // could neither own the build nor collect it.
+        var result = await CreateController(Anonymous()).StartCondenseBuild(
+            new EmailController.CondenseRequest { SeriesId = SeriesId, CondenseMode = "all" },
+            CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(result.Result).StatusCode);
+        _builds.VerifyNoOtherCalls();
+        _seriesLibrary.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -874,11 +987,11 @@ public sealed class EmailControllerTests : IDisposable
         var controller = CreateController();
         var request = new EmailController.CondenseRequest { Files = new List<string> { "/lib/a.cbz" }, CondenseMode = "count" };
 
-        _builds.Setup(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _builds.Setup(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), It.IsAny<EmailAccessScope>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Condensing by count requires at least 2 issues per book."));
         Assert.Equal("Condensing by count requires at least 2 issues per book.", ErrorOf<BadRequestObjectResult>((await controller.StartCondenseBuild(request, CancellationToken.None)).Result));
 
-        _builds.Setup(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _builds.Setup(b => b.StartAsync(It.IsAny<CondensedBookBuildRequest>(), It.IsAny<EmailAccessScope>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Too many builds are running."));
         Assert.Equal("Too many builds are running.", ErrorOf<BadRequestObjectResult>((await controller.StartCondenseBuild(request, CancellationToken.None)).Result));
     }
@@ -1052,9 +1165,9 @@ public sealed class EmailControllerTests : IDisposable
     public async Task GetSubscriptions_FiltersBySeries()
     {
         var subscription = Subscription();
-        _devices.Setup(d => d.GetSubscriptionsAsync("Saga", It.IsAny<CancellationToken>())).ReturnsAsync(new[] { subscription });
+        _devices.Setup(d => d.GetSubscriptionsAsync(It.IsAny<EmailAccessScope>(), "Saga", It.IsAny<CancellationToken>())).ReturnsAsync(new[] { subscription });
 
-        var json = OkJson(await CreateController().GetSubscriptions("Saga", CancellationToken.None));
+        var json = OkJson(await CreateController().GetSubscriptions("Saga", cancellationToken: CancellationToken.None));
 
         Assert.Equal(11, Assert.Single(json.GetProperty("subscriptions").EnumerateArray()).GetProperty("Id").GetInt32());
     }
@@ -1074,7 +1187,7 @@ public sealed class EmailControllerTests : IDisposable
     public async Task UpsertSubscription_SavesTheSubscription()
     {
         var subscription = Subscription();
-        _devices.Setup(d => d.UpsertSubscriptionAsync("Saga", 2, "device", false, It.IsAny<CancellationToken>())).ReturnsAsync(subscription);
+        _devices.Setup(d => d.UpsertSubscriptionAsync(It.IsAny<EmailAccessScope>(), "Saga", 2, "device", false, It.IsAny<CancellationToken>())).ReturnsAsync(subscription);
 
         var result = await CreateController().UpsertSubscription(
             new EmailController.SubscriptionRequest { SeriesTitle = "Saga", DeviceId = 2, DeliveryFormat = "device", Enabled = false },
@@ -1089,11 +1202,11 @@ public sealed class EmailControllerTests : IDisposable
         var controller = CreateController();
         var request = new EmailController.SubscriptionRequest { SeriesTitle = "Saga", DeviceId = 404 };
 
-        _devices.Setup(d => d.UpsertSubscriptionAsync("Saga", 404, null, true, It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.UpsertSubscriptionAsync(It.IsAny<EmailAccessScope>(), "Saga", 404, null, true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(default(SeriesEmailSubscriptionDto?));
         Assert.Equal("Device not found", ErrorOf<NotFoundObjectResult>((await controller.UpsertSubscription(request, CancellationToken.None)).Result));
 
-        _devices.Setup(d => d.UpsertSubscriptionAsync("Saga", 404, null, true, It.IsAny<CancellationToken>()))
+        _devices.Setup(d => d.UpsertSubscriptionAsync(It.IsAny<EmailAccessScope>(), "Saga", 404, null, true, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Unsupported delivery format 'pdf'."));
         Assert.Equal("Unsupported delivery format 'pdf'.", ErrorOf<BadRequestObjectResult>((await controller.UpsertSubscription(request, CancellationToken.None)).Result));
     }
@@ -1101,7 +1214,7 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task DeleteSubscription_ReportsWhetherTheSubscriptionExisted()
     {
-        _devices.Setup(d => d.DeleteSubscriptionAsync(1, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _devices.Setup(d => d.DeleteSubscriptionAsync(It.IsAny<EmailAccessScope>(), 1, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var controller = CreateController();
 
         var ok = Assert.IsType<OkObjectResult>(await controller.DeleteSubscription(1, CancellationToken.None));
@@ -1113,7 +1226,7 @@ public sealed class EmailControllerTests : IDisposable
     public async Task GetDeliveries_ReturnsTheRequestedPageWithTotals()
     {
         var limitedUntil = new DateTime(2024, 6, 1, 13, 0, 0, DateTimeKind.Utc);
-        _email.Setup(e => e.GetDeliveriesPageAsync(20, 10, It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.GetDeliveriesPageAsync(It.IsAny<EmailAccessScope>(), 20, 10, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ComicEmailDeliveryPage(
                 new[] { Delivery(1, "/lib/a.cbz"), Delivery(2, "/lib/b.cbz") },
                 Total: 42,
@@ -1122,7 +1235,7 @@ public sealed class EmailControllerTests : IDisposable
                 PendingCount: 3,
                 RateLimitedUntil: limitedUntil));
 
-        var json = OkJson(await CreateController().GetDeliveries(limit: 10, offset: 20, CancellationToken.None));
+        var json = OkJson(await CreateController().GetDeliveries(limit: 10, offset: 20, cancellationToken: CancellationToken.None));
 
         Assert.Equal(new[] { 1, 2 }, json.GetProperty("deliveries").EnumerateArray().Select(d => d.GetProperty("Id").GetInt32()));
         Assert.Equal(42, json.GetProperty("total").GetInt32());
@@ -1135,7 +1248,7 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task GetDeliveries_DefaultsToTheFirstFiftyDeliveries()
     {
-        _email.Setup(e => e.GetDeliveriesPageAsync(0, 50, It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.GetDeliveriesPageAsync(It.IsAny<EmailAccessScope>(), 0, 50, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ComicEmailDeliveryPage(Array.Empty<ComicEmailDeliveryDto>(), 0, 0, 50, 0, null));
 
         var json = OkJson(await CreateController().GetDeliveries());
@@ -1148,7 +1261,7 @@ public sealed class EmailControllerTests : IDisposable
     public async Task CancelDelivery_ReturnsTheCancelledDelivery()
     {
         var cancelled = Delivery(1, "/lib/a.cbz") with { Status = EmailDeliveryStatus.Cancelled };
-        _email.Setup(e => e.CancelDeliveryAsync(1, It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.CancelDeliveryAsync(It.IsAny<EmailAccessScope>(), 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.Cancelled, cancelled));
 
         var json = OkJson(await CreateController().CancelDelivery(1, CancellationToken.None));
@@ -1160,7 +1273,7 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task CancelDelivery_IsAcceptedWhileThePreparationStops()
     {
-        _email.Setup(e => e.CancelDeliveryAsync(1, It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.CancelDeliveryAsync(It.IsAny<EmailAccessScope>(), 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.Stopping, Delivery(1, "/lib/a.cbz")));
 
         var result = await CreateController().CancelDelivery(1, CancellationToken.None);
@@ -1174,7 +1287,7 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task CancelDelivery_UnknownDeliveryIsNotFound()
     {
-        _email.Setup(e => e.CancelDeliveryAsync(404, It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.CancelDeliveryAsync(It.IsAny<EmailAccessScope>(), 404, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.NotFound, null));
 
         var result = await CreateController().CancelDelivery(404, CancellationToken.None);
@@ -1194,7 +1307,7 @@ public sealed class EmailControllerTests : IDisposable
         string expectedError)
     {
         var delivery = Delivery(1, "/lib/a.cbz") with { Status = status };
-        _email.Setup(e => e.CancelDeliveryAsync(1, It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.CancelDeliveryAsync(It.IsAny<EmailAccessScope>(), 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EmailDeliveryCancelResult(outcome, delivery));
 
         var result = await CreateController().CancelDelivery(1, CancellationToken.None);
@@ -1207,10 +1320,10 @@ public sealed class EmailControllerTests : IDisposable
     [Fact]
     public async Task CancelPendingDeliveries_ReportsWhatWasCancelled()
     {
-        _email.Setup(e => e.CancelPendingDeliveriesAsync(It.IsAny<CancellationToken>()))
+        _email.Setup(e => e.CancelPendingDeliveriesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EmailDeliveryBulkCancelResult(Cancelled: 4, Stopping: 1, Sending: 2));
 
-        var json = OkJson(await CreateController().CancelPendingDeliveries(CancellationToken.None));
+        var json = OkJson(await CreateController().CancelPendingDeliveries(cancellationToken: CancellationToken.None));
 
         Assert.Equal(4, json.GetProperty("cancelled").GetInt32());
         Assert.Equal(1, json.GetProperty("stopping").GetInt32());
@@ -1232,6 +1345,7 @@ public sealed class EmailControllerTests : IDisposable
             _email.Object,
             _builds.Object,
             _seriesLibrary.Object,
+            new RoleAuthorizationService(),
             Mock.Of<IOptionsMonitor<AppSettings>>(m => m.CurrentValue == _settings),
             _logger.Object)
         {
@@ -1240,6 +1354,26 @@ public sealed class EmailControllerTests : IDisposable
     }
 
     private static ClaimsPrincipal Anonymous() => new(new ClaimsIdentity());
+
+    private static ClaimsPrincipal Administrator() => new(new ClaimsIdentity(
+        new[] { new Claim(ClaimTypes.NameIdentifier, "admin-1"), new Claim(ClaimTypes.Role, "Admin") },
+        "Test"));
+
+    /// <summary>Grants CanAdminister to members of the Admin role, like the real policy.</summary>
+    private sealed class RoleAuthorizationService : IAuthorizationService
+    {
+        public Task<AuthorizationResult> AuthorizeAsync(
+            ClaimsPrincipal user,
+            object? resource,
+            IEnumerable<IAuthorizationRequirement> requirements) =>
+            throw new NotSupportedException();
+
+        public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, string policyName) =>
+            Task.FromResult(
+                policyName == AuthorizationPolicies.CanAdminister && user.IsInRole("Admin")
+                    ? AuthorizationResult.Success()
+                    : AuthorizationResult.Failed());
+    }
 
     private static JsonElement ToJson(object? value) => JsonSerializer.SerializeToElement(value);
 
@@ -1265,28 +1399,28 @@ public sealed class EmailControllerTests : IDisposable
 
     private void SetupQueueFiles(EmailQueueResult result) =>
         _email
-            .Setup(e => e.QueueFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.QueueFilesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(result);
 
     private void SetupQueueCondensed(EmailQueueResult result) =>
         _email
-            .Setup(e => e.QueueCondensedFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.QueueCondensedFilesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(result);
 
     private void VerifyNoPlainQueue() =>
-        _email.Verify(e => e.QueueFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _email.Verify(e => e.QueueFilesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
 
     private void VerifyNoCondensedQueue() =>
-        _email.Verify(e => e.QueueCondensedFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _email.Verify(e => e.QueueCondensedFilesAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
 
     private void SetupCreateBook(CondensedBookFile book) =>
         _email
-            .Setup(e => e.CreateCondensedBookAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<IProgress<EpubConversionProgress>?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.CreateCondensedBookAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<IProgress<EpubConversionProgress>?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(book);
 
     private void SetupCreateBookThrows(Exception exception) =>
         _email
-            .Setup(e => e.CreateCondensedBookAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<IProgress<EpubConversionProgress>?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.CreateCondensedBookAsync(It.IsAny<EmailAccessScope>(), It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int?>(), It.IsAny<bool>(), It.IsAny<IProgress<EpubConversionProgress>?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(exception);
 
     private static SeriesIssuesResult Series(params string[] files) => new()

@@ -908,7 +908,7 @@
                             <label for="staleCleanupMissingGraceHours">Remove Missing Files After (Hours)</label>
                             <input type="number" id="staleCleanupMissingGraceHours" name="staleCleanupMissingGraceHours" min="0" max="720" step="1" placeholder="6" autocomplete="off">
                             <small class="form-hint">
-                                A scheduled cleanup only removes a file that an earlier cleanup, at least this long before, also could not find. A file that comes back in the meantime keeps its processing state and metadata edits.
+                                A cleanup only removes a file that an earlier cleanup, at least this long before, also could not find (so even 0 takes two cleanups); Clean Database Now asks before removing anything newer. A file that comes back in the meantime keeps its processing state and metadata edits.
                             </small>
                         </div>
 

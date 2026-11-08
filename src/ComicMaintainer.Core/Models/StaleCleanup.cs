@@ -4,15 +4,18 @@ namespace ComicMaintainer.Core.Models;
 /// How a stale-entry cleanup was started, which decides how cautious it is.
 /// </summary>
 /// <param name="IsManual">
-/// True for a cleanup an administrator started (the settings or files endpoint). A manual
-/// run deletes rows for files that are missing right now instead of waiting for a second
-/// run after <c>AppSettings.StaleCleanupMissingGraceHours</c>.
+/// True for a cleanup an administrator started (the settings or files endpoint). Like a
+/// scheduled run, a manual run deletes a row by itself only once an earlier run first
+/// missed the file at least <c>AppSettings.StaleCleanupMissingGraceHours</c> ago; for any
+/// other missing file it stops and asks for confirmation.
 /// </param>
 /// <param name="Confirmed">
-/// True when the administrator confirmed a cleanup that the guards stopped because the
-/// watched directory held no comics or because it would delete more than
-/// <c>AppSettings.StaleCleanupMaxRemovalPercent</c> of the library. Ignored for scheduled
-/// runs, and never overrides a missing watched directory or sentinel file.
+/// True when the administrator confirmed a cleanup that the guards stopped: the watched
+/// directory held no comics, the run would delete more than
+/// <c>AppSettings.StaleCleanupMaxRemovalPercent</c> of the library, or missing files have
+/// not yet stayed missing for the grace period. A confirmed run deletes every row whose
+/// file is missing right now. Ignored for scheduled runs, and never overrides a missing
+/// watched directory or sentinel file.
 /// </param>
 public sealed record StaleCleanupOptions(bool IsManual = false, bool Confirmed = false)
 {
@@ -50,6 +53,14 @@ public enum StaleCleanupStatus
     /// </summary>
     ThresholdExceeded,
 
+    /// <summary>
+    /// A manual run found missing files it may not delete by itself: no earlier run has
+    /// missed them for the grace period (a share may be briefly offline), or a duplicate
+    /// directory holds no comics although files are tracked under it. Missing files were
+    /// stamped but nothing was deleted; a confirmed manual run may proceed.
+    /// </summary>
+    ConfirmationRequired,
+
     /// <summary>The run failed (for example the database was unavailable). Nothing was deleted.</summary>
     Failed,
 
@@ -73,7 +84,7 @@ public sealed record StaleCleanupResult
     /// <summary>Rows whose file could not be found on disk during this run.</summary>
     public int MissingCount { get; init; }
 
-    /// <summary>Rows this run would delete (missing for long enough), before the share guard.</summary>
+    /// <summary>Rows this run may delete (missing for long enough, or confirmed), before the share guard.</summary>
     public int RemovableCount { get; init; }
 
     /// <summary>Rows first seen missing by this run; they are deleted by a later run if still missing.</summary>
@@ -93,5 +104,7 @@ public sealed record StaleCleanupResult
 
     /// <summary>True when an administrator may repeat the run with <see cref="StaleCleanupOptions.Confirmed"/>.</summary>
     public bool RequiresConfirmation =>
-        Status is StaleCleanupStatus.WatchedDirectoryEmpty or StaleCleanupStatus.ThresholdExceeded;
+        Status is StaleCleanupStatus.WatchedDirectoryEmpty
+            or StaleCleanupStatus.ThresholdExceeded
+            or StaleCleanupStatus.ConfirmationRequired;
 }

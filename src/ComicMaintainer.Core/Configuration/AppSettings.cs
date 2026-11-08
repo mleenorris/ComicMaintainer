@@ -67,9 +67,10 @@ public class AppSettings
 
     /// <summary>
     /// How long (hours) a tracked file must have been missing, as seen by two cleanup runs at
-    /// least this far apart, before a scheduled cleanup deletes its row. The first run that
-    /// cannot find the file only stamps <c>MissingSince</c>; a file that reappears in the
-    /// meantime keeps its row and everything stored on it. A manual cleanup does not wait.
+    /// least this far apart, before a cleanup deletes its row. The first run that cannot find
+    /// the file only stamps <c>MissingSince</c>, so even 0 takes a second run; a file that
+    /// reappears in the meantime keeps its row and everything stored on it. A manual cleanup
+    /// asks for confirmation before deleting a file that has not been missing this long.
     /// </summary>
     public int StaleCleanupMissingGraceHours { get; set; } = 6;
 

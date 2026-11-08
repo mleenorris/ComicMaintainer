@@ -847,18 +847,18 @@ public class SettingsController : ControllerBase
     }
 
     /// <summary>
-    /// Body of <c>PUT /api/settings/database-cleanup</c>; an omitted value takes its default.
+    /// Body of <c>PUT /api/settings/database-cleanup</c>; an omitted value keeps its current setting.
     /// </summary>
     public class DatabaseCleanupSettingsRequest
     {
         /// <summary>Hours between scheduled cleanups; 0 runs it only once after start-up.</summary>
-        public int IntervalHours { get; set; } = 12;
+        public int? IntervalHours { get; set; }
 
         /// <summary>Largest share of the library (0-100 percent) one cleanup may remove without confirmation.</summary>
-        public int StaleCleanupMaxRemovalPercent { get; set; } = 10;
+        public int? StaleCleanupMaxRemovalPercent { get; set; }
 
-        /// <summary>Hours a file must stay missing before a scheduled cleanup removes its row.</summary>
-        public int StaleCleanupMissingGraceHours { get; set; } = 6;
+        /// <summary>Hours a file must stay missing before a cleanup removes its row without confirmation.</summary>
+        public int? StaleCleanupMissingGraceHours { get; set; }
 
         /// <summary>File that must exist before any cleanup runs (relative to the watched directory); empty disables it.</summary>
         public string? StaleCleanupSentinelFile { get; set; }

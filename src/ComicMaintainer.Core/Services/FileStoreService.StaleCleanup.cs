@@ -43,11 +43,15 @@ public partial class FileStoreService
     /// sentinel file is missing, or (unless confirmed) when the watched directory holds no
     /// comics at all — what an unmounted share looks like. A file must be missing on two
     /// runs at least <see cref="AppSettings.StaleCleanupMissingGraceHours"/> apart before a
-    /// scheduled run deletes its row: the first run only stamps <c>MissingSince</c>, and the
-    /// stamp is cleared when the file is seen again. A run that would delete more than
-    /// <see cref="AppSettings.StaleCleanupMaxRemovalPercent"/> of the library deletes
+    /// run deletes its row: the first run only stamps <c>MissingSince</c> (so even a grace of
+    /// zero takes a second run), and the stamp is cleared when the file is seen again. A
+    /// manual run that finds other missing files deletes nothing and asks for confirmation;
+    /// a confirmed run deletes whatever is missing right now. A run that would delete more
+    /// than <see cref="AppSettings.StaleCleanupMaxRemovalPercent"/> of the library deletes
     /// nothing unless an administrator confirms it. A file whose check fails with an I/O or
-    /// permission error is left alone.
+    /// permission error is left alone, and so are the rows under a duplicate directory that
+    /// is unavailable or (unless confirmed) holds no comics, since that directory can be an
+    /// unmounted share of its own.
     /// </remarks>
     public async Task<StaleCleanupResult> CleanupStaleEntriesAsync(
         StaleCleanupOptions options,
@@ -118,24 +122,39 @@ public partial class FileStoreService
                     rows.Count);
             }
 
-            // Rows in a duplicate directory that is not there (an unmounted share of its
-            // own) cannot be checked either.
+            // The duplicate directory can be an unmounted share of its own. Its rows cannot be
+            // checked while it is not there, and while it holds no comics at all they stay
+            // unchecked unless an administrator confirms, just as for the watched directory.
             var duplicateDirectory = settings.DuplicateDirectory;
-            var duplicateRootMissing = !string.IsNullOrWhiteSpace(duplicateDirectory)
-                && ProbeLibraryRoot(duplicateDirectory) == LibraryRootState.Unavailable;
+            var duplicateRootState = string.IsNullOrWhiteSpace(duplicateDirectory)
+                ? LibraryRootState.Populated
+                : ProbeLibraryRoot(duplicateDirectory);
+            var skipDuplicateRoot = duplicateRootState == LibraryRootState.Unavailable
+                || (duplicateRootState == LibraryRootState.Empty && !confirmed);
 
             var now = DateTime.UtcNow;
             var removable = new List<string>();
             var newlyMissing = new List<string>();
             var restored = new List<string>();
-            int missing = 0, unknown = 0;
+            int missing = 0, unknown = 0, inEmptyDuplicateRoot = 0;
             foreach (var row in rows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var state = duplicateRootMissing && IsWithin(row.FilePath, duplicateDirectory!)
-                    ? TrackedFileState.Unknown
-                    : ProbeTrackedFile(row.FilePath);
+                TrackedFileState state;
+                if (skipDuplicateRoot && IsWithin(row.FilePath, duplicateDirectory!))
+                {
+                    state = TrackedFileState.Unknown;
+                    if (duplicateRootState == LibraryRootState.Empty)
+                    {
+                        inEmptyDuplicateRoot++;
+                    }
+                }
+                else
+                {
+                    state = ProbeTrackedFile(row.FilePath);
+                }
+
                 switch (state)
                 {
                     case TrackedFileState.Present:
@@ -154,10 +173,10 @@ public partial class FileStoreService
                             newlyMissing.Add(row.FilePath);
                         }
 
-                        // A manual run acts on what is missing now; a scheduled run only once
-                        // the file has stayed missing for the grace period since an earlier run
-                        // first missed it.
-                        if (options.IsManual || (row.MissingSince is { } since && now - since >= grace))
+                        // Deleted only once the file has stayed missing for the grace period
+                        // since an earlier run first missed it, unless an administrator has
+                        // confirmed that what is missing right now should go.
+                        if (confirmed || (row.MissingSince is { } since && now - since >= grace))
                         {
                             removable.Add(row.FilePath);
                         }
@@ -169,15 +188,21 @@ public partial class FileStoreService
                 ? int.MaxValue
                 : Math.Max(StaleCleanupAlwaysAllowedRemovals, (int)((long)rows.Count * maxRemovalPercent / 100));
             var overThreshold = removable.Count > allowed && !confirmed;
-            var toDelete = overThreshold ? new List<string>() : removable;
+            var waiting = missing - removable.Count;
+
+            // A manual run answers straight away, so instead of leaving these for a later run
+            // it stops and lets the administrator decide (scheduled runs simply come back).
+            var needsConfirmation = !overThreshold && options.IsManual && !confirmed
+                && (waiting > 0 || inEmptyDuplicateRoot > 0);
+            var toDelete = overThreshold || needsConfirmation ? new List<string>() : removable;
 
             // Stamps, cleared stamps and deletions are saved together in one transaction. The
             // statements are set-based and keyed by path, so a row renamed while the disk was
-            // being checked (it now has a different path) is left alone. A scheduled run only
+            // being checked (it now has a different path) is left alone. An unconfirmed run only
             // deletes rows that still carry their stamp: re-adding a file that came back in
             // the meantime clears it (RefreshFromDisk), which keeps that row.
             cancellationToken.ThrowIfCancellationRequested();
-            var deleteUnstamped = options.IsManual;
+            var deleteUnstamped = confirmed;
             var deleted = new List<string>(toDelete.Count);
             await using (var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken))
             {
@@ -223,17 +248,16 @@ public partial class FileStoreService
             var removedCount = deleted.Count;
             if (removedCount > 0)
             {
-                foreach (var path in deleted)
-                {
-                    ForgetCommittedRow(path);
-                }
+                await MirrorCommittedRowsAsync(Array.Empty<ComicFileEntity>(), deleted);
                 MarkChanged();
                 await BroadcastFileListUpdateAfterCleanupAsync();
             }
 
             var result = new StaleCleanupResult
             {
-                Status = overThreshold ? StaleCleanupStatus.ThresholdExceeded : StaleCleanupStatus.Completed,
+                Status = overThreshold
+                    ? StaleCleanupStatus.ThresholdExceeded
+                    : needsConfirmation ? StaleCleanupStatus.ConfirmationRequired : StaleCleanupStatus.Completed,
                 RemovedCount = removedCount,
                 TrackedCount = rows.Count,
                 MissingCount = missing,
@@ -244,7 +268,9 @@ public partial class FileStoreService
                 MaxRemovalPercent = maxRemovalPercent,
                 Message = overThreshold
                     ? $"{removable.Count} of {rows.Count} tracked files are missing, more than the {maxRemovalPercent}% one cleanup may remove without confirmation. No rows were removed; check that the whole library is mounted."
-                    : DescribeCompletedCleanup(removedCount, missing - removable.Count, restored.Count, unknown, grace),
+                    : needsConfirmation
+                        ? DescribeUnconfirmedCleanup(waiting, inEmptyDuplicateRoot, grace)
+                        : DescribeCompletedCleanup(removedCount, waiting, restored.Count, unknown, grace),
             };
 
             if (overThreshold)
@@ -253,11 +279,17 @@ public partial class FileStoreService
                     "Stale-entry cleanup ({RunKind}) skipped: {Removable} of {Tracked} tracked files are missing, more than the {Percent}% one cleanup may remove without confirmation. No rows were removed",
                     runKind, removable.Count, rows.Count, maxRemovalPercent);
             }
+            else if (needsConfirmation)
+            {
+                _logger.LogWarning(
+                    "Stale-entry cleanup ({RunKind}) needs confirmation: {Waiting} missing file(s) have not stayed missing for the grace period and {EmptyDuplicates} are under a duplicate directory holding no comics. No rows were removed",
+                    runKind, waiting, inEmptyDuplicateRoot);
+            }
             else
             {
                 _logger.LogInformation(
                     "Stale-entry cleanup ({RunKind}) completed: removed {Removed}, waiting {Waiting}, reappeared {Restored}, unchecked {Unchecked} of {Tracked} tracked files",
-                    runKind, removedCount, missing - removable.Count, restored.Count, unknown, rows.Count);
+                    runKind, removedCount, waiting, restored.Count, unknown, rows.Count);
             }
 
             if (unknown > 0)
@@ -309,6 +341,21 @@ public partial class FileStoreService
         {
             _logger.LogWarning(ex, "Failed to broadcast file list update after stale-entry cleanup");
         }
+    }
+
+    private static string DescribeUnconfirmedCleanup(int waiting, int inEmptyDuplicateRoot, TimeSpan grace)
+    {
+        var parts = new List<string>();
+        if (waiting > 0)
+        {
+            parts.Add($"{waiting} tracked file(s) have only just gone missing (a cleanup must miss a file twice, {grace.TotalHours:0.#} hour(s) apart, before removing it by itself); part of the library may be briefly offline.");
+        }
+        if (inEmptyDuplicateRoot > 0)
+        {
+            parts.Add($"{inEmptyDuplicateRoot} tracked file(s) are in the duplicate directory, which holds no comics and may be unmounted.");
+        }
+        parts.Add("No rows were removed.");
+        return string.Join(' ', parts);
     }
 
     private static string DescribeCompletedCleanup(int removed, int waiting, int restored, int unknown, TimeSpan grace)

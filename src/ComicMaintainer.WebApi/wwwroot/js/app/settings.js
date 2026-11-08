@@ -1670,9 +1670,10 @@
         /**
          * "Clean Database Now". The server refuses (409) while the library looks
          * unmounted, and asks for confirmation (409 with requiresConfirmation)
-         * before removing more than the configured share of the library or when
-         * the watched folder holds no comics; the request is then repeated with
-         * ?confirm=true only if the administrator agrees.
+         * before removing more than the configured share of the library, files
+         * that have not stayed missing for the grace period, or when the watched
+         * folder holds no comics; the request is then repeated with ?confirm=true
+         * only if the administrator agrees.
          */
         async function cleanupDatabaseNow() {
             try {

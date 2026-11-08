@@ -126,7 +126,7 @@ public sealed class FileStoreServiceStaleCleanupTests : IAsyncLifetime
         Assert.Equal(11, (await RowsAsync()).Count);
 
         await File.WriteAllTextAsync(Path.Join(_library, ".library-mounted"), string.Empty);
-        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual);
+        var result = await service.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: true));
 
         Assert.Equal(StaleCleanupStatus.Completed, result.Status);
         Assert.Equal(1, result.RemovedCount);
@@ -253,7 +253,12 @@ public sealed class FileStoreServiceStaleCleanupTests : IAsyncLifetime
     {
         // 2 of 4 files is 50%, but a handful of removals never needs confirmation.
         _settings.StaleCleanupMaxRemovalPercent = 10;
-        await TrackAsync(present: 2, missing: 2);
+        _settings.StaleCleanupMissingGraceHours = 1;
+        var paths = await TrackAsync(present: 2, missing: 2);
+        foreach (var path in paths.Missing)
+        {
+            await SetMissingSinceAsync(path, DateTime.UtcNow.AddDays(-1));
+        }
         var service = await CreateServiceAsync();
 
         var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual);
@@ -263,17 +268,97 @@ public sealed class FileStoreServiceStaleCleanupTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ManualRun_RemovesWhatIsMissingNowWithoutWaitingForASecondRun()
+    public async Task ManualRun_AFileJustFoundMissing_AsksForConfirmationAndRemovesNothing()
     {
+        // A small sub-share offline when the administrator clicks "Clean Database Now": well
+        // under the removal share, so only the two-run rule protects these rows.
         var paths = await TrackAsync(present: 20, missing: 1);
         var service = await CreateServiceAsync();
 
         var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual);
 
+        Assert.Equal(StaleCleanupStatus.ConfirmationRequired, result.Status);
+        Assert.True(result.RequiresConfirmation);
+        Assert.Equal(0, result.RemovedCount);
+        Assert.Equal(1, result.MissingCount);
+        Assert.Equal(0, result.RemovableCount);
+        Assert.Contains("No rows were removed", result.Message);
+        Assert.NotNull((await RowsAsync())[paths.Missing[0]].MissingSince);
+        Assert.True(await service.FileExistsAsync(paths.Missing[0]));
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Never());
+    }
+
+    [Fact]
+    public async Task ManualRun_Confirmed_RemovesWhatIsMissingNowWithoutWaitingForASecondRun()
+    {
+        var paths = await TrackAsync(present: 20, missing: 1);
+        var service = await CreateServiceAsync();
+
+        var result = await service.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: true));
+
         Assert.Equal(StaleCleanupStatus.Completed, result.Status);
         Assert.Equal(1, result.RemovedCount);
         Assert.DoesNotContain(paths.Missing[0], (await RowsAsync()).Keys);
         Assert.False(await service.FileExistsAsync(paths.Missing[0]));
+    }
+
+    [Fact]
+    public async Task ManualRun_AFileMissingForTheGracePeriod_IsRemovedWithoutConfirmation()
+    {
+        _settings.StaleCleanupMissingGraceHours = 6;
+        var paths = await TrackAsync(present: 20, missing: 1);
+        await SetMissingSinceAsync(paths.Missing[0], DateTime.UtcNow.AddHours(-7));
+        var service = await CreateServiceAsync();
+
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual);
+
+        Assert.Equal(StaleCleanupStatus.Completed, result.Status);
+        Assert.False(result.RequiresConfirmation);
+        Assert.Equal(1, result.RemovedCount);
+        Assert.DoesNotContain(paths.Missing[0], (await RowsAsync()).Keys);
+    }
+
+    [Fact]
+    public async Task ManualRun_SomeFilesStillWithinTheGracePeriod_RemovesNothingUntilConfirmed()
+    {
+        // Declining the prompt must leave everything in place, so the run holds back the
+        // file past its grace period as well.
+        _settings.StaleCleanupMissingGraceHours = 6;
+        var paths = await TrackAsync(present: 20, missing: 2);
+        var pastGrace = paths.Missing[0];
+        var recent = paths.Missing[1];
+        await SetMissingSinceAsync(pastGrace, DateTime.UtcNow.AddHours(-7));
+        await SetMissingSinceAsync(recent, DateTime.UtcNow.AddHours(-1));
+        var service = await CreateServiceAsync();
+
+        var unconfirmed = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual);
+
+        Assert.Equal(StaleCleanupStatus.ConfirmationRequired, unconfirmed.Status);
+        Assert.Equal(0, unconfirmed.RemovedCount);
+        Assert.Equal(22, (await RowsAsync()).Count);
+
+        var confirmed = await service.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: true));
+
+        Assert.Equal(StaleCleanupStatus.Completed, confirmed.Status);
+        Assert.Equal(2, confirmed.RemovedCount);
+    }
+
+    [Fact]
+    public async Task GraceOfZero_StillTakesASecondRun()
+    {
+        _settings.StaleCleanupMissingGraceHours = 0;
+        var paths = await TrackAsync(present: 20, missing: 1);
+        var service = await CreateServiceAsync();
+
+        var first = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled);
+
+        Assert.Equal(0, first.RemovedCount);
+        Assert.NotNull((await RowsAsync())[paths.Missing[0]].MissingSince);
+
+        var second = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled);
+
+        Assert.Equal(1, second.RemovedCount);
+        Assert.DoesNotContain(paths.Missing[0], (await RowsAsync()).Keys);
     }
 
     [Fact]
@@ -293,6 +378,75 @@ public sealed class FileStoreServiceStaleCleanupTests : IAsyncLifetime
         Assert.Equal(0, result.RemovedCount);
         var row = (await RowsAsync())[duplicate];
         Assert.Null(row.MissingSince);
+    }
+
+    [Fact]
+    public async Task FilesInAnEmptyDuplicateDirectory_ScheduledRun_AreLeftUnchecked()
+    {
+        // A separately mounted duplicate share that is unmounted shows up as an empty
+        // directory. Even a row stamped long ago must survive that.
+        _settings.StaleCleanupMissingGraceHours = 1;
+        await TrackAsync(present: 5, missing: 0);
+        var duplicates = Directory.CreateDirectory(Path.Join(_root, "duplicates")).FullName;
+        _settings.DuplicateDirectory = duplicates;
+        var stamped = Path.Join(duplicates, "Saga", "Saga 001.cbz");
+        var unstamped = Path.Join(duplicates, "Saga", "Saga 002.cbz");
+        await InsertRowsAsync(stamped, unstamped);
+        await SetMissingSinceAsync(stamped, DateTime.UtcNow.AddDays(-1));
+        var service = await CreateServiceAsync();
+
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled);
+
+        Assert.Equal(StaleCleanupStatus.Completed, result.Status);
+        Assert.Equal(2, result.UncheckedCount);
+        Assert.Equal(0, result.RemovedCount);
+        var rows = await RowsAsync();
+        Assert.Contains(stamped, rows.Keys);
+        Assert.Null(rows[unstamped].MissingSince);
+    }
+
+    [Fact]
+    public async Task FilesInAnEmptyDuplicateDirectory_ManualRun_AsksForConfirmationAndConfirmedRemovesThem()
+    {
+        await TrackAsync(present: 5, missing: 0);
+        var duplicates = Directory.CreateDirectory(Path.Join(_root, "duplicates")).FullName;
+        _settings.DuplicateDirectory = duplicates;
+        var duplicate = Path.Join(duplicates, "Saga", "Saga 001.cbz");
+        await InsertRowsAsync(duplicate);
+        var service = await CreateServiceAsync();
+
+        var unconfirmed = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual);
+
+        Assert.Equal(StaleCleanupStatus.ConfirmationRequired, unconfirmed.Status);
+        Assert.Contains("duplicate directory", unconfirmed.Message);
+        Assert.Contains(duplicate, (await RowsAsync()).Keys);
+
+        var confirmed = await service.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: true));
+
+        Assert.Equal(StaleCleanupStatus.Completed, confirmed.Status);
+        Assert.Equal(1, confirmed.RemovedCount);
+        Assert.DoesNotContain(duplicate, (await RowsAsync()).Keys);
+    }
+
+    [Fact]
+    public async Task FilesInAPopulatedDuplicateDirectory_AreCheckedLikeAnyOther()
+    {
+        await TrackAsync(present: 5, missing: 0);
+        var duplicates = Directory.CreateDirectory(Path.Join(_root, "duplicates")).FullName;
+        _settings.DuplicateDirectory = duplicates;
+        var present = Path.Join(duplicates, "Saga 001.cbz");
+        await File.WriteAllTextAsync(present, "comic");
+        var gone = Path.Join(duplicates, "Saga 002.cbz");
+        await InsertRowsAsync(present, gone);
+        var service = await CreateServiceAsync();
+
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled);
+
+        Assert.Equal(0, result.UncheckedCount);
+        Assert.Equal(1, result.NewlyMissingCount);
+        var rows = await RowsAsync();
+        Assert.Null(rows[present].MissingSince);
+        Assert.NotNull(rows[gone].MissingSince);
     }
 
     [Fact]

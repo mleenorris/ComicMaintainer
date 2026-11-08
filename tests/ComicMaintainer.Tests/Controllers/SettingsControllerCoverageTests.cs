@@ -873,6 +873,37 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
+    public async Task UpdateDatabaseCleanupSettings_OmittedValuesKeepTheirCurrentSetting()
+    {
+        // A script changing the interval must not clear the sentinel file (disabling the
+        // mount guard) or reset the other guards to their defaults.
+        _settings.StaleCleanupMaxRemovalPercent = 15;
+        _settings.StaleCleanupMissingGraceHours = 24;
+        _settings.StaleCleanupSentinelFile = ".mounted";
+        _settings.ProcessingHistoryRetentionDays = 30;
+        _settings.ProcessingHistoryMaxEntries = 20000;
+
+        await CreateController().UpdateDatabaseCleanupSettings(new() { IntervalHours = 24 });
+
+        _settingsService.Verify(
+            s => s.UpdateDatabaseCleanupSettingsAsync(new DatabaseCleanupSettings(24, 15, 24, ".mounted", 30, 20000), It.IsAny<CancellationToken>()),
+            Times.Once());
+    }
+
+    [Fact]
+    public async Task UpdateDatabaseCleanupSettings_AnExplicitlyEmptySentinelClearsIt()
+    {
+        _settings.StaleCleanupSentinelFile = ".mounted";
+
+        await CreateController().UpdateDatabaseCleanupSettings(new() { StaleCleanupSentinelFile = "" });
+
+        _settingsService.Verify(
+            s => s.UpdateDatabaseCleanupSettingsAsync(
+                It.Is<DatabaseCleanupSettings>(d => d.StaleCleanupSentinelFile == ""), It.IsAny<CancellationToken>()),
+            Times.Once());
+    }
+
+    [Fact]
     public async Task UpdateDatabaseCleanupSettings_OutOfRange_Returns400WithTheReason()
     {
         _settingsService
@@ -939,6 +970,8 @@ public class SettingsControllerCoverageTests
         Assert.True(json.GetProperty("success").GetBoolean());
         Assert.Equal("Database reset completed successfully", json.GetProperty("message").GetString());
         Assert.Equal((0, 0), countsWhenStoreReinitialized);
+        // The history page must not keep reporting the entries that were just deleted.
+        _history.Verify(h => h.InvalidateTotalCount(), Times.Once());
         _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once());
         VerifyLogged(LogLevel.Information, running.JobId.ToString(), Times.Once());
         VerifyLogged(LogLevel.Information, queued.JobId.ToString(), Times.Once());
@@ -970,8 +1003,6 @@ public class SettingsControllerCoverageTests
             {
                 using var check = db.Factory.CreateDbContext();
                 filesLeftWhenCancelled.Add(jobId, check.ComicFiles.Count());
-        // The history page must not keep reporting the entries that were just deleted.
-        _history.Verify(h => h.InvalidateTotalCount(), Times.Once());
                 return jobId != finishedMeanwhile.JobId;
             });
 

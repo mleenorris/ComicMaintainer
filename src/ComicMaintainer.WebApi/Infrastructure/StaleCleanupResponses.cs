@@ -11,8 +11,9 @@ namespace ComicMaintainer.WebApi.Infrastructure;
 /// <list type="bullet">
 /// <item>200: the cleanup ran (<c>removedCount</c> rows were deleted).</item>
 /// <item>409 with <c>requiresConfirmation = true</c>: the watched directory holds no comics,
-/// or more than the configured share of the library would be removed. Repeat the request
-/// with <c>?confirm=true</c> to go ahead.</item>
+/// more than the configured share of the library would be removed, or files are missing
+/// that have not yet stayed missing for the grace period. Nothing was removed; repeat the
+/// request with <c>?confirm=true</c> to go ahead.</item>
 /// <item>409 with <c>requiresConfirmation = false</c>: the watched directory or the sentinel
 /// file is missing; confirmation cannot override that, mount the library first.</item>
 /// <item>499: the request was cancelled; 500: the cleanup failed. Nothing was removed.</item>

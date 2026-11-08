@@ -382,10 +382,11 @@ public class ComicFileEntity
 
     /// <summary>
     /// When the stale-entry cleanup first failed to find this file on disk (UTC), or
-    /// <c>null</c> while the file is present. A scheduled cleanup deletes the row only when a
-    /// later run, at least <c>AppSettings.StaleCleanupMissingGraceHours</c> after this stamp,
-    /// still cannot find it; the stamp is cleared as soon as the file is seen again, so a
-    /// briefly unavailable library keeps every row and everything stored on it.
+    /// <c>null</c> while the file is present. Unless an administrator confirms, a cleanup
+    /// deletes the row only when a later run, at least
+    /// <c>AppSettings.StaleCleanupMissingGraceHours</c> after this stamp, still cannot find
+    /// it; the stamp is cleared as soon as the file is seen again, so a briefly unavailable
+    /// library keeps every row and everything stored on it.
     /// </summary>
     public DateTime? MissingSince { get; set; }
 

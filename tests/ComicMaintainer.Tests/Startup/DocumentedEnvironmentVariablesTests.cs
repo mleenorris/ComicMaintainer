@@ -68,6 +68,7 @@ public sealed class DocumentedEnvironmentVariablesTests
     [InlineData("Dockerfile.dotnet")]
     [InlineData("docker-compose.dotnet.yml")]
     [InlineData(".env.example")]
+    [InlineData("docs/kubernetes-deployment.yaml")]
     public void DeploymentFile_SetsOnlyVariablesTheAppReads(string file)
     {
         var variables = VariablesSetIn(file);
@@ -181,6 +182,8 @@ public sealed class DocumentedEnvironmentVariablesTests
         var assignment = file switch
         {
             "Dockerfile.dotnet" => new Regex(@"^\s*#?\s*ENV\s+(\w+)[=\s]"),
+            // The ConfigMap's data entries: upper-case keys with quoted values.
+            "docs/kubernetes-deployment.yaml" => new Regex(@"^\s*#?\s*([A-Z][A-Za-z0-9_]*):\s*"""),
             "docker-compose.dotnet.yml" => new Regex(@"^\s*#?\s*-\s+(\w+)="),
             _ => new Regex(@"^\s*#?\s*(\w+)="),
         };
@@ -216,6 +219,15 @@ public sealed class DocumentedEnvironmentVariablesTests
     /// <summary>Whether the app, or the Docker image's entrypoint, reads <paramref name="variable"/>.</summary>
     private static bool IsRead(string variable)
     {
+        // A secret such as JWT_SECRET or ADMIN_PASSWORD read through SecretEnvironmentVariable can instead be read from
+        // the file its <name>_FILE variable names.
+        const string fileSuffix = "_FILE";
+        if (variable.EndsWith(fileSuffix, StringComparison.Ordinal)
+            && ReadElsewhere.TryGetValue(variable[..^fileSuffix.Length], out var secretReader))
+        {
+            return File.ReadAllText(Path.Join(RepositoryRoot, secretReader)).Contains("SecretEnvironmentVariable.Read(", StringComparison.Ordinal);
+        }
+
         if (ReadElsewhere.TryGetValue(variable, out var reader))
         {
             return Regex.IsMatch(File.ReadAllText(Path.Join(RepositoryRoot, reader)), $@"\b{Regex.Escape(variable)}\b");

@@ -1129,6 +1129,21 @@ public class ComicEmailService : IComicEmailService
                 return;
             }
 
+            // Checked after the wait: a retry, a delivery resumed by a restart or
+            // one held by the rate limit can run hours after it was queued, and
+            // nothing should go to an address its owner has since removed.
+            if (!await db.EreaderDevices.AsNoTracking().AnyAsync(d => d.Id == delivery.DeviceId, preparationToken))
+            {
+                MarkCancelled(delivery);
+                delivery.ErrorMessage = "The device this was queued for has been deleted.";
+                _logger.LogInformation(
+                    "Cancelled email delivery {DeliveryId} of {FilePath} because its device was deleted",
+                    delivery.Id,
+                    LoggingHelper.SanitizePathForLog(delivery.FilePath));
+                await db.SaveChangesAsync(CancellationToken.None);
+                return;
+            }
+
             var maxBytes = GetMaxAttachmentBytes();
 
             var attachmentPath = resolved[0];
@@ -1214,8 +1229,7 @@ public class ComicEmailService : IComicEmailService
             // Whatever the work in progress threw once it was asked to stop —
             // usually an OperationCanceledException, but a converter can
             // surface the abort differently — the user cancelled it.
-            delivery.Status = EmailDeliveryStatus.Cancelled;
-            delivery.ErrorMessage = null;
+            MarkCancelled(delivery);
             _logger.LogInformation(
                 "Cancelled email delivery {DeliveryId} of {FilePath} before it was sent",
                 delivery.Id,
@@ -1268,6 +1282,14 @@ public class ComicEmailService : IComicEmailService
         {
             _queue.Schedule(delivery.Id, due);
         }
+    }
+
+    /// <summary>Records that the delivery will not be sent, so it has no retry waiting.</summary>
+    private static void MarkCancelled(ComicEmailDeliveryEntity delivery)
+    {
+        delivery.Status = EmailDeliveryStatus.Cancelled;
+        delivery.ErrorMessage = null;
+        delivery.NextAttemptAt = null;
     }
 
     private void MarkFailed(ComicEmailDeliveryEntity delivery, Exception exception, string errorMessage)
@@ -1565,8 +1587,7 @@ public class ComicEmailService : IComicEmailService
                 return (null, inFlight);
             }
 
-            delivery.Status = EmailDeliveryStatus.Cancelled;
-            delivery.ErrorMessage = null;
+            MarkCancelled(delivery);
             await db.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
@@ -1616,8 +1637,7 @@ public class ComicEmailService : IComicEmailService
                     continue;
                 }
 
-                delivery.Status = EmailDeliveryStatus.Cancelled;
-                delivery.ErrorMessage = null;
+                MarkCancelled(delivery);
                 cancelled++;
             }
 

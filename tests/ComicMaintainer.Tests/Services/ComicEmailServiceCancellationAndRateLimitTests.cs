@@ -316,6 +316,21 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessDeliveryAsync_DoesNotSendToADeviceDeletedDuringTheRateLimitWait()
+    {
+        var delivery = await StartRateLimitedDeliveryAsync();
+
+        await _devices.DeleteDeviceAsync(TestEmailScopes.Everyone, delivery.DeviceId);
+        await AdvanceUntilAsync(() => _processing!.IsCompleted, TimeSpan.FromMinutes(1));
+        await _processing!;
+
+        Assert.Equal(0, SendCount);
+        var saved = await GetDeliveryAsync(delivery.Id);
+        Assert.Equal(EmailDeliveryStatus.Cancelled, saved.Status);
+        Assert.Equal("The device this was queued for has been deleted.", saved.ErrorMessage);
+    }
+
+    [Fact]
     public async Task CancelPendingDeliveriesAsync_ReportsWhenNothingIsPending()
     {
         var result = await _service.CancelPendingDeliveriesAsync(TestEmailScopes.Everyone);

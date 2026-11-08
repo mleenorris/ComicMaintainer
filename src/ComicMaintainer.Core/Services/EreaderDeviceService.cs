@@ -161,7 +161,8 @@ public class EreaderDeviceService : IEreaderDeviceService
         }
 
         // Subscriptions cascade with the device; delivery history is retained on
-        // purpose so the user can still see what was sent where.
+        // purpose so the user can still see what was sent where. A delivery
+        // still pending is cancelled when its turn comes instead of being sent.
         db.EreaderDevices.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
         return true;

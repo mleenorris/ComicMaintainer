@@ -202,6 +202,53 @@ public class ComicEmailDeliveryRetryTests : IDisposable
         Assert.Equal("Already delivered to this device", second.Skipped[file]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellingADeliveryWaitingForARetry_LeavesNoRetryTimeBehind(bool cancelAllPending)
+    {
+        FailSendsWith(Transient421());
+        var service = CreateService(_queue.Object);
+        var id = await QueueAsync(service, "Series 001.cbz");
+        await service.ProcessDeliveryAsync(id);
+        Assert.NotNull((await GetDeliveryAsync(id)).NextAttemptAt);
+
+        if (cancelAllPending)
+        {
+            await service.CancelPendingDeliveriesAsync(TestEmailScopes.Everyone);
+        }
+        else
+        {
+            await service.CancelDeliveryAsync(TestEmailScopes.Everyone, id);
+        }
+
+        var delivery = await GetDeliveryAsync(id);
+        Assert.Equal(EmailDeliveryStatus.Cancelled, delivery.Status);
+        Assert.Null(delivery.NextAttemptAt);
+        Assert.Null(delivery.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ARetryForADeviceDeletedInTheMeantime_IsCancelledInsteadOfSent()
+    {
+        FailSendsWith(Transient421());
+        var service = CreateService(_queue.Object);
+        var id = await QueueAsync(service, "Series 001.cbz");
+        await service.ProcessDeliveryAsync(id);
+        await _devices.DeleteDeviceAsync(TestEmailScopes.Everyone, (await GetDeliveryAsync(id)).DeviceId);
+        _scheduled.Clear();
+
+        _time.Advance(ComicEmailService.TransientRetryDelays[0]);
+        await service.ProcessDeliveryAsync(id);
+
+        Assert.Equal(1, _sendAttempts);
+        Assert.Empty(_scheduled);
+        var delivery = await GetDeliveryAsync(id);
+        Assert.Equal(EmailDeliveryStatus.Cancelled, delivery.Status);
+        Assert.Null(delivery.NextAttemptAt);
+        Assert.Equal("The device this was queued for has been deleted.", delivery.ErrorMessage);
+    }
+
     [Fact]
     public async Task ResumePendingDeliveriesAsync_KeepsTheRetryTimeOfADeliveryLeftWaiting()
     {

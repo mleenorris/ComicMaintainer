@@ -160,6 +160,27 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
         Assert.False(queue.IsQueued(id));
     }
 
+    [Fact]
+    public async Task QueueStart_CancelsADeliveryWhoseDeviceWasDeletedInsteadOfSendingIt()
+    {
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        await AddDeliveryAsync(device.Id, "Series 001.cbz", EmailDeliveryStatus.Pending);
+        await _devices.DeleteDeviceAsync(TestEmailScopes.Everyone, device.Id);
+
+        var (_, queue) = CreateServiceWithRealQueue();
+        await queue.StartAsync();
+        try
+        {
+            await WaitUntilAsync(async () => (await GetDeliveriesAsync()).Single().Status == EmailDeliveryStatus.Cancelled);
+        }
+        finally
+        {
+            await queue.StopAsync();
+        }
+
+        Assert.Empty(_sentSubjects);
+    }
+
     private ComicEmailService CreateService(IComicEmailQueue queue) => new(
         _dbFactory,
         _sender.Object,

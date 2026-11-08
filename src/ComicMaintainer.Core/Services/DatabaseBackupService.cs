@@ -30,6 +30,7 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
     public const string PendingRestoreSuffix = ".restore-pending";
     private const string SafetyBackupSuffix = "prerestore";
     private const string PreMigrationSuffix = "premigrate";
+    private const string UnfinishedUpgradeSuffix = ".migration-attempt";
 
     /// <summary>
     /// How many backups taken before startup migrations pruning keeps, newest first. They are kept apart from
@@ -37,6 +38,14 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
     /// database that the previous version can still open.
     /// </summary>
     public const int PreMigrationBackupsKept = 3;
+
+    /// <summary>
+    /// How long after its last try an unfinished upgrade still counts as the same upgrade. A restart loop retries
+    /// within minutes, so it keeps the one backup however long it lasts. A retry after a longer gap takes a new one,
+    /// because the previous version may have been put back and used in between; versions before 3.0 do not clear the
+    /// record of an unfinished upgrade when they start.
+    /// </summary>
+    public static readonly TimeSpan UnfinishedUpgradeRetryWindow = TimeSpan.FromDays(1);
 
     private static readonly byte[] SqliteHeader = Encoding.ASCII.GetBytes("SQLite format 3\0");
 
@@ -102,16 +111,42 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         }
     }
 
-    public async Task<DatabaseBackupInfo> CreatePreMigrationBackupAsync(CancellationToken cancellationToken = default)
+    public async Task<PreMigrationBackupResult> CreatePreMigrationBackupAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            return await CreateBackupCoreAsync(PreMigrationSuffix, cancellationToken);
+            var earlier = FindBackupOfUnfinishedUpgrade();
+            if (earlier is not null)
+            {
+                RecordUnfinishedUpgrade(earlier.Name);
+                return new PreMigrationBackupResult(earlier, FromEarlierAttempt: true);
+            }
+
+            var backup = await CreateBackupCoreAsync(PreMigrationSuffix, cancellationToken);
+            RecordUnfinishedUpgrade(backup.Name);
+            PrunePreMigrationBackups();
+            return new PreMigrationBackupResult(backup, FromEarlierAttempt: false);
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    public void MarkMigrationsApplied()
+    {
+        var record = UnfinishedUpgradePath;
+        try
+        {
+            if (File.Exists(record))
+            {
+                File.Delete(record);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Failed to clear the record of the finished database upgrade; the next upgrade may reuse its backup");
         }
     }
 
@@ -170,8 +205,47 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         }
 
         var backups = ListBackups();
-        var expired = backups.Where(backup => !IsPreMigrationBackup(backup.Name)).Skip(retention)
-            .Concat(backups.Where(backup => IsPreMigrationBackup(backup.Name)).Skip(PreMigrationBackupsKept));
+        var deleted = DeleteBackups(
+            backups.Where(backup => !IsPreMigrationBackup(backup.Name)).Skip(retention)
+                .Concat(ExpiredPreMigrationBackups(backups)));
+
+        if (deleted > 0)
+        {
+            _logger.LogInformation(
+                "Pruned {Count} database backup(s), keeping the newest {Retention} and the newest {PreMigrationKept} taken before migrations",
+                deleted,
+                retention,
+                PreMigrationBackupsKept);
+        }
+        return deleted;
+    }
+
+    private static IEnumerable<DatabaseBackupInfo> ExpiredPreMigrationBackups(IEnumerable<DatabaseBackupInfo> newestFirst) =>
+        newestFirst.Where(backup => IsPreMigrationBackup(backup.Name)).Skip(PreMigrationBackupsKept);
+
+    /// <summary>
+    /// Bounds the backups taken before migrations when a new one is taken, as <see cref="PruneBackups"/> only runs
+    /// after a scheduled backup, which never happens when scheduled backups are off or startup keeps failing.
+    /// </summary>
+    private void PrunePreMigrationBackups()
+    {
+        if (_settings.CurrentValue.DatabaseBackupRetention < 1)
+        {
+            return;
+        }
+
+        var deleted = DeleteBackups(ExpiredPreMigrationBackups(ListBackups()));
+        if (deleted > 0)
+        {
+            _logger.LogInformation(
+                "Pruned {Count} database backup(s) taken before migrations, keeping the newest {PreMigrationKept}",
+                deleted,
+                PreMigrationBackupsKept);
+        }
+    }
+
+    private int DeleteBackups(IEnumerable<DatabaseBackupInfo> expired)
+    {
         var deleted = 0;
         foreach (var backup in expired)
         {
@@ -186,15 +260,57 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
             }
         }
 
-        if (deleted > 0)
-        {
-            _logger.LogInformation(
-                "Pruned {Count} database backup(s), keeping the newest {Retention} and the newest {PreMigrationKept} taken before migrations",
-                deleted,
-                retention,
-                PreMigrationBackupsKept);
-        }
         return deleted;
+    }
+
+    /// <summary>
+    /// Sidecar that names the backup of an upgrade that has not finished. It is removed once startup's migrations
+    /// have run, so its presence means no version has got past them since that backup was taken.
+    /// </summary>
+    private string UnfinishedUpgradePath => _databasePath + UnfinishedUpgradeSuffix;
+
+    /// <summary>
+    /// The backup an unfinished upgrade began with, or null when no upgrade is unfinished, its last try is too long
+    /// ago to be the same upgrade, or its backup is gone.
+    /// </summary>
+    private DatabaseBackupInfo? FindBackupOfUnfinishedUpgrade()
+    {
+        var record = UnfinishedUpgradePath;
+        try
+        {
+            if (!File.Exists(record)
+                || _timeProvider.GetUtcNow().UtcDateTime - File.GetLastWriteTimeUtc(record) > UnfinishedUpgradeRetryWindow)
+            {
+                return null;
+            }
+
+            var name = File.ReadAllText(record).Trim();
+            var backup = IsPreMigrationBackup(name) ? new FileInfo(Path.Join(BackupDirectory, name)) : null;
+            return backup is { Exists: true } ? ToInfo(backup) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not read the record of an unfinished database upgrade; taking a new backup");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Notes that an upgrade starting from <paramref name="backupName"/> is being tried now. Without the note the
+    /// next start takes another backup, which the startup pruning bounds, so a failure here does not stop the upgrade.
+    /// </summary>
+    private void RecordUnfinishedUpgrade(string backupName)
+    {
+        var record = UnfinishedUpgradePath;
+        try
+        {
+            File.WriteAllText(record, backupName);
+            File.SetLastWriteTimeUtc(record, _timeProvider.GetUtcNow().UtcDateTime);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not record the unfinished database upgrade; if it fails, the next start takes another backup");
+        }
     }
 
     public async Task<DatabaseRestoreResult> StageRestoreAsync(string name, CancellationToken cancellationToken = default)

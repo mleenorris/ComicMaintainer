@@ -85,6 +85,8 @@ public sealed class ConfigDirectoryStartupTests : IDisposable
         _ = factory.Services;
 
         var backup = Assert.Single(Directory.GetFiles(Path.Join(configDir, "backups"), "comicmaintainer-*-premigrate.db"));
+        // The migrations finished, so the next upgrade is not mistaken for a retry of this one.
+        Assert.Empty(Directory.GetFiles(configDir, "*.migration-attempt"));
         await using (var backedUp = new ComicMaintainerDbContext(
             new DbContextOptionsBuilder<ComicMaintainerDbContext>().UseSqlite($"Data Source={backup};Pooling=False").Options))
         {

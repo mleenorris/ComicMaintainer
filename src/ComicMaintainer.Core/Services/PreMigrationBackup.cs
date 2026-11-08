@@ -16,9 +16,12 @@ public static class PreMigrationBackup
 {
     /// <summary>
     /// Backs the database up when it already exists and migrations are pending. A new database (no migrations
-    /// applied yet) holds nothing to keep, so it is not backed up.
+    /// applied yet) holds nothing to keep, so it is not backed up. When an earlier start already backed it up and its
+    /// migrations have not finished since, that backup stands and no new one is taken: it holds the database as the
+    /// previous version left it, while this start may find it partly migrated. Startup calls
+    /// <see cref="IDatabaseBackupService.MarkMigrationsApplied"/> once the migrations have run.
     /// </summary>
-    /// <returns>The backup taken, or null when none was needed.</returns>
+    /// <returns>The backup that covers the pending migrations, or null when none was needed.</returns>
     /// <exception cref="InvalidOperationException">
     /// The backup failed. The migrations are then not applied, so the database still works with the version that
     /// last used it.
@@ -47,10 +50,10 @@ public static class PreMigrationBackup
             return null;
         }
 
-        DatabaseBackupInfo backup;
+        PreMigrationBackupResult result;
         try
         {
-            backup = await backups.CreatePreMigrationBackupAsync(cancellationToken);
+            result = await backups.CreatePreMigrationBackupAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException or InvalidOperationException)
         {
@@ -61,6 +64,18 @@ public static class PreMigrationBackup
                 pending.Count);
             throw new InvalidOperationException(
                 $"Could not back up the database to {backups.BackupDirectory} before applying {pending.Count} database migration(s).", ex);
+        }
+
+        var backup = result.Backup;
+        if (result.FromEarlierAttempt)
+        {
+            logger.LogWarning(
+                "The database upgrade an earlier start began has not finished, so {PendingCount} database migration(s) ({PendingMigrations}) are being tried again. The backup {BackupPath} from before that upgrade is kept and no new one is taken; to go back to the version that used the database, restore it from Settings > Backups or copy it over {DatabaseFile} while ComicMaintainer is stopped.",
+                pending.Count,
+                string.Join(", ", pending),
+                Path.Join(backups.BackupDirectory, backup.Name),
+                Path.GetFileName(databasePath));
+            return backup;
         }
 
         logger.LogInformation(

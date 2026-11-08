@@ -134,13 +134,8 @@ public sealed class DatabaseBackupServiceTests : IDisposable
     [Fact]
     public async Task PruneBackups_KeepsBackupsTakenBeforeMigrationsApartFromTheRetentionCount()
     {
-        // Two upgrades with migrations, then more scheduled backups than the retention keeps (3 here).
-        var upgrades = new List<string>();
-        for (var i = 0; i < 4; i++)
-        {
-            upgrades.Add((await _service.CreatePreMigrationBackupAsync()).Name);
-            _time.Advance(TimeSpan.FromDays(1));
-        }
+        // Upgrades that finished, then more scheduled backups than the retention keeps (3 here).
+        var upgrades = await RunFinishedUpgradesAsync(DatabaseBackupService.PreMigrationBackupsKept);
         for (var i = 0; i < 5; i++)
         {
             await _service.CreateBackupAsync();
@@ -149,16 +144,49 @@ public sealed class DatabaseBackupServiceTests : IDisposable
 
         var deleted = _service.PruneBackups();
 
-        // The scheduled backups are pruned to the retention count without counting the pre-migration backups, of
-        // which the newest PreMigrationBackupsKept stay.
-        Assert.Equal(3, DatabaseBackupService.PreMigrationBackupsKept);
-        Assert.Equal(2 + 1, deleted);
+        // The scheduled backups are pruned to the retention count without counting the pre-migration backups.
+        Assert.Equal(2, deleted);
         var remaining = _service.ListBackups().Select(b => b.Name).ToList();
         Assert.Equal(
-            ["comicmaintainer-20261028-040000.db", "comicmaintainer-20261027-040000.db", "comicmaintainer-20261026-040000.db"],
+            ["comicmaintainer-20261027-040000.db", "comicmaintainer-20261026-040000.db", "comicmaintainer-20261025-040000.db"],
             remaining.Where(name => !DatabaseBackupService.IsPreMigrationBackup(name)));
-        Assert.Equal(upgrades.Skip(1).Reverse(), remaining.Where(DatabaseBackupService.IsPreMigrationBackup));
+        Assert.Equal(upgrades.AsEnumerable().Reverse(), remaining.Where(DatabaseBackupService.IsPreMigrationBackup));
+    }
+
+    [Fact]
+    public async Task CreatePreMigrationBackup_BoundsThemWithoutWaitingForAScheduledBackup()
+    {
+        Assert.Equal(3, DatabaseBackupService.PreMigrationBackupsKept);
+
+        var upgrades = await RunFinishedUpgradesAsync(5);
+
         Assert.Equal("comicmaintainer-20261020-040000-premigrate.db", upgrades[0]);
+        Assert.Equal(upgrades.Skip(2).Reverse(), _service.ListBackups().Select(b => b.Name));
+    }
+
+    [Fact]
+    public async Task CreatePreMigrationBackup_KeepsThemAllWhenPruningIsOff()
+    {
+        _settings.DatabaseBackupRetention = 0;
+
+        var upgrades = await RunFinishedUpgradesAsync(5);
+
+        Assert.Equal(upgrades.AsEnumerable().Reverse(), _service.ListBackups().Select(b => b.Name));
+    }
+
+    private async Task<List<string>> RunFinishedUpgradesAsync(int count)
+    {
+        var names = new List<string>();
+        for (var i = 0; i < count; i++)
+        {
+            var result = await _service.CreatePreMigrationBackupAsync();
+            Assert.False(result.FromEarlierAttempt);
+            names.Add(result.Backup.Name);
+            _service.MarkMigrationsApplied();
+            _time.Advance(TimeSpan.FromDays(1));
+        }
+
+        return names;
     }
 
     [Theory]

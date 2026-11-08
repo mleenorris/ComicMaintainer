@@ -67,10 +67,12 @@ public class EntrypointConfigDirectoryTests
         // key is made private. It only adds owner and group access, never a fixed mode.
         var privatized = script.IndexOf("-exec chmod 600 {} +", StringComparison.Ordinal);
         var optIn = script.IndexOf("if [ \"$FIX_LIBRARY_PERMISSIONS\" = true ]; then", StringComparison.Ordinal);
-        var widened = script.IndexOf(
-            "\"${SECRET_FILE_EXCLUSIONS[@]}\" -exec chown \"$PUID:$PGID\" {} + -exec chmod u+rwX,g+rwX {} +", StringComparison.Ordinal);
+        // Secret files are given to PUID before the tests that keep their mode private: the app must be able to read them.
+        var owned = script.IndexOf("-exec chown \"$PUID:$PGID\" {} +", StringComparison.Ordinal);
+        var widened = script.IndexOf("\"${SECRET_FILE_EXCLUSIONS[@]}\" -exec chmod u+rwX,g+rwX {} +", StringComparison.Ordinal);
         Assert.InRange(privatized, 0, gosu);
         Assert.InRange(optIn, privatized, gosu);
+        Assert.InRange(owned, optIn, widened);
         Assert.InRange(widened, optIn, gosu);
         Assert.Single(Regex.Matches(script, @"-exec chmod u\+rwX,g\+rwX"));
         Assert.DoesNotMatch(@"\bchmod\s+(-R\s+)?755\b", script);

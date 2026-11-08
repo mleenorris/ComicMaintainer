@@ -80,7 +80,8 @@ docker run --rm \
     "${IMAGE}" \
     -c "chown root:root '${APP_CONFIG_DIR}' && chmod 700 '${APP_CONFIG_DIR}' && touch '${APP_CONFIG_DIR}/.permission-test' && chmod 600 '${APP_CONFIG_DIR}/.permission-test'"
 
-# The admin password is read from a private file in /duplicates, which FIX_LIBRARY_PERMISSIONS must leave private.
+# The admin password is read from a private file in /duplicates that belongs to the runner's user. FIX_LIBRARY_PERMISSIONS
+# must give it to PUID, or the app could not read it, and leave its mode private.
 printf '%s\n' 'SmokeTestPassword123!' > "${DUP_DIR}/.admin-password"
 chmod 600 "${DUP_DIR}/.admin-password"
 
@@ -132,8 +133,8 @@ directory_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' "${APP_C
 secret_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' "${APP_CONFIG_DIR}/.permission-test")"
 [ "${directory_mode}" = "700" ] || fail "Custom CONFIG_DIR mode changed to ${directory_mode}, expected 700"
 [ "${secret_mode}" = "600" ] || fail "Private config file mode changed to ${secret_mode}, expected 600"
-admin_password_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' /duplicates/.admin-password)"
-[ "${admin_password_mode}" = "600" ] || fail "ADMIN_PASSWORD_FILE mode changed to ${admin_password_mode}, expected 600"
+admin_password_owner_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%u %a' /duplicates/.admin-password)"
+[ "${admin_password_owner_mode}" = "10001 600" ] || fail "ADMIN_PASSWORD_FILE is ${admin_password_owner_mode}, expected owner 10001 and mode 600"
 
 # FIX_LIBRARY_PERMISSIONS only adds owner and group access (u+rwX,g+rwX): the 755 library folder becomes 775 and is
 # handed to PUID, so the app user can write it and the entrypoint does not warn that it cannot.

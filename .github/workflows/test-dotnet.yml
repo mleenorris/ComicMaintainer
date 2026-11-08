@@ -88,9 +88,11 @@ jobs:
           ./TestResults/**/*.dmp
         if-no-files-found: warn
 
-    # Fails the job when line coverage drops below the lower threshold, which is the
-    # coverage of the suite when the gate was added (95.5% of lines): TESTING_POLICY.md
-    # does not allow changes that lower coverage. Raise it as coverage grows.
+    # Fails the job when overall line coverage drops below the lower threshold, which is what
+    # this job measured on dotnet when the gate was added (97.1%: 44482 of 45792 lines, Release
+    # on Linux): TESTING_POLICY.md does not allow changes that lower coverage. Raise it as
+    # coverage grows. The gate looks only at the overall rate, so the per-package health column
+    # is off: it would mark a package below the threshold as failing on a run that passes.
     - name: Code Coverage Summary
       uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
       with:
@@ -100,9 +102,9 @@ jobs:
         format: markdown
         hide_branch_rate: false
         hide_complexity: true
-        indicators: true
+        indicators: false
         output: both
-        thresholds: '95 80'
+        thresholds: '97 99'
 
     - name: Add Testing Policy Note to Coverage Report
       if: always() && github.event_name == 'pull_request'

@@ -49,7 +49,12 @@ public sealed class DockerImageTests
     [InlineData("tests/")]
     [InlineData("node_modules/")]
     [InlineData("src/ComicMaintainer.MauiApp/")]
-    [InlineData(".env")]
+    // Secrets are matched at any depth: a key or .env under src/ would be copied into the build stage by COPY src/ src/.
+    [InlineData("**/.env")]
+    [InlineData("**/.env.*")]
+    [InlineData("**/*.pfx")]
+    [InlineData("**/*.pem")]
+    [InlineData("**/*.key")]
     public void DockerIgnore_KeepsLocalOutputAndUnusedFoldersOutOfTheBuildContext(string pattern)
     {
         var patterns = File.ReadAllLines(Path.Join(RepositoryRoot, ".dockerignore")).Select(line => line.Trim());

@@ -34,12 +34,12 @@ docs/
 *.md
 LICENSE*
 
-# Local environment and secrets: never sent to the builder
-.env
-.env.*
-*.pfx
-*.pem
-*.key
+# Local environment and secrets, at any depth: never sent to the builder
+**/.env
+**/.env.*
+**/*.pfx
+**/*.pem
+**/*.key
 
 # Logs, OS files and temporary files
 *.log

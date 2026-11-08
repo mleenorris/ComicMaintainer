@@ -79,7 +79,9 @@ find /Config "$CONFIG_DIR" -type f \( -name 'jwt-secret.key' -o -name 'jwt-secre
 # The comic library and the duplicates folder belong to the user and are left alone. Changing the owner or mode of
 # everything in them at every start would strip the group write access other containers (Suwayomi, Komga, Kavita)
 # rely on, expose libraries kept private, and walk the whole library, which takes minutes on NFS/SMB, before the
-# app starts. Only the top folders are checked; a folder that does not exist yet is created for PUID.
+# app starts. Only the top folders are checked, and one that holds nothing of the user's yet is given to PUID: a
+# folder that does not exist, the image's own empty folder when no volume is mounted there, or the empty root-owned
+# folder Docker creates for a missing bind-mount source.
 LIBRARY_DIRS=("${WATCHED_DIR:-/watched_dir}")
 if [ "${DUPLICATE_DIR:-/duplicates}" != "${LIBRARY_DIRS[0]}" ]; then
     LIBRARY_DIRS+=("${DUPLICATE_DIR:-/duplicates}")
@@ -96,9 +98,10 @@ case "${FIX_LIBRARY_PERMISSIONS:-false}" in
         ;;
 esac
 
-# Secret files named by JWT_SECRET_FILE or ADMIN_PASSWORD_FILE keep the permissions they were given, even inside the
-# library. When the named path is a symlink, the file it points to is excluded too. find -path takes a glob pattern,
-# so glob metacharacters in the paths are escaped to match them literally.
+# Secret files named by JWT_SECRET_FILE or ADMIN_PASSWORD_FILE keep the mode they were given, even inside the library;
+# like everything else there they are still given to PUID, or the app could not read a private one. When the named
+# path is a symlink, the file it points to is excluded too. find -path takes a glob pattern, so glob metacharacters in
+# the paths are escaped to match them literally.
 escape_find_glob() {
     local value=$1
     value=${value//\\/\\\\}
@@ -129,6 +132,14 @@ app_user_can_write() {
     gosu "$USER_NAME" sh -c '[ -r "$1" ] && [ -w "$1" ] && [ -x "$1" ]' sh "$1"
 }
 
+# Gives the directory $1 itself, not its contents, to the app user when it is empty and owned by root, and reports
+# whether the app user can then write to it.
+claim_empty_root_owned_folder() {
+    [ -n "$(find "$1" -maxdepth 0 -type d -uid 0 -empty 2>/dev/null)" ] \
+        && chown "$PUID:$PGID" -- "$1" 2>/dev/null \
+        && app_user_can_write "$1"
+}
+
 for library_dir in "${LIBRARY_DIRS[@]}"; do
     if [ ! -d "$library_dir" ]; then
         if mkdir -p -- "$library_dir" 2>/dev/null; then
@@ -141,12 +152,14 @@ for library_dir in "${LIBRARY_DIRS[@]}"; do
 
     if [ "$FIX_LIBRARY_PERMISSIONS" = true ]; then
         echo "FIX_LIBRARY_PERMISSIONS=true: giving everything in $library_dir to UID $PUID and GID $PGID with owner and group read/write access. This walks the whole folder at every start; remove the variable once it has run."
+        # -exec ... + is always true, so a secret file that the tests after the chown turn away has still been given to PUID.
         find "$library_dir" "${CONFIG_DIR_EXCLUSIONS[@]}" ! -type l \
+            -exec chown "$PUID:$PGID" {} + \
             ! \( -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \) \
-            "${SECRET_FILE_EXCLUSIONS[@]}" -exec chown "$PUID:$PGID" {} + -exec chmod u+rwX,g+rwX {} + 2>/dev/null || true
+            "${SECRET_FILE_EXCLUSIONS[@]}" -exec chmod u+rwX,g+rwX {} + 2>/dev/null || true
     fi
 
-    if ! app_user_can_write "$library_dir"; then
+    if ! app_user_can_write "$library_dir" && ! claim_empty_root_owned_folder "$library_dir"; then
         echo "Warning: $USER_NAME (UID=$PUID, GID=$PGID) cannot write to $library_dir, so comics there cannot be tagged, renamed or moved."
         echo "         Give UID $PUID or GID $PGID write access to the host folder, set PUID/PGID to its owner, or set FIX_LIBRARY_PERMISSIONS=true once."
     fi

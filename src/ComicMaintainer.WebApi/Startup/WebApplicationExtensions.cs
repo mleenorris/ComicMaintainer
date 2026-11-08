@@ -27,17 +27,20 @@ internal static class WebApplicationExtensions
             // A restore staged through /api/backups is swapped in here, before anything
             // has opened the database and before migrations bring it up to date.
             var databasePath = CoreServiceCollectionExtensions.ResolveSqliteDatabasePath(db.Database.GetConnectionString());
+            IDatabaseBackupService? backups = null;
             if (databasePath is not null)
             {
                 DatabaseBackupService.ApplyPendingRestore(databasePath, logger);
 
                 // An upgrade's migrations cannot be undone, so the database is backed up before they run.
-                await PreMigrationBackup.CreateIfMigrationsPendingAsync(
-                    db.Database, databasePath, scope.ServiceProvider.GetService<IDatabaseBackupService>(), logger);
+                backups = scope.ServiceProvider.GetService<IDatabaseBackupService>();
+                await PreMigrationBackup.CreateIfMigrationsPendingAsync(db.Database, databasePath, backups, logger);
             }
 
             db.Database.Migrate();
-            
+            // Reached only when the migrations succeeded: until then a restart retries the upgrade with the same backup.
+            backups?.MarkMigrationsApplied();
+
             // Seed roles
             var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
             var roles = new[] { "Admin", "User", "ReadOnly" };

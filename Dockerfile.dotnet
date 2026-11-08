@@ -52,8 +52,9 @@ ENV DUPLICATE_DIR=/duplicates
 ENV CONFIG_DIR=/Config
 ENV PUID=99
 ENV PGID=100
-# The entrypoint only checks that PUID can write to WATCHED_DIR and DUPLICATE_DIR. Set to true to have it give
-# everything in them to PUID:PGID with owner and group read/write access (u+rwX,g+rwX) at start.
+# The entrypoint only checks that PUID can write to WATCHED_DIR and DUPLICATE_DIR, and gives PUID one that is empty
+# and owned by root. Set to true to have it give everything in them to PUID:PGID with owner and group read/write
+# access (u+rwX,g+rwX) at start.
 ENV FIX_LIBRARY_PERMISSIONS=false
 
 # Security note: These default values should be overridden in production
@@ -66,7 +67,7 @@ COPY entrypoint.dotnet.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Create the mount points. User/group are created at runtime from PUID/PGID, and the entrypoint gives /Config to
-# them; the library folders are bind mounts that keep the host's ownership.
+# them; a library folder mounted from the host keeps the host's ownership.
 RUN mkdir -p /watched_dir /duplicates /Config && \
     chmod 755 /watched_dir /duplicates /Config
 

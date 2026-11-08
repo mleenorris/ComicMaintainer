@@ -10,8 +10,8 @@
     <!--
       Known-vulnerable packages (NuGet audit) are left to the security scan workflow, which fails on high and critical
       advisories. Failing every build here would also stop unrelated pull requests on a low or moderate advisory in
-      a transitive package.
+      a transitive package, when vulnerability data cannot be fetched (NU1900), or when a source offers none (NU1905).
     -->
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904;NU1905</WarningsNotAsErrors>
   </PropertyGroup>
 </Project>

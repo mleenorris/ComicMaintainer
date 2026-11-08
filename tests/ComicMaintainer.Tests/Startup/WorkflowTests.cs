@@ -230,7 +230,12 @@ public sealed class WorkflowTests
 
         var coverage = Mapping(Assert.Single(steps, step => Scalar(step, "uses")?.StartsWith("irongut/CodeCoverageSummary@", StringComparison.Ordinal) == true), "with");
         Assert.Equal("true", Scalar(coverage, "fail_below_min"));
-        Assert.Matches(@"^\d+ \d+$", Scalar(coverage, "thresholds"));
+        // The lower threshold is the gate; the action silently replaces an upper threshold that is below it.
+        var thresholds = Regex.Match(Scalar(coverage, "thresholds")!, @"^(\d+) (\d+)$");
+        Assert.True(thresholds.Success, "thresholds must be '<lower> <upper>'");
+        var lower = int.Parse(thresholds.Groups[1].Value);
+        Assert.InRange(lower, 97, 100);
+        Assert.InRange(int.Parse(thresholds.Groups[2].Value), lower + 1, 100);
         Assert.DoesNotContain("../blob/", File.ReadAllText(Path.Join(WorkflowDirectory, Tests)));
     }
 

@@ -256,6 +256,26 @@ public sealed class WorkflowTests
         Assert.DoesNotContain(steps, step => Scalar(step, "uses")?.StartsWith("tj-actions/", StringComparison.Ordinal) == true);
     }
 
+    [Fact]
+    public void Dependabot_IsNotToldToSkipSharpCompressUpdates()
+    {
+        // SharpCompress opens every untrusted archive and ships its fixes in 0.x minor versions, and an ignore rule
+        // would also suppress Dependabot's security updates for it.
+        var stream = new YamlStream();
+        using (var reader = new StringReader(File.ReadAllText(Path.Join(Path.GetDirectoryName(WorkflowDirectory)!, "dependabot.yml"))))
+        {
+            stream.Load(reader);
+        }
+
+        var updates = Assert.IsType<YamlSequenceNode>(((YamlMappingNode)stream.Documents[0].RootNode).Children[new YamlScalarNode("updates")]);
+        var ignored = updates.Children.Cast<YamlMappingNode>()
+            .Where(update => update.Children.ContainsKey(new YamlScalarNode("ignore")))
+            .SelectMany(update => ((YamlSequenceNode)update.Children[new YamlScalarNode("ignore")]).Children.Cast<YamlMappingNode>())
+            .Select(rule => Scalar(rule, "dependency-name"));
+
+        Assert.DoesNotContain("SharpCompress", ignored);
+    }
+
     private static string WorkflowDirectory
     {
         get

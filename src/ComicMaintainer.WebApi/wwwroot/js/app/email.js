@@ -40,42 +40,6 @@
         // Guards against an out-of-order history response overwriting a newer one.
         let emailDeliveryHistoryToken = 0;
 
-        async function fetchEmailJson(path, options = {}) {
-            const response = await fetch(apiUrl(path), {
-                credentials: 'include',
-                ...options,
-                headers: {
-                    ...getAuthHeaders(),
-                    ...(options.headers || {})
-                }
-            });
-            if (handleAuthError(response)) {
-                const error = new Error('Authentication required');
-                error.status = response.status;
-                throw error;
-            }
-            if (!response.ok) {
-                let message = `HTTP error! status: ${response.status}`;
-                try {
-                    const body = await response.json();
-                    if (body && (body.error || body.message)) {
-                        message = body.error || body.message;
-                    }
-                } catch (_) {}
-                const error = new Error(message);
-                // Carried so a caller can distinguish an HTTP response from
-                // a failure that never received one.
-                error.status = response.status;
-                throw error;
-            }
-            if (response.status === 204) return {};
-            try {
-                return await response.json();
-            } catch (_) {
-                return {};
-            }
-        }
-
         async function loadEmailStatus() {
             try {
                 const data = await fetchEmailStatus(true);
@@ -97,13 +61,13 @@
         // page asks for it (the admin may have just changed SMTP settings).
         async function fetchEmailStatus(force = false) {
             if (!force && emailStatusCache) return emailStatusCache;
-            emailStatusCache = await fetchEmailJson('/api/email/status');
+            emailStatusCache = await apiFetch('/api/email/status');
             return emailStatusCache;
         }
 
         async function loadEmailDevices(force = false) {
             if (!force && emailDevicesCache.length) return emailDevicesCache;
-            const data = await fetchEmailJson('/api/email/devices');
+            const data = await apiFetch('/api/email/devices');
             emailDevicesCache = Array.isArray(data.devices) ? data.devices : [];
             return emailDevicesCache;
         }
@@ -213,7 +177,7 @@
                 return;
             }
             try {
-                await fetchEmailJson(id ? `/api/email/devices/${encodeURIComponent(id)}` : '/api/email/devices', {
+                await apiFetch(id ? `/api/email/devices/${encodeURIComponent(id)}` : '/api/email/devices', {
                     method: id ? 'PUT' : 'POST',
                     body: JSON.stringify({ name, emailAddress, deliveryFormat })
                 });
@@ -228,7 +192,7 @@
         async function deleteEmailDevice(id) {
             if (!confirm('Delete this ereader device?')) return;
             try {
-                await fetchEmailJson(`/api/email/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                await apiFetch(`/api/email/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
                 showMessage('Ereader device deleted.', 'success');
                 renderEmailDevicesList(await loadEmailDevices(true));
             } catch (error) {
@@ -238,7 +202,7 @@
 
         async function sendEmailDeviceTest(id) {
             try {
-                await fetchEmailJson(`/api/email/devices/${encodeURIComponent(id)}/test`, { method: 'POST' });
+                await apiFetch(`/api/email/devices/${encodeURIComponent(id)}/test`, { method: 'POST' });
                 showMessage('Test email queued.', 'success');
             } catch (error) {
                 showMessage('Failed to send test email: ' + error.message, 'error');
@@ -498,7 +462,7 @@
             setEmailSendEnabled(false);
 
             try {
-                const plan = await fetchEmailJson('/api/email/condense-plan', {
+                const plan = await apiFetch('/api/email/condense-plan', {
                     method: 'POST',
                     body: JSON.stringify(buildEmailCondenseRequest())
                 });
@@ -589,7 +553,7 @@
         async function downloadCondensedBook(index) {
             if (!currentEmailSend) return;
             try {
-                const build = await fetchEmailJson('/api/email/condense-builds', {
+                const build = await apiFetch('/api/email/condense-builds', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(buildEmailCondenseRequest({ bookIndex: index }))
@@ -626,7 +590,7 @@
          */
         async function refreshEmailCondenseBuilds() {
             try {
-                const data = await fetchEmailJson('/api/email/condense-builds');
+                const data = await apiFetch('/api/email/condense-builds');
                 reconcileEmailCondenseBuilds(Array.isArray(data.builds) ? data.builds : []);
             } catch (error) {
                 // A failure here must not break the send dialog; the builds
@@ -663,7 +627,7 @@
 
             emailCondenseBuildPollInFlight = true;
             try {
-                const data = await fetchEmailJson('/api/email/condense-builds');
+                const data = await apiFetch('/api/email/condense-builds');
                 reconcileEmailCondenseBuilds(Array.isArray(data.builds) ? data.builds : []);
             } catch (error) {
                 // Transient failures (a restart, a dropped connection) must not
@@ -736,11 +700,7 @@
         async function downloadBuiltCondensedBook(buildId) {
             const build = emailCondenseBuilds.find(b => b.build_id === buildId);
             try {
-                const response = await fetch(apiUrl(`/api/email/condense-builds/${encodeURIComponent(buildId)}/download`), {
-                    credentials: 'include',
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch(`/api/email/condense-builds/${encodeURIComponent(buildId)}/download`, { json: false });
                 if (!response.ok) {
                     let message = `HTTP error! status: ${response.status}`;
                     try {
@@ -776,7 +736,7 @@
 
         async function cancelCondensedBookBuild(buildId) {
             try {
-                await fetchEmailJson(`/api/email/condense-builds/${encodeURIComponent(buildId)}/cancel`, { method: 'POST' });
+                await apiFetch(`/api/email/condense-builds/${encodeURIComponent(buildId)}/cancel`, { method: 'POST' });
                 emailCondenseAutoDownloads.delete(buildId);
                 showMessage('Cancelling the condensed book build...', 'info');
                 await pollEmailCondenseBuilds();
@@ -788,7 +748,7 @@
         /** Forgets a finished build and frees the file it produced. */
         async function dismissCondensedBookBuild(buildId) {
             try {
-                await fetchEmailJson(`/api/email/condense-builds/${encodeURIComponent(buildId)}`, { method: 'DELETE' });
+                await apiFetch(`/api/email/condense-builds/${encodeURIComponent(buildId)}`, { method: 'DELETE' });
             } catch (error) {
                 showMessage('Failed to remove the build: ' + error.message, 'error');
                 return;
@@ -899,7 +859,7 @@
             setEmailDeliveryHistoryPagingEnabled(false);
             try {
                 const offset = (emailDeliveryHistoryPage - 1) * EMAIL_DELIVERY_HISTORY_PAGE_SIZE;
-                const data = await fetchEmailJson(`/api/email/deliveries?limit=${EMAIL_DELIVERY_HISTORY_PAGE_SIZE}&offset=${offset}`);
+                const data = await apiFetch(`/api/email/deliveries?limit=${EMAIL_DELIVERY_HISTORY_PAGE_SIZE}&offset=${offset}`);
                 if (token !== emailDeliveryHistoryToken) return;
                 const deliveries = Array.isArray(data.deliveries) ? data.deliveries : [];
                 const total = Math.max(Number(data.total) || 0, offset + deliveries.length);
@@ -982,7 +942,7 @@
         async function cancelEmailDelivery(id, button) {
             if (button) button.disabled = true;
             try {
-                const result = await fetchEmailJson(`/api/email/deliveries/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+                const result = await apiFetch(`/api/email/deliveries/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
                 if (result.cancelled) {
                     showMessage('Delivery cancelled.', 'success');
                 } else {
@@ -1004,7 +964,7 @@
             const button = document.getElementById('emailDeliveryCancelAllBtn');
             if (button) button.disabled = true;
             try {
-                const result = await fetchEmailJson('/api/email/deliveries/cancel-pending', { method: 'POST' });
+                const result = await apiFetch('/api/email/deliveries/cancel-pending', { method: 'POST' });
                 const cancelled = Number(result.cancelled) || 0;
                 showMessage(describeEmailBulkCancel(result), cancelled > 0 ? 'success' : 'info');
             } catch (error) {
@@ -1077,7 +1037,7 @@
             if (button) button.disabled = true;
             try {
                 const result = currentEmailSend.mode === 'series'
-                    ? await fetchEmailJson('/api/email/send-series', {
+                    ? await apiFetch('/api/email/send-series', {
                         method: 'POST',
                         body: JSON.stringify({
                             seriesId: currentEmailSend.seriesId,
@@ -1088,7 +1048,7 @@
                             issuesPerBook
                         })
                     })
-                    : await fetchEmailJson('/api/email/send', {
+                    : await apiFetch('/api/email/send', {
                         method: 'POST',
                         body: JSON.stringify({
                             files: currentEmailSend.files,
@@ -1132,7 +1092,7 @@
             try {
                 const devices = await loadEmailDevices(true);
                 renderEmailDeviceOptions(deviceSelect, devices);
-                const data = await fetchEmailJson(`/api/email/subscriptions?series=${encodeURIComponent(seriesTitle)}`);
+                const data = await apiFetch(`/api/email/subscriptions?series=${encodeURIComponent(seriesTitle)}`);
                 renderEmailSubscriptionsList(Array.isArray(data.subscriptions) ? data.subscriptions : []);
             } catch (error) {
                 renderHtml(list, html`<div class="empty-state"><p>Failed to load subscriptions: ${error.message}</p></div>`);
@@ -1169,7 +1129,7 @@
                 return;
             }
             try {
-                await fetchEmailJson('/api/email/subscriptions', {
+                await apiFetch('/api/email/subscriptions', {
                     method: 'PUT',
                     body: JSON.stringify({
                         seriesTitle: currentEmailSubscriptionSeriesTitle,
@@ -1179,7 +1139,7 @@
                     })
                 });
                 showMessage('Auto-send subscription saved.', 'success');
-                const data = await fetchEmailJson(`/api/email/subscriptions?series=${encodeURIComponent(currentEmailSubscriptionSeriesTitle)}`);
+                const data = await apiFetch(`/api/email/subscriptions?series=${encodeURIComponent(currentEmailSubscriptionSeriesTitle)}`);
                 renderEmailSubscriptionsList(Array.isArray(data.subscriptions) ? data.subscriptions : []);
             } catch (error) {
                 showMessage('Failed to save auto-send subscription: ' + error.message, 'error');
@@ -1188,9 +1148,9 @@
 
         async function deleteEmailSubscription(id) {
             try {
-                await fetchEmailJson(`/api/email/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                await apiFetch(`/api/email/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' });
                 showMessage('Auto-send subscription deleted.', 'success');
-                const data = await fetchEmailJson(`/api/email/subscriptions?series=${encodeURIComponent(currentEmailSubscriptionSeriesTitle)}`);
+                const data = await apiFetch(`/api/email/subscriptions?series=${encodeURIComponent(currentEmailSubscriptionSeriesTitle)}`);
                 renderEmailSubscriptionsList(Array.isArray(data.subscriptions) ? data.subscriptions : []);
             } catch (error) {
                 showMessage('Failed to delete auto-send subscription: ' + error.message, 'error');

@@ -88,11 +88,8 @@
             updateDuplicateReviewNavigation();
 
             try {
-                const response = await fetch(apiUrl('/api/files?filter=duplicates&per_page=-1&sort=name'), {
-                    headers: getAuthHeaders()
-                });
+                const response = await apiFetch('/api/files?filter=duplicates&per_page=-1&sort=name', { json: false });
                 if (loadId !== duplicateReviewLoadId) return;
-                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -251,19 +248,7 @@
             showProgressModal(`Deleting ${paths.length} duplicate(s)...`);
 
             try {
-                const response = await fetch(apiUrl('/api/jobs/delete-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: paths })
-                });
-
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
+                const response = await apiFetch('/api/jobs/delete-selected', { method: 'POST', body: { Files: paths }, json: false });
 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));
@@ -310,14 +295,7 @@
             modal.classList.add('active');
 
             try {
-                const response = await fetch(apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/folders`), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch(`/api/files/series/${encodeURIComponent(seriesId)}/folders`);
                 seriesFoldersCurrent = data;
                 const folders = Array.isArray(data.folders) ? data.folders : [];
 
@@ -402,14 +380,7 @@
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
 
             try {
-                const response = await fetch(apiUrl('/api/files/combinable-folders'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/files/combinable-folders');
                 combineFolderGroups = Array.isArray(data.groups) ? data.groups : [];
                 combineFolderIndex = 0;
                 combineFolderSelectedDestination = null;
@@ -585,15 +556,7 @@
          * rejects with the server's error otherwise.
          */
         async function requestCombineFoldersPreview(body) {
-            const response = await fetch(apiUrl('/api/files/combine-folders/preview'), {
-                method: 'POST',
-                headers: {
-                    ...getAuthHeaders(),
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(body)
-            });
-            if (handleAuthError(response)) return null;
+            const response = await apiFetch('/api/files/combine-folders/preview', { method: 'POST', body, json: false });
             const data = await response.json();
             if (!response.ok) {
                 throw new Error(data.error || `HTTP error! status: ${response.status}`);
@@ -779,15 +742,7 @@
             document.getElementById('combineFoldersPreviewBtn').disabled = true;
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
             try {
-                const response = await fetch(apiUrl('/api/files/combine-folders'), {
-                    method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(body)
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch('/api/files/combine-folders', { method: 'POST', body, json: false });
                 const data = await response.json();
                 if (!response.ok) {
                     throw new Error(data.error || `HTTP error! status: ${response.status}`);
@@ -875,14 +830,7 @@
         async function viewTags(filepath) {
             try {
                 const encodedPath = encodeFilePathForUrl(filepath);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}/tags`), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const tags = await response.json();
+                const tags = await apiFetch(`/api/files/${encodedPath}/tags`);
                 
                 if (tags.error) {
                     showMessage(tags.error, 'error');
@@ -956,25 +904,7 @@
             try {
                 console.log('[SINGLE FILE] Starting update metadata file request...');
                 // Start the update metadata job using job-based pattern
-                const response = await fetch(apiUrl('/api/jobs/update-metadata-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: [targetFile], Metadata: metadata, Fields: fields })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[SINGLE FILE] Failed to start updating metadata for file (HTTP ${response.status})`);
-                    throw new Error('Failed to start update metadata job');
-                }
-                
-                const result = await response.json();
+                const result = await apiFetch('/api/jobs/update-metadata-selected', { method: 'POST', body: { Files: [targetFile], Metadata: metadata, Fields: fields }, errorMessage: 'Failed to start update metadata job' });
                 const jobId = result.job_id;
                 
                 if (!jobId) {
@@ -1038,25 +968,7 @@
             try {
                 console.log('[BATCH] Starting update metadata selected files request...');
                 // Start the job using the jobs endpoint
-                const response = await fetch(apiUrl('/api/jobs/update-metadata-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: files, Metadata: metadata, Fields: fields })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start updating metadata for selected files (HTTP ${response.status})`);
-                    throw new Error('Failed to start update metadata job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/update-metadata-selected', { method: 'POST', body: { Files: files, Metadata: metadata, Fields: fields }, errorMessage: 'Failed to start update metadata job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 

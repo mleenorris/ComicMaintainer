@@ -238,10 +238,7 @@
             }
             let data;
             try {
-                const resp = await fetch(apiUrl('/api/overview'), {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const resp = await apiFetch('/api/overview', { json: false });
                 if (!resp.ok) throw new Error('overview ' + resp.status);
                 data = await resp.json();
             } catch (err) {

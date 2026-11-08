@@ -107,44 +107,12 @@
             return showMessage(text, type, inDialog ? { ...options, container } : options);
         }
 
-        // The error thrown for a failed response, carrying the server's own
-        // message when it sent one.
-        async function suwayomiResponseError(response) {
-            let message = `HTTP error! status: ${response.status}`;
-            let fromServer = false;
-            try {
-                const body = await response.json();
-                if (body && typeof body.error === 'string' && body.error) {
-                    message = body.error;
-                    fromServer = true;
-                }
-            } catch (e) { /* not a JSON error body */ }
-            const error = apiResponseError(response, message);
-            error.fromServer = fromServer;
-            return error;
-        }
-
-        async function fetchSuwayomiSearchJson(path, options = {}) {
-            const response = await fetch(apiUrl(path), {
-                headers: getAuthHeaders(),
-                credentials: 'same-origin',
-                ...options
-            });
-            if (handleAuthError(response)) {
-                const error = new Error('Your session has expired.');
-                error.authHandled = true;
-                throw error;
-            }
-            if (!response.ok) throw await suwayomiResponseError(response);
-            return await response.json();
-        }
-
         // Loads the installed sources and fills the language picker with
         // their languages. A failed load is forgotten so the next search
         // tries again.
         function loadSuwayomiSearchSources() {
             if (suwayomiSourcesPromise) return suwayomiSourcesPromise;
-            const promise = fetchSuwayomiSearchJson('/api/suwayomi/sources').then(data => {
+            const promise = apiFetch('/api/suwayomi/sources').then(data => {
                 const sources = (Array.isArray(data && data.sources) ? data.sources : [])
                     .filter(source => source && typeof source.id === 'string' && /^[0-9]+$/.test(source.id));
                 if (suwayomiSourcesPromise === promise) populateSuwayomiSearchLanguages(sources);
@@ -343,7 +311,7 @@
             // letter or digit would match the whole library.
             if (/[\p{L}\p{Nd}]/u.test(query)) {
                 try {
-                    const data = await fetchSuwayomiSearchJson(
+                    const data = await apiFetch(
                         `/api/suwayomi/series?query=${encodeURIComponent(query)}&limit=10`,
                         { signal: controller.signal });
                     if (!isCurrent()) return;
@@ -361,7 +329,7 @@
                     const index = next++;
                     const source = searched[index];
                     try {
-                        const data = await fetchSuwayomiSearchJson(
+                        const data = await apiFetch(
                             `/api/suwayomi/sources/${encodeURIComponent(source.id)}/series?query=${encodeURIComponent(query)}`,
                             { signal: controller.signal });
                         if (!isCurrent()) return;
@@ -451,14 +419,7 @@
             if (button) button.disabled = true;
             if (label) label.textContent = inLibrary() ? 'Queuing...' : 'Adding...';
             try {
-                const response = await fetch(apiUrl(`/api/suwayomi/series/${id}/add`), {
-                    method: 'POST',
-                    headers: getAuthHeaders(),
-                    credentials: 'same-origin'
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) throw await suwayomiResponseError(response);
-                const result = await response.json();
+                const result = await apiFetch(`/api/suwayomi/series/${id}/add`, { method: 'POST' });
                 const queued = result && result.downloads && Array.isArray(result.downloads.queuedChapters)
                     ? result.downloads.queuedChapters.length
                     : 0;

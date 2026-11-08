@@ -72,10 +72,7 @@
             // The server knows whether the Authelia session is still valid. A proxy sends an expired
             // session to the Authelia portal with a redirect, and following that one fails just like
             // being offline does (the portal is another origin), so it is looked at and not followed.
-            const response = await fetch(apiUrl('/api/auth/status'), {
-                credentials: 'include', // Important for Authelia cookies
-                redirect: 'manual'
-            });
+            const response = await apiFetch('/api/auth/status', { auth: false, json: false, redirect: 'manual' });
 
             if (response.type === 'opaqueredirect' || response.status === 401 || response.status === 403) {
                 console.warn('[AUTH] Authelia session expired or invalid');
@@ -120,11 +117,7 @@
         async function fetchStreamToken() {
             const isAutheliaAuth = isAutheliaAuthenticated();
             console.log('SSE: Authentication mode -', isAutheliaAuth ? 'Authelia' : 'JWT');
-            const response = await fetch(apiUrl('/api/auth/stream-token'), {
-                method: 'POST',
-                credentials: 'include', // Authelia sessions are cookies
-                headers: getAuthHeaders()
-            });
+            const response = await apiFetch('/api/auth/stream-token', { method: 'POST', json: false, redirectOn401: false });
             if (!response.ok) {
                 console.error('SSE: Failed to get a stream token - status:', response.status);
                 if (response.status === 401 && !isAutheliaAuth) {
@@ -554,14 +547,7 @@
         async function updateWatcherStatus() {
             // Fetch the current status; SSE watcher_status events keep it up to date
             try {
-                const response = await fetch(apiUrl('/api/watcher/status'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/watcher/status');
                 updateWatcherStatusDisplay(data.running, data.enabled);
             } catch (error) {
                 console.error('Error fetching initial watcher status:', error);

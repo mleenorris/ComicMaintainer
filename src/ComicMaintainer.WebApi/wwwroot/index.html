@@ -2098,25 +2098,6 @@
     </div>
     
     
-    <!-- External JavaScript -->
-    <script>
-        // Base path for reverse proxy support
-        // In .NET, this can be configured via environment variable BASE_PATH if needed
-        const BASE_PATH = '';
-        
-        // Helper function to build URLs with base path
-        function apiUrl(path) {
-            // Ensure path starts with /
-            if (!path.startsWith('/')) {
-                path = '/' + path;
-            }
-            const fullUrl = BASE_PATH + path;
-            console.log('[API_URL] Building URL - BASE_PATH:', BASE_PATH, 'path:', path, 'result:', fullUrl);
-            return fullUrl;
-        }
-        
-    </script>
-
     <!-- App scripts, loaded with a server-injected version for cache busting.
          The __APP_VERSION__ placeholder is replaced by
          HtmlVersionInjectionMiddleware so the URLs are always versioned

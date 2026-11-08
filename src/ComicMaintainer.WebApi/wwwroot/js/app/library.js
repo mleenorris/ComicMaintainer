@@ -165,33 +165,24 @@
             const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
             seriesLoadController = controller;
             try {
-                let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${limit}`);
+                let path = `/api/files/series?offset=${seriesOffset}&limit=${limit}`;
                 if (refresh) {
-                    url += '&refresh=true';
+                    path += '&refresh=true';
                 }
                 if (searchQuery) {
-                    url += `&search=${encodeURIComponent(searchQuery)}`;
+                    path += `&search=${encodeURIComponent(searchQuery)}`;
                 }
                 if (filterMode !== 'all') {
-                    url += `&filter=${encodeURIComponent(filterMode)}`;
+                    path += `&filter=${encodeURIComponent(filterMode)}`;
                 }
                 if (sortMode !== 'name') {
-                    url += `&sort=${encodeURIComponent(sortMode)}`;
+                    path += `&sort=${encodeURIComponent(sortMode)}`;
                 }
                 if (sortDirection !== 'asc') {
-                    url += `&direction=${encodeURIComponent(sortDirection)}`;
+                    path += `&direction=${encodeURIComponent(sortDirection)}`;
                 }
 
-                const response = await fetch(url, {
-                    headers: getAuthHeaders(),
-                    signal: controller ? controller.signal : undefined
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
-
-                const data = await response.json();
+                const data = await apiFetch(path, { signal: controller ? controller.signal : undefined });
                 const newSeries = data.series || [];
                 seriesLibrary = seriesLibrary.concat(newSeries);
                 seriesOffset += newSeries.length;
@@ -490,17 +481,7 @@
         async function scanUnmarkedFiles() {
             try {
                 showMessage('Scanning for unmarked files...', 'info');
-                const response = await fetch(apiUrl('/api/scan-unmarked'), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/scan-unmarked', { method: 'POST' });
                 
                 showMessage(`Found ${data.unmarked_count} unmarked file(s) and ${data.marked_count} marked file(s) out of ${data.total_count} total files.`, 'success');
             } catch (error) {
@@ -508,29 +489,25 @@
             }
         }
 
-        function getSeriesCoverUrl(filePath) {
+        function getSeriesCoverPath(filePath) {
             // Persistent server-side cache endpoint. Falls back automatically
             // (via the protected-image fallback machinery) to the legacy page
             // extraction endpoint if the cache is unavailable.
-            return apiUrl(`/api/comicreader/cover?filePath=${encodeURIComponent(filePath)}`);
-        }
-
-        function getSeriesCoverFallbackUrl(filePath) {
-            return apiUrl(`/api/comicreader/page?filePath=${encodeURIComponent(filePath)}&page=1`);
+            return `/api/comicreader/cover?filePath=${encodeURIComponent(filePath)}`;
         }
 
         /**
-         * Resolve a `data-protected-image` token to a fetchable URL. Tokens
-         * that look like API paths (start with "/api/") are passed through to
-         * apiUrl(); anything else is treated as a comic file path and routed
-         * through the comicreader page endpoint.
+         * Resolve a `data-protected-image` token to an API path. Tokens
+         * that look like API paths (start with "/api/") are used as they are;
+         * anything else is treated as a comic file path and routed through the
+         * comicreader cover endpoint.
          */
-        function resolveProtectedImageUrl(token) {
+        function resolveProtectedImagePath(token) {
             if (!token) return null;
             if (token.startsWith('/api/')) {
-                return apiUrl(token);
+                return token;
             }
-            return getSeriesCoverUrl(token);
+            return getSeriesCoverPath(token);
         }
 
         // Lazy per-image hydration. Previously this function fetched every
@@ -594,9 +571,9 @@
             image.dataset.protectedImageLoaded = '1';
 
             const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-            const fetchOnce = async (url) => {
+            const fetchOnce = async (path) => {
                 try {
-                    const response = await fetch(url, { headers: getAuthHeaders() });
+                    const response = await apiFetch(path, { json: false });
                     return { response, errored: false };
                 } catch (error) {
                     return { response: null, errored: true, error };
@@ -608,16 +585,16 @@
                     image.src = protectedImageUrls.get(token);
                     return 'ok';
                 }
-                const url = resolveProtectedImageUrl(token);
-                if (!url) return 'missing';
+                const path = resolveProtectedImagePath(token);
+                if (!path) return 'missing';
 
-                let attempt = await fetchOnce(url);
+                let attempt = await fetchOnce(path);
                 let response = attempt.response;
                 const isTransient = attempt.errored
                     || (response && response.status >= 500);
                 if (isTransient) {
                     await sleep(250);
-                    attempt = await fetchOnce(url);
+                    attempt = await fetchOnce(path);
                     response = attempt.response;
                 }
 
@@ -827,11 +804,7 @@
         // result for the lifetime of the selection.
         async function fetchSeriesFilePaths(seriesId) {
             try {
-                const url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=-1&filter=all`);
-                const response = await fetch(url, {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=-1&filter=all`, { json: false });
                 if (!response.ok) return [];
                 const data = await response.json();
                 const issues = Array.isArray(data.issues) ? data.issues : [];
@@ -1085,10 +1058,7 @@
             const container = document.getElementById('providerHealthWidget');
             if (!container) return;
             try {
-                const response = await fetch(apiUrl('/api/metadata/providers'), {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch('/api/metadata/providers', { json: false });
                 if (!response.ok) {
                     renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>`);
                     return;

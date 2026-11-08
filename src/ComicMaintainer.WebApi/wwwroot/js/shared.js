@@ -26,24 +26,23 @@ function escapeHtml(text) {
 }
 
 /**
+ * The path the app is served under: '' at the domain root.
+ */
+const BASE_PATH = '';
+
+/**
+ * The URL of a path of this app. Every URL the scripts build goes through
+ * here, so that the app works under a subfolder.
+ */
+function apiUrl(path) {
+    return BASE_PATH + (path.startsWith('/') ? path : '/' + path);
+}
+
+/**
  * Whether the user signed in through Authelia (cookie-based auth) rather than
  * with a JWT. Authelia sessions ride on cookies sent via
  * `credentials: 'include'`, so no Authorization header is attached for them.
  */
 function isAutheliaAuthenticated() {
     return localStorage.getItem('authelia_authenticated') === 'true';
-}
-
-/**
- * Fetch options that always send cookies and, for JWT sessions, attach the
- * bearer token. `extra` is merged in (its headers are preserved).
- */
-function buildCredentialedFetchOptions(extra, bearerToken) {
-    const opts = Object.assign({ credentials: 'include' }, extra || {});
-    if (!isAutheliaAuthenticated() && bearerToken) {
-        opts.headers = Object.assign({}, opts.headers || {}, {
-            'Authorization': 'Bearer ' + bearerToken
-        });
-    }
-    return opts;
 }

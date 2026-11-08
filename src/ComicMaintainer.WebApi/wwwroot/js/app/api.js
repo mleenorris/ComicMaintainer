@@ -1,4 +1,4 @@
-        // ComicMaintainer SPA — API plumbing: failure references, auth/JWT handling, fetch options, preferences, showMessage().
+        // ComicMaintainer SPA — API plumbing: failure references, auth/JWT handling, apiFetch(), preferences, showMessage().
         //
         // Classic (non-module) script: its top-level declarations are globals
         // shared with the other app scripts and with inline onclick handlers.
@@ -6,10 +6,6 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
-        // BASE_PATH and apiUrl are defined in an inline script in the main HTML file
-        // (before this external JS is loaded) to support Flask template variable injection.
-        // They are available globally when this script executes.
-        
         // =================================================================
         // API failure references
         // =================================================================
@@ -115,8 +111,14 @@
             return currentTime >= expirationTime;
         }
         
+        // Set once the page is on its way to the login screen. Whatever was
+        // in flight then fails, and telling the user about each of those
+        // failures on the way out would only be noise.
+        let loginRedirectStarted = false;
+
         // Helper function to redirect to login and clear auth data
         function redirectToLogin() {
+            loginRedirectStarted = true;
             localStorage.removeItem('jwt_token');
             localStorage.removeItem('username');
             localStorage.removeItem('authelia_authenticated');
@@ -162,9 +164,7 @@
         async function checkAuth() {
             try {
                 // First check server auth status (includes Authelia check)
-                const response = await fetch(apiUrl('/api/auth/status'), {
-                    credentials: 'include' // Important for Authelia cookies
-                });
+                const response = await apiFetch('/api/auth/status', { auth: false, json: false });
                 
                 if (response.ok) {
                     const authStatus = await response.json();
@@ -235,7 +235,7 @@
             // If authenticated via Authelia, don't need Authorization header
             // The cookies will be sent automatically with credentials: 'include'
             if (isAutheliaAuth) {
-                console.log('[AUTH] Using Authelia authentication (cookies)');
+                apiDebugLog('Using Authelia authentication (cookies)');
                 return {
                     'Content-Type': 'application/json',
                     'X-Client-Session': getOrCreateClientCacheSessionId()
@@ -257,7 +257,7 @@
             };
             if (token) {
                 headers['Authorization'] = `Bearer ${token}`;
-                console.log('[AUTH] Adding authorization header (token present)');
+                apiDebugLog('Adding authorization header (token present)');
             } else {
                 console.warn('[AUTH] No JWT token found in localStorage');
             }
@@ -275,21 +275,145 @@
             return false;
         }
         
-        // Helper function to get fetch options with proper credentials
-        function getFetchOptions(method = 'GET', body = null) {
-            const options = {
-                method: method,
-                headers: getAuthHeaders(),
-                credentials: 'include' // Always include credentials for Authelia support
-            };
-            
-            if (body) {
-                options.body = typeof body === 'string' ? body : JSON.stringify(body);
+        // Per-request logging is off by default: a large library makes one
+        // request per cover, and a console full of these hides the real
+        // errors. Run localStorage.setItem('debug_api', 'true') in the browser
+        // console to turn it on.
+        function isApiDebugEnabled() {
+            try {
+                return localStorage.getItem('debug_api') === 'true';
+            } catch {
+                return false;
             }
-            
-            return options;
         }
-        
+
+        function apiDebugLog(...details) {
+            if (isApiDebugEnabled()) console.debug('[API]', ...details);
+        }
+
+        /**
+         * What a failed response says went wrong, or undefined when it says
+         * nothing a user could read. The API answers with ProblemDetails plus
+         * an `error` string, older endpoints with `error` or `message` alone,
+         * and BadRequest("...") with the bare text. A 5xx body that is not
+         * JSON comes from a proxy or an error page, so it is left out.
+         */
+        async function apiErrorMessage(response) {
+            let text = '';
+            try {
+                text = await response.text();
+            } catch {
+                return undefined;
+            }
+
+            let body;
+            try {
+                body = JSON.parse(text);
+            } catch {
+                const isPlainText = /^text\/plain/i.test(response.headers.get('Content-Type') || '');
+                return response.status < 500 && isPlainText && text.trim() ? text.trim() : undefined;
+            }
+
+            const candidates = typeof body === 'string'
+                ? [body]
+                : [body?.error, body?.detail, body?.message, body?.title];
+            return candidates.find(value => typeof value === 'string' && value.trim());
+        }
+
+        /**
+         * The error for a session that has ended. The user is already on the
+         * way to the login page, so `authHandled` tells callers there is
+         * nothing left to report.
+         */
+        function apiSessionEndedError(status = 401) {
+            const error = new Error('Authentication required');
+            error.status = status;
+            error.correlationId = null;
+            error.authHandled = true;
+            return error;
+        }
+
+        /**
+         * Sends a request to the app's API. Every request goes through here,
+         * so credentials, the session headers and the handling of an ended
+         * session are the same everywhere.
+         *
+         * Options, besides what fetch() itself takes (signal, keepalive, ...):
+         *  - method: GET unless given.
+         *  - body: an object or array is sent as JSON; a string, FormData or
+         *    Blob is sent as it is.
+         *  - json: true (the default) parses the answer and returns it (`{}`
+         *    when the answer is empty), and throws apiResponseError() for a
+         *    failed one, with the server's own message when it gave one
+         *    (`fromServer` says so).
+         *    false returns the Response, for binary answers and for callers
+         *    that treat some statuses specially.
+         *  - errorMessage: the message for a failure the server did not explain.
+         *  - forbiddenMessage: the message for a 403 the server did not explain.
+         *  - auth: false sends no session headers and leaves a 401 to the
+         *    caller, for the requests that are made without a session.
+         *  - redirectOn401: false leaves a 401 to the caller but still sends
+         *    the session headers.
+         *
+         * A 401 means the session has ended: the user is sent to the login
+         * page and this throws an error flagged `authHandled`.
+         */
+        async function apiFetch(path, options = {}) {
+            const {
+                method = 'GET',
+                body,
+                json = true,
+                auth = true,
+                redirectOn401 = true,
+                errorMessage,
+                forbiddenMessage = 'You do not have permission to do that.',
+                headers,
+                ...fetchOptions
+            } = options;
+
+            const requestHeaders = { ...(auth ? getAuthHeaders() : {}), ...headers };
+            // getAuthHeaders() found an expired token and started the redirect:
+            // sending the request would only earn a 401.
+            if (auth && loginRedirectStarted) throw apiSessionEndedError();
+
+            const request = { method, credentials: 'include', ...fetchOptions, headers: requestHeaders };
+            if (body !== undefined && body !== null) {
+                const sentAsIs = typeof body === 'string' || body instanceof FormData || body instanceof Blob;
+                request.body = sentAsIs ? body : JSON.stringify(body);
+                if (body instanceof FormData) {
+                    // The browser adds the multipart boundary itself.
+                    delete requestHeaders['Content-Type'];
+                } else if (!sentAsIs && !requestHeaders['Content-Type']) {
+                    requestHeaders['Content-Type'] = 'application/json';
+                }
+            }
+
+            const url = apiUrl(path);
+            apiDebugLog(method, url);
+            const response = await fetch(url, request);
+
+            if (auth && redirectOn401 && response.status === 401) {
+                console.log('Received 401 Unauthorized, redirecting to login');
+                redirectToLogin();
+                throw apiSessionEndedError(response.status);
+            }
+            if (!json) return response;
+
+            if (!response.ok) {
+                const serverMessage = await apiErrorMessage(response);
+                const fallback = response.status === 403
+                    ? forbiddenMessage
+                    : errorMessage ?? `HTTP error! status: ${response.status}`;
+                const error = apiResponseError(response, serverMessage ?? fallback);
+                error.fromServer = serverMessage !== undefined;
+                throw error;
+            }
+
+            if (response.status === 204) return {};
+            const text = await response.text();
+            return text ? JSON.parse(text) : {};
+        }
+
         // Helper function to encode filepath for RESTful URL
         function encodeFilePathForUrl(filePath) {
             // Convert to base64 URL-safe encoding
@@ -307,9 +431,11 @@
             if (confirm('Are you sure you want to logout?')) {
                 const token = localStorage.getItem('jwt_token');
                 if (token && !isAutheliaAuthenticated()) {
-                    fetch(apiUrl('/api/auth/logout'), {
+                    apiFetch('/api/auth/logout', {
                         method: 'POST',
                         keepalive: true,
+                        auth: false,
+                        json: false,
                         headers: { 'Authorization': `Bearer ${token}` }
                     }).catch(error => console.warn('[AUTH] Sign-out request failed:', error));
                 }
@@ -320,15 +446,7 @@
         // API helper functions for server-side preferences
         async function getPreferences() {
             try {
-                const response = await fetch(apiUrl('/api/preferences'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return {};
-                if (!response.ok) {
-                    console.error('Failed to get preferences:', response.status);
-                    return {};
-                }
-                return await response.json();
+                return await apiFetch('/api/preferences');
             } catch (error) {
                 console.error('Error getting preferences:', error);
                 return {};
@@ -337,24 +455,18 @@
         
         async function setPreferences(prefs) {
             try {
-                const response = await fetch(apiUrl('/api/preferences'), {
-                    method: 'PUT',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(prefs)
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    console.error('Failed to set preferences:', response.status);
-                }
+                await apiFetch('/api/preferences', { method: 'PUT', body: prefs });
             } catch (error) {
                 console.error('Error setting preferences:', error);
             }
         }
         
         function showMessage(message, type = 'info', options = {}) {
+            // On the way to the login page, the requests still in flight fail
+            // and their callers report it; the user just needs the login page.
+            if (loginRedirectStarted && type === 'error') {
+                return document.createElement('div');
+            }
             // An open dialog covers #messageContainer, so a dialog that stays
             // open after an action passes its own live region as `container`.
             const container = options.container || document.getElementById('messageContainer');

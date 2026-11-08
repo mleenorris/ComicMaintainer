@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using ComicMaintainer.WebApi.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
 
@@ -31,6 +32,14 @@ public sealed class AuthenticationRateLimitTests : IAsyncLifetime
 
         using var limited = await LoginAsync(client, 0);
         Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+
+        // The sign-in page shows the server's message: the response says what happened and how long to wait.
+        Assert.Equal("application/json", limited.Content.Headers.ContentType?.MediaType);
+        var seconds = limited.Headers.RetryAfter?.Delta?.TotalSeconds;
+        Assert.NotNull(seconds);
+        Assert.InRange(seconds.Value, 1, AuthenticationRateLimit.Window.TotalSeconds);
+        var body = await limited.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.StartsWith("Too many requests. Please try again in ", body.GetProperty("error").GetString());
 
         // The limit is shared with setup and registration, and leaves the rest of the API alone.
         using var setup = await client.PostAsJsonAsync("/api/auth/setup", new { username = "someone", password = "An0therGuess", setupToken = "guess" });

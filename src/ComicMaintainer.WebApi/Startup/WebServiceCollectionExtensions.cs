@@ -116,8 +116,9 @@ public static class WebServiceCollectionExtensions
                     });
             });
 
-            // Sign-in, registration and first-run setup: few attempts per client address, whether or not
-            // the request is authenticated, so one client cannot guess passwords for many accounts.
+            // Everything that checks a password or a setup code (sign-in, registration, first-run setup,
+            // change password, create API key): few attempts per client address, whether or not the
+            // request is authenticated, so one client cannot guess passwords for many accounts.
             options.AddPolicy(AuthenticationRateLimit.PolicyName, context =>
                 System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: $"ip:{ForwardedClientAddress.Resolve(context, trustedProxies, forwardedHopLimit)?.ToString() ?? "unknown"}",
@@ -128,6 +129,7 @@ public static class WebServiceCollectionExtensions
                         QueueLimit = 0
                     }));
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.OnRejected = new RateLimitRejection(trustedProxies).WriteAsync;
         });
 
         // Add output caching for better performance  

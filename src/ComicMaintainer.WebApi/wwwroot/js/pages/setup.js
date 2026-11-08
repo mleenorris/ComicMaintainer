@@ -107,6 +107,20 @@
             }
         }
         
+        // What to tell a client that made too many attempts: the app explains in
+        // JSON, but a limit set on a proxy in front of it may answer with anything.
+        async function rateLimitMessage(response) {
+            try {
+                const data = await response.json();
+                if (data && data.error) {
+                    return data.error;
+                }
+            } catch (error) {
+                console.warn('Rate limit response was not JSON:', error);
+            }
+            return 'Too many attempts. Please wait a few minutes and try again.';
+        }
+
         // Handle setup form submission
         document.getElementById('setupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -161,8 +175,10 @@
                     })
                 });
                 
-                const data = await response.json();
-                
+                const data = response.status === 429
+                    ? { error: await rateLimitMessage(response) }
+                    : await response.json();
+
                 if (response.ok) {
                     // Show success and redirect to login
                     showSuccess('Administrator account created successfully! Redirecting to login...');

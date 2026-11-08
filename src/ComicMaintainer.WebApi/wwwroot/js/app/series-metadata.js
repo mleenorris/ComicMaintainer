@@ -1035,7 +1035,10 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    showMessage('Failed to refresh metadata', 'error');
+                    // A 503 names the provider that could not answer; the record is kept.
+                    let msg = 'Failed to refresh metadata';
+                    try { const j = await response.json(); if (j && (j.error || typeof j === 'string')) msg = j.error || j; } catch {}
+                    showMessage(msg, 'error');
                     return;
                 }
                 const record = await response.json();
@@ -1088,7 +1091,10 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    renderHtml(container, html`<p style="color: var(--text-error);">Search failed.</p>`);
+                    // A 503 names the providers that could not answer.
+                    let msg = 'Search failed.';
+                    try { const j = await response.json(); if (j && j.error) msg = `Search failed: ${j.error}`; } catch {}
+                    renderHtml(container, html`<p style="color: var(--text-error);">${msg}</p>`);
                     return;
                 }
                 const data = await response.json();

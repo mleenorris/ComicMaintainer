@@ -565,7 +565,8 @@ test('Refresh from Provider reloads the provider names, image and lookup status'
         [metadataRecord({ lookup_status: 'manual_match' }), { text: 'Metadata refreshed', type: 'success' }],
         [metadataRecord({ lookup_status: 'not_found' }), { text: 'Lookup status: not_found', type: 'info' }],
         [metadataRecord({ lookup_status: null }), { text: 'Lookup status: unknown', type: 'info' }],
-        [respond(502, { error: 'ComicVine is unavailable' }), { text: 'Failed to refresh metadata', type: 'error' }],
+        [respond(503, { error: 'ComicVine is unavailable' }), { text: 'ComicVine is unavailable', type: 'error' }],
+        [respond(502, 'Bad Gateway'), { text: 'Failed to refresh metadata', type: 'error' }],
         [offline, { text: 'Failed to refresh metadata', type: 'error' }]
     ];
     for (const [handler, expected] of outcomes) {

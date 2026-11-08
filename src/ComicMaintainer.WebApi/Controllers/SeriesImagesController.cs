@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
@@ -271,6 +272,13 @@ public class SeriesImagesController : ControllerBase
                 .ToList();
 
             return Ok(new { query, candidates });
+        }
+        catch (ExternalMetadataUnavailableException ex)
+        {
+            // No provider returned candidates and at least one could not answer.
+            _logger.LogWarning(LoggingHelper.WithWebsitePrefix("Provider image search for {Query} failed: {Reason}"),
+                LoggingHelper.SanitizeForLog(query), LoggingHelper.SanitizeForLog(ex.Message));
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, ex.Message);
         }
         // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a search error.
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)

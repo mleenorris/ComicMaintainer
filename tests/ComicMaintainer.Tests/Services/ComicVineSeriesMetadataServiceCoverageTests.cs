@@ -18,7 +18,13 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
     private readonly ListLogger _logger = new();
 
-    public void Dispose() => _cache.Dispose();
+    private readonly ProviderRateLimiter _fastThrottle = new("ComicVine test", 1000, TimeSpan.FromSeconds(1));
+
+    public void Dispose()
+    {
+        _cache.Dispose();
+        _fastThrottle.Dispose();
+    }
 
     private static AppSettings Settings(bool enabled = true, string? apiKey = "test-key") => new()
     {
@@ -27,14 +33,25 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
         ComicVineBaseUrl = BaseUrl + "/"
     };
 
-    private ComicVineSeriesMetadataService CreateService(StubHandler handler, AppSettings? settings = null)
+    /// <summary>
+    /// Creates the service. Unless <paramref name="realThrottle"/> is set it gets a
+    /// throttle that never waits, so tests sending several requests do not spend
+    /// ComicVine's one-second spacing each time.
+    /// </summary>
+    private ComicVineSeriesMetadataService CreateService(StubHandler handler, AppSettings? settings = null, bool realThrottle = false)
     {
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(f => f.CreateClient(It.IsAny<string>()))
             .Returns(() => new HttpClient(handler, disposeHandler: false));
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(settings ?? Settings());
-        return new ComicVineSeriesMetadataService(factory.Object, options.Object, _cache, _logger);
+        return new ComicVineSeriesMetadataService(
+            factory.Object,
+            options.Object,
+            _cache,
+            _logger,
+            metrics: null,
+            realThrottle ? null : _fastThrottle);
     }
 
     private static HttpResponseMessage Json(string json) => new(HttpStatusCode.OK)
@@ -147,7 +164,7 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
         var handler = new StubHandler(_ => Json("{\"status_code\":1,\"results\":[]}"));
         var settings = Settings();
         settings.ComicVineRequestsPerHour = 2;
-        var service = CreateService(handler, settings);
+        var service = CreateService(handler, settings, realThrottle: true);
 
         await service.SearchSeriesAsync("one");
         await service.SearchSeriesAsync("two");
@@ -168,7 +185,7 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
             lock (times) times.Add(DateTime.UtcNow);
             return Json("{\"status_code\":1,\"results\":[]}");
         });
-        var service = CreateService(handler);
+        var service = CreateService(handler, realThrottle: true);
 
         await Task.WhenAll(service.SearchSeriesAsync("one"), service.SearchSeriesAsync("two"));
 

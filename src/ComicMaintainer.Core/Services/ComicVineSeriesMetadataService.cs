@@ -55,10 +55,22 @@ public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
         IMemoryCache cache,
         ILogger<ComicVineSeriesMetadataService> logger,
         ComicMaintainerMetrics? metrics = null)
+        : this(httpClientFactory, settings, cache, logger, metrics, rateLimiter: null)
+    {
+    }
+
+    /// <summary>Creates the provider with the given throttle instead of ComicVine's own (tests only).</summary>
+    internal ComicVineSeriesMetadataService(
+        IHttpClientFactory httpClientFactory,
+        IOptionsMonitor<AppSettings> settings,
+        IMemoryCache cache,
+        ILogger<ComicVineSeriesMetadataService> logger,
+        ComicMaintainerMetrics? metrics,
+        ProviderRateLimiter? rateLimiter)
         : base("ComicVine", httpClientFactory, settings, cache, logger, metrics)
     {
         _rateLimiter = new Lazy<ProviderRateLimiter>(
-            () => new ProviderRateLimiter(
+            () => rateLimiter ?? new ProviderRateLimiter(
                 "ComicVine",
                 permitLimit: 1,
                 window: TimeSpan.FromSeconds(1),

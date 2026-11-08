@@ -167,7 +167,9 @@ test('failed and empty provider searches say so', async () => {
     const page = await bootSeries();
     await openManageNames(page);
     const outcomes = [
-        [respond(500, { error: 'Provider error' }), 'Search failed.'],
+        [respond(503, { error: 'External metadata providers unavailable: MangaDex did not answer within 15s' }),
+            'Search failed: External metadata providers unavailable: MangaDex did not answer within 15s'],
+        [respond(502, 'Bad Gateway'), 'Search failed.'],
         [offline, 'Search failed.'],
         [{ results: [] }, NO_MATCHES],
         [{}, NO_MATCHES]

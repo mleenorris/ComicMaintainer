@@ -123,9 +123,10 @@ public class ServiceWorkerUpdateTests
 
         // 'controllerchange' and the banner's fallback both reload; routing them
         // through one guarded helper stops a double reload.
-        Assert.Matches(
-            new Regex(@"addEventListener\('controllerchange',\s*\(\)\s*=>\s*\{\s*reloadForServiceWorkerUpdate\("),
-            contents);
+        Assert.Contains("addEventListener('controllerchange', handleServiceWorkerControllerChange)", contents);
+        var controllerChange = ExtractMainJsFunction(contents, "handleServiceWorkerControllerChange");
+        Assert.Contains("reloadForServiceWorkerUpdate(", controllerChange);
+        Assert.DoesNotContain("location.reload", controllerChange);
 
         var reload = ExtractMainJsFunction(contents, "reloadForServiceWorkerUpdate");
         Assert.Matches(new Regex(@"if \(serviceWorkerReloadStarted\)\s*(?:return;|\{\s*return;\s*\})\s*serviceWorkerReloadStarted = true;"), reload);

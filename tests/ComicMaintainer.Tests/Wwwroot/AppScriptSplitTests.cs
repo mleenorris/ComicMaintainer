@@ -109,8 +109,9 @@ public class AppScriptSplitTests
 
         // Precached under the same versioned URL the page requests, and added
         // during install.
-        Assert.Contains("${script}?v=${APP_VERSION}", sw);
-        Assert.Contains("precacheAppScripts(cache)", sw);
+        Assert.Contains("return `${asset}?v=${APP_VERSION}`;", sw);
+        Assert.Contains("[...APP_SCRIPTS, ...PAGE_SCRIPTS, ...STYLESHEETS]", sw);
+        Assert.Contains("precacheVersionedAssets(cache)", sw);
     }
 
     [Fact]
@@ -139,7 +140,7 @@ public class AppScriptSplitTests
         Assert.Equal(expected, precached);
 
         // Precached with the app scripts, under the same versioned URL.
-        Assert.Contains("[...APP_SCRIPTS, ...PAGE_SCRIPTS].map((script) =>", sw);
+        Assert.Contains("[...APP_SCRIPTS, ...PAGE_SCRIPTS, ...STYLESHEETS]", sw);
     }
 
     [Fact]

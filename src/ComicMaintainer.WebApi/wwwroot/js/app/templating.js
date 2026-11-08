@@ -143,11 +143,15 @@
         // copies of the page (markup and parsed DOM) alive for nothing.
         const MAX_CACHED_TEMPLATE_LENGTH = 8192;
 
+        function parseTemplate(markup) {
+            const template = document.createElement('template');
+            template.innerHTML = markup;
+            return template;
+        }
+
         function getParsedTemplate(markup) {
             if (markup.length > MAX_CACHED_TEMPLATE_LENGTH) {
-                const template = document.createElement('template');
-                template.innerHTML = markup;
-                return template;
+                return parseTemplate(markup);
             }
             const cached = TEMPLATE_CACHE.get(markup);
             if (cached) {
@@ -158,8 +162,7 @@
                 return cached;
             }
 
-            const template = document.createElement('template');
-            template.innerHTML = markup;
+            const template = parseTemplate(markup);
             if (TEMPLATE_CACHE.size >= MAX_TEMPLATE_CACHE_ENTRIES) {
                 TEMPLATE_CACHE.delete(TEMPLATE_CACHE.keys().next().value);
             }

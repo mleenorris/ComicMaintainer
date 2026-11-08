@@ -38,7 +38,7 @@ public sealed class SuwayomiServiceSourceSearchTests
         SuwayomiPassword = password
     };
 
-    private SuwayomiService CreateService(SuwayomiHandler handler, AppSettings? settings = null)
+    private SuwayomiService CreateService(SuwayomiHandler handler, AppSettings? settings = null, TimeProvider? timeProvider = null)
     {
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(f => f.CreateClient(SuwayomiService.HttpClientName))
@@ -47,12 +47,16 @@ public sealed class SuwayomiServiceSourceSearchTests
                 // Like the registered client: a short timeout for a server on
                 // the local network.
                 var client = new HttpClient(handler, disposeHandler: false) { Timeout = ClientTimeout };
-                _clients.Add(client);
+                lock (_clients)
+                {
+                    _clients.Add(client);
+                }
+
                 return client;
             });
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(settings ?? Settings());
-        return new SuwayomiService(factory.Object, options.Object, _logger);
+        return new SuwayomiService(factory.Object, options.Object, _logger, timeProvider);
     }
 
     private static HttpResponseMessage Json(string json) => new(HttpStatusCode.OK)
@@ -500,6 +504,266 @@ public sealed class SuwayomiServiceSourceSearchTests
             handler.Requests
                 .Where(request => request.Operation == "SearchSource")
                 .Select(request => request.Variables.GetProperty("query").GetString()));
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_StopsPagingASourceAtThePageCapAndSaysSo()
+    {
+        // A fuzzy search that always has another page of unrelated series.
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("[]")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" => Json(SearchResults(
+                $$"""[{"id":{{request.Variables.GetProperty("page").GetInt32() * 10}},"title":"Something Else {{request.Variables.GetProperty("page").GetInt32()}}"}]""",
+                "true")),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var ex = await Assert.ThrowsAsync<SuwayomiException>(() => CreateService(handler)
+            .DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 }));
+
+        Assert.Equal(
+            Enumerable.Range(1, SuwayomiService.MaxSourceSearchPages),
+            handler.Requests.Where(request => request.Operation == "SearchSource")
+                .Select(request => request.Variables.GetProperty("page").GetInt32()));
+        Assert.Contains($"1 search(es) were cut short; Source: Only the first {SuwayomiService.MaxSourceSearchPages} pages of results for 'Solo Leveling' were searched.", ex.Message);
+        Assert.DoesNotContain("failed", ex.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_ReportsACutShortSearchApartFromFailures()
+    {
+        // Partial matches keep the search going to the page cap, and one of
+        // them is still good enough to download from.
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("[]")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" => Json(SearchResults(
+                $$"""[{"id":{{request.Variables.GetProperty("page").GetInt32() * 10}},"title":"Solo Leveling: Ragnarok {{request.Variables.GetProperty("page").GetInt32()}}"}]""",
+                "true")),
+            "FetchChapters" => Json(FetchedChapters("""
+                [{"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]
+                """)),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 });
+
+        Assert.Equal(new[] { 82 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        Assert.Empty(result.DiscoveryFailures);
+        var cutShort = Assert.Single(result.CutShortSearches);
+        Assert.Equal("Source", cutShort.Target);
+        Assert.Contains($"Only the first {SuwayomiService.MaxSourceSearchPages} pages", cutShort.Reason);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_StopsPagingASourceThatRepeatsTheSamePage()
+    {
+        // A source that ignores the page number and always claims more results.
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("[]")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" => Json(SearchResults("""[{"id":7,"title":"Solo Leveling: Ragnarok"}]""", "true")),
+            "FetchChapters" => Json(FetchedChapters("[]")),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 });
+
+        Assert.Equal(new[] { 1, 2 }, handler.Requests.Where(request => request.Operation == "SearchSource")
+            .Select(request => request.Variables.GetProperty("page").GetInt32()));
+        Assert.Equal(new[] { 2 }, result.UnmatchedIssueNumbers);
+        Assert.Empty(result.DiscoveryFailures);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_SearchesOnlyTheHighestPriorityTitlesOnSources()
+    {
+        var aliases = Enumerable.Range(1, 6).Select(i => $"Alias {i}").ToArray();
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("[]")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" => Json(SearchResults("[]")),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var ex = await Assert.ThrowsAsync<SuwayomiException>(() => CreateService(handler)
+            .DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 }, alternateTitles: aliases));
+
+        Assert.Equal(4, SuwayomiService.MaxSourceSearchTitles);
+        Assert.Equal(
+            new[] { "Solo Leveling", "Alias 1", "Alias 2", "Alias 3" },
+            handler.Requests.Where(request => request.Operation == "SearchSource")
+                .Select(request => request.Variables.GetProperty("query").GetString()));
+        Assert.Contains("Only the first 4 of the series' 7 titles were searched on the sources.", ex.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_StopsSearchingASourceOnceItsTimeBudgetIsSpent()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        var handler = new SuwayomiHandler(request =>
+        {
+            switch (request.Operation)
+            {
+                case "Library":
+                    return Json(Library("[]"));
+                case "Sources":
+                    return Json(Sources("""[{"id":"20","name":"Slow Source","displayName":"Slow Source"}]"""));
+                case "SearchSource":
+                    // Each page takes a slow site 70 seconds.
+                    time.Advance(TimeSpan.FromSeconds(70));
+                    var page = request.Variables.GetProperty("page").GetInt32();
+                    return Json(SearchResults($$"""[{"id":{{page}},"title":"Unrelated {{page}}"}]""", "true"));
+                default:
+                    throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation);
+            }
+        });
+
+        var ex = await Assert.ThrowsAsync<SuwayomiException>(() => CreateService(handler, timeProvider: time)
+            .DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 }, alternateTitles: new[] { "Alias" }));
+
+        // 140 seconds in, the 2-minute budget is spent: no third page and no alias.
+        Assert.Equal(2, handler.Requests.Count(request => request.Operation == "SearchSource"));
+        Assert.Contains("Slow Source: The search was stopped after 2 minutes without an exact title match.", ex.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_SkipsTheSourcesLeftOnceTheSeriesSearchBudgetIsSpent()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        var sources = string.Join(",", Enumerable.Range(1, 8).Select(i => $$"""{"id":"{{i}}","name":"S{{i}}","displayName":"S{{i}}"}"""));
+        var handler = new SuwayomiHandler(request =>
+        {
+            switch (request.Operation)
+            {
+                case "Library":
+                    return Json(Library("[]"));
+                case "Sources":
+                    return Json(Sources("[" + sources + "]"));
+                case "SearchSource":
+                    // Every source is slower than the whole series is allowed.
+                    lock (time)
+                    {
+                        time.Advance(SuwayomiService.SourceDiscoveryBudget + TimeSpan.FromMinutes(1));
+                    }
+
+                    return Json(SearchResults("""[{"id":3,"title":"Unrelated"}]"""));
+                default:
+                    throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation);
+            }
+        });
+
+        var ex = await Assert.ThrowsAsync<SuwayomiException>(() => CreateService(handler, timeProvider: time)
+            .DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 }));
+
+        // At most the first batch started before the budget was spent, and
+        // every source after them was skipped.
+        var searched = handler.Requests.Where(request => request.Operation == "SearchSource").ToList();
+        Assert.InRange(searched.Count, 1, 4);
+        Assert.Contains(
+            $"1 search(es) were cut short; Installed Suwayomi sources: {8 - searched.Count} of 8 sources were not searched because the search reached its 10-minute limit.",
+            ex.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_StopsASourceStartedLateAtTheSeriesSearchBudget()
+    {
+        // The first source takes 9 minutes, so the fifth starts with only one
+        // minute of the series' budget left, less than its own 2 minutes.
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        var fifthSearched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sources = string.Join(",", Enumerable.Range(1, 5).Select(i => $$"""{"id":"{{i}}","name":"S{{i}}","displayName":"S{{i}}"}"""));
+        var handler = SuwayomiHandler.Async(async request =>
+        {
+            switch (request.Operation)
+            {
+                case "Library":
+                    return Json(Library("[]"));
+                case "Sources":
+                    return Json(Sources("[" + sources + "]"));
+                case "SearchSource":
+                    switch (request.Variables.GetProperty("source").GetString())
+                    {
+                        case "1":
+                            time.Advance(TimeSpan.FromMinutes(9));
+                            return Json(SearchResults("[]"));
+                        case "5":
+                            time.Advance(TimeSpan.FromMinutes(2));
+                            fifthSearched.TrySetResult();
+                            return Json(SearchResults("""[{"id":5,"title":"Unrelated"}]""", "true"));
+                        default:
+                            // Keep the other workers busy so the fifth source
+                            // can only start once the first one has finished.
+                            // Well within the 60-second request timeout.
+                            await fifthSearched.Task.WaitAsync(TimeSpan.FromSeconds(45));
+                            return Json(SearchResults("[]"));
+                    }
+
+                default:
+                    throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation);
+            }
+        });
+
+        var ex = await Assert.ThrowsAsync<SuwayomiException>(() => CreateService(handler, timeProvider: time)
+            .DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 }));
+
+        Assert.Single(handler.Requests, request =>
+            request.Operation == "SearchSource" && request.Variables.GetProperty("source").GetString() == "5");
+        Assert.Contains(
+            "S5: The search was stopped when the search of all sources reached its 10-minute limit, without an exact title match.",
+            ex.Message);
+        Assert.DoesNotContain("were not searched", ex.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_StartsTheNextSourceWithoutWaitingForTheSlowestOne()
+    {
+        // The first source only answers once the fifth one has been searched:
+        // searching in fixed batches of four would never get to the fifth.
+        var fifthSearched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sources = string.Join(",", Enumerable.Range(1, 5).Select(i => $$"""{"id":"{{i}}","name":"S{{i}}","displayName":"S{{i}}"}"""));
+        var handler = SuwayomiHandler.Async(async request =>
+        {
+            switch (request.Operation)
+            {
+                case "Library":
+                    return Json(Library("[]"));
+                case "Sources":
+                    return Json(Sources("[" + sources + "]"));
+                case "SearchSource":
+                    var source = request.Variables.GetProperty("source").GetString();
+                    if (source == "1")
+                    {
+                        // Well within the 60-second request timeout.
+                        await fifthSearched.Task.WaitAsync(TimeSpan.FromSeconds(45));
+                    }
+
+                    if (source == "5")
+                    {
+                        fifthSearched.TrySetResult();
+                        return Json(SearchResults("""[{"id":8,"title":"Solo Leveling"}]"""));
+                    }
+
+                    return Json(SearchResults("[]"));
+                case "FetchChapters":
+                    return Json(FetchedChapters("""[{"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]"""));
+                case "Enqueue":
+                    return Json(Enqueued);
+                default:
+                    throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation);
+            }
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 });
+
+        Assert.Equal(new[] { 82 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        Assert.Equal("S5", result.Series!.Source);
     }
 
     [Fact]
@@ -1090,10 +1354,20 @@ public sealed class SuwayomiServiceSourceSearchTests
 
     private sealed class SuwayomiHandler : HttpMessageHandler
     {
-        private readonly Func<RecordedRequest, HttpResponseMessage> _respond;
+        private readonly Func<RecordedRequest, Task<HttpResponseMessage>> _respond;
         private readonly List<RecordedRequest> _requests = new();
 
-        public SuwayomiHandler(Func<RecordedRequest, HttpResponseMessage> respond) => _respond = respond;
+        public SuwayomiHandler(Func<RecordedRequest, HttpResponseMessage> respond)
+            => _respond = request => Task.FromResult(respond(request));
+
+        private SuwayomiHandler(Func<RecordedRequest, Task<HttpResponseMessage>> respondAsync) => _respond = respondAsync;
+
+        /// <summary>
+        /// A handler whose responses can wait for other requests without
+        /// blocking a thread-pool thread, which a loaded machine may not have
+        /// to spare.
+        /// </summary>
+        public static SuwayomiHandler Async(Func<RecordedRequest, Task<HttpResponseMessage>> respondAsync) => new(respondAsync);
 
         public IReadOnlyList<RecordedRequest> Requests
         {
@@ -1121,7 +1395,7 @@ public sealed class SuwayomiServiceSourceSearchTests
                 _requests.Add(recorded);
             }
 
-            return _respond(recorded);
+            return await _respond(recorded);
         }
     }
 

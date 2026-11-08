@@ -152,6 +152,32 @@ public class MissingIssuesCheckJobHandlerTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_AutoDownload_ReportsCutShortSearchesWithoutCallingThemFailures()
+    {
+        SetupCandidates(("a", "Alpha"));
+        SetupSeries("a", "Alpha", "1", "4");
+        _suwayomi.SetupGet(s => s.IsConfigured).Returns(true);
+        _suwayomi.Setup(s => s.GetLibrarySeriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SuwayomiLibrarySnapshot());
+        _suwayomi.Setup(s => s.DownloadMissingIssuesFromSnapshotAsync(
+                "Alpha", It.IsAny<IEnumerable<int>>(), It.IsAny<SuwayomiLibrarySnapshot>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SuwayomiDownloadResult
+            {
+                CutShortSearches = new List<SuwayomiCutShortSearch>
+                {
+                    new() { Target = "Fuzzy source", Reason = "Only the first 3 pages of results were searched." },
+                    new() { Target = "Other source", Reason = "Only the first 3 pages of results were searched." }
+                }
+            });
+
+        var summary = await BuildHandler().ExecuteAsync("""{"autoDownload":true}""", CancellationToken.None);
+
+        Assert.Contains("2 Suwayomi search(es) were cut short", summary);
+        Assert.DoesNotContain("failed", summary);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_AutoDownload_FailureForOneSeriesDoesNotAbortOthers()
     {
         SetupCandidates(("a", "Alpha"), ("b", "Beta"));

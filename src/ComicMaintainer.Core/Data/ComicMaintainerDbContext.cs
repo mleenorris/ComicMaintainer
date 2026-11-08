@@ -283,7 +283,11 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Name).IsRequired().HasMaxLength(128);
             entity.Property(e => e.EmailAddress).IsRequired().HasMaxLength(320);
             entity.Property(e => e.DeliveryFormat).IsRequired().HasMaxLength(16);
-            entity.HasIndex(e => e.EmailAddress).IsUnique();
+            entity.Property(e => e.OwnerUserId).HasMaxLength(450);
+            // Unique per owner: users cannot see each other's devices, so a
+            // global constraint would reveal another user's address through
+            // the conflict error.
+            entity.HasIndex(e => new { e.OwnerUserId, e.EmailAddress }).IsUnique();
         });
 
         // Configure SeriesEmailSubscriptionEntity
@@ -313,6 +317,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Source).IsRequired().HasMaxLength(16);
             entity.Property(e => e.ErrorMessage).HasMaxLength(1024);
             entity.Property(e => e.DisplayName).HasMaxLength(512);
+            entity.Property(e => e.OwnerUserId).HasMaxLength(450);
+            // The delivery history is listed per owner, newest first.
+            entity.HasIndex(e => new { e.OwnerUserId, e.CreatedAt });
             // Auto-send dedupe looks up "was this file already delivered to this device".
             entity.HasIndex(e => new { e.FilePath, e.DeviceId, e.Status });
             entity.HasIndex(e => e.CreatedAt);
@@ -754,6 +761,15 @@ public class EreaderDeviceEntity
 {
     public int Id { get; set; }
 
+    /// <summary>
+    /// Id of the user who saved the device. Only that user (and administrators)
+    /// can see it, send to it, change it or subscribe it to series; its
+    /// subscriptions and deliveries belong to the same user. Null only for
+    /// devices saved before devices had owners when no administrator existed
+    /// to inherit them, which only administrators can reach.
+    /// </summary>
+    public string? OwnerUserId { get; set; }
+
     /// <summary>Friendly device name shown in the UI.</summary>
     public string Name { get; set; } = string.Empty;
 
@@ -807,6 +823,14 @@ public class SeriesEmailSubscriptionEntity
 public class ComicEmailDeliveryEntity
 {
     public int Id { get; set; }
+
+    /// <summary>
+    /// Owner of the device the delivery was sent to, copied when it was queued
+    /// so the history stays private to that user after the device is deleted.
+    /// Null only for unowned legacy rows, which only administrators can reach.
+    /// </summary>
+    public string? OwnerUserId { get; set; }
+
     public string FilePath { get; set; } = string.Empty;
     public int DeviceId { get; set; }
     public string DeviceName { get; set; } = string.Empty;
@@ -842,9 +866,30 @@ public class ComicEmailDeliveryEntity
     /// </summary>
     public string? DisplayName { get; set; }
 
+    /// <summary>
+    /// Why the delivery failed, or, while it is pending after a temporary
+    /// failure, why the last attempt failed and when it is tried again.
+    /// </summary>
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SentAt { get; set; }
+
+    /// <summary>How many times the message has been handed to the mail server.</summary>
+    public int AttemptCount { get; set; }
+
+    /// <summary>
+    /// When a pending delivery whose last attempt failed temporarily is tried
+    /// again (UTC); null when no retry is waiting.
+    /// </summary>
+    public DateTime? NextAttemptAt { get; set; }
+
+    /// <summary>
+    /// How many times work on this delivery has begun since a result was last
+    /// recorded. Saved before converting or sending, so a process that dies
+    /// partway leaves a trace; a delivery that keeps doing so is given up on
+    /// rather than replayed on every start.
+    /// </summary>
+    public int StartsWithoutOutcome { get; set; }
 }
 
 /// <summary>
@@ -932,6 +977,15 @@ public class ErrorReportEntity
     /// forever; changing any part of the configuration clears the block.
     /// </summary>
     public string? PermanentFailureSignature { get; set; }
+
+    /// <summary>
+    /// When an attempt to file the issue started whose outcome is unknown: the
+    /// request timed out or failed after it may have reached GitHub, so the
+    /// issue may exist without its number being recorded. Before filing again
+    /// the repository is searched for an issue carrying this fingerprint that
+    /// was created since then. Null once the outcome is known.
+    /// </summary>
+    public DateTime? IssueCreationAttemptedAt { get; set; }
 }
 
 /// <summary>

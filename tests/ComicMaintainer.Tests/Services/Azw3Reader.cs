@@ -52,6 +52,7 @@ internal sealed class Azw3Reader
 
         foreach (var entry in ReadIndex(chunkIndex))
         {
+            ChunkSelectors.Add(ReadCncxString(chunkIndex, entry.Values[2][0]));
             _chunks.Add(new ChunkRow(
                 InsertPos: int.Parse(entry.Label, CultureInfo.InvariantCulture),
                 FileNumber: entry.Values[3][0],
@@ -95,6 +96,12 @@ internal sealed class Azw3Reader
     public IReadOnlyList<byte[]> Resources { get; }
 
     public List<int> IndexDataRecordCounts { get; } = new();
+
+    /// <summary>The selector each chunk's string reference resolves to, in index order.</summary>
+    public List<string> ChunkSelectors { get; } = new();
+
+    /// <summary>How many CNCX records the chunk index carries.</summary>
+    public int ChunkCncxRecordCount { get; private set; }
 
     public static Azw3Reader Read(string path)
     {
@@ -283,6 +290,28 @@ internal sealed class Azw3Reader
 
         Assert.Equal(expectedEntryCount, rows.Count);
         return rows;
+    }
+
+    /// <summary>
+    /// Follows a string reference from an index entry the way a reader does:
+    /// the record among the index's CNCX records in the high 16 bits and the
+    /// byte offset inside it in the low 16.
+    /// </summary>
+    private string ReadCncxString(int headerRecord, int reference)
+    {
+        var header = _records[headerRecord];
+        var dataRecordCount = (int)ReadUInt32(header, 24);
+        ChunkCncxRecordCount = (int)ReadUInt32(header, 52);
+
+        var recordNumber = reference >> 16;
+        Assert.InRange(recordNumber, 0, ChunkCncxRecordCount - 1);
+
+        var record = _records[headerRecord + 1 + dataRecordCount + recordNumber];
+        Assert.True(record.Length <= ushort.MaxValue);
+
+        var position = reference & 0xFFFF;
+        var length = ReadVariableWidth(record, ref position);
+        return Encoding.UTF8.GetString(record, position, length);
     }
 
     /// <summary>

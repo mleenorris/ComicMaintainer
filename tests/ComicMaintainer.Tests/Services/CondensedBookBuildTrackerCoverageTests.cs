@@ -16,6 +16,7 @@ namespace ComicMaintainer.Tests.Services;
 public class CondensedBookBuildTrackerCoverageTests : IDisposable
 {
     private const string Owner = "user-1";
+    private static readonly EmailAccessScope OwnerScope = EmailAccessScope.ForUser(Owner);
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     private readonly string _workDir;
@@ -31,14 +32,16 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
 
         _email
             .Setup(e => e.ResolveCondensedFormatAsync(
+                It.IsAny<EmailAccessScope>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
-            .Returns((string? format, int? _, CancellationToken _) =>
+            .Returns((EmailAccessScope _, string? format, int? _, CancellationToken _) =>
                 Task.FromResult(EmailDeliveryFormat.NormalizeCondensedOrThrow(format, null, nameof(format))));
 
         _email
             .Setup(e => e.PlanCondensedDeliveryAsync(
+                It.IsAny<EmailAccessScope>(),
                 It.IsAny<IEnumerable<string>>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
@@ -72,7 +75,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
         SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(epub, Path.GetFileName(epub))));
 
         using var tracker = new CondensedBookBuildTracker(_email.Object, _logger);
-        var started = await tracker.StartAsync(Request(), Owner);
+        var started = await tracker.StartAsync(Request(), OwnerScope);
         var finished = await WaitForAsync(tracker, started.BuildId, Owner, IsTerminal);
 
         Assert.Equal(CondensedBookBuildStatus.Completed, finished.Status);
@@ -95,12 +98,12 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
             return new CondensedBookFile(epub, Path.GetFileName(epub));
         });
 
-        var running = await _tracker.StartAsync(Request(), Owner);
+        var running = await _tracker.StartAsync(Request(), OwnerScope);
         await entered.Task.WaitAsync(Timeout);
 
         // A different format is a different book, so it queues behind the
         // running build instead of joining it.
-        var queued = await _tracker.StartAsync(Request(EmailDeliveryFormat.Azw3), Owner);
+        var queued = await _tracker.StartAsync(Request(EmailDeliveryFormat.Azw3), OwnerScope);
         Assert.NotEqual(running.BuildId, queued.BuildId);
         Assert.Equal(CondensedBookBuildStatus.Queued, queued.Status);
 
@@ -133,7 +136,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
             return new CondensedBookFile(epub, Path.GetFileName(epub));
         });
 
-        var started = await _tracker.StartAsync(Request(), Owner);
+        var started = await _tracker.StartAsync(Request(), OwnerScope);
         await entered.Task.WaitAsync(Timeout);
 
         Assert.True(_tracker.Discard(started.BuildId, Owner));
@@ -163,14 +166,14 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
 
         // Another user's build is older than all of them but does not count
         // towards this user's limit.
-        var otherUsers = await _tracker.StartAsync(Request(), "user-2");
+        var otherUsers = await _tracker.StartAsync(Request(), EmailAccessScope.ForUser("user-2"));
         await WaitForAsync(_tracker, otherUsers.BuildId, "user-2", IsTerminal);
         _clock.Advance(TimeSpan.FromSeconds(1));
 
         var ids = new List<Guid>();
         for (var i = 0; i < 21; i++)
         {
-            var started = await _tracker.StartAsync(Request(), Owner);
+            var started = await _tracker.StartAsync(Request(), OwnerScope);
             await WaitForAsync(_tracker, started.BuildId, Owner, IsTerminal);
             ids.Add(started.BuildId);
             _clock.Advance(TimeSpan.FromSeconds(1));
@@ -218,7 +221,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
             return new CondensedBookFile(epub, Path.GetFileName(epub));
         });
 
-        var started = await _tracker.StartAsync(Request(), Owner);
+        var started = await _tracker.StartAsync(Request(), OwnerScope);
 
         for (var i = 0; i < steps.Length; i++)
         {
@@ -257,8 +260,8 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
         });
 
         var request = new CondensedBookBuildRequest(Files, null, 3, 0);
-        var started = await _tracker.StartAsync(request, null);
-        var joined = await _tracker.StartAsync(request, null);
+        var started = await _tracker.StartAsync(request, EmailAccessScope.System);
+        var joined = await _tracker.StartAsync(request, EmailAccessScope.System);
 
         Assert.Equal(started.BuildId, joined.BuildId);
         Assert.Null(_tracker.Get(started.BuildId, Owner));
@@ -282,7 +285,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
             throw new InvalidOperationException("The build should have been cancelled.");
         });
 
-        var started = await _tracker.StartAsync(Request(), Owner);
+        var started = await _tracker.StartAsync(Request(), OwnerScope);
         await entered.Task.WaitAsync(Timeout);
 
         _tracker.Dispose();
@@ -310,7 +313,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
             throw new InvalidOperationException("The build should have been cancelled.");
         });
 
-        await tracker.StartAsync(Request(), Owner);
+        await tracker.StartAsync(Request(), OwnerScope);
         await entered.Task.WaitAsync(Timeout);
 
         tracker.Dispose();
@@ -320,7 +323,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
             && e.Message.Contains("worker failed during shutdown", StringComparison.Ordinal)
             && e.Exception is InvalidOperationException);
         Assert.Empty(tracker.List(Owner));
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => tracker.StartAsync(Request(), Owner));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => tracker.StartAsync(Request(), OwnerScope));
     }
 
     private static bool IsTerminal(CondensedBookBuildDto build) =>
@@ -337,6 +340,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
     {
         _email
             .Setup(e => e.CreateCondensedBookAsync(
+                It.IsAny<EmailAccessScope>(),
                 It.IsAny<IEnumerable<string>>(),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
@@ -348,6 +352,7 @@ public class CondensedBookBuildTrackerCoverageTests : IDisposable
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
+                EmailAccessScope _,
                 IEnumerable<string> _,
                 string? _,
                 int? _,

@@ -72,6 +72,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
         var queuedChapters = 0;
         var downloadFailures = 0;
         var sourceCheckFailures = 0;
+        var searchesCutShort = 0;
         var downloadEnabled = options.AutoDownload && _suwayomi.IsConfigured;
 
         foreach (var series in candidates.Series)
@@ -145,6 +146,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
                             cancellationToken: cancellationToken);
                         queuedChapters += result.QueuedChapters.Count;
                         sourceCheckFailures += result.DiscoveryFailures.Count;
+                        searchesCutShort += result.CutShortSearches.Count;
                     }
                     catch (SuwayomiException ex)
                     {
@@ -169,7 +171,8 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
             downloadEnabled,
             queuedChapters,
             downloadFailures,
-            sourceCheckFailures);
+            sourceCheckFailures,
+            searchesCutShort);
     }
 
     /// <summary>
@@ -244,7 +247,8 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
         bool downloadEnabled,
         int queuedChapters,
         int downloadFailures,
-        int sourceCheckFailures)
+        int sourceCheckFailures,
+        int searchesCutShort)
     {
         var outcomes = new List<string>();
         if (downloadEnabled && seriesWithGaps.Count > 0)
@@ -257,6 +261,10 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
             if (sourceCheckFailures > 0)
             {
                 outcomes.Add($"{sourceCheckFailures} Suwayomi source check(s) failed");
+            }
+            if (searchesCutShort > 0)
+            {
+                outcomes.Add($"{searchesCutShort} Suwayomi search(es) were cut short");
             }
         }
         else if (autoDownloadRequested && !downloadEnabled)

@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Timeouts;
@@ -14,6 +15,14 @@ namespace ComicMaintainer.WebApi.Controllers;
 /// Endpoints for emailing comics to saved ereader devices: device management,
 /// one-off/bulk/series sends, and per-series automatic delivery.
 /// </summary>
+/// <remarks>
+/// Devices, subscriptions and deliveries are private to the user who owns the
+/// device: every request runs in the caller's <see cref="EmailAccessScope"/>,
+/// and another user's device, subscription or delivery answers 404 exactly
+/// like one that does not exist. Administrators can act on everyone's, and the
+/// listings (and cancel-pending) include other users' when called with
+/// <c>?all=true</c>.
+/// </remarks>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
@@ -25,6 +34,7 @@ public class EmailController : ControllerBase
     private readonly IComicEmailService _email;
     private readonly ICondensedBookBuildTracker _builds;
     private readonly ISeriesLibraryService _seriesLibrary;
+    private readonly IAuthorizationService _authorization;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<EmailController> _logger;
 
@@ -33,6 +43,7 @@ public class EmailController : ControllerBase
         IComicEmailService email,
         ICondensedBookBuildTracker builds,
         ISeriesLibraryService seriesLibrary,
+        IAuthorizationService authorization,
         IOptionsMonitor<AppSettings> appSettings,
         ILogger<EmailController> logger)
     {
@@ -40,6 +51,7 @@ public class EmailController : ControllerBase
         _email = email;
         _builds = builds;
         _seriesLibrary = seriesLibrary;
+        _authorization = authorization;
         _appSettings = appSettings;
         _logger = logger;
     }
@@ -56,10 +68,21 @@ public class EmailController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// The caller's devices; an administrator's call with <paramref name="all"/>
+    /// lists every user's.
+    /// </summary>
     [HttpGet("devices")]
-    public async Task<ActionResult<object>> GetDevices(CancellationToken cancellationToken)
+    public async Task<ActionResult<object>> GetDevices(
+        [FromQuery] bool all = false,
+        CancellationToken cancellationToken = default)
     {
-        var devices = await _devices.GetDevicesAsync(cancellationToken);
+        if (await GetScopeAsync(all) is not { } scope)
+        {
+            return NoUser();
+        }
+
+        var devices = await _devices.GetDevicesAsync(scope, cancellationToken);
         return Ok(new { devices });
     }
 
@@ -73,9 +96,15 @@ public class EmailController : ControllerBase
             return BadRequest(new { error = "Request body is required" });
         }
 
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
         try
         {
             var device = await _devices.CreateDeviceAsync(
+                scope,
                 request.Name ?? string.Empty,
                 request.EmailAddress ?? string.Empty,
                 request.DeliveryFormat,
@@ -104,9 +133,15 @@ public class EmailController : ControllerBase
             return BadRequest(new { error = "Request body is required" });
         }
 
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
         try
         {
             var device = await _devices.UpdateDeviceAsync(
+                scope,
                 deviceId,
                 request.Name,
                 request.EmailAddress,
@@ -128,7 +163,12 @@ public class EmailController : ControllerBase
     [HttpDelete("devices/{deviceId:int}")]
     public async Task<ActionResult> DeleteDevice(int deviceId, CancellationToken cancellationToken)
     {
-        var deleted = await _devices.DeleteDeviceAsync(deviceId, cancellationToken);
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
+        var deleted = await _devices.DeleteDeviceAsync(scope, deviceId, cancellationToken);
         return deleted ? Ok(new { message = "Device deleted" }) : NotFound(new { error = "Device not found" });
     }
 
@@ -136,9 +176,14 @@ public class EmailController : ControllerBase
     [HttpPost("devices/{deviceId:int}/test")]
     public async Task<ActionResult> SendTestEmail(int deviceId, CancellationToken cancellationToken)
     {
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
         try
         {
-            await _email.SendTestEmailAsync(deviceId, cancellationToken);
+            await _email.SendTestEmailAsync(scope, deviceId, cancellationToken);
             return Ok(new { message = "Test email sent" });
         }
         catch (InvalidOperationException ex)
@@ -166,6 +211,11 @@ public class EmailController : ControllerBase
             return BadRequest(new { error = "At least one file is required" });
         }
 
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
         try
         {
             // Normalize first: an unrecognized mode must fail with 400 rather
@@ -174,6 +224,7 @@ public class EmailController : ControllerBase
 
             var result = EmailCondenseMode.IsCondensing(condenseMode)
                 ? await _email.QueueCondensedFilesAsync(
+                    scope,
                     request.Files,
                     request.DeviceId,
                     condenseMode,
@@ -184,6 +235,7 @@ public class EmailController : ControllerBase
                     request.DeliveryFormat,
                     cancellationToken)
                 : await _email.QueueFilesAsync(
+                    scope,
                     request.Files,
                     request.DeviceId,
                     request.DeliveryFormat,
@@ -214,6 +266,11 @@ public class EmailController : ControllerBase
         if (request is null || string.IsNullOrWhiteSpace(request.SeriesId))
         {
             return BadRequest(new { error = "Series id is required" });
+        }
+
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
         }
 
         var issues = await _seriesLibrary.GetSeriesIssuesAsync(
@@ -252,6 +309,7 @@ public class EmailController : ControllerBase
 
             var result = EmailCondenseMode.IsCondensing(condenseMode)
                 ? await _email.QueueCondensedFilesAsync(
+                    scope,
                     files,
                     request.DeviceId,
                     condenseMode,
@@ -264,6 +322,7 @@ public class EmailController : ControllerBase
                     request.DeliveryFormat,
                     cancellationToken)
                 : await _email.QueueFilesAsync(
+                    scope,
                     files,
                     request.DeviceId,
                     request.DeliveryFormat,
@@ -305,6 +364,11 @@ public class EmailController : ControllerBase
             return BadRequest(new { error = "Request body is required" });
         }
 
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
         var (files, error) = await ResolveCondenseFilesAsync(request, cancellationToken);
         if (error is not null)
         {
@@ -314,6 +378,7 @@ public class EmailController : ControllerBase
         try
         {
             var plan = await _email.PlanCondensedDeliveryAsync(
+                scope,
                 files!,
                 request.CondenseMode,
                 request.IssuesPerBook,
@@ -328,6 +393,7 @@ public class EmailController : ControllerBase
                 total_issues = plan.TotalIssues,
                 issues_per_book = plan.IssuesPerBook,
                 max_attachment_bytes = plan.MaxAttachmentBytes,
+                max_book_bytes = EmailCondenseMode.MaxBookBytes,
                 can_email = plan.CanEmail,
                 oversized_book_count = plan.OversizedBookCount,
                 books = plan.Books.Select(b => new
@@ -335,7 +401,8 @@ public class EmailController : ControllerBase
                     display_name = b.DisplayName,
                     issue_count = b.Files.Count,
                     estimated_bytes = b.EstimatedBytes,
-                    exceeds_attachment_limit = b.ExceedsAttachmentLimit
+                    exceeds_attachment_limit = b.ExceedsAttachmentLimit,
+                    exceeds_book_size_limit = b.ExceedsBookSizeLimit
                 }),
                 skipped = plan.Skipped
             });
@@ -363,6 +430,11 @@ public class EmailController : ControllerBase
             return BadRequest(new { error = "Request body is required" });
         }
 
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
         var (files, error) = await ResolveCondenseFilesAsync(request, cancellationToken);
         if (error is not null)
         {
@@ -373,6 +445,7 @@ public class EmailController : ControllerBase
         try
         {
             book = await _email.CreateCondensedBookAsync(
+                scope,
                 files!,
                 request.CondenseMode,
                 request.IssuesPerBook,
@@ -438,6 +511,11 @@ public class EmailController : ControllerBase
             return BadRequest(new { error = "Request body is required" });
         }
 
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
         var (files, error) = await ResolveCondenseFilesAsync(request, cancellationToken);
         if (error is not null)
         {
@@ -456,7 +534,7 @@ public class EmailController : ControllerBase
                     request.DeviceId,
                     request.SkipAlreadyDelivered,
                     request.DeliveryFormat),
-                CurrentUserId,
+                scope,
                 cancellationToken);
 
             return Accepted(ToBuildResponse(build));
@@ -597,6 +675,33 @@ public class EmailController : ControllerBase
     private string? CurrentUserId => User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
     /// <summary>
+    /// The caller's access scope, or null when the request carries no user id
+    /// (which no configured authentication scheme produces).
+    /// </summary>
+    /// <param name="listEveryone">
+    /// Whether listings should include other users' rows; honoured for
+    /// administrators only.
+    /// </param>
+    private async Task<EmailAccessScope?> GetScopeAsync(bool listEveryone = false)
+    {
+        var userId = CurrentUserId;
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return null;
+        }
+
+        var isAdministrator = (await _authorization.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister)).Succeeded;
+        return EmailAccessScope.ForUser(userId, isAdministrator, listEveryone);
+    }
+
+    /// <summary>
+    /// Refuses a request without a user id: devices and deliveries are per
+    /// user, so there is nothing such a caller could own.
+    /// </summary>
+    private ObjectResult NoUser() =>
+        StatusCode(StatusCodes.Status403Forbidden, new { error = "Email delivery requires a signed-in user." });
+
+    /// <summary>
     /// Content type of a generated condensed book, which is an EPUB or an AZW3
     /// depending on the requested delivery format.
     /// </summary>
@@ -671,12 +776,22 @@ public class EmailController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// The caller's subscriptions, optionally for one series; an
+    /// administrator's call with <paramref name="all"/> lists every user's.
+    /// </summary>
     [HttpGet("subscriptions")]
     public async Task<ActionResult<object>> GetSubscriptions(
         [FromQuery] string? series,
-        CancellationToken cancellationToken)
+        [FromQuery] bool all = false,
+        CancellationToken cancellationToken = default)
     {
-        var subscriptions = await _devices.GetSubscriptionsAsync(series, cancellationToken);
+        if (await GetScopeAsync(all) is not { } scope)
+        {
+            return NoUser();
+        }
+
+        var subscriptions = await _devices.GetSubscriptionsAsync(scope, series, cancellationToken);
         return Ok(new { subscriptions });
     }
 
@@ -691,9 +806,15 @@ public class EmailController : ControllerBase
             return BadRequest(new { error = "Series title is required" });
         }
 
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
         try
         {
             var subscription = await _devices.UpsertSubscriptionAsync(
+                scope,
                 request.SeriesTitle,
                 request.DeviceId,
                 request.DeliveryFormat,
@@ -713,19 +834,34 @@ public class EmailController : ControllerBase
     [HttpDelete("subscriptions/{subscriptionId:int}")]
     public async Task<ActionResult> DeleteSubscription(int subscriptionId, CancellationToken cancellationToken)
     {
-        var deleted = await _devices.DeleteSubscriptionAsync(subscriptionId, cancellationToken);
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
+        var deleted = await _devices.DeleteSubscriptionAsync(scope, subscriptionId, cancellationToken);
         return deleted
             ? Ok(new { message = "Subscription removed" })
             : NotFound(new { error = "Subscription not found" });
     }
 
+    /// <summary>
+    /// One page of the caller's delivery history; an administrator's call with
+    /// <paramref name="all"/> covers every user's.
+    /// </summary>
     [HttpGet("deliveries")]
     public async Task<ActionResult<object>> GetDeliveries(
         [FromQuery] int limit = 50,
         [FromQuery] int offset = 0,
+        [FromQuery] bool all = false,
         CancellationToken cancellationToken = default)
     {
-        var page = await _email.GetDeliveriesPageAsync(offset, limit, cancellationToken);
+        if (await GetScopeAsync(all) is not { } scope)
+        {
+            return NoUser();
+        }
+
+        var page = await _email.GetDeliveriesPageAsync(scope, offset, limit, cancellationToken);
         return Ok(new
         {
             deliveries = page.Deliveries,
@@ -745,7 +881,12 @@ public class EmailController : ControllerBase
     [HttpPost("deliveries/{deliveryId:int}/cancel")]
     public async Task<ActionResult<object>> CancelDelivery(int deliveryId, CancellationToken cancellationToken)
     {
-        var result = await _email.CancelDeliveryAsync(deliveryId, cancellationToken);
+        if (await GetScopeAsync() is not { } scope)
+        {
+            return NoUser();
+        }
+
+        var result = await _email.CancelDeliveryAsync(scope, deliveryId, cancellationToken);
         return result.Outcome switch
         {
             EmailDeliveryCancelOutcome.NotFound => NotFound(new { error = "Delivery not found" }),
@@ -760,11 +901,21 @@ public class EmailController : ControllerBase
         };
     }
 
-    /// <summary>Cancels every delivery that has not been sent yet.</summary>
+    /// <summary>
+    /// Cancels every one of the caller's deliveries that has not been sent yet;
+    /// an administrator's call with <paramref name="all"/> cancels every user's.
+    /// </summary>
     [HttpPost("deliveries/cancel-pending")]
-    public async Task<ActionResult<object>> CancelPendingDeliveries(CancellationToken cancellationToken)
+    public async Task<ActionResult<object>> CancelPendingDeliveries(
+        [FromQuery] bool all = false,
+        CancellationToken cancellationToken = default)
     {
-        var result = await _email.CancelPendingDeliveriesAsync(cancellationToken);
+        if (await GetScopeAsync(all) is not { } scope)
+        {
+            return NoUser();
+        }
+
+        var result = await _email.CancelPendingDeliveriesAsync(scope, cancellationToken);
         return Ok(new
         {
             cancelled = result.Cancelled,

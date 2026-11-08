@@ -6,12 +6,28 @@ namespace ComicMaintainer.Core.Services.Kf8;
 /// <summary>
 /// One page image embedded in the book, in the order the pages are read.
 /// </summary>
-/// <param name="Bytes">Encoded image data, stored verbatim in its own record.</param>
-/// <param name="MediaType">MIME type of <paramref name="Bytes"/> (e.g. image/jpeg).</param>
+/// <remarks>
+/// The image itself is not held: the writer lays the book out from
+/// <paramref name="Length"/> and only opens the image while copying it into
+/// the file, one page at a time, so a book of any size is written with the
+/// memory of a single page.
+/// </remarks>
+/// <param name="Length">Size of the encoded image in bytes.</param>
+/// <param name="OpenImage">
+/// Opens the encoded image, which is stored verbatim in its own record. It
+/// must yield exactly <paramref name="Length"/> bytes.
+/// </param>
+/// <param name="MediaType">MIME type of the image (e.g. image/jpeg).</param>
 /// <param name="Width">Pixel width, used for the fixed-layout viewport.</param>
 /// <param name="Height">Pixel height, used for the fixed-layout viewport.</param>
 /// <param name="Title">Title of the generated page document.</param>
-internal sealed record Kf8Page(byte[] Bytes, string MediaType, int Width, int Height, string Title);
+internal sealed record Kf8Page(
+    long Length,
+    Func<Stream> OpenImage,
+    string MediaType,
+    int Width,
+    int Height,
+    string Title);
 
 /// <summary>
 /// Everything the writer needs to emit one AZW3 file.
@@ -58,10 +74,39 @@ internal static class Kf8ComicWriter
     private static readonly byte[] EofRecord = { 0xE9, 0x8E, 0x0D, 0x0A };
 
     /// <summary>
+    /// Records the PalmDB format can index: the record count is an unsigned
+    /// 16-bit field.
+    /// </summary>
+    internal const int MaxRecords = ushort.MaxValue;
+
+    /// <summary>
+    /// Largest file the PalmDB format can address: record offsets are unsigned
+    /// 32-bit values, so every record must start below 4 GiB.
+    /// </summary>
+    internal const long MaxRecordOffset = uint.MaxValue;
+
+    /// <summary>
+    /// Records a book needs besides one per page: the header, at least one
+    /// text record, two records for each of the two indices, and the
+    /// FDST/FLIS/FCIS/EOF markers.
+    /// </summary>
+    private const int MinimumNonPageRecords = 1 + 1 + 4 + 4;
+
+    private const int CopyBufferSize = 81920;
+
+    /// <summary>
     /// Serializes <paramref name="book"/> and writes it to <paramref name="path"/>.
+    /// Only the text and index records are built in memory; each page image is
+    /// streamed into the file from <see cref="Kf8Page.OpenImage"/> in turn.
     /// </summary>
     /// <exception cref="ArgumentException">The book has no pages.</exception>
-    public static void Write(Kf8Book book, string path)
+    /// <exception cref="InvalidOperationException">
+    /// The book is too large for the format: more than <see cref="MaxRecords"/>
+    /// records or a record beyond <see cref="MaxRecordOffset"/>. Nothing is
+    /// written in that case. Also thrown when a page image does not have the
+    /// length it was declared with.
+    /// </exception>
+    public static void Write(Kf8Book book, string path, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(book);
 
@@ -70,13 +115,43 @@ internal static class Kf8ComicWriter
             throw new ArgumentException("A KF8 book needs at least one page.", nameof(book));
         }
 
+        // Fail before the text and indices are built for a book that cannot fit.
+        if (book.Pages.Count > MaxRecords - MinimumNonPageRecords)
+        {
+            throw TooManyRecords(book.Pages.Count + MinimumNonPageRecords);
+        }
+
         var records = BuildRecords(book);
+        var offsets = LayOutPalmDatabase(records);
 
         using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
-        WritePalmDatabase(stream, book.Title, records);
+        WritePalmDatabase(stream, book.Title, records, offsets, cancellationToken);
     }
 
-    private static List<byte[]> BuildRecords(Kf8Book book)
+    /// <summary>
+    /// One PalmDB record: either bytes built in memory, or a page image that is
+    /// streamed into the file when it is written.
+    /// </summary>
+    private sealed class Record
+    {
+        private Record(byte[]? data, Kf8Page? image)
+        {
+            Data = data;
+            Image = image;
+        }
+
+        public byte[]? Data { get; }
+
+        public Kf8Page? Image { get; }
+
+        public long Length => Data?.LongLength ?? Image!.Length;
+
+        public static Record FromBytes(byte[] data) => new(data, null);
+
+        public static Record FromImage(Kf8Page page) => new(null, page);
+    }
+
+    private static List<Record> BuildRecords(Kf8Book book)
     {
         // Flow 0 is the concatenation of every page document, each stored as
         // its skeleton bytes followed by its chunk bytes.
@@ -88,8 +163,10 @@ internal static class Kf8ComicWriter
         {
             var page = book.Pages[i];
 
-            var bodyAid = ToBase32(i * 1_000_000);
-            var containerAid = ToBase32((i * 1_000_000) + 1);
+            // Anchors only have to be unique in the book. Numbering them in
+            // sequence keeps them short and cannot overflow at any page count.
+            var bodyAid = ToBase32(2 * i);
+            var containerAid = ToBase32((2 * i) + 1);
             var head = Encoding.UTF8.GetBytes(BuildDocumentHead(page, bodyAid));
             // Resource numbers are 1-based, and page i is resource i + 1.
             var body = Encoding.UTF8.GetBytes(BuildDocumentBody(page, i + 1, containerAid));
@@ -118,36 +195,42 @@ internal static class Kf8ComicWriter
         }
 
         var text = flow.ToArray();
-        var records = new List<byte[]> { Array.Empty<byte>() };
-        records.AddRange(CreateTextRecords(text));
+
+        // Record 0, the header, is built last because it points at the others.
+        var records = new List<Record> { Record.FromBytes(Array.Empty<byte>()) };
+        records.AddRange(CreateTextRecords(text).Select(Record.FromBytes));
 
         var lastTextRecord = records.Count - 1;
         var firstNonTextRecord = records.Count;
 
         var chunkIndex = records.Count;
-        records.AddRange(BuildChunkIndex(chunks));
+        records.AddRange(BuildChunkIndex(chunks).Select(Record.FromBytes));
 
         var skelIndex = records.Count;
-        records.AddRange(BuildSkeletonIndex(skeletons));
+        records.AddRange(BuildSkeletonIndex(skeletons).Select(Record.FromBytes));
 
         var firstResourceRecord = records.Count;
-        foreach (var page in book.Pages)
-        {
-            records.Add(page.Bytes);
-        }
+        records.AddRange(book.Pages.Select(Record.FromImage));
 
         var fdstRecord = records.Count;
-        records.Add(BuildFdst(text.Length));
+        records.Add(Record.FromBytes(BuildFdst(text.Length)));
 
         var flisRecord = records.Count;
-        records.Add(Flis);
+        records.Add(Record.FromBytes(Flis));
 
         var fcisRecord = records.Count;
-        records.Add(BuildFcis(text.Length));
+        records.Add(Record.FromBytes(BuildFcis(text.Length)));
 
-        records.Add(EofRecord);
+        records.Add(Record.FromBytes(EofRecord));
 
-        records[0] = BuildRecord0(
+        // Checked before the header is built: it stores record numbers in
+        // 16-bit fields too.
+        if (records.Count > MaxRecords)
+        {
+            throw TooManyRecords(records.Count);
+        }
+
+        records[0] = Record.FromBytes(BuildRecord0(
             book,
             textLength: text.Length,
             lastTextRecord: lastTextRecord,
@@ -157,10 +240,15 @@ internal static class Kf8ComicWriter
             firstResourceRecord: firstResourceRecord,
             fdstRecord: fdstRecord,
             flisRecord: flisRecord,
-            fcisRecord: fcisRecord);
+            fcisRecord: fcisRecord));
 
         return records;
     }
+
+    private static InvalidOperationException TooManyRecords(int recordCount) => new(
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"The book has too many pages for the AZW3 format: it needs {recordCount:N0} records and the format allows at most {MaxRecords:N0}. Condense fewer issues per book."));
 
     private static string BuildDocumentHead(Kf8Page page, string bodyAid)
     {
@@ -494,16 +582,20 @@ internal static class Kf8ComicWriter
         => (length + 3) & ~3;
 
     /// <summary>
-    /// Holds the strings an index refers to. Entries point at them by byte
-    /// offset; a comic's selectors never come close to the 64K record limit, so
-    /// a single record is always enough.
+    /// Holds the strings an index refers to. A long book's strings do not fit
+    /// one record, so an entry points at its string by record and byte offset:
+    /// the record number in the high 16 bits and the offset in the low 16.
     /// </summary>
     private sealed class Cncx
     {
+        /// <summary>The room Calibre and kindlegen leave below the 64K a record's offsets can reach.</summary>
+        private const int RecordLimit = 0x10000 - 1024;
+
         private readonly Dictionary<string, int> _offsets = new(StringComparer.Ordinal);
 
         public Cncx(IEnumerable<string> strings)
         {
+            var records = new List<byte[]>();
             using var buffer = new MemoryStream();
             foreach (var value in strings)
             {
@@ -513,14 +605,24 @@ internal static class Kf8ComicWriter
                 }
 
                 var utf8 = Encoding.UTF8.GetBytes(value);
-                _offsets[value] = (int)buffer.Length;
-                buffer.Write(EncodeVariableWidth(utf8.Length));
+                var length = EncodeVariableWidth(utf8.Length);
+                if (buffer.Length + length.Length + utf8.Length > RecordLimit)
+                {
+                    records.Add(AlignBlock(buffer.ToArray()));
+                    buffer.SetLength(0);
+                }
+
+                _offsets[value] = (records.Count << 16) | (int)buffer.Length;
+                buffer.Write(length);
                 buffer.Write(utf8);
             }
 
-            Records = buffer.Length == 0
-                ? Array.Empty<byte[]>()
-                : new[] { AlignBlock(buffer.ToArray()) };
+            if (buffer.Length > 0)
+            {
+                records.Add(AlignBlock(buffer.ToArray()));
+            }
+
+            Records = records;
         }
 
         public IReadOnlyList<byte[]> Records { get; }
@@ -663,7 +765,37 @@ internal static class Kf8ComicWriter
         return exth.ToArray();
     }
 
-    private static void WritePalmDatabase(Stream stream, string title, IReadOnlyList<byte[]> records)
+    /// <summary>
+    /// Computes where every record starts in the file: 78 bytes of database
+    /// header, one 8 byte entry per record, a two byte gap, then the records
+    /// back to back. Throws when a record would start beyond what the 32-bit
+    /// offsets can address.
+    /// </summary>
+    private static uint[] LayOutPalmDatabase(IReadOnlyList<Record> records)
+    {
+        var offsets = new uint[records.Count];
+        long offset = 78 + (8L * records.Count) + 2;
+        for (var i = 0; i < records.Count; i++)
+        {
+            if (offset > MaxRecordOffset)
+            {
+                throw new InvalidOperationException(
+                    "The book is too large for the AZW3 format, which cannot address more than 4 GB. Condense fewer issues per book.");
+            }
+
+            offsets[i] = (uint)offset;
+            offset += records[i].Length;
+        }
+
+        return offsets;
+    }
+
+    private static void WritePalmDatabase(
+        Stream stream,
+        string title,
+        IReadOnlyList<Record> records,
+        IReadOnlyList<uint> offsets,
+        CancellationToken cancellationToken)
     {
         var name = new byte[32];
         var asciiTitle = new string(title.Select(c => char.IsAsciiLetterOrDigit(c) ? c : '_').ToArray());
@@ -682,24 +814,60 @@ internal static class Kf8ComicWriter
         stream.Write(UInt32Bytes(0));
         stream.Write(UInt16Bytes(records.Count));
 
-        // 78 bytes of database header, then one 8 byte entry per record and a
-        // two byte gap before the record data itself.
-        var offset = 78 + (8 * records.Count) + 2;
         for (var i = 0; i < records.Count; i++)
         {
-            stream.Write(UInt32Bytes((uint)offset));
+            stream.Write(UInt32Bytes(offsets[i]));
             stream.WriteByte(0);
             stream.Write(UInt32Bytes((uint)(2 * i)), 1, 3);
-            offset += records[i].Length;
         }
 
         stream.Write(new byte[2]);
 
+        var buffer = new byte[CopyBufferSize];
         foreach (var record in records)
         {
-            stream.Write(record);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (record.Data is { } data)
+            {
+                stream.Write(data);
+                continue;
+            }
+
+            var page = record.Image!;
+            using var image = page.OpenImage();
+            CopyExactly(image, stream, page.Length, buffer, page.Title);
         }
     }
+
+    /// <summary>
+    /// Copies exactly <paramref name="length"/> bytes: the record offsets were
+    /// written from the declared lengths, so an image of any other size would
+    /// silently corrupt every record after it.
+    /// </summary>
+    private static void CopyExactly(Stream source, Stream destination, long length, byte[] buffer, string pageTitle)
+    {
+        var remaining = length;
+        while (remaining > 0)
+        {
+            var read = source.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+            if (read == 0)
+            {
+                throw ImageLengthMismatch(pageTitle);
+            }
+
+            destination.Write(buffer, 0, read);
+            remaining -= read;
+        }
+
+        if (source.Read(buffer, 0, 1) != 0)
+        {
+            throw ImageLengthMismatch(pageTitle);
+        }
+    }
+
+    private static InvalidOperationException ImageLengthMismatch(string pageTitle) =>
+        new($"The image of {pageTitle} changed size while the AZW3 book was being written.");
 
     /// <summary>
     /// Maps an IETF language tag onto the language code the MOBI header uses.

@@ -80,6 +80,13 @@ public sealed class ErrorReportingService : IErrorReportingService
         TimeSpan.FromSeconds(10)
     };
 
+    /// <summary>
+    /// How far before an attempt to file an issue the lookup for the issue it
+    /// may have created starts, so a clock difference between this host and
+    /// GitHub cannot hide it.
+    /// </summary>
+    private static readonly TimeSpan IssueLookupClockSkew = TimeSpan.FromMinutes(5);
+
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly IGitHubIssueClient _gitHubClient;
@@ -247,31 +254,65 @@ public sealed class ErrorReportingService : IErrorReportingService
             ? null
             : settings.ErrorReportingAssignee;
 
+        // Whether the issue may exist without its number being known, because
+        // the latest request to create it timed out or broke off.
+        var attempt = new CreationAttempt { OutcomeUnknown = entity.IssueCreationAttemptedAt is not null };
         try
         {
-            GitHubIssueReference issue;
-            try
+            GitHubIssueReference? issue = null;
+
+            // An earlier attempt may have filed the issue after all; filing
+            // again would create a duplicate.
+            if (entity.IssueCreationAttemptedAt is DateTime previousAttempt)
             {
-                issue = await WithTransientRetriesAsync(
-                    ct => _gitHubClient.CreateIssueAsync(target, title, body, labels, assignee, ct),
+                issue = await _gitHubClient.FindIssueByFingerprintAsync(
+                    target,
+                    entity.Fingerprint,
+                    AsUtcOffset(previousAttempt) - IssueLookupClockSkew,
                     cancellationToken);
-            }
-            catch (GitHubIssuePermanentException ex) when (assignee is not null && ex.IsAssigneeRejection)
-            {
-                // GitHub rejects the whole request when an assignee cannot be
-                // assigned (not a collaborator, coding agent not enabled). An
-                // unassigned issue is far better than no issue, so retry once
-                // without the assignee. Every other permanent rejection — bad
-                // token, missing repository — would fail identically and is
-                // left to propagate.
-                _logger.LogWarning(
-                    "GitHub rejected the assignee {Assignee}; retrying unassigned",
-                    LoggingHelper.SanitizeForLog(assignee));
-                issue = await WithTransientRetriesAsync(
-                    ct => _gitHubClient.CreateIssueAsync(target, title, body, labels, null, ct),
-                    cancellationToken);
+                attempt.FoundExisting = issue is not null;
             }
 
+            if (issue is null)
+            {
+                // Recorded before the request goes out, so even a crash while
+                // it is in flight leaves a trace to reconcile against.
+                entity.IssueCreationAttemptedAt = now;
+                await SaveAsync(db, cancellationToken);
+                var createdSince = AsUtcOffset(now) - IssueLookupClockSkew;
+
+                try
+                {
+                    issue = await CreateWithRetriesAsync(
+                        ct => _gitHubClient.CreateIssueAsync(target, title, body, labels, assignee, ct),
+                        target,
+                        entity.Fingerprint,
+                        createdSince,
+                        attempt,
+                        cancellationToken);
+                }
+                catch (GitHubIssuePermanentException ex) when (assignee is not null && ex.IsAssigneeRejection)
+                {
+                    // GitHub rejects the whole request when an assignee cannot be
+                    // assigned (not a collaborator, coding agent not enabled). An
+                    // unassigned issue is far better than no issue, so retry once
+                    // without the assignee. Every other permanent rejection — bad
+                    // token, missing repository — would fail identically and is
+                    // left to propagate.
+                    _logger.LogWarning(
+                        "GitHub rejected the assignee {Assignee}; retrying unassigned",
+                        LoggingHelper.SanitizeForLog(assignee));
+                    issue = await CreateWithRetriesAsync(
+                        ct => _gitHubClient.CreateIssueAsync(target, title, body, labels, null, ct),
+                        target,
+                        entity.Fingerprint,
+                        createdSince,
+                        attempt,
+                        cancellationToken);
+                }
+            }
+
+            entity.IssueCreationAttemptedAt = null;
             entity.GitHubIssueNumber = issue.Number;
             entity.GitHubIssueUrl = issue.HtmlUrl;
             entity.GitHubOwner = target.Owner;
@@ -285,19 +326,115 @@ public sealed class ErrorReportingService : IErrorReportingService
 
             OnReportingSucceeded();
 
-            _logger.LogInformation(
-                "Filed GitHub issue #{IssueNumber} for error fingerprint {Fingerprint} ({IsNew})",
-                issue.Number,
-                LoggingHelper.SanitizeForLog(entity.Fingerprint),
-                isNew ? "first occurrence" : "previously unreported");
+            if (attempt.FoundExisting)
+            {
+                _logger.LogInformation(
+                    "Linked GitHub issue #{IssueNumber}, filed by an earlier attempt whose response was lost, to error fingerprint {Fingerprint} instead of filing another",
+                    issue.Number,
+                    LoggingHelper.SanitizeForLog(entity.Fingerprint));
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Filed GitHub issue #{IssueNumber} for error fingerprint {Fingerprint} ({IsNew})",
+                    issue.Number,
+                    LoggingHelper.SanitizeForLog(entity.Fingerprint),
+                    isNew ? "first occurrence" : "previously unreported");
+            }
 
             return ErrorReportOutcome.IssueCreated;
         }
         catch (Exception ex) when (ex is GitHubIssueTransientException or GitHubIssuePermanentException)
         {
+            // Keep the attempt time only while the issue may exist, so the
+            // next occurrence looks for it before filing.
+            if (!attempt.OutcomeUnknown)
+            {
+                entity.IssueCreationAttemptedAt = null;
+            }
+
             await RecordFailureAsync(db, entity, ex, configurationSignature, cancellationToken);
             return ErrorReportOutcome.Failed;
         }
+    }
+
+    /// <summary>
+    /// Posts a new issue, retrying a transient failure with backoff — but never
+    /// blindly. A request that may have been carried out (a timeout, a broken
+    /// connection, a server error) is only repeated once the repository has
+    /// been checked for the issue it might have created; and when GitHub says
+    /// how long to wait, the request is not repeated in place at all: the
+    /// failure is recorded and reporting pauses for that long.
+    /// </summary>
+    private async Task<GitHubIssueReference> CreateWithRetriesAsync(
+        Func<CancellationToken, Task<GitHubIssueReference>> create,
+        GitHubIssueTarget target,
+        string fingerprint,
+        DateTimeOffset createdSince,
+        CreationAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        for (var i = 0; ; i++)
+        {
+            try
+            {
+                var issue = await create(cancellationToken);
+                attempt.OutcomeUnknown = false;
+                return issue;
+            }
+            catch (GitHubIssuePermanentException)
+            {
+                // Rejected outright: nothing was created.
+                attempt.OutcomeUnknown = false;
+                throw;
+            }
+            catch (GitHubIssueTransientException ex)
+            {
+                attempt.OutcomeUnknown = ex.MayHaveSucceeded;
+                if (ex.RetryAfter is not null || i >= _retryDelays.Count || cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                // The wait comes before the lookup: a request that timed out on
+                // this side may still be finishing on GitHub's, and only a lookup
+                // made once it has landed can find the issue it created.
+                var delay = _retryDelays[i];
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay, _timeProvider, cancellationToken);
+                }
+
+                if (ex.MayHaveSucceeded)
+                {
+                    // A failure here propagates with the outcome still unknown.
+                    var existing = await _gitHubClient.FindIssueByFingerprintAsync(
+                        target,
+                        fingerprint,
+                        createdSince,
+                        cancellationToken);
+                    attempt.OutcomeUnknown = false;
+                    if (existing is not null)
+                    {
+                        attempt.FoundExisting = true;
+                        return existing;
+                    }
+                }
+            }
+        }
+    }
+
+    private static DateTimeOffset AsUtcOffset(DateTime utc)
+        => new(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeSpan.Zero);
+
+    /// <summary>What is known about the issue a report is being filed as.</summary>
+    private sealed class CreationAttempt
+    {
+        /// <summary>The issue may exist although no request returned its number.</summary>
+        public bool OutcomeUnknown { get; set; }
+
+        /// <summary>The issue was found on the repository rather than created now.</summary>
+        public bool FoundExisting { get; set; }
     }
 
     private async Task<ErrorReportOutcome> AddRecurrenceCommentAsync(
@@ -347,7 +484,10 @@ public sealed class ErrorReportingService : IErrorReportingService
     /// has already taken it off the queue — so without an in-place retry a
     /// single timeout silently discards it. Retries are bounded and honour
     /// cancellation so shutdown is never delayed, and permanent rejections are
-    /// not retried at all.
+    /// not retried at all. Neither is a request GitHub may already have
+    /// carried out (repeating it would post a duplicate), nor one GitHub asked
+    /// us to hold off on: the failure is recorded and reporting pauses for as
+    /// long as GitHub asked.
     /// </remarks>
     private async Task<T> WithTransientRetriesAsync<T>(
         Func<CancellationToken, Task<T>> attempt,
@@ -359,7 +499,11 @@ public sealed class ErrorReportingService : IErrorReportingService
             {
                 return await attempt(cancellationToken);
             }
-            catch (GitHubIssueTransientException) when (i < _retryDelays.Count && !cancellationToken.IsCancellationRequested)
+            catch (GitHubIssueTransientException ex) when (
+                ex.RetryAfter is null &&
+                !ex.MayHaveSucceeded &&
+                i < _retryDelays.Count &&
+                !cancellationToken.IsCancellationRequested)
             {
                 var delay = _retryDelays[i];
                 if (delay > TimeSpan.Zero)
@@ -390,12 +534,27 @@ public sealed class ErrorReportingService : IErrorReportingService
             : null;
         await SaveAsync(db, cancellationToken);
 
-        if (exception is GitHubIssueTransientException)
+        if (exception is GitHubIssueTransientException transient)
         {
+            var now = _timeProvider.GetUtcNow();
+
+            // GitHub said how long to stay away (Retry-After, a rate-limit
+            // reset, or a secondary rate limit): honour it rather than letting
+            // the next report try again sooner, which can extend the
+            // restriction on the token.
+            if (transient.RetryAfter is TimeSpan wait)
+            {
+                PauseReportingUntil(now + wait);
+                _logger.LogWarning(
+                    "GitHub asked to wait {Seconds} seconds before the next request; pausing error reporting until {Until:O}",
+                    (long)Math.Ceiling(wait.TotalSeconds),
+                    now + wait);
+            }
+
             var failures = Interlocked.Increment(ref _consecutiveTransientFailures);
             if (failures >= CircuitBreakerThreshold)
             {
-                _circuitOpenUntil = _timeProvider.GetUtcNow().Add(CircuitBreakerDuration);
+                PauseReportingUntil(now.Add(CircuitBreakerDuration));
                 _logger.LogWarning(
                     "Pausing GitHub error reporting for {Minutes} minutes after {Failures} consecutive failures",
                     (int)CircuitBreakerDuration.TotalMinutes,
@@ -409,6 +568,15 @@ public sealed class ErrorReportingService : IErrorReportingService
             "Could not report error fingerprint {Fingerprint} to GitHub: {Reason}",
             LoggingHelper.SanitizeForLog(entity.Fingerprint),
             LoggingHelper.SanitizeForLog(exception.Message));
+    }
+
+    /// <summary>Opens the circuit until at least <paramref name="until"/>, never shortening a longer pause.</summary>
+    private void PauseReportingUntil(DateTimeOffset until)
+    {
+        if (until > _circuitOpenUntil)
+        {
+            _circuitOpenUntil = until;
+        }
     }
 
     private void OnReportingSucceeded()

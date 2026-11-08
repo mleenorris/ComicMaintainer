@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -37,7 +38,7 @@ public class EreaderDeviceServiceTests
     [Fact]
     public async Task CreateDeviceAsync_DefaultsToOriginalFormat()
     {
-        var device = await _service.CreateDeviceAsync("Kindle", " kindle@kindle.com ", null);
+        var device = await _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", " kindle@kindle.com ", null);
 
         Assert.Equal("Kindle", device.Name);
         Assert.Equal("kindle@kindle.com", device.EmailAddress);
@@ -51,31 +52,31 @@ public class EreaderDeviceServiceTests
     [InlineData("")]
     public async Task CreateDeviceAsync_RejectsInvalidAddresses(string address)
     {
-        await Assert.ThrowsAsync<ArgumentException>(() => _service.CreateDeviceAsync("Device", address, null));
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Device", address, null));
     }
 
     [Fact]
     public async Task CreateDeviceAsync_RejectsUnknownFormat()
     {
         await Assert.ThrowsAsync<ArgumentException>(
-            () => _service.CreateDeviceAsync("Device", "a@b.com", "pdf"));
+            () => _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Device", "a@b.com", "pdf"));
     }
 
     [Fact]
     public async Task CreateDeviceAsync_RejectsDuplicateAddress()
     {
-        await _service.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
+        await _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", null);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _service.CreateDeviceAsync("Kindle 2", "kindle@kindle.com", null));
+            () => _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle 2", "kindle@kindle.com", null));
     }
 
     [Fact]
     public async Task UpdateDeviceAsync_LeavesNullFieldsUnchanged()
     {
-        var device = await _service.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
 
-        var updated = await _service.UpdateDeviceAsync(device.Id, "Living Room Kindle", null, null);
+        var updated = await _service.UpdateDeviceAsync(TestEmailScopes.Everyone, device.Id, "Living Room Kindle", null, null);
 
         Assert.NotNull(updated);
         Assert.Equal("Living Room Kindle", updated!.Name);
@@ -86,42 +87,42 @@ public class EreaderDeviceServiceTests
     [Fact]
     public async Task UpdateDeviceAsync_WithUnknownId_ReturnsNull()
     {
-        Assert.Null(await _service.UpdateDeviceAsync(999, "x", null, null));
+        Assert.Null(await _service.UpdateDeviceAsync(TestEmailScopes.Everyone, 999, "x", null, null));
     }
 
     [Fact]
     public async Task DeleteDeviceAsync_RemovesDeviceAndItsSubscriptions()
     {
-        var device = await _service.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
-        await _service.UpsertSubscriptionAsync("My Series", device.Id, null, true);
+        var device = await _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", null);
+        await _service.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "My Series", device.Id, null, true);
 
-        Assert.True(await _service.DeleteDeviceAsync(device.Id));
-        Assert.Empty(await _service.GetDevicesAsync());
-        Assert.Empty(await _service.GetSubscriptionsAsync());
+        Assert.True(await _service.DeleteDeviceAsync(TestEmailScopes.Everyone, device.Id));
+        Assert.Empty(await _service.GetDevicesAsync(TestEmailScopes.Everyone));
+        Assert.Empty(await _service.GetSubscriptionsAsync(TestEmailScopes.Everyone));
     }
 
     [Fact]
     public async Task UpsertSubscriptionAsync_IsIdempotentPerSeriesAndDevice()
     {
-        var device = await _service.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
+        var device = await _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", null);
 
-        var first = await _service.UpsertSubscriptionAsync("My Series", device.Id, EmailDeliveryFormat.Epub, true);
-        var second = await _service.UpsertSubscriptionAsync("my series!", device.Id, EmailDeliveryFormat.Original, false);
+        var first = await _service.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "My Series", device.Id, EmailDeliveryFormat.Epub, true);
+        var second = await _service.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "my series!", device.Id, EmailDeliveryFormat.Original, false);
 
         Assert.NotNull(first);
         Assert.NotNull(second);
         Assert.Equal(first!.Id, second!.Id);
         Assert.Equal(EmailDeliveryFormat.Original, second.DeliveryFormat);
         Assert.False(second.Enabled);
-        Assert.Single(await _service.GetSubscriptionsAsync());
+        Assert.Single(await _service.GetSubscriptionsAsync(TestEmailScopes.Everyone));
     }
 
     [Fact]
     public async Task UpsertSubscriptionAsync_DefaultsToDeviceFormat()
     {
-        var device = await _service.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
+        var device = await _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", null);
 
-        var subscription = await _service.UpsertSubscriptionAsync("My Series", device.Id, null, true);
+        var subscription = await _service.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "My Series", device.Id, null, true);
 
         Assert.Equal(EmailDeliveryFormat.Device, subscription!.DeliveryFormat);
     }
@@ -129,17 +130,17 @@ public class EreaderDeviceServiceTests
     [Fact]
     public async Task UpsertSubscriptionAsync_WithUnknownDevice_ReturnsNull()
     {
-        Assert.Null(await _service.UpsertSubscriptionAsync("My Series", 42, null, true));
+        Assert.Null(await _service.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "My Series", 42, null, true));
     }
 
     [Fact]
     public async Task GetSubscriptionsAsync_FiltersBySeriesTitle()
     {
-        var device = await _service.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
-        await _service.UpsertSubscriptionAsync("Series A", device.Id, null, true);
-        await _service.UpsertSubscriptionAsync("Series B", device.Id, null, true);
+        var device = await _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", null);
+        await _service.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "Series A", device.Id, null, true);
+        await _service.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "Series B", device.Id, null, true);
 
-        var filtered = await _service.GetSubscriptionsAsync("series a");
+        var filtered = await _service.GetSubscriptionsAsync(TestEmailScopes.Everyone, "series a");
 
         Assert.Equal("Series A", Assert.Single(filtered).SeriesTitle);
     }
@@ -147,13 +148,13 @@ public class EreaderDeviceServiceTests
     [Fact]
     public async Task DeleteSubscriptionAsync_RemovesOnlyThatSubscription()
     {
-        var device = await _service.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
-        var a = await _service.UpsertSubscriptionAsync("Series A", device.Id, null, true);
-        await _service.UpsertSubscriptionAsync("Series B", device.Id, null, true);
+        var device = await _service.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", null);
+        var a = await _service.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "Series A", device.Id, null, true);
+        await _service.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "Series B", device.Id, null, true);
 
-        Assert.True(await _service.DeleteSubscriptionAsync(a!.Id));
-        Assert.False(await _service.DeleteSubscriptionAsync(a.Id));
-        Assert.Equal("Series B", Assert.Single(await _service.GetSubscriptionsAsync()).SeriesTitle);
+        Assert.True(await _service.DeleteSubscriptionAsync(TestEmailScopes.Everyone, a!.Id));
+        Assert.False(await _service.DeleteSubscriptionAsync(TestEmailScopes.Everyone, a.Id));
+        Assert.Equal("Series B", Assert.Single(await _service.GetSubscriptionsAsync(TestEmailScopes.Everyone)).SeriesTitle);
     }
 
     [Theory]

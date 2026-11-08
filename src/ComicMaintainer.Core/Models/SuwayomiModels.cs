@@ -81,6 +81,13 @@ public class SuwayomiDownloadResult
     /// Other sources may still have supplied downloads.
     /// </summary>
     public List<SuwayomiDownloadFailure> DiscoveryFailures { get; set; } = new();
+
+    /// <summary>
+    /// Searches that stopped at a limit without an exact title match, so the
+    /// series might have been further down the results. Nothing went wrong, so
+    /// these are kept apart from <see cref="DiscoveryFailures"/>.
+    /// </summary>
+    public List<SuwayomiCutShortSearch> CutShortSearches { get; set; } = new();
 }
 
 /// <summary>
@@ -94,6 +101,19 @@ public class SuwayomiDownloadFailure
 
     /// <summary>Human-readable reason the check failed.</summary>
     public string Error { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A search of Suwayomi's installed sources that stopped at a limit before it
+/// had seen every result.
+/// </summary>
+public class SuwayomiCutShortSearch
+{
+    /// <summary>The source that was being searched, or the sources as a whole.</summary>
+    public string Target { get; set; } = string.Empty;
+
+    /// <summary>Human-readable description of the limit that was reached.</summary>
+    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>

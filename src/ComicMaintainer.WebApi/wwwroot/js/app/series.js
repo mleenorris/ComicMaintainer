@@ -658,6 +658,7 @@
                 const queued = (result.queuedChapters || result.queued_chapters || []).length;
                 const unmatched = (result.unmatchedIssueNumbers || result.unmatched_issue_numbers || []).length;
                 const failures = result.discoveryFailures || result.discovery_failures || [];
+                const cutShort = result.cutShortSearches || result.cut_short_searches || [];
                 // Name the Suwayomi series when it goes by another title, so a
                 // match made through one of the other titles is visible.
                 const matchedTitle = result.series && typeof result.series.title === 'string' ? result.series.title : '';
@@ -677,6 +678,9 @@
                     const first = failures[0] || {};
                     const detail = first.target && first.error ? ` First failure: ${first.target}: ${first.error}` : '';
                     message += ` ${failures.length} source check${failures.length === 1 ? '' : 's'} failed.${detail}`;
+                }
+                if (cutShort.length) {
+                    message += ` ${cutShort.length} search${cutShort.length === 1 ? ' was' : 'es were'} cut short, so a series further down the results may have been missed.`;
                 }
                 showMessage(message, queued ? 'success' : failures.length ? 'error' : 'info');
             } catch (err) {

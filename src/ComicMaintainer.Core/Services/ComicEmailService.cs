@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Telemetry;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
@@ -65,6 +66,31 @@ public class ComicEmailService : IComicEmailService
     /// </summary>
     private static readonly TimeSpan MaxRateLimitPoll = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// How long to wait before trying again after the mail server failed a
+    /// delivery temporarily (a 4xx reply, a dropped connection or a timeout),
+    /// by attempt: the first retry comes after the first entry, and so on. A
+    /// delivery is tried at most <see cref="MaxDeliveryAttempts"/> times in all
+    /// before it is marked failed.
+    /// </summary>
+    public static readonly IReadOnlyList<TimeSpan> TransientRetryDelays = new[]
+    {
+        TimeSpan.FromMinutes(1),
+        TimeSpan.FromMinutes(5),
+        TimeSpan.FromMinutes(30),
+        TimeSpan.FromHours(2),
+    };
+
+    /// <summary>Most attempts a delivery gets when its failures are all temporary.</summary>
+    public static int MaxDeliveryAttempts => TransientRetryDelays.Count + 1;
+
+    /// <summary>
+    /// Times work on a delivery may begin with no result recorded before it is
+    /// marked failed. A book whose conversion kills the process would otherwise
+    /// be picked up first on every restart, taking the application down each time.
+    /// </summary>
+    public const int MaxStartsWithoutOutcome = 3;
+
     /// <summary>Ticks of <see cref="RateLimitedUntil"/>; 0 when nothing is held back.</summary>
     private long _rateLimitedUntilTicks;
 
@@ -125,6 +151,7 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<EmailQueueResult> QueueFilesAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         int deviceId,
         string? deliveryFormat,
@@ -133,6 +160,7 @@ public class ComicEmailService : IComicEmailService
         int? subscriptionId = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(filePaths);
 
         if (!IsConfigured)
@@ -147,11 +175,7 @@ public class ComicEmailService : IComicEmailService
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
-        var device = await db.EreaderDevices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
-        if (device is null)
-        {
-            throw new InvalidOperationException($"Ereader device {deviceId} was not found.");
-        }
+        var device = await FindDeviceAsync(db, scope, deviceId, cancellationToken);
 
         var format = EmailDeliveryFormat.NormalizeOrThrow(deliveryFormat, device.DeliveryFormat, nameof(deliveryFormat));
 
@@ -255,6 +279,7 @@ public class ComicEmailService : IComicEmailService
 
             var delivery = new ComicEmailDeliveryEntity
             {
+                OwnerUserId = device.OwnerUserId,
                 FilePath = fullPath,
                 DeviceId = device.Id,
                 DeviceName = device.Name,
@@ -279,6 +304,7 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<EmailQueueResult> QueueCondensedFilesAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         int deviceId,
         string? condenseMode,
@@ -289,6 +315,7 @@ public class ComicEmailService : IComicEmailService
         string? deliveryFormat = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(filePaths);
 
         if (!IsConfigured)
@@ -311,11 +338,7 @@ public class ComicEmailService : IComicEmailService
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
-        var device = await db.EreaderDevices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
-        if (device is null)
-        {
-            throw new InvalidOperationException($"Ereader device {deviceId} was not found.");
-        }
+        var device = await FindDeviceAsync(db, scope, deviceId, cancellationToken);
 
         var format = EmailDeliveryFormat.NormalizeCondensedOrThrow(
             deliveryFormat,
@@ -345,7 +368,7 @@ public class ComicEmailService : IComicEmailService
 
             var maxBytes = GetMaxAttachmentBytes();
             queued = new List<ComicEmailDeliveryEntity>();
-            foreach (var group in BuildBooks(candidates, preserveIssueOrder, perBook))
+            foreach (var group in BuildBooks(candidates, preserveIssueOrder, perBook, nameof(issuesPerBook)))
             {
                 var displayName = await BuildCondensedNameAsync(group, cancellationToken);
 
@@ -356,11 +379,12 @@ public class ComicEmailService : IComicEmailService
                 if (estimated > maxBytes)
                 {
                     throw new InvalidOperationException(
-                        $"Condensed book \"{displayName}\" is about {FormatMegabytes(estimated)} which exceeds the {FormatMegabytes(maxBytes)} attachment limit. Download it instead, or condense fewer issues per book.");
+                        $"Condensed book \"{displayName}\" is about {FormatMegabytes(estimated)}, {DescribeOversizedAttachment(estimated)}. Download it instead, or condense fewer issues per book.");
                 }
 
                 var delivery = new ComicEmailDeliveryEntity
                 {
+                    OwnerUserId = device.OwnerUserId,
                     FilePath = group[0],
                     DeviceId = device.Id,
                     DeviceName = device.Name,
@@ -407,6 +431,7 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<CondensePlanDto> PlanCondensedDeliveryAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         string? condenseMode,
         int? issuesPerBook,
@@ -415,6 +440,7 @@ public class ComicEmailService : IComicEmailService
         bool skipAlreadyDelivered = false,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(filePaths);
 
         var mode = EmailCondenseMode.NormalizeOrThrow(condenseMode, nameof(condenseMode));
@@ -429,11 +455,16 @@ public class ComicEmailService : IComicEmailService
         var issues = ResolveIssues(filePaths, skipped);
 
         // The plan must describe the books the send would actually queue, so it
-        // drops the same already-delivered issues the queueing path does.
+        // drops the same already-delivered issues the queueing path does. Only
+        // for a device the caller may use: another user's delivery history is
+        // not theirs to see.
         if (skipAlreadyDelivered && deviceId is int device && issues.Count > 0)
         {
             await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-            issues = await FilterAlreadyDeliveredAsync(db, device, issues, skipped, cancellationToken);
+            if (await db.EreaderDevices.AccessibleTo(scope).AnyAsync(d => d.Id == device, cancellationToken))
+            {
+                issues = await FilterAlreadyDeliveredAsync(db, device, issues, skipped, cancellationToken);
+            }
         }
 
         var perBook = EmailCondenseMode.NormalizeIssuesPerBookOrThrow(
@@ -444,20 +475,22 @@ public class ComicEmailService : IComicEmailService
 
         var maxBytes = GetMaxAttachmentBytes();
         var books = new List<CondensedBookDto>();
-        foreach (var group in BuildBooks(issues, preserveIssueOrder, perBook))
+        foreach (var group in BuildBooks(issues, preserveIssueOrder, perBook, nameof(issuesPerBook)))
         {
             var estimated = EstimateCondensedSize(group);
             books.Add(new CondensedBookDto(
                 await BuildCondensedNameAsync(group, cancellationToken),
                 group,
                 estimated,
-                estimated > maxBytes));
+                estimated > maxBytes,
+                estimated > EmailCondenseMode.MaxBookBytes));
         }
 
         return new CondensePlanDto(mode, issues.Count, perBook, maxBytes, books, skipped);
     }
 
     public async Task<CondensedBookFile> CreateCondensedBookAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         string? condenseMode,
         int? issuesPerBook,
@@ -469,9 +502,10 @@ public class ComicEmailService : IComicEmailService
         string? deliveryFormat = null,
         CancellationToken cancellationToken = default)
     {
-        var format = await ResolveCondensedFormatAsync(deliveryFormat, deviceId, cancellationToken);
+        var format = await ResolveCondensedFormatAsync(scope, deliveryFormat, deviceId, cancellationToken);
 
         var plan = await PlanCondensedDeliveryAsync(
+            scope,
             filePaths,
             condenseMode,
             issuesPerBook,
@@ -488,6 +522,7 @@ public class ComicEmailService : IComicEmailService
         }
 
         var book = plan.Books[bookIndex];
+        EmailCondenseMode.EnsureBookCanBeBuilt(book);
         var workDirectory = Path.Join(GetTempDirectory(), "email-download", Guid.NewGuid().ToString("N"));
 
         // A download has no mail size budget, so the pages keep their original
@@ -519,13 +554,16 @@ public class ComicEmailService : IComicEmailService
     /// <summary>
     /// Resolves the format a condensed book is generated in. A download can be
     /// requested without a device, in which case there is no default to inherit
-    /// and EPUB is used.
+    /// and EPUB is used; so is a device <paramref name="scope"/> cannot reach.
     /// </summary>
     public async Task<string> ResolveCondensedFormatAsync(
+        EmailAccessScope scope,
         string? deliveryFormat,
         int? deviceId,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         string? deviceDefault = null;
         var inheritsDevice = string.IsNullOrWhiteSpace(deliveryFormat) ||
             string.Equals(deliveryFormat.Trim(), EmailDeliveryFormat.Device, StringComparison.OrdinalIgnoreCase);
@@ -535,6 +573,7 @@ public class ComicEmailService : IComicEmailService
             await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
             deviceDefault = await db.EreaderDevices
                 .AsNoTracking()
+                .AccessibleTo(scope)
                 .Where(d => d.Id == id)
                 .Select(d => d.DeliveryFormat)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -616,15 +655,21 @@ public class ComicEmailService : IComicEmailService
     /// supplied one series in reading order (a send-series request), and that
     /// order is authoritative even when the series spans several folders.
     /// </summary>
+    /// <exception cref="ArgumentException">A book would hold too many issues.</exception>
     private static List<List<string>> BuildBooks(
         IReadOnlyList<string> issues,
         bool preserveIssueOrder,
-        int perBook)
+        int perBook,
+        string paramName)
     {
         var books = new List<List<string>>();
         foreach (var series in GroupBySeries(issues, preserveIssueOrder))
         {
-            books.AddRange(Chunk(series, perBook));
+            foreach (var book in Chunk(series, perBook))
+            {
+                EmailCondenseMode.EnsureBookIssueCountAllowed(book.Count, paramName);
+                books.Add(book);
+            }
         }
 
         return books;
@@ -760,11 +805,28 @@ public class ComicEmailService : IComicEmailService
         return (long)(total * 1.02) + 64 * 1024;
     }
 
-    private long GetMaxAttachmentBytes() =>
+    /// <summary>
+    /// The configured email size limit. Mail servers enforce their limits on
+    /// the whole encoded message, so attachments are measured against
+    /// <see cref="GetMaxAttachmentBytes"/> instead.
+    /// </summary>
+    private long GetMaxMessageBytes() =>
         (long)Math.Max(1, _settings.CurrentValue.EmailMaxAttachmentMegabytes) * 1024 * 1024;
 
+    /// <summary>
+    /// Largest attachment whose email, once base64 encoded and wrapped in
+    /// MIME, stays within <see cref="GetMaxMessageBytes"/>. Used for every size
+    /// check and as the budget an oversized book is recompressed to.
+    /// </summary>
+    private long GetMaxAttachmentBytes() =>
+        EmailMessageSize.MaxAttachmentBytes(GetMaxMessageBytes());
+
+    /// <summary>Explains that an attachment of <paramref name="attachmentBytes"/> is too large to email.</summary>
+    private string DescribeOversizedAttachment(long attachmentBytes) =>
+        $"about {FormatMegabytes(EmailMessageSize.EstimateMessageBytes(attachmentBytes))} once encoded for email, which exceeds the {FormatMegabytes(GetMaxMessageBytes())} email size limit";
+
     private static string FormatMegabytes(long bytes) =>
-        $"{bytes / (1024d * 1024d):0.#} MB";
+        string.Create(CultureInfo.InvariantCulture, $"{bytes / (1024d * 1024d):0.#} MB");
 
     /// <summary>
     /// Names a condensed book after the series and the range it covers, e.g.
@@ -894,7 +956,10 @@ public class ComicEmailService : IComicEmailService
 
             try
             {
+                // On behalf of the subscription's owner, whoever's file
+                // processing produced the issue.
                 var result = await QueueFilesAsync(
+                    EmailAccessScope.System,
                     new[] { filePath },
                     row.device.Id,
                     format,
@@ -940,8 +1005,21 @@ public class ComicEmailService : IComicEmailService
                 return;
             }
 
-            if (!string.Equals(delivery.Status, EmailDeliveryStatus.Pending, StringComparison.Ordinal) ||
-                !_inFlight.TryAdd(deliveryId, inFlight))
+            if (!string.Equals(delivery.Status, EmailDeliveryStatus.Pending, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            // A retry that is not due yet (resumed early, or queued again by a
+            // sweep) waits for its time without holding up the queue.
+            if (delivery.NextAttemptAt is DateTime nextAttempt &&
+                DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc) > _timeProvider.GetUtcNow().UtcDateTime)
+            {
+                _queue.Schedule(deliveryId, new DateTimeOffset(DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc)));
+                return;
+            }
+
+            if (!_inFlight.TryAdd(deliveryId, inFlight))
             {
                 return;
             }
@@ -993,6 +1071,8 @@ public class ComicEmailService : IComicEmailService
         CancellationToken stoppingToken)
     {
         string? temporaryAttachment = null;
+        DateTimeOffset? retryAt = null;
+        var startRecorded = false;
         try
         {
             // A condensed delivery carries several issues; an ordinary one only
@@ -1027,6 +1107,27 @@ public class ComicEmailService : IComicEmailService
                     delivery.Id);
                 return;
             }
+
+            // Checked after the wait: a retry, a delivery resumed by a restart or
+            // one held by the rate limit can run hours after it was queued, and
+            // nothing should go to an address its owner has since removed.
+            if (!await db.EreaderDevices.AsNoTracking().AnyAsync(d => d.Id == delivery.DeviceId, preparationToken))
+            {
+                MarkCancelled(delivery);
+                delivery.ErrorMessage = "The device this was queued for has been deleted.";
+                _logger.LogInformation(
+                    "Cancelled email delivery {DeliveryId} of {FilePath} because its device was deleted",
+                    delivery.Id,
+                    LoggingHelper.SanitizePathForLog(delivery.FilePath));
+                await db.SaveChangesAsync(CancellationToken.None);
+                return;
+            }
+
+            // Saved before the work that can take the whole process down, which
+            // leaves nothing else behind to show this delivery was the cause.
+            delivery.StartsWithoutOutcome++;
+            await db.SaveChangesAsync(preparationToken);
+            startRecorded = true;
 
             var maxBytes = GetMaxAttachmentBytes();
 
@@ -1066,7 +1167,7 @@ public class ComicEmailService : IComicEmailService
             if (attachmentLength > maxBytes)
             {
                 throw new InvalidOperationException(
-                    $"Attachment is {attachmentLength / (1024 * 1024)} MB which exceeds the {_settings.CurrentValue.EmailMaxAttachmentMegabytes} MB limit.");
+                    $"The attachment is {FormatMegabytes(attachmentLength)}, {DescribeOversizedAttachment(attachmentLength)}.");
             }
 
             // Past this point the delivery can no longer be cancelled.
@@ -1079,6 +1180,8 @@ public class ComicEmailService : IComicEmailService
             var displayName = string.IsNullOrWhiteSpace(delivery.DisplayName)
                 ? Path.GetFileNameWithoutExtension(delivery.FilePath)
                 : delivery.DisplayName;
+            delivery.AttemptCount++;
+            delivery.NextAttemptAt = null;
             await _sender.SendAsync(
                 new ComicEmailMessage(
                     delivery.DeviceEmail,
@@ -1111,8 +1214,7 @@ public class ComicEmailService : IComicEmailService
             // Whatever the work in progress threw once it was asked to stop —
             // usually an OperationCanceledException, but a converter can
             // surface the abort differently — the user cancelled it.
-            delivery.Status = EmailDeliveryStatus.Cancelled;
-            delivery.ErrorMessage = null;
+            MarkCancelled(delivery);
             _logger.LogInformation(
                 "Cancelled email delivery {DeliveryId} of {FilePath} before it was sent",
                 delivery.Id,
@@ -1120,43 +1222,216 @@ public class ComicEmailService : IComicEmailService
         }
         catch (OperationCanceledException)
         {
-            // Shutdown: leave the delivery pending.
+            // Shutdown: leave the delivery pending. An orderly stop says nothing
+            // about this delivery, so it is not held against it.
+            if (startRecorded && stoppingToken.IsCancellationRequested)
+            {
+                await WithdrawStartAsync(db, delivery);
+            }
+
             throw;
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (TransientEmailSendException ex) when (delivery.AttemptCount < MaxDeliveryAttempts)
         {
-            delivery.Status = EmailDeliveryStatus.Failed;
-            delivery.ErrorMessage = Truncate(ex.Message, 1024);
-            _metrics?.RecordEmailSend(success: false);
-
-            // A rejected delivery is almost always the remote SMTP server or the
-            // recipient address, both of which the operator controls; the
-            // failure is already surfaced on the delivery row.
-            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("email delivery rejected by the remote server")))
-            {
-                _logger.LogError(
-                    ex,
-                    "Failed to email {FilePath} to device {DeviceId}",
-                    LoggingHelper.SanitizePathForLog(delivery.FilePath),
-                    delivery.DeviceId);
-            }
+            // The mail server may well accept it later: keep the delivery
+            // pending (so the already-delivered check still holds) and try again
+            // once the back-off has passed.
+            var delay = TransientRetryDelays[Math.Clamp(delivery.AttemptCount - 1, 0, TransientRetryDelays.Count - 1)];
+            var nextAttempt = _timeProvider.GetUtcNow() + delay;
+            retryAt = nextAttempt;
+            delivery.NextAttemptAt = nextAttempt.UtcDateTime;
+            delivery.ErrorMessage = Truncate(
+                $"Attempt {delivery.AttemptCount} of {MaxDeliveryAttempts} failed: {ex.Message} Retrying at {nextAttempt:u}.",
+                1024);
+            _logger.LogWarning(
+                ex,
+                "Email delivery {DeliveryId} of {FilePath} failed temporarily (attempt {Attempt} of {MaxAttempts}); retrying at {RetryAt:O}",
+                delivery.Id,
+                LoggingHelper.SanitizePathForLog(delivery.FilePath),
+                delivery.AttemptCount,
+                MaxDeliveryAttempts,
+                nextAttempt);
+        }
+        catch (TransientEmailSendException ex)
+        {
+            MarkFailed(delivery, ex, $"Failed after {delivery.AttemptCount} attempts: {ex.Message}");
+        }
+        catch (OutOfMemoryException ex)
+        {
+            // The book's buffers are released by now, so the queue can go on
+            // with deliveries that fit; trying this one again would only repeat it.
+            MarkFailed(
+                delivery,
+                ex,
+                "The server ran out of memory while preparing this delivery. Try again when it is less busy, or send fewer issues per book.");
+        }
+        catch (Exception ex)
+        {
+            MarkFailed(delivery, ex, ex.Message);
         }
         finally
         {
             CleanupTemporaryAttachment(temporaryAttachment);
         }
 
+        delivery.StartsWithoutOutcome = 0;
         await db.SaveChangesAsync(CancellationToken.None);
+
+        // Scheduled only once the retry time is saved, so whatever loads the
+        // delivery when it comes due sees the same time.
+        if (retryAt is DateTimeOffset due)
+        {
+            _queue.Schedule(delivery.Id, due);
+        }
     }
 
-    public async Task SendTestEmailAsync(int deviceId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Takes back the start recorded for a delivery that is being left pending
+    /// because the application is stopping. If this fails the delivery merely
+    /// has one start counted against it, which is not worth failing the stop.
+    /// </summary>
+    private async Task WithdrawStartAsync(ComicMaintainerDbContext db, ComicEmailDeliveryEntity delivery)
+    {
+        try
+        {
+            delivery.StartsWithoutOutcome = Math.Max(0, delivery.StartsWithoutOutcome - 1);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not take back the recorded start of email delivery {DeliveryId} during shutdown",
+                delivery.Id);
+        }
+    }
+
+    /// <summary>Records that the delivery will not be sent, so it has no retry waiting.</summary>
+    private static void MarkCancelled(ComicEmailDeliveryEntity delivery)
+    {
+        delivery.Status = EmailDeliveryStatus.Cancelled;
+        delivery.ErrorMessage = null;
+        delivery.NextAttemptAt = null;
+    }
+
+    private void MarkFailed(ComicEmailDeliveryEntity delivery, Exception exception, string errorMessage)
+    {
+        delivery.Status = EmailDeliveryStatus.Failed;
+        delivery.NextAttemptAt = null;
+        delivery.ErrorMessage = Truncate(errorMessage, 1024);
+        _metrics?.RecordEmailSend(success: false);
+
+        // A rejected delivery is almost always the remote SMTP server or the
+        // recipient address, both of which the operator controls; the
+        // failure is already surfaced on the delivery row.
+        using (_logger.BeginScope(ErrorReportLogProperties.Exclude("email delivery rejected by the remote server")))
+        {
+            _logger.LogError(
+                exception,
+                "Failed to email {FilePath} to device {DeviceId}",
+                LoggingHelper.SanitizePathForLog(delivery.FilePath),
+                delivery.DeviceId);
+        }
+    }
+
+    public async Task<int> ResumePendingDeliveriesAsync(CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var device = await db.EreaderDevices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
-        if (device is null)
+        var pending = await db.ComicEmailDeliveries
+            .AsNoTracking()
+            .Where(d => d.Status == EmailDeliveryStatus.Pending)
+            .OrderBy(d => d.Id)
+            .Select(d => new { d.Id, d.NextAttemptAt, d.StartsWithoutOutcome })
+            .ToListAsync(cancellationToken);
+
+        var now = _timeProvider.GetUtcNow();
+        var resumed = 0;
+        foreach (var delivery in pending)
         {
-            throw new InvalidOperationException($"Ereader device {deviceId} was not found.");
+            // Being worked on, or already waiting its turn: nothing to resume.
+            if (_inFlight.ContainsKey(delivery.Id) || _queue.IsQueued(delivery.Id))
+            {
+                continue;
+            }
+
+            if (delivery.StartsWithoutOutcome >= MaxStartsWithoutOutcome)
+            {
+                await FailRepeatedlyInterruptedDeliveryAsync(delivery.Id, cancellationToken);
+                continue;
+            }
+
+            // A retry keeps the time it was given rather than going out early.
+            if (delivery.NextAttemptAt is DateTime nextAttempt &&
+                new DateTimeOffset(DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc)) is var due &&
+                due > now)
+            {
+                _queue.Schedule(delivery.Id, due);
+            }
+            else
+            {
+                _queue.Enqueue(delivery.Id);
+            }
+
+            resumed++;
         }
+
+        if (resumed > 0)
+        {
+            _logger.LogInformation(
+                "Re-queued {Count} pending comic email deliveries that were not waiting in the queue",
+                resumed);
+        }
+
+        return resumed;
+    }
+
+    /// <summary>
+    /// Marks failed a delivery that has reached <see cref="MaxStartsWithoutOutcome"/>.
+    /// </summary>
+    private async Task FailRepeatedlyInterruptedDeliveryAsync(int deliveryId, CancellationToken cancellationToken)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+
+        await _deliveryStateLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Read again under the lock: the sweep's copy may predate the worker
+            // finishing this delivery, which clears the count.
+            var delivery = await db.ComicEmailDeliveries.FirstOrDefaultAsync(d => d.Id == deliveryId, cancellationToken);
+            if (delivery is null ||
+                !string.Equals(delivery.Status, EmailDeliveryStatus.Pending, StringComparison.Ordinal) ||
+                delivery.StartsWithoutOutcome < MaxStartsWithoutOutcome ||
+                _inFlight.ContainsKey(deliveryId) ||
+                _queue.IsQueued(deliveryId))
+            {
+                return;
+            }
+
+            delivery.Status = EmailDeliveryStatus.Failed;
+            delivery.NextAttemptAt = null;
+            delivery.ErrorMessage =
+                $"Gave up after {delivery.StartsWithoutOutcome} attempts to prepare or send this delivery were interrupted before finishing, most likely because the application crashed or ran out of memory.";
+            await db.SaveChangesAsync(CancellationToken.None);
+            _metrics?.RecordEmailSend(success: false);
+
+            _logger.LogError(
+                "Gave up on email delivery {DeliveryId} of {FilePath}: work on it began {Starts} times without finishing",
+                delivery.Id,
+                LoggingHelper.SanitizePathForLog(delivery.FilePath),
+                delivery.StartsWithoutOutcome);
+        }
+        finally
+        {
+            _deliveryStateLock.Release();
+        }
+    }
+
+    public async Task SendTestEmailAsync(EmailAccessScope scope, int deviceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var device = await FindDeviceAsync(db, scope, deviceId, cancellationToken);
 
         await _sender.SendAsync(
             new ComicEmailMessage(
@@ -1167,14 +1442,18 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<IReadOnlyList<ComicEmailDeliveryDto>> GetRecentDeliveriesAsync(
+        EmailAccessScope scope,
         int limit,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         var take = Math.Clamp(limit, 1, 500);
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var deliveries = await db.ComicEmailDeliveries
             .AsNoTracking()
+            .ListedFor(scope)
             .OrderByDescending(d => d.Id)
             .Take(take)
             .ToListAsync(cancellationToken);
@@ -1183,19 +1462,22 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<ComicEmailDeliveryPage> GetDeliveriesPageAsync(
+        EmailAccessScope scope,
         int offset,
         int limit,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         var take = Math.Clamp(limit, 1, 500);
         var skip = Math.Max(0, offset);
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var total = await db.ComicEmailDeliveries.CountAsync(cancellationToken);
-        var pending = await db.ComicEmailDeliveries
+        var visible = db.ComicEmailDeliveries.AsNoTracking().ListedFor(scope);
+        var total = await visible.CountAsync(cancellationToken);
+        var pending = await visible
             .CountAsync(d => d.Status == EmailDeliveryStatus.Pending, cancellationToken);
-        var deliveries = await db.ComicEmailDeliveries
-            .AsNoTracking()
+        var deliveries = await visible
             .OrderByDescending(d => d.Id)
             .Skip(skip)
             .Take(take)
@@ -1211,9 +1493,22 @@ public class ComicEmailService : IComicEmailService
     }
 
     public async Task<EmailDeliveryCancelResult> CancelDeliveryAsync(
+        EmailAccessScope scope,
         int deliveryId,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // Another user's delivery is reported like one that does not exist. Its
+        // owner never changes, so checking once up front is enough.
+        await using (var db = await _dbFactory.CreateDbContextAsync(cancellationToken))
+        {
+            if (!await db.ComicEmailDeliveries.AccessibleTo(scope).AnyAsync(d => d.Id == deliveryId, cancellationToken))
+            {
+                return new EmailDeliveryCancelResult(EmailDeliveryCancelOutcome.NotFound, null);
+            }
+        }
+
         var (direct, inFlight) = await CancelUnclaimedDeliveryAsync(deliveryId, cancellationToken);
         if (inFlight is null)
         {
@@ -1261,9 +1556,13 @@ public class ComicEmailService : IComicEmailService
         return new EmailDeliveryCancelResult(outcome, latest);
     }
 
-    public async Task<EmailDeliveryBulkCancelResult> CancelPendingDeliveriesAsync(CancellationToken cancellationToken = default)
+    public async Task<EmailDeliveryBulkCancelResult> CancelPendingDeliveriesAsync(
+        EmailAccessScope scope,
+        CancellationToken cancellationToken = default)
     {
-        var (cancelled, claimed) = await CancelUnclaimedPendingDeliveriesAsync(null, cancellationToken);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var (cancelled, claimed) = await CancelUnclaimedPendingDeliveriesAsync(scope, null, cancellationToken);
 
         var requests = claimed
             .Select(c => (c.Id, c.Delivery, Request: c.Delivery.TryRequestCancel()))
@@ -1300,7 +1599,7 @@ public class ComicEmailService : IComicEmailService
         // being worked on and are cancelled directly.
         if (finishedIds.Count > 0)
         {
-            await CancelUnclaimedPendingDeliveriesAsync(finishedIds, cancellationToken);
+            await CancelUnclaimedPendingDeliveriesAsync(scope, finishedIds, cancellationToken);
         }
 
         var stillStopping = 0;
@@ -1357,8 +1656,7 @@ public class ComicEmailService : IComicEmailService
                 return (null, inFlight);
             }
 
-            delivery.Status = EmailDeliveryStatus.Cancelled;
-            delivery.ErrorMessage = null;
+            MarkCancelled(delivery);
             await db.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
@@ -1377,9 +1675,11 @@ public class ComicEmailService : IComicEmailService
     /// Cancels pending deliveries the processor is not working on, under the
     /// state lock so none can be claimed or finished meanwhile.
     /// </summary>
+    /// <param name="scope">Whose pending deliveries are cancelled (see <see cref="EmailAccessScope.Lists"/>).</param>
     /// <param name="ids">Deliveries to consider; null for every pending one.</param>
     /// <returns>How many were cancelled, and those the processor is working on.</returns>
     private async Task<(int Cancelled, List<(int Id, InFlightDelivery Delivery)> Claimed)> CancelUnclaimedPendingDeliveriesAsync(
+        EmailAccessScope scope,
         List<int>? ids,
         CancellationToken cancellationToken)
     {
@@ -1390,7 +1690,9 @@ public class ComicEmailService : IComicEmailService
         try
         {
             await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-            var query = db.ComicEmailDeliveries.Where(d => d.Status == EmailDeliveryStatus.Pending);
+            var query = db.ComicEmailDeliveries
+                .ListedFor(scope)
+                .Where(d => d.Status == EmailDeliveryStatus.Pending);
             if (ids is not null)
             {
                 query = query.Where(d => ids.Contains(d.Id));
@@ -1404,8 +1706,7 @@ public class ComicEmailService : IComicEmailService
                     continue;
                 }
 
-                delivery.Status = EmailDeliveryStatus.Cancelled;
-                delivery.ErrorMessage = null;
+                MarkCancelled(delivery);
                 cancelled++;
             }
 
@@ -1766,7 +2067,26 @@ public class ComicEmailService : IComicEmailService
         entity.ErrorMessage,
         entity.CreatedAt,
         entity.SentAt,
-        Math.Max(1, DeserializeCondensedPaths(entity.CondensedFilePaths).Count));
+        Math.Max(1, DeserializeCondensedPaths(entity.CondensedFilePaths).Count),
+        entity.AttemptCount,
+        entity.NextAttemptAt is DateTime nextAttempt ? DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc) : null,
+        entity.OwnerUserId);
+
+    /// <summary>
+    /// The device <paramref name="scope"/> wants to send to. Another user's
+    /// device is reported exactly like one that does not exist.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No such device within the scope.</exception>
+    private static async Task<EreaderDeviceEntity> FindDeviceAsync(
+        ComicMaintainerDbContext db,
+        EmailAccessScope scope,
+        int deviceId,
+        CancellationToken cancellationToken)
+        => await db.EreaderDevices
+               .AsNoTracking()
+               .AccessibleTo(scope)
+               .FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken)
+           ?? throw new InvalidOperationException($"Ereader device {deviceId} was not found.");
 
     /// <summary>What became of a request to stop an in-flight delivery.</summary>
     private enum InFlightCancelRequest

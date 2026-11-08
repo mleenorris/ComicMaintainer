@@ -23,6 +23,9 @@ namespace ComicMaintainer.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("CondensedFilePaths")
                         .HasColumnType("TEXT");
 
@@ -60,6 +63,13 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("TEXT");
 
@@ -67,6 +77,9 @@ namespace ComicMaintainer.Core.Migrations
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("StartsWithoutOutcome")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -79,6 +92,8 @@ namespace ComicMaintainer.Core.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt");
+
+                    b.HasIndex("OwnerUserId", "CreatedAt");
 
                     b.HasIndex("Status", "SentAt");
 
@@ -216,12 +231,16 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OwnerUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EmailAddress")
+                    b.HasIndex("OwnerUserId", "EmailAddress")
                         .IsUnique();
 
                     b.ToTable("EreaderDevices");
@@ -268,6 +287,9 @@ namespace ComicMaintainer.Core.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("IssueCreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("IssueCreationAttemptedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("LastError")

@@ -158,6 +158,23 @@ test('partial source failures are reported without hiding successful downloads',
     });
 });
 
+test('searches that were cut short are mentioned without being called failures', async () => {
+    const page = await bootMissing();
+    page.route(DOWNLOAD, {
+        series: { id: 7, title: 'SAGA' },
+        queuedChapters: [],
+        unmatchedIssueNumbers: [2],
+        cutShortSearches: [{ target: 'Fuzzy (EN)', reason: 'Only the first 3 pages of results were searched.' }]
+    });
+
+    await download(page);
+
+    assert.deepEqual(lastMessage(page), {
+        text: 'Nothing was queued on Suwayomi. 1 issue has no matching chapter. 1 search was cut short, so a series further down the results may have been missed.',
+        type: 'info'
+    });
+});
+
 test('a series that has no missing issues any more asks for nothing', async () => {
     const page = await bootMissing();
     page.route(`GET ${ISSUES}`, issuesBody(seriesCard(), [issue(1), issue(2), issue(3), issue(4)]));

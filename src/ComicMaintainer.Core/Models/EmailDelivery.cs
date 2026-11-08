@@ -139,8 +139,38 @@ public static class EmailCondenseMode
     /// <summary>A single book containing every selected issue.</summary>
     public const string All = "all";
 
-    /// <summary>Upper bound on the issues that may be condensed into one book.</summary>
+    /// <summary>
+    /// Upper bound on the issues that may be condensed into one book, in
+    /// <see cref="Count"/> mode and <see cref="All"/> mode alike.
+    /// </summary>
     public const int MaxIssuesPerBook = 500;
+
+    /// <summary>
+    /// Largest condensed book that is built, judged by its estimated size. A
+    /// download keeps every page at full quality, so without a ceiling one
+    /// request for a whole long-running series could fill the disk with the
+    /// intermediate and final book; AZW3 also cannot exceed 4 GiB. Larger
+    /// selections must be split by condensing by count.
+    /// </summary>
+    public const long MaxBookBytes = 2L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Refuses to build <paramref name="book"/> when it is over
+    /// <see cref="MaxBookBytes"/>, with a message the user can act on.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The book is too large to build.</exception>
+    public static void EnsureBookCanBeBuilt(CondensedBookDto book)
+    {
+        ArgumentNullException.ThrowIfNull(book);
+
+        if (book.ExceedsBookSizeLimit)
+        {
+            const double Gigabyte = 1024d * 1024d * 1024d;
+            throw new InvalidOperationException(string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"Condensed book \"{book.DisplayName}\" is about {book.EstimatedBytes / Gigabyte:0.#} GB, more than the {MaxBookBytes / Gigabyte:0.#} GB a single book may be. Condense fewer issues per book."));
+        }
+    }
 
     public static bool IsCondensing(string? value) =>
         string.Equals(value, Count, StringComparison.OrdinalIgnoreCase) ||
@@ -171,8 +201,28 @@ public static class EmailCondenseMode
     }
 
     /// <summary>
+    /// Refuses a book of more than <see cref="MaxIssuesPerBook"/> issues, with
+    /// a message the user can act on. <see cref="Count"/> mode cannot produce
+    /// one; in <see cref="All"/> mode each series becomes a single book however
+    /// many issues it has, so the limit applies per book and not to the whole
+    /// selection.
+    /// </summary>
+    /// <exception cref="ArgumentException">The book has too many issues.</exception>
+    public static void EnsureBookIssueCountAllowed(int issues, string paramName)
+    {
+        if (issues > MaxIssuesPerBook)
+        {
+            throw new ArgumentException(
+                $"At most {MaxIssuesPerBook} issues can be condensed into a single book, but one of these books would have {issues}. Condense by count to split them into several books.",
+                paramName);
+        }
+    }
+
+    /// <summary>
     /// Validates the issues-per-book value for <paramref name="mode"/>. Only
-    /// <see cref="Count"/> uses it; the other modes ignore it.
+    /// <see cref="Count"/> uses it; <see cref="All"/> puts every issue of a
+    /// series in one book, which <see cref="EnsureBookIssueCountAllowed"/>
+    /// limits once the books are known.
     /// </summary>
     public static int NormalizeIssuesPerBookOrThrow(string mode, int? issuesPerBook, int totalIssues, string paramName)
     {
@@ -227,16 +277,80 @@ public static class EmailRateLimitBounds
     public const int MaxMinSecondsBetweenSends = 86_400;
 }
 
+/// <summary>
+/// Relates the size of an attachment on disk to the size of the email that
+/// carries it. Mail servers enforce their limits on the encoded message, and
+/// base64 turns every 3 bytes into 4 characters wrapped at 76 characters per
+/// line, so an attachment grows by about 37% on the wire: a 25 MB book is a
+/// 34 MB email.
+/// </summary>
+public static class EmailMessageSize
+{
+    /// <summary>
+    /// Room reserved for the headers, the text body and the MIME boundaries,
+    /// which together take a few kilobytes, with the rest as a safety margin.
+    /// </summary>
+    public const long MessageOverheadBytes = 64 * 1024;
+
+    /// <summary>Base64 characters per line; each line ends with CRLF.</summary>
+    private const long Base64LineLength = 76;
+
+    /// <summary>
+    /// Upper estimate of the size of an email carrying an attachment of
+    /// <paramref name="attachmentBytes"/> bytes.
+    /// </summary>
+    public static long EstimateMessageBytes(long attachmentBytes)
+    {
+        var raw = Math.Max(0, attachmentBytes);
+        var base64 = checked((raw + 2) / 3 * 4);
+        var lineBreaks = (base64 + Base64LineLength - 1) / Base64LineLength * 2;
+        return checked(base64 + lineBreaks + MessageOverheadBytes);
+    }
+
+    /// <summary>
+    /// Largest attachment whose email stays within
+    /// <paramref name="maxMessageBytes"/>; 0 when not even an empty
+    /// attachment fits.
+    /// </summary>
+    public static long MaxAttachmentBytes(long maxMessageBytes)
+    {
+        var available = maxMessageBytes - MessageOverheadBytes;
+        if (available <= 0)
+        {
+            return 0;
+        }
+
+        // Invert the estimate, then correct the rounding either way; that is
+        // at most a few bytes, so each loop runs only a handful of times.
+        var base64 = available * Base64LineLength / (Base64LineLength + 2);
+        var raw = base64 / 4 * 3;
+        while (raw > 0 && EstimateMessageBytes(raw) > maxMessageBytes)
+        {
+            raw--;
+        }
+
+        while (EstimateMessageBytes(raw + 1) <= maxMessageBytes)
+        {
+            raw++;
+        }
+
+        return raw;
+    }
+}
+
 /// <summary>A saved ereader destination.</summary>
+/// <param name="OwnerUserId">The user the device belongs to; null for an unowned legacy device.</param>
 public record EreaderDeviceDto(
     int Id,
     string Name,
     string EmailAddress,
     string DeliveryFormat,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    string? OwnerUserId = null);
 
 /// <summary>An automatic-delivery subscription for a series.</summary>
+/// <param name="OwnerUserId">Owner of the subscribed device, to whom the subscription belongs.</param>
 public record SeriesEmailSubscriptionDto(
     int Id,
     string NormalizedSeriesKey,
@@ -246,9 +360,17 @@ public record SeriesEmailSubscriptionDto(
     string DeviceEmail,
     string DeliveryFormat,
     bool Enabled,
-    DateTime? LastSentAt);
+    DateTime? LastSentAt,
+    string? OwnerUserId = null);
 
 /// <summary>A single (attempted) comic email.</summary>
+/// <param name="ErrorMessage">
+/// Why the delivery failed, or for a pending delivery whose last attempt
+/// failed temporarily, why it failed and when it is retried.
+/// </param>
+/// <param name="AttemptCount">How many times the message has been handed to the mail server.</param>
+/// <param name="NextAttemptAt">When a pending delivery is retried after a temporary failure (UTC).</param>
+/// <param name="OwnerUserId">Owner of the device it was sent to, to whom the delivery belongs.</param>
 public record ComicEmailDeliveryDto(
     int Id,
     string FilePath,
@@ -262,7 +384,10 @@ public record ComicEmailDeliveryDto(
     string? ErrorMessage,
     DateTime CreatedAt,
     DateTime? SentAt,
-    int IssueCount = 1);
+    int IssueCount = 1,
+    int AttemptCount = 0,
+    DateTime? NextAttemptAt = null,
+    string? OwnerUserId = null);
 
 /// <summary>One page of the delivery history, newest first.</summary>
 /// <param name="Total">Number of deliveries in the whole history.</param>
@@ -331,21 +456,32 @@ public record EmailDeliveryBulkCancelResult(int Cancelled, int Stopping, int Sen
 /// container overhead is a close approximation.
 /// </param>
 /// <param name="ExceedsAttachmentLimit">
-/// True when <paramref name="EstimatedBytes"/> is over the configured mail
-/// attachment limit. Such a book should be downloaded rather than emailed:
+/// True when <paramref name="EstimatedBytes"/> is over the largest attachment
+/// that fits the configured email size limit once encoded (see
+/// <see cref="EmailMessageSize"/>). Such a book should be downloaded rather than emailed:
 /// the converter will still try to recompress it, but heavily condensed books
 /// cannot realistically be shrunk far enough.
+/// </param>
+/// <param name="ExceedsBookSizeLimit">
+/// True when <paramref name="EstimatedBytes"/> is over
+/// <see cref="EmailCondenseMode.MaxBookBytes"/>: the book is too large to be
+/// built at all, so it can be neither emailed nor downloaded.
 /// </param>
 public record CondensedBookDto(
     string DisplayName,
     IReadOnlyList<string> Files,
     long EstimatedBytes,
-    bool ExceedsAttachmentLimit);
+    bool ExceedsAttachmentLimit,
+    bool ExceedsBookSizeLimit = false);
 
 /// <summary>
 /// What condensing a selection would produce, so the user can be warned before
 /// a mass condense that cannot be emailed.
 /// </summary>
+/// <param name="MaxAttachmentBytes">
+/// Largest book that can be emailed: the configured email size limit less
+/// the base64 and MIME overhead (see <see cref="EmailMessageSize"/>).
+/// </param>
 public record CondensePlanDto(
     string Mode,
     int TotalIssues,

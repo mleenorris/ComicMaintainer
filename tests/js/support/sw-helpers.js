@@ -54,6 +54,7 @@ function reply(status, body, { headers = {}, type } = {}) {
 const html = body => reply(200, body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 const image = body => reply(200, body, { headers: { 'Content-Type': 'image/jpeg' } });
 const script = body => reply(200, body, { headers: { 'Content-Type': 'application/javascript' } });
+const stylesheet = body => reply(200, body, { headers: { 'Content-Type': 'text/css' } });
 
 function toResponse(result, url) {
     let response;
@@ -513,18 +514,23 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
 }
 
 const OFFLINE_PAGE = '<!DOCTYPE html><title>Offline</title><h1>You\'re offline</h1>';
+// The reader document install precaches (the server's copy at install time).
+const PRECACHED_READER_PAGE = '<!DOCTYPE html><title>Reader (precached)</title>';
 
 /**
  * Route everything install() fetches on `network`: /api/version (answering
- * `version`), the essential files and every /js/ script. Routes added later
- * take priority, so a test can still make any of them fail.
+ * `version`), the essential files (the reader document answering `reader`),
+ * every /js/ script and every /css/ stylesheet. Routes added later take
+ * priority, so a test can still make any of them fail.
  */
-function installRoutes(network, version = { version: APP_VERSION, platform: '.NET' }) {
+function installRoutes(network, version = { version: APP_VERSION, platform: '.NET' }, { reader = PRECACHED_READER_PAGE } = {}) {
     network.route('GET /api/version', version);
     network.route('GET /manifest.json', { name: 'Comic Maintainer', start_url: '/' });
     network.route('GET /offline.html', html(OFFLINE_PAGE));
+    network.route('GET /reader.html', html(reader));
     network.route(call => call.sameOrigin && call.path.startsWith('/icons/'), reply(200, 'png', { headers: { 'Content-Type': 'image/png' } }));
     network.route(call => call.sameOrigin && call.path.startsWith('/js/'), call => script(`// ${call.path}${call.search}`));
+    network.route(call => call.sameOrigin && call.path.startsWith('/css/'), call => stylesheet(`/* ${call.path}${call.search} */`));
     return network;
 }
 
@@ -546,12 +552,14 @@ module.exports = {
     DEFAULT_CACHE,
     IMAGE_CACHE,
     OFFLINE_CACHE,
+    PRECACHED_READER_PAGE,
     NAVIGATION_ACCEPT,
     absolute,
     reply,
     html,
     image,
     script,
+    stylesheet,
     toResponse,
     createNetwork,
     FakeCacheStorage,

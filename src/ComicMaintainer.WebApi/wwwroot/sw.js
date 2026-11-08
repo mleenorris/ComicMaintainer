@@ -8,9 +8,17 @@
 // and that new instance must keep using the same cache, not this default.
 let CACHE_NAME = 'comic-maintainer-v2'; // Default fallback
 const CACHE_PREFIX = 'comic-maintainer-';
+// The shell every release precaches; install fails if any of it cannot be
+// stored. /reader.html is the document that renders comics downloaded for
+// offline reading (offline.html links to it). It must be precached rather than
+// left to the runtime document cache: that copy lives in the versioned cache,
+// which activate deletes on every upgrade, so after an update a saved comic
+// could otherwise not be opened offline until the reader had been visited
+// online again.
 const urlsToCache = [
   '/manifest.json',
   '/offline.html',
+  '/reader.html',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
   '/icons/icon-192x192-maskable.png',
@@ -55,6 +63,25 @@ const APP_SCRIPTS = [
 // the offline.html fallback each load their own script from /js/pages/. They
 // are precached the same way as APP_SCRIPTS.
 const PAGE_SCRIPTS = [
+  '/js/pages/reader.js',
+  '/js/pages/offline.js'
+];
+
+// Stylesheets, linked with the same ?v=<version> as the scripts (index.html
+// and reader.html both use main.css).
+const STYLESHEETS = [
+  '/css/main.css'
+];
+
+// The versioned assets the offline reader cannot work without: what
+// reader.html and offline.html load. Unlike the rest of the app scripts these
+// are required, like urlsToCache. A release that activated without them would
+// leave every downloaded comic unreadable offline, so its install fails
+// instead and the previous release, whose cache still holds them, stays in
+// control until the next update check retries.
+const OFFLINE_READER_ASSETS = [
+  '/css/main.css',
+  '/js/shared.js',
   '/js/pages/reader.js',
   '/js/pages/offline.js'
 ];
@@ -472,20 +499,30 @@ async function offlineFallbackResponse() {
   );
 }
 
-function versionedScriptUrl(script) {
-  return `${script}?v=${APP_VERSION}`;
+function versionedAssetUrl(asset) {
+  return `${asset}?v=${APP_VERSION}`;
 }
 
-// Precache the versioned app and page scripts. Best effort: without a known
-// version the URLs the pages will request cannot be predicted, and a failed
-// script must not abort installation (cache.addAll would reject on any 404).
-function precacheAppScripts(cache) {
+// Every script and stylesheet install precaches under its versioned URL.
+function versionedAssets() {
+  return [...APP_SCRIPTS, ...PAGE_SCRIPTS, ...STYLESHEETS];
+}
+
+// Precache the versioned scripts and stylesheets. Without a known version the
+// URLs the pages will request cannot be predicted, so nothing is. Otherwise
+// the offline reader's assets must all be stored (the returned promise
+// rejects, failing the install, if one cannot be); any other asset that fails
+// is logged and fetched on demand later instead.
+function precacheVersionedAssets(cache) {
   if (!APP_VERSION) {
     return Promise.resolve();
   }
-  return Promise.all([...APP_SCRIPTS, ...PAGE_SCRIPTS].map((script) =>
-    cache.add(versionedScriptUrl(script)).catch((error) => {
-      console.log('Service Worker: Failed to precache', script, error);
+  return Promise.all(versionedAssets().map((asset) =>
+    cache.add(versionedAssetUrl(asset)).catch((error) => {
+      console.log('Service Worker: Failed to precache', asset, error);
+      if (OFFLINE_READER_ASSETS.includes(asset)) {
+        throw error;
+      }
     })
   ));
 }
@@ -493,8 +530,8 @@ function precacheAppScripts(cache) {
 // The absolute URLs of everything install puts in the versioned cache. A
 // woken-up worker knows them too: recallCacheName restores APP_VERSION.
 function precachedUrls() {
-  const scripts = APP_VERSION ? [...APP_SCRIPTS, ...PAGE_SCRIPTS].map(versionedScriptUrl) : [];
-  return new Set([...urlsToCache, ...scripts].map((path) => new URL(path, self.location.origin).href));
+  const assets = APP_VERSION ? versionedAssets().map(versionedAssetUrl) : [];
+  return new Set([...urlsToCache, ...assets].map((path) => new URL(path, self.location.origin).href));
 }
 
 // Install event - cache essential resources
@@ -513,7 +550,7 @@ self.addEventListener('install', (event) => {
       .then(() => caches.open(CACHE_NAME))
       .then((cache) => {
         console.log('Service Worker: Caching essential files with cache name:', CACHE_NAME);
-        return cache.addAll(urlsToCache).then(() => precacheAppScripts(cache));
+        return cache.addAll(urlsToCache).then(() => precacheVersionedAssets(cache));
       })
       .then(() => recordCacheName(INSTALLED_CACHE_KEY))
   );

@@ -199,6 +199,34 @@ public sealed class BatchJobRegistryTests
     }
 
     [Fact]
+    public async Task ItemThrowing_FailsTheJobAndReleasesWaiters()
+    {
+        var registry = CreateRegistry();
+
+        var jobId = registry.StartJob(
+            Definition((_, _) => throw new InvalidOperationException("item failed unexpectedly")),
+            new[] { "a" });
+        var job = await registry.WaitForCompletionAsync(jobId).WaitAsync(Timeout);
+
+        Assert.Equal(JobStatus.Failed, job!.Status);
+        Assert.NotNull(job.EndTime);
+    }
+
+    [Fact]
+    public async Task PostLoopThrowing_FailsTheJobAfterItsItemsRan()
+    {
+        var registry = CreateRegistry();
+
+        var jobId = registry.StartJob(
+            Definition(postLoop: (_, _) => throw new InvalidOperationException("cleanup failed")),
+            new[] { "a" });
+        var job = await registry.WaitForCompletionAsync(jobId).WaitAsync(Timeout);
+
+        Assert.Equal(JobStatus.Failed, job!.Status);
+        Assert.Equal(1, job.ProcessedFiles);
+    }
+
+    [Fact]
     public async Task ItemThrowingOutOfMemory_MarksTheJobFailedAndReleasesWaiters()
     {
         var registry = CreateRegistry();

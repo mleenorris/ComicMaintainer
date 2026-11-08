@@ -28,6 +28,7 @@ updates:
           - "Moq"
           - "coverlet*"
           - "Microsoft.NET.Test.Sdk"
+          - "YamlDotNet"
       # Microsoft's runtime packages are versioned and released together, so updating them
       # individually produces PRs that conflict with each other and can leave the projects on
       # a mismatched set of versions.

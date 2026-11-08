@@ -373,7 +373,13 @@ async function extend(lifetime) {
     }
 }
 
-function loadServiceWorker({ routes, network = createNetwork(routes), caches, clients = [] } = {}) {
+function loadServiceWorker({
+    routes,
+    network = createNetwork(routes),
+    caches,
+    clients = [],
+    registration = { scope: `${ORIGIN}/`, installing: null, waiting: null, active: null }
+} = {}) {
     const cacheStorage = caches || new FakeCacheStorage(network);
     const listeners = new Map();
     const worker = {
@@ -399,7 +405,7 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
             matchAll: async () => [...clients],
             get: async id => clients.find(client => client.id === id)
         },
-        registration: { scope: `${ORIGIN}/`, installing: null, waiting: null, active: null },
+        registration,
         location: new URL(`${ORIGIN}/sw.js`),
         skipWaiting: async () => {
             worker.skipWaitingCalls++;
@@ -455,9 +461,10 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
         async install() {
             await extend(dispatch('install').lifetime);
         },
-        /** Fire `activate` and wait for its cleanup. */
+        /** Fire `activate` and wait for its cleanup; the registration then has an active worker. */
         async activate() {
             await extend(dispatch('activate').lifetime);
+            registration.active = { scriptURL: `${ORIGIN}/sw.js`, state: 'activated' };
         },
         /**
          * Fire `fetch` for a Request (or a URL plus makeRequest() options).
@@ -512,7 +519,7 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
         idle,
         /** A fresh evaluation of sw.js over the same caches and network (a woken-up worker). */
         restart() {
-            return loadServiceWorker({ network, caches: cacheStorage, clients });
+            return loadServiceWorker({ network, caches: cacheStorage, clients, registration });
         }
     });
     return worker;

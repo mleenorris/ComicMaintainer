@@ -716,11 +716,23 @@ function versionedAssets() {
   return [...APP_SCRIPTS, ...PAGE_SCRIPTS, ...STYLESHEETS];
 }
 
-// Precache the versioned scripts and stylesheets. Without a known version the
-// URLs the pages will request cannot be predicted, so nothing is. Otherwise
-// the offline reader's assets must all be stored (the returned promise
-// rejects, failing the install, if one cannot be); any other asset that fails
-// is logged and fetched on demand later instead.
+// An update that cannot learn its version cannot precache what the pages will
+// request, and activating it would delete the cache of the release in control,
+// the only one holding the offline reader's assets. So its install fails, and
+// the next update check tries again. A first install has nothing to lose and
+// carries on with the default cache.
+function refuseUpdateWithoutVersion() {
+  if (!APP_VERSION && self.registration.active) {
+    throw new Error('Cannot install an update without knowing its version');
+  }
+}
+
+// Precache the versioned scripts and stylesheets. Without a known version (a
+// first install only, see above) the URLs the pages will request cannot be
+// predicted, so nothing is. Otherwise the offline reader's assets must all be
+// stored (the returned promise rejects, failing the install, if one cannot
+// be); any other asset that fails is logged and fetched on demand later
+// instead.
 function precacheVersionedAssets(cache) {
   if (!APP_VERSION) {
     return Promise.resolve();
@@ -755,6 +767,7 @@ self.addEventListener('install', (event) => {
   console.log('Service Worker: Installing...');
   event.waitUntil(
     updateCacheName()
+      .then(refuseUpdateWithoutVersion)
       .then(() => caches.open(CACHE_NAME))
       .then((cache) => {
         console.log('Service Worker: Caching essential files with cache name:', CACHE_NAME);

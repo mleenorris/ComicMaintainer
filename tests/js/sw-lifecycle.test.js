@@ -192,6 +192,31 @@ test('without a usable server version the default cache is used and no scripts a
     }
 });
 
+test('an update that cannot learn its version fails to install, leaving the release in control untouched', async () => {
+    const answers = {
+        'an error status': reply(503, { error: 'starting up' }),
+        'an answer without a version': { platform: '.NET' },
+        'a network error': () => {
+            throw new TypeError('Failed to fetch');
+        }
+    };
+    for (const [label, answer] of Object.entries(answers)) {
+        const previous = loadServiceWorker();
+        installRoutes(previous.network, { version: '2.0.350.0' });
+        await previous.install();
+        await previous.activate();
+        const names = previous.caches.names();
+        const precached = previous.caches.urls('comic-maintainer-2-0-350-0');
+
+        const update = previous.restart();
+        update.network.route('GET /api/version', answer);
+        await assert.rejects(update.install(), /without knowing its version/, label);
+
+        assert.deepEqual(update.caches.names(), names, `${label}: not even a default cache was made`);
+        assert.deepEqual(update.caches.urls('comic-maintainer-2-0-350-0'), precached, label);
+    }
+});
+
 test('a failed version lookup is logged', async () => {
     const sw = loadServiceWorker();
     installRoutes(sw.network);

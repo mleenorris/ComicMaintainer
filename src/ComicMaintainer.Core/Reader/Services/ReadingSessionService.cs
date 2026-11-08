@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -65,15 +66,20 @@ public class ReadingSessionService : IReadingSessionService
     }
 
     /// <inheritdoc/>
-    public async Task<ReadingSession?> EndSessionAsync(Guid sessionId, int endPage, CancellationToken cancellationToken = default)
+    public async Task<ReadingSession?> EndSessionAsync(string userId, Guid sessionId, int endPage, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(userId);
+
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        // Scoped to the caller: another user's session is reported exactly like
+        // an unknown one, so a leaked or guessed id neither ends it nor reveals it.
         var entity = await db.ReadingSessions
-            .FirstOrDefaultAsync(s => s.SessionId == sessionId, cancellationToken);
+            .FirstOrDefaultAsync(s => s.SessionId == sessionId && s.UserId == userId, cancellationToken);
 
         if (entity is null)
         {
-            _logger.LogWarning("Attempted to end unknown reading session {SessionId}", sessionId);
+            _logger.LogWarning("Attempted to end unknown reading session {SessionId} for user {UserId}",
+                sessionId, LoggingHelper.SanitizeForLog(userId));
             return null;
         }
 

@@ -239,9 +239,6 @@ internal static class WebApplicationExtensions
         // Use response compression
         app.UseResponseCompression();
 
-        // Use output caching
-        app.UseOutputCache();
-
         // Add security headers middleware
         app.Use(async (context, next) =>
         {

@@ -31,9 +31,19 @@ namespace ComicMaintainer.Core.Services;
 ///
 /// Concurrent requests for the same file are coalesced via a
 /// <see cref="SemaphoreSlim"/> registered per cache key.
+///
+/// Because an entry is a function of the source's length and mtime and the
+/// variant alone, <see cref="GetValidator"/> answers conditional requests from
+/// a <c>stat</c> of the source: a 304 reads neither the blob nor its sidecar.
 /// </summary>
 public class FileCoverCacheService : IFileCoverCacheService
 {
+    /// <summary>
+    /// Pruning granularity: a cached blob's last-access time is refreshed at most
+    /// once per this interval, so serving a cover is not also a metadata write.
+    /// </summary>
+    internal static readonly TimeSpan AccessTimeRefreshInterval = TimeSpan.FromDays(1);
+
     private readonly IComicReaderService _readerService;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<FileCoverCacheService> _logger;
@@ -51,39 +61,36 @@ public class FileCoverCacheService : IFileCoverCacheService
         _logger = logger;
     }
 
-    public async Task<FileCoverCacheEntry?> GetOrCreateAsync(string filePath, CancellationToken cancellationToken = default)
+    public FileCoverValidator? GetValidator(string filePath)
     {
-        if (string.IsNullOrWhiteSpace(filePath))
+        var info = TryStat(filePath);
+        if (info is null)
         {
             return null;
         }
 
-        FileInfo info;
-        try
+        return new FileCoverValidator(
+            info.Length,
+            new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero),
+            CurrentVariant(_settings.CurrentValue));
+    }
+
+    public async Task<FileCoverCacheEntry?> GetOrCreateAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        var info = TryStat(filePath);
+        if (info is null)
         {
-            info = new FileInfo(filePath);
-            if (!info.Exists)
-            {
-                return null;
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
-        {
-            _logger.LogDebug(ex, "FileCoverCache: stat failed for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return null;
         }
 
         var settings = _settings.CurrentValue;
         var sourceMtime = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero);
         var sourceLength = info.Length;
-        var variant = CoverThumbnailEncoder.BuildVariant(
-            settings.FileCoverThumbnailMaxWidth,
-            settings.FileCoverThumbnailFormat,
-            settings.FileCoverThumbnailQuality);
+        var variant = CurrentVariant(settings);
 
         if (!settings.FileCoverCacheEnabled)
         {
-            return await ExtractAsync(filePath, sourceMtime, settings, variant, cancellationToken);
+            return await ExtractAsync(filePath, sourceMtime, sourceLength, settings, variant, cancellationToken);
         }
 
         var key = ComputeKey(filePath);
@@ -108,7 +115,7 @@ public class FileCoverCacheService : IFileCoverCacheService
                 return cached;
             }
 
-            var generated = await ExtractAsync(filePath, sourceMtime, settings, variant, cancellationToken);
+            var generated = await ExtractAsync(filePath, sourceMtime, sourceLength, settings, variant, cancellationToken);
             if (generated is null)
             {
                 return null;
@@ -178,9 +185,53 @@ public class FileCoverCacheService : IFileCoverCacheService
 
     // ---- internals -------------------------------------------------------
 
+    /// <summary>
+    /// Stats the source file. Returns <c>null</c> for a blank path, a missing
+    /// file or a path that cannot be inspected.
+    /// </summary>
+    private FileInfo? TryStat(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var info = new FileInfo(filePath);
+            return info.Exists ? info : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        {
+            _logger.LogDebug(ex, "FileCoverCache: stat failed for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return null;
+        }
+    }
+
+    private static string CurrentVariant(AppSettings settings) =>
+        WithPageListVersion(
+            CoverThumbnailEncoder.BuildVariant(
+                settings.FileCoverThumbnailMaxWidth,
+                settings.FileCoverThumbnailFormat,
+                settings.FileCoverThumbnailQuality),
+            ComicReaderService.PageListVersion);
+
+    /// <summary>
+    /// Adds the reader's page-list version to a thumbnail variant token. The
+    /// cover is page 1 of the page list, so when the rules that build that list
+    /// change, cached covers must miss and their ETags must change. Version 1
+    /// adds nothing: every cover cached so far was made under the version-1
+    /// rules, so those entries stay valid.
+    /// </summary>
+    internal static string WithPageListVersion(string thumbnailVariant, int pageListVersion) =>
+        pageListVersion <= 1
+            ? thumbnailVariant
+            : thumbnailVariant + "-l" + pageListVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     private async Task<FileCoverCacheEntry?> ExtractAsync(
         string filePath,
         DateTimeOffset sourceMtime,
+        long sourceLength,
         AppSettings settings,
         string variant,
         CancellationToken cancellationToken)
@@ -201,7 +252,7 @@ public class FileCoverCacheService : IFileCoverCacheService
                 data, maxWidth, settings.FileCoverThumbnailFormat, settings.FileCoverThumbnailQuality);
             if (thumb is not null)
             {
-                return new FileCoverCacheEntry(thumb.Value.Data, thumb.Value.ContentType, sourceMtime, variant);
+                return new FileCoverCacheEntry(thumb.Value.Data, thumb.Value.ContentType, sourceMtime, sourceLength, variant);
             }
             // Encoding failed (unsupported/corrupt image): serve the original
             // bytes. The entry is still stamped with the current variant so we
@@ -209,7 +260,7 @@ public class FileCoverCacheService : IFileCoverCacheService
             _logger.LogDebug("FileCoverCache: thumbnail encode failed for {FilePath}; using original bytes",
                 LoggingHelper.SanitizePathForLog(filePath));
         }
-        return new FileCoverCacheEntry(data, contentType, sourceMtime, variant);
+        return new FileCoverCacheEntry(data, contentType, sourceMtime, sourceLength, variant);
     }
 
     private FileCoverCacheEntry? TryReadCached(
@@ -241,16 +292,36 @@ public class FileCoverCacheService : IFileCoverCacheService
             }
 
             var data = File.ReadAllBytes(blobPath);
-            // Best-effort: bump last-access so LRU-style pruning is accurate.
-            try { File.SetLastAccessTimeUtc(blobPath, DateTime.UtcNow); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* ignore */ }
+            RefreshAccessTime(blobPath, DateTime.UtcNow);
 
-            return new FileCoverCacheEntry(data, meta.ContentType, sourceMtime, variant);
+            return new FileCoverCacheEntry(data, meta.ContentType, sourceMtime, sourceLength, variant);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             _logger.LogDebug(ex, "FileCoverCache: failed to read cached entry");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Keeps a served blob's last-access time recent enough for
+    /// <see cref="PruneIfOverLimit"/> to evict least-recently-used covers first,
+    /// with at most one metadata write per blob per
+    /// <see cref="AccessTimeRefreshInterval"/> (like the <c>relatime</c> mount
+    /// option) instead of one per request. Best-effort.
+    /// </summary>
+    internal static void RefreshAccessTime(string blobPath, DateTime nowUtc)
+    {
+        try
+        {
+            if (nowUtc - File.GetLastAccessTimeUtc(blobPath) >= AccessTimeRefreshInterval)
+            {
+                File.SetLastAccessTimeUtc(blobPath, nowUtc);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Ignore: LRU order is a pruning hint, never a reason to fail a read.
         }
     }
 

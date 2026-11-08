@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Models;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
@@ -205,8 +206,10 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         _reader.Setup(r => r.GetPageCountAsync(physicalPath)).ReturnsAsync(24);
         _reader.Setup(r => r.GetPageAsync(physicalPath, 1)).ReturnsAsync((new byte[] { 0xFF, 0xD8 }, "image/jpeg"));
         _reader.Setup(r => r.GetPageNamesAsync(physicalPath)).ReturnsAsync(new List<string> { "001.jpg" });
+        _coverCache.Setup(c => c.GetValidator(physicalPath))
+            .Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
         _coverCache.Setup(c => c.GetOrCreateAsync(physicalPath, _cts.Token))
-            .ReturnsAsync(new FileCoverCacheEntry(new byte[] { 1 }, "image/jpeg", DateTimeOffset.UnixEpoch, "orig"));
+            .ReturnsAsync(new FileCoverCacheEntry(new byte[] { 1 }, "image/jpeg", DateTimeOffset.UnixEpoch, 4, "orig"));
         _library.Setup(l => l.GetAdjacentIssueAsync(libraryPath, "next", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AdjacentIssueResult { Found = true, HasAdjacent = false });
         _fileStore.Setup(f => f.GetReadingProgressAsync(libraryPath, _cts.Token)).ReturnsAsync(7);
@@ -278,10 +281,9 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         _reader.Verify(r => r.GetPageNamesAsync(physical), Times.Once);
         _reader.Verify(r => r.GetPageCountAsync(physical), Times.Exactly(3));
         _fileStore.Verify(f => f.MarkFileReadAsync(alias, true, _cts.Token), Times.Once);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(alias, 3, _cts.Token), Times.Once);
-        Assert.Equal(2, saved.Count);
-        Assert.All(saved, progress => Assert.Equal(alias, progress.ContentId));
-        _progress.Verify(p => p.GetProgressAsync("user-1", alias, _cts.Token), Times.Exactly(2));
+        _progress.Verify(p => p.RecordPageAsync("user-1", alias, 3, 24, _cts.Token), Times.Once);
+        Assert.Equal(alias, Assert.Single(saved).ContentId);
+        _progress.Verify(p => p.GetProgressAsync("user-1", alias, _cts.Token), Times.Once);
     }
 
     // ---- GetComicInfo -------------------------------------------------------------------
@@ -309,6 +311,18 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         Assert500(result.Result, "Error reading comic file");
     }
 
+    [Fact]
+    public async Task GetComicInfo_ArchiveOverTheReadLimits_Returns422WithTheReason()
+    {
+        _reader.Setup(r => r.GetPageCountAsync(_file))
+            .ThrowsAsync(new ArchiveLimitExceededException("'Saga 001.cbz' has more than 20,000 entries, which is over the limit for a comic archive."));
+
+        var result = await CreateController().GetComicInfo(_file);
+
+        AssertError<UnprocessableEntityObjectResult>(result.Result,
+            "'Saga 001.cbz' has more than 20,000 entries, which is over the limit for a comic archive.");
+    }
+
     // ---- GetPage ------------------------------------------------------------------------
 
     [Theory]
@@ -333,7 +347,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GetPage_ExistingPage_StreamsImageWithPublicCacheHeader()
+    public async Task GetPage_ExistingPage_StreamsImageThatOnlyTheRequestingBrowserMayCache()
     {
         var bytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 };
         _reader.Setup(r => r.GetPageAsync(_file, 3)).ReturnsAsync((bytes, "image/jpeg"));
@@ -344,7 +358,104 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var file = Assert.IsType<FileContentResult>(result);
         Assert.Equal(bytes, file.FileContents);
         Assert.Equal("image/jpeg", file.ContentType);
-        Assert.Equal("public, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+        // Pages are behind authentication: never "public", so no shared cache stores them.
+        Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task GetPage_ExistingPage_CarriesValidatorsFromTheFilesMetadata()
+    {
+        _reader.Setup(r => r.GetPageAsync(_file, 3)).ReturnsAsync((new byte[] { 1 }, "image/png"));
+        var lastWrite = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(_file, lastWrite);
+        var controller = CreateController();
+
+        await controller.GetPage(_file, 3);
+
+        var length = new FileInfo(_file).Length;
+        Assert.Equal(ComicReaderController.BuildPageETag(length, lastWrite, 3), controller.Response.Headers.ETag.ToString());
+        Assert.Equal("Wed, 04 Mar 2026 05:06:07 GMT", controller.Response.Headers.LastModified.ToString());
+    }
+
+    [Fact]
+    public async Task GetPage_Revalidation_Returns304WithoutOpeningTheArchive()
+    {
+        var info = new FileInfo(_file);
+        var controller = CreateController();
+        controller.Request.Headers.IfNoneMatch = ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 2);
+
+        var result = await controller.GetPage(_file, 2);
+
+        Assert.Equal(StatusCodes.Status304NotModified, Assert.IsType<StatusCodeResult>(result).StatusCode);
+        Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+        Assert.Equal(ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 2), controller.Response.Headers.ETag.ToString());
+        _reader.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GetPage_RevalidationAfterTheFileChanged_ServesTheNewPage()
+    {
+        var info = new FileInfo(_file);
+        var stale = ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 2);
+        File.WriteAllBytes(_file, new byte[] { 0x50, 0x4B, 0x05, 0x06, 0x00 });
+        _reader.Setup(r => r.GetPageAsync(_file, 2)).ReturnsAsync((new byte[] { 7 }, "image/jpeg"));
+        var controller = CreateController();
+        controller.Request.Headers.IfNoneMatch = stale;
+
+        var result = await controller.GetPage(_file, 2);
+
+        Assert.Equal(new byte[] { 7 }, Assert.IsType<FileContentResult>(result).FileContents);
+        Assert.NotEqual(stale, controller.Response.Headers.ETag.ToString());
+    }
+
+    [Fact]
+    public void BuildPageETag_DiffersByPageLengthAndLastWriteTime()
+    {
+        var when = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var tags = new[]
+        {
+            ComicReaderController.BuildPageETag(100, when, 1),
+            ComicReaderController.BuildPageETag(100, when, 2),
+            ComicReaderController.BuildPageETag(101, when, 1),
+            ComicReaderController.BuildPageETag(100, when.AddTicks(1), 1),
+        };
+
+        Assert.Equal(tags.Length, tags.Distinct().Count());
+        Assert.All(tags, tag => Assert.Matches("^\"v[0-9]+-p[0-9]+-[0-9a-f]+-[0-9a-f]+\"$", tag));
+    }
+
+    [Fact]
+    public void BuildPageETag_NamesThePageListVersion()
+    {
+        // Which image is page N depends on the reader's page-list rules as well
+        // as on the file, so the tag carries the version of those rules.
+        var when = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal(
+            $"\"v{ComicReaderService.PageListVersion}-p3-{when.Ticks:x}-64\"",
+            ComicReaderController.BuildPageETag(100, when, 3));
+    }
+
+    [Fact]
+    public async Task GetPage_TagFromOtherPageListRules_ServesThePageAgain()
+    {
+        // What a browser holds after an upgrade that changed which entry is
+        // page 2 of an unchanged file: same length and timestamp, other rules.
+        var info = new FileInfo(_file);
+        var current = ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 2);
+        var otherRules = current.Replace(
+            $"\"v{ComicReaderService.PageListVersion}-",
+            $"\"v{ComicReaderService.PageListVersion - 1}-",
+            StringComparison.Ordinal);
+        Assert.NotEqual(current, otherRules);
+        _reader.Setup(r => r.GetPageAsync(_file, 2)).ReturnsAsync((new byte[] { 7 }, "image/jpeg"));
+        var controller = CreateController();
+        controller.Request.Headers.IfNoneMatch = otherRules;
+
+        var result = await controller.GetPage(_file, 2);
+
+        Assert.Equal(new byte[] { 7 }, Assert.IsType<FileContentResult>(result).FileContents);
+        Assert.Equal(current, controller.Response.Headers.ETag.ToString());
     }
 
     [Fact]
@@ -355,6 +466,19 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var result = await CreateController().GetPage(_file, 1);
 
         Assert500(result, "Error reading page");
+    }
+
+    [Fact]
+    public async Task GetPage_PageOverTheReadLimits_Returns422WithTheReasonAndNoCacheHeaders()
+    {
+        _reader.Setup(r => r.GetPageAsync(_file, 1))
+            .ThrowsAsync(new ArchiveLimitExceededException("Archive entry 'p1.png' is 2 GiB uncompressed, over the 100 MiB limit."));
+        var controller = CreateController();
+
+        var result = await controller.GetPage(_file, 1);
+
+        AssertError<UnprocessableEntityObjectResult>(result, "Archive entry 'p1.png' is 2 GiB uncompressed, over the 100 MiB limit.");
+        Assert.Equal(0, controller.Response.Headers.ETag.Count);
     }
 
     // ---- GetCover -----------------------------------------------------------------------
@@ -393,6 +517,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [Fact]
     public async Task GetCover_NoExtractableCover_ReturnsNotFound()
     {
+        _coverCache.Setup(c => c.GetValidator(_file)).Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
         _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
             .ReturnsAsync(default(FileCoverCacheEntry?));
 
@@ -405,7 +530,8 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     public async Task GetCover_FreshCover_SetsValidatorsAndHttpDateLastModified()
     {
         var entry = new FileCoverCacheEntry(
-            new byte[] { 1, 2, 3 }, "image/jpeg", new DateTimeOffset(2026, 1, 2, 5, 4, 5, TimeSpan.FromHours(2)), "orig");
+            new byte[] { 1, 2, 3 }, "image/jpeg", new DateTimeOffset(2026, 1, 2, 5, 4, 5, TimeSpan.FromHours(2)), 4, "orig");
+        _coverCache.Setup(c => c.GetValidator(_file)).Returns(entry.Validator);
         _coverCache.Setup(c => c.GetOrCreateAsync(_file, _cts.Token)).ReturnsAsync(entry);
         var controller = CreateController();
 
@@ -415,17 +541,17 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         Assert.Equal(new byte[] { 1, 2, 3 }, file.FileContents);
         Assert.Equal("image/jpeg", file.ContentType);
         var headers = controller.Response.Headers;
-        Assert.Equal(ComicReaderController.BuildCoverETag(entry), headers.ETag.ToString());
-        Assert.Equal("public, max-age=3600", headers.CacheControl.ToString());
+        Assert.Equal(ComicReaderController.BuildCoverETag(entry.Validator), headers.ETag.ToString());
+        Assert.Equal("private, max-age=3600", headers.CacheControl.ToString());
         Assert.Equal("Fri, 02 Jan 2026 03:04:05 GMT", headers.LastModified.ToString());
     }
 
     [Fact]
     public async Task GetCover_NotModified_KeepsCacheHeadersButOmitsBody()
     {
-        var entry = new FileCoverCacheEntry(new byte[] { 9 }, "image/webp", DateTimeOffset.UnixEpoch, "w480");
-        _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>())).ReturnsAsync(entry);
-        var etag = ComicReaderController.BuildCoverETag(entry);
+        var validator = new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "w480");
+        _coverCache.Setup(c => c.GetValidator(_file)).Returns(validator);
+        var etag = ComicReaderController.BuildCoverETag(validator);
         var controller = CreateController();
         controller.Request.Headers.IfNoneMatch = etag;
 
@@ -434,13 +560,15 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var status = Assert.IsType<StatusCodeResult>(result);
         Assert.Equal(StatusCodes.Status304NotModified, status.StatusCode);
         Assert.Equal(etag, controller.Response.Headers.ETag.ToString());
-        Assert.Equal("public, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+        Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
         Assert.Equal(0, controller.Response.Headers.LastModified.Count);
+        _coverCache.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task GetCover_CacheFailure_Returns500()
     {
+        _coverCache.Setup(c => c.GetValidator(_file)).Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
         _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("cache dir unavailable"));
 
@@ -460,7 +588,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [InlineData("wébp", "\"10-3-wbp\"")]
     public void BuildCoverETag_EncodesTicksLengthAndSanitisedVariant(string? variant, string expected)
     {
-        var entry = new FileCoverCacheEntry(new byte[3], "image/jpeg", new DateTimeOffset(16, TimeSpan.Zero), variant!);
+        var entry = new FileCoverValidator(3, new DateTimeOffset(16, TimeSpan.Zero), variant!);
 
         Assert.Equal(expected, ComicReaderController.BuildCoverETag(entry));
     }
@@ -579,72 +707,77 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     // ---- SaveProgress -------------------------------------------------------------------
 
     [Fact]
-    public async Task SaveProgress_AnonymousRequest_PersistsFileProgressOnly()
+    public async Task SaveProgress_AnonymousRequest_RecordsNothing()
     {
         var result = await CreateController().SaveProgress(_file, 4, _cts.Token);
 
         Assert.IsType<OkResult>(result);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(_file, 4, _cts.Token), Times.Once);
+        _reader.VerifyNoOtherCalls();
+        _fileStore.VerifyNoOtherCalls();
         _progress.VerifyNoOtherCalls();
     }
 
     [Theory]
-    [InlineData(7, 30, 7, false)]
-    [InlineData(30, 30, 30, true)]
-    [InlineData(50, 30, 30, true)]
-    public async Task SaveProgress_User_RecordsPageClampedToArchiveLength(int page, int totalPages, int expectedPage, bool completed)
+    [InlineData(7, 30)]
+    [InlineData(50, 30)]
+    public async Task SaveProgress_User_RecordsThePageAndTheArchiveLengthInOneWrite(int page, int totalPages)
     {
+        // The service clamps the page to the length and writes both the resume
+        // page and the durable progress in one transaction (ReadingProgressRecordPageTests).
         _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(totalPages);
-        _progress.Setup(p => p.GetProgressAsync("user-2", _file, _cts.Token)).ReturnsAsync(default(ReadingProgress?));
-        var saved = TrackSavedProgress();
 
         var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, page, _cts.Token);
 
         Assert.IsType<OkResult>(result);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(_file, page, _cts.Token), Times.Once);
-        var progress = Assert.Single(saved);
-        Assert.Equal("user-2", progress.UserId);
-        Assert.Equal(_file, progress.ContentId);
-        Assert.Equal(totalPages, progress.TotalPages);
-        Assert.Equal(expectedPage, progress.CurrentPage);
-        Assert.Equal(completed, progress.CompletedAt is not null);
+        _progress.Verify(p => p.RecordPageAsync("user-2", _file, page, totalPages, _cts.Token), Times.Once);
+        _progress.VerifyNoOtherCalls();
+        // The per-page save no longer goes through the file store's separate write.
+        _fileStore.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task SaveProgress_UserOnEmptyArchive_SkipsPerUserProgress()
+    public async Task SaveProgress_UserOnEmptyArchive_RecordsTheResumePageWithoutALength()
     {
         _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(0);
 
         var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, 1);
 
         Assert.IsType<OkResult>(result);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(_file, 1, It.IsAny<CancellationToken>()), Times.Once);
-        _progress.VerifyNoOtherCalls();
+        _progress.Verify(p => p.RecordPageAsync("user-2", _file, 1, 0, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task SaveProgress_PerUserProgressFailure_DoesNotFailRequest()
+    public async Task SaveProgress_ArchiveOverTheReadLimits_StillRecordsTheResumePage()
     {
-        _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(10);
-        _progress.Setup(p => p.GetProgressAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("progress db offline"));
+        _reader.Setup(r => r.GetPageCountAsync(_file))
+            .ThrowsAsync(new ArchiveLimitExceededException("'Saga 001.cbz' has more than 20,000 entries."));
 
         var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, 3);
 
         Assert.IsType<OkResult>(result);
-        _fileStore.Verify(f => f.SaveReadingProgressAsync(_file, 3, It.IsAny<CancellationToken>()), Times.Once);
-        _progress.Verify(p => p.SaveProgressAsync(It.IsAny<ReadingProgress>(), It.IsAny<CancellationToken>()), Times.Never);
+        _progress.Verify(p => p.RecordPageAsync("user-2", _file, 3, 0, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task SaveProgress_StoreFailure_Returns500()
+    public async Task SaveProgress_WriteFailure_Returns500SoTheReaderRetries()
     {
-        _fileStore.Setup(f => f.SaveReadingProgressAsync(_file, 2, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("disk full"));
+        // reader.js keeps a page whose save answered 5xx and replays it later; the
+        // old path logged the failure and answered 200, so the page was lost.
+        _reader.Setup(r => r.GetPageCountAsync(_file)).ReturnsAsync(10);
+        _progress.Setup(p => p.RecordPageAsync("user-2", _file, 2, 10, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
 
         var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, 2);
 
         Assert500(result, "Error saving reading progress");
+    }
+
+    [Fact]
+    public async Task SaveProgress_UserWithEmptyIdClaim_RecordsNothing()
+    {
+        var result = await CreateController(UserWithId(string.Empty)).SaveProgress(_file, 2);
+
+        Assert.IsType<OkResult>(result);
         _progress.VerifyNoOtherCalls();
     }
 

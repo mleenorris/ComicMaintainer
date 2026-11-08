@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Mail;
 
 namespace ComicMaintainer.Core.Utilities;
@@ -13,7 +14,7 @@ public static class EmailAddressUtils
     /// Returns true when <paramref name="value"/> parses as a single
     /// <c>local@domain</c> mailbox with a dotted domain.
     /// </summary>
-    public static bool IsValid(string? value)
+    public static bool IsValid([NotNullWhen(true)] string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {

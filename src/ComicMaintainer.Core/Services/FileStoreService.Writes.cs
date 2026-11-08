@@ -85,7 +85,7 @@ public partial class FileStoreService
             return;
         }
 
-        ApplyCommittedRow(committed);
+        await MirrorCommittedRowAsync(committed);
         MarkChanged();
 
         // Broadcast file list update to connected clients
@@ -157,7 +157,7 @@ public partial class FileStoreService
             return;
         }
 
-        ForgetCommittedRow(filePath);
+        await MirrorCommittedRowsAsync(Array.Empty<ComicFileEntity>(), new[] { filePath });
         MarkChanged();
 
         // Broadcast file list update to connected clients
@@ -407,7 +407,7 @@ public partial class FileStoreService
                 survivor = row;
                 if (survivor is null)
                 {
-                    ForgetCommittedRow(oldPath);
+                    await MirrorCommittedRowsAsync(Array.Empty<ComicFileEntity>(), new[] { oldPath });
                     MarkChanged();
                     return;
                 }
@@ -423,8 +423,7 @@ public partial class FileStoreService
 
         // The row move committed (even if repointing read state afterwards failed), so the
         // in-memory copy follows it.
-        ForgetCommittedRow(oldPath);
-        ApplyCommittedRow(survivor);
+        await MirrorCommittedRowsAsync(new[] { survivor }, new[] { oldPath });
         MarkChanged();
         _logger.LogDebug("Updated file path in memory store: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
 
@@ -570,7 +569,7 @@ public partial class FileStoreService
             await dbContext.SaveChangesAsync(cancellationToken);
 
             // Mirror the committed row so subsequent reads see the stamp.
-            ApplyCommittedRow(entity);
+            await MirrorCommittedRowAsync(entity);
             MarkChanged();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -599,7 +598,7 @@ public partial class FileStoreService
         entity.UpdatedAt = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        ApplyCommittedRow(entity);
+        await MirrorCommittedRowAsync(entity);
         await BroadcastFileListUpdateSafeAsync();
     }
 }

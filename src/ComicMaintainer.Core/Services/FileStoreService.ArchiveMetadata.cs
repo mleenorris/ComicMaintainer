@@ -133,7 +133,7 @@ public partial class FileStoreService
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        ApplyCommittedRow(entity);
+        await MirrorCommittedRowAsync(entity);
         return true;
     }
 

@@ -17,9 +17,10 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 /// <remarks>
 /// The database is the single source of truth. Every write commits to the database
-/// first and only then updates the in-memory copy from the saved row
-/// (<see cref="ApplyCommittedRow"/>), so a failed or cancelled write leaves both exactly
-/// as they were and every endpoint, whichever of the two it reads, reports the same state.
+/// first and only then refreshes the in-memory copy from the committed row
+/// (<see cref="MirrorCommittedRowsAsync"/>), so a failed or cancelled write leaves both
+/// exactly as they were and every endpoint, whichever of the two it reads, reports the
+/// same state.
 /// </remarks>
 public partial class FileStoreService : IFileStoreService, IChangeVersionSource, IUserReadStateSource
 {
@@ -47,6 +48,9 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
     /// reader always sees a row exactly as it was saved.
     /// </summary>
     private readonly ConcurrentDictionary<string, ComicFile> _files = new();
+
+    /// <summary>Serializes refreshing <see cref="_files"/> from the database; see <see cref="MirrorCommittedRowsAsync"/>.</summary>
+    private readonly SemaphoreSlim _mirrorLock = new(1, 1);
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<FileStoreService> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
@@ -90,6 +94,75 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
     /// <summary>Drops the in-memory copy of a row whose deletion was just committed.</summary>
     private void ForgetCommittedRow(string filePath)
         => _files.TryRemove(filePath, out _);
+
+    /// <summary>Refreshes the in-memory copy of one row after its write committed.</summary>
+    private Task MirrorCommittedRowAsync(ComicFileEntity saved)
+        => MirrorCommittedRowsAsync(new[] { saved });
+
+    /// <summary>
+    /// Refreshes the in-memory copy of the given rows after their writes committed, from
+    /// what the database holds now rather than from the tracked entities. Those entities
+    /// were loaded before the save and EF writes only the columns that changed, so copying
+    /// one could put back a stale value of a column another writer committed in between.
+    /// </summary>
+    /// <remarks>
+    /// Reading and applying happen under one lock, so the refreshes of a row cannot be
+    /// applied out of order: whichever runs last read the row after the last commit. SQLite
+    /// has a single writer anyway, and this read is far cheaper than the write it follows,
+    /// so the lock costs no meaningful throughput. Should the read fail, the entities are
+    /// the best knowledge available. Not cancellable: the write has already committed.
+    /// </remarks>
+    /// <param name="saved">Rows that were inserted or updated.</param>
+    /// <param name="removed">Paths whose rows were deleted (or moved away).</param>
+    private async Task MirrorCommittedRowsAsync(
+        IReadOnlyCollection<ComicFileEntity> saved,
+        IReadOnlyCollection<string>? removed = null)
+    {
+        var paths = saved.Select(e => e.FilePath)
+            .Concat(removed ?? Array.Empty<string>())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        await _mirrorLock.WaitAsync(CancellationToken.None);
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(CancellationToken.None);
+            foreach (var chunk in paths.Chunk(SqliteParameterChunkSize))
+            {
+                var rows = await dbContext.ComicFiles
+                    .AsNoTracking()
+                    .Where(e => chunk.Contains(e.FilePath))
+                    .ToDictionaryAsync(e => e.FilePath, StringComparer.Ordinal, CancellationToken.None);
+                foreach (var path in chunk)
+                {
+                    if (rows.TryGetValue(path, out var row))
+                    {
+                        ApplyCommittedRow(row);
+                    }
+                    else
+                    {
+                        ForgetCommittedRow(path);
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Could not re-read {Count} committed row(s); updating the in-memory copy from the saved values", paths.Count);
+            foreach (var entity in saved)
+            {
+                ApplyCommittedRow(entity);
+            }
+            foreach (var path in removed ?? Array.Empty<string>())
+            {
+                ForgetCommittedRow(path);
+            }
+        }
+        finally
+        {
+            _mirrorLock.Release();
+        }
+    }
 
     public FileStoreService(
         IOptionsMonitor<AppSettings> settings,

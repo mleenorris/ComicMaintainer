@@ -107,7 +107,7 @@ public partial class FileStoreService
             return;
         }
 
-        ApplyCommittedRow(committed);
+        await MirrorCommittedRowAsync(committed);
         MarkChanged();
     }
 
@@ -161,10 +161,7 @@ public partial class FileStoreService
 
                 // Mirror each committed chunk, so GetAllFilesAsync()/IsFileRenamedAsync() agree
                 // with the database even when a later chunk fails.
-                foreach (var entity in flagged)
-                {
-                    ApplyCommittedRow(entity);
-                }
+                await MirrorCommittedRowsAsync(flagged);
                 MarkChanged();
             }
         }

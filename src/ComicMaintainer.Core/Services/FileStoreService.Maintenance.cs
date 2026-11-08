@@ -16,33 +16,43 @@ public partial class FileStoreService
 
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-            // Load all files from database. We deliberately do NOT call File.Exists()
-            // for each row here: with large libraries a synchronous stat() per row
-            // delays startup (and thus the first file-list response) noticeably.
-            // Stale rows for files no longer on disk are cleaned up asynchronously
-            // by CleanupStaleEntriesAsync (and by the live FileSystemWatcher when a
-            // delete is observed). Read paths now query the database directly, so
-            // the worst case for a transiently missing file is one stale entry in
-            // the UI until cleanup runs.
-            var fileEntities = await dbContext.ComicFiles
-                .AsNoTracking()
-                .ToListAsync(cancellationToken);
-
-            _logger.LogInformation("Loading {Count} files from database", fileEntities.Count);
-
-            // The database is the record, so the in-memory copy is replaced rather than
-            // merged: a row deleted since the last load (for example by a database reset)
-            // must disappear from memory too, not linger as a file every endpoint still lists.
-            var loadedPaths = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var entity in fileEntities)
+            // Held while reading and replacing, so a write committing during the load is
+            // refreshed after the load has been applied rather than overwritten by it.
+            await _mirrorLock.WaitAsync(cancellationToken);
+            try
             {
-                ApplyCommittedRow(entity);
-                loadedPaths.Add(entity.FilePath);
+                // Load all files from database. We deliberately do NOT call File.Exists()
+                // for each row here: with large libraries a synchronous stat() per row
+                // delays startup (and thus the first file-list response) noticeably.
+                // Stale rows for files no longer on disk are cleaned up asynchronously
+                // by CleanupStaleEntriesAsync (and by the live FileSystemWatcher when a
+                // delete is observed). Read paths now query the database directly, so
+                // the worst case for a transiently missing file is one stale entry in
+                // the UI until cleanup runs.
+                var fileEntities = await dbContext.ComicFiles
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken);
+
+                _logger.LogInformation("Loading {Count} files from database", fileEntities.Count);
+
+                // The database is the record, so the in-memory copy is replaced rather than
+                // merged: a row deleted since the last load (for example by a database reset)
+                // must disappear from memory too, not linger as a file every endpoint still lists.
+                var loadedPaths = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var entity in fileEntities)
+                {
+                    ApplyCommittedRow(entity);
+                    loadedPaths.Add(entity.FilePath);
+                }
+
+                foreach (var stalePath in _files.Keys.Where(path => !loadedPaths.Contains(path)).ToList())
+                {
+                    ForgetCommittedRow(stalePath);
+                }
             }
-
-            foreach (var stalePath in _files.Keys.Where(path => !loadedPaths.Contains(path)).ToList())
+            finally
             {
-                ForgetCommittedRow(stalePath);
+                _mirrorLock.Release();
             }
 
             MarkChanged();
@@ -73,7 +83,7 @@ public partial class FileStoreService
         entity.UpdatedAt = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        ApplyCommittedRow(entity);
+        await MirrorCommittedRowAsync(entity);
         MarkChanged();
     }
 
@@ -121,10 +131,7 @@ public partial class FileStoreService
 
                     // Mirror the committed versions into the in-memory copy so
                     // subsequent reads agree with the database.
-                    foreach (var entity in entities)
-                    {
-                        ApplyCommittedRow(entity);
-                    }
+                    await MirrorCommittedRowsAsync(entities);
                     MarkChanged();
                 }
             }

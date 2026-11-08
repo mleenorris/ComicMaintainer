@@ -64,10 +64,7 @@ public partial class FileStoreService
 
         if (changedEntities.Count == 0) return 0;
 
-        foreach (var entity in changedEntities)
-        {
-            ApplyCommittedRow(entity);
-        }
+        await MirrorCommittedRowsAsync(changedEntities);
         MarkChanged();
 
         return changedEntities.Count;

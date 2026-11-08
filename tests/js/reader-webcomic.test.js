@@ -54,6 +54,13 @@ test('webcomic mode opens a buffer of pages around the saved page and scrolls to
     assert.equal(page.$('#readerContent img.page-image'), null);
 });
 
+test('the position shows the saved page as soon as the comic opens, before any page change', async () => {
+    const page = await openWebcomicReader({ series: { [FILE]: 30 }, progress: 8, beforeScripts: contentLayout(40000) });
+
+    assert.equal(page.$('#pageInfo').textContent, 'Page 8 / 30');
+    assert.equal(page.$('#readerProgressBar').style.width, `${(8 / 30) * 100}%`);
+});
+
 test('the most visible page becomes the current page, is saved, and pulls in its neighbours', async () => {
     const page = await openWebcomicReader({ series: { [FILE]: 30 }, progress: 8, beforeScripts: contentLayout(40000) });
 

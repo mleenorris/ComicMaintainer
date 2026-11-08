@@ -381,7 +381,11 @@
             
             // Setup page observer for tracking visible pages
             setupPageObserver();
-            
+
+            // Show the position straight away: the observer only reports a
+            // page other than the one that is already current.
+            updatePageInfoInWebcomicMode();
+
             // Calculate initial prefetch range based on buffer
             const [startIdx, endIdx] = calculatePrefetchIndices(startPage);
             
@@ -1825,10 +1829,22 @@
             return Boolean(content && event.target instanceof Node && content.contains(event.target));
         }
 
+        // True when a key operates a focused control of the header or footer
+        // instead of reading: form fields take every key themselves (the page
+        // slider's arrows; the shortcuts leave them alone) and Space presses a
+        // button. Arrow keys on a button that merely kept focus after a click
+        // still turn pages.
+        function isChromeControlKey(event) {
+            const target = event.target;
+            if (!(target instanceof Element) || !target.closest('#readerHeader, #readerFooter')) return false;
+            return event.key === ' ' || target.matches('input, select, textarea');
+        }
+
         // Auto-hide chrome after a few seconds of inactivity. Moving the
         // mouse, touching or clicking anything but the page, a key other than
-        // a reading key, or focus moving to a control re-shows it and resets
-        // the timer; reading (page turns, scrolling) leaves it as it is.
+        // a reading key, a key operating a control, or focus moving to a
+        // control re-shows it and resets the timer; reading (page turns,
+        // scrolling) leaves it as it is.
         function setupChromeAutoHide() {
             const container = document.getElementById('readerContainer');
             document.addEventListener('mousemove', () => {
@@ -1847,7 +1863,7 @@
                 }, { passive: true });
             });
             document.addEventListener('keydown', (event) => {
-                if (!READING_KEYS.has(event.key)) resetChromeIdleTimer();
+                if (!READING_KEYS.has(event.key) || isChromeControlKey(event)) resetChromeIdleTimer();
             }, { passive: true });
             container.addEventListener('focusin', () => resetChromeIdleTimer());
             const content = document.getElementById('readerContent');

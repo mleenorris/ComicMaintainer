@@ -149,6 +149,37 @@ test('turning pages, by tapping or with the keys, leaves hidden controls hidden'
     assert.equal(chromeHidden(page), false);
 });
 
+test('keys that operate the focused page slider keep the controls up and bring them back', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = await openReader({ series: { [FILE]: 30 } });
+    page.$('#pageSlider').focus();
+    t.mock.timers.tick(2000);
+
+    press(page, 'ArrowRight');
+    t.mock.timers.tick(2000);
+    assert.equal(chromeHidden(page), false, 'the key restarted the countdown');
+    t.mock.timers.tick(1000);
+    assert.equal(chromeHidden(page), true);
+
+    press(page, 'Home');
+    assert.equal(chromeHidden(page), false, 'the key brought the controls back');
+});
+
+test('Space on a focused button brings the controls back, while arrow keys on it still just turn pages', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = await openReader({ series: { [FILE]: 30 } });
+    page.$('#modeToggleBtn').focus();
+    t.mock.timers.tick(3000);
+    assert.equal(chromeHidden(page), true);
+
+    press(page, 'ArrowRight');
+    await page.waitFor(() => page.run('currentPage') === 2);
+    assert.equal(chromeHidden(page), true, 'an arrow key reads, wherever focus was left');
+
+    press(page, ' ');
+    assert.equal(chromeHidden(page), false);
+});
+
 test('touching the controls themselves keeps them up', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const page = await openReader();

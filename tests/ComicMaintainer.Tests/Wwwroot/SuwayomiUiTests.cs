@@ -49,7 +49,7 @@ public class SuwayomiUiTests
         var contents = ReadMainJs();
 
         Assert.Matches(
-            new Regex(@"path: '/api/settings/suwayomi',[\s\S]*?saved: async \(\) => \{\s*suwayomiStatusPromise = null;\s*await refreshSuwayomiAvailability\(\);"),
+            new Regex(@"await saveAllSettings\(settingsUpdate\);[\s\S]*?if \(settingsUpdate\.suwayomi\) \{\s*suwayomiStatusPromise = null;\s*await refreshSuwayomiAvailability\(\);"),
             contents);
     }
 
@@ -61,11 +61,11 @@ public class SuwayomiUiTests
         Assert.Contains("suwayomiDownloadsDirectory.value = settingsData.suwayomi_downloads_directory || ''", contents);
         Assert.Contains("suwayomiImportDirectory.value = settingsData.suwayomi_import_directory || ''", contents);
 
-        var body = Regex.Match(contents, @"const suwayomiBody = \{.*?\};", RegexOptions.Singleline);
+        var body = Regex.Match(contents, @"settingsUpdate\.suwayomi = \{.*?\};", RegexOptions.Singleline);
         Assert.True(body.Success, "Expected to find the Suwayomi settings request body.");
         // Sent trimmed but not nulled: an emptied field must clear the stored folder.
-        Assert.Matches(@"downloadsDirectory: suwayomiDownloadsDirectoryEl \? suwayomiDownloadsDirectoryEl\.value\.trim\(\) : null", body.Value);
-        Assert.Matches(@"importDirectory: suwayomiImportDirectoryEl \? suwayomiImportDirectoryEl\.value\.trim\(\) : null", body.Value);
+        Assert.Matches(@"downloadsDirectory: unlessPinned\('suwayomi_downloads_directory', suwayomiDownloadsDirectoryEl \? suwayomiDownloadsDirectoryEl\.value\.trim\(\) : null\)", body.Value);
+        Assert.Matches(@"importDirectory: unlessPinned\('suwayomi_import_directory', suwayomiImportDirectoryEl \? suwayomiImportDirectoryEl\.value\.trim\(\) : null\)", body.Value);
     }
 
     [Fact]

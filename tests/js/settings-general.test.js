@@ -448,13 +448,13 @@ test('non-administrators see server-wide settings read-only', async () => {
 
 // Checkboxes that save on change: [element, method, endpoint, success label, error prefix].
 const TOGGLES = [
-    ['watcherEnableRenameCheckbox', 'POST', '/api/settings/watcher-enable-rename', 'File rename', 'Failed to update rename setting: '],
-    ['watcherEnableNormalizeCheckbox', 'POST', '/api/settings/watcher-enable-normalize', 'Metadata normalize', 'Failed to update normalize setting: '],
-    ['convertRarToCbzOnWriteCheckbox', 'POST', '/api/settings/convert-rar-to-cbz-on-write', 'Convert CBR/RAR to CBZ when writing tags', 'Failed to update CBR/RAR conversion setting: '],
-    ['writeCoverToFirstArchiveCheckbox', 'POST', '/api/settings/write-cover-to-first-archive', 'Embed cover into first issue archive', 'Failed to update cover embed setting: '],
-    ['writeCoverToSeriesFolderCheckbox', 'POST', '/api/settings/write-cover-to-series-folder', 'Write cover into series folder', 'Failed to update cover folder setting: '],
+    ['watcherEnableRenameCheckbox', 'PUT', '/api/settings/watcher-enable-rename', 'File rename', 'Failed to update rename setting: '],
+    ['watcherEnableNormalizeCheckbox', 'PUT', '/api/settings/watcher-enable-normalize', 'Metadata normalize', 'Failed to update normalize setting: '],
+    ['convertRarToCbzOnWriteCheckbox', 'PUT', '/api/settings/convert-rar-to-cbz-on-write', 'Convert CBR/RAR to CBZ when writing tags', 'Failed to update CBR/RAR conversion setting: '],
+    ['writeCoverToFirstArchiveCheckbox', 'PUT', '/api/settings/write-cover-to-first-archive', 'Embed cover into first issue archive', 'Failed to update cover embed setting: '],
+    ['writeCoverToSeriesFolderCheckbox', 'PUT', '/api/settings/write-cover-to-series-folder', 'Write cover into series folder', 'Failed to update cover folder setting: '],
     ['allowRegistrationCheckbox', 'PUT', '/api/settings/allow-registration', 'Self-service registration', 'Failed to update registration setting: '],
-    ['downloadExternalSeriesImagesCheckbox', 'POST', '/api/settings/download-external-series-images', 'Download external series images', 'Failed to update series image download setting: ']
+    ['downloadExternalSeriesImagesCheckbox', 'PUT', '/api/settings/download-external-series-images', 'Download external series images', 'Failed to update series image download setting: ']
 ];
 
 test('settings checkboxes save as soon as they change', async t => {
@@ -494,7 +494,9 @@ test('settings checkboxes save as soon as they change', async t => {
             page.route(route, respond(500, { error: 'Failed to save setting' }));
             page.input(checkbox, !initial);
             await page.settle();
-            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}HTTP error! status: 500` });
+            // The one toggle the environment can pin passes the server's reason on.
+            const reason = id === 'downloadExternalSeriesImagesCheckbox' ? 'Failed to save setting' : 'HTTP error! status: 500';
+            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}${reason}` });
             assert.equal(checkbox.checked, initial);
 
             page.route(route, networkError);

@@ -81,7 +81,7 @@
             
             try {
                 const response = await fetch(apiUrl('/api/settings/watcher-enable-rename'), {
-                    method: 'POST',
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
@@ -111,7 +111,7 @@
             
             try {
                 const response = await fetch(apiUrl('/api/settings/watcher-enable-normalize'), {
-                    method: 'POST',
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
@@ -141,7 +141,7 @@
 
             try {
                 const response = await fetch(apiUrl('/api/settings/convert-rar-to-cbz-on-write'), {
-                    method: 'POST',
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
@@ -171,7 +171,7 @@
             
             try {
                 const response = await fetch(apiUrl('/api/settings/write-cover-to-first-archive'), {
-                    method: 'POST',
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
@@ -201,7 +201,7 @@
             
             try {
                 const response = await fetch(apiUrl('/api/settings/write-cover-to-series-folder'), {
-                    method: 'POST',
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
@@ -261,7 +261,7 @@
             
             try {
                 const response = await fetch(apiUrl('/api/settings/download-external-series-images'), {
-                    method: 'POST',
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
@@ -275,9 +275,9 @@
                 }
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(await settingsErrorMessage(response));
                 }
-                
+
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Download external series images ${statusText} successfully!`, 'success');
             } catch (error) {
@@ -302,7 +302,101 @@
             if (retryButton) retryButton.hidden = state !== 'error';
         }
 
-        async function loadSettings() {
+        // The settings an environment variable pins, as last reported by
+        // GET /api/settings: field name → variable name.
+        let settingsEnvLocks = new Map();
+
+        // The inputs of each GET /api/settings field the environment can pin.
+        // The server's override table (AppSettingsEnvironmentOverrides) is the
+        // other half of this list; a test keeps the two in step.
+        const SETTINGS_ENV_LOCK_INPUTS = Object.freeze({
+            stale_cleanup_max_removal_percent: ['staleCleanupMaxRemovalPercent'],
+            stale_cleanup_missing_grace_hours: ['staleCleanupMissingGraceHours'],
+            stale_cleanup_sentinel_file: ['staleCleanupSentinelFile'],
+            processing_history_retention_days: ['processingHistoryRetentionDays'],
+            processing_history_max_entries: ['processingHistoryMaxEntries'],
+            enable_external_series_metadata: ['enableExternalSeriesMetadata'],
+            comicvine_api_key_set: ['comicVineApiKey', 'comicVineClearApiKeyCheckbox'],
+            comicvine_base_url: ['comicVineBaseUrl'],
+            enable_mangadex_metadata: ['enableMangaDexMetadata'],
+            mangadex_base_url: ['mangaDexBaseUrl'],
+            enable_anilist_metadata: ['enableAniListMetadata'],
+            anilist_base_url: ['aniListBaseUrl'],
+            enable_suwayomi: ['enableSuwayomiCheckbox'],
+            suwayomi_base_url: ['suwayomiBaseUrl'],
+            suwayomi_username: ['suwayomiUsername'],
+            suwayomi_password_set: ['suwayomiPassword', 'suwayomiClearPasswordCheckbox'],
+            suwayomi_downloads_directory: ['suwayomiDownloadsDirectory'],
+            suwayomi_import_directory: ['suwayomiImportDirectory'],
+            download_external_series_images: ['downloadExternalSeriesImagesCheckbox'],
+            series_image_max_bytes: ['seriesImageMaxMB'],
+            series_image_max_download_bytes: ['seriesImageMaxDownloadMB'],
+            series_image_max_dimension: ['seriesImageMaxDimension'],
+            smtp_host: ['smtpHost'],
+            smtp_port: ['smtpPort'],
+            smtp_username: ['smtpUsername'],
+            smtp_password_set: ['smtpPassword', 'smtpClearPasswordCheckbox'],
+            smtp_use_ssl: ['smtpUseSslCheckbox'],
+            smtp_allow_insecure: ['smtpAllowInsecureCheckbox'],
+            email_from_address: ['emailFromAddress'],
+            email_from_name: ['emailFromName'],
+            email_max_attachment_mb: ['emailMaxAttachmentMb'],
+            email_max_sends_per_hour: ['emailMaxSendsPerHour'],
+            email_max_sends_per_day: ['emailMaxSendsPerDay'],
+            email_min_seconds_between_sends: ['emailMinSecondsBetweenSends'],
+            error_reporting_enabled: ['errorReportingEnabledCheckbox'],
+            error_reporting_github_token_set: ['errorReportingToken', 'errorReportingClearTokenCheckbox'],
+            error_reporting_assignee: ['errorReportingAssignee'],
+            error_reporting_max_issues_per_day: ['errorReportingMaxPerDay'],
+            error_reporting_dedupe_window_hours: ['errorReportingDedupeHours'],
+            error_reporting_comment_on_recurrence: ['errorReportingCommentCheckbox']
+        });
+
+        /**
+         * Marks the inputs of the settings the environment pins: applyCapabilities
+         * keeps them disabled, and a hint under each says which variable pins it.
+         */
+        function applySettingsEnvLocks(locked) {
+            settingsEnvLocks = new Map((Array.isArray(locked) ? locked : []).map(entry => [entry.field, entry.variable]));
+            for (const [field, inputIds] of Object.entries(SETTINGS_ENV_LOCK_INPUTS)) {
+                const variable = settingsEnvLocks.get(field);
+                for (const inputId of inputIds) {
+                    const input = document.getElementById(inputId);
+                    if (!input) continue;
+                    if (variable) {
+                        input.setAttribute('data-env-locked', variable);
+                    } else {
+                        input.removeAttribute('data-env-locked');
+                    }
+                }
+                setSettingsEnvLockHint(field, inputIds[0], variable);
+            }
+        }
+
+        function setSettingsEnvLockHint(field, inputId, variable) {
+            document.querySelector(`[data-env-lock-hint="${field}"]`)?.remove();
+            const input = document.getElementById(inputId);
+            if (!variable || !input) return;
+            const hint = document.createElement('small');
+            hint.className = 'form-hint';
+            hint.dataset.envLockHint = field;
+            hint.textContent = `Set by the ${variable} environment variable, so it cannot be changed here.`;
+            (input.closest('label') || input).after(hint);
+        }
+
+        /** The reason a failed settings request gave, or the HTTP status when it gave none. */
+        async function settingsErrorMessage(response) {
+            // A proxy's error page or an empty body is not JSON.
+            const result = await response.json().catch(() => null);
+            return (result && (result.error || result.message || result.title)) || `HTTP error! status: ${response.status}`;
+        }
+
+        /**
+         * Fills the settings page from the server. Resolves to false when it told
+         * the user the load failed (or the session expired); `afterSave` words that
+         * failure for the save that came before it.
+         */
+        async function loadSettings(afterSave = false) {
             const loadRequest = ++settingsLoadRequest;
             settingsLoaded = false;
             setSettingsLoadStatus('loading', 'Loading settings…');
@@ -319,7 +413,7 @@
 
                 console.log('[SETTINGS] Response status:', settingsResponse.status, 'OK:', settingsResponse.ok, 'URL:', settingsResponse.url);
 
-                if (handleAuthError(settingsResponse)) return;
+                if (handleAuthError(settingsResponse)) return false;
 
                 if (!settingsResponse.ok) {
                     const errorText = await settingsResponse.text();
@@ -328,7 +422,7 @@
                 }
                 
                 const settingsData = await settingsResponse.json();
-                if (loadRequest !== settingsLoadRequest) return;
+                if (loadRequest !== settingsLoadRequest) return undefined;
                 console.log('[SETTINGS] Settings data loaded:', settingsData);
                 
                 document.getElementById('filenameFormat').value = settingsData.filename_format || '';
@@ -525,12 +619,17 @@
                 updateSettingsNavActive();
                 settingsLoaded = true;
                 setSettingsLoadStatus('loaded');
+                applySettingsEnvLocks(settingsData.env_locked);
                 applyCapabilities();
+                return true;
             } catch (error) {
-                if (loadRequest !== settingsLoadRequest) return;
+                if (loadRequest !== settingsLoadRequest) return undefined;
                 console.error('[SETTINGS] Error in loadSettings():', error);
                 setSettingsLoadStatus('error', 'Settings could not be loaded. Retry before making changes.');
-                showMessage('Failed to load settings: ' + error.message, 'error');
+                showMessage(
+                    (afterSave ? 'Settings were saved, but the page could not be reloaded: ' : 'Failed to load settings: ') + error.message,
+                    afterSave ? 'warning' : 'error');
+                return false;
             }
         }
         
@@ -1294,13 +1393,14 @@
         }
 
         /**
-         * Save one Save Settings group; throws an Error carrying the server's
-         * reason on failure, flagged `authHandled` after a 401 (already
-         * redirecting to login).
+         * Sends one Save Settings request. Throws an Error carrying the server's
+         * reason on failure, flagged `authHandled` after a 401 (already redirecting
+         * to login) and `nothingSaved` when the server answered that it did not
+         * apply the save (a proxy's 502/504 says nothing about that).
          */
-        async function saveSettingsGroup(method, path, body) {
-            const response = await fetch(apiUrl(path), {
-                method,
+        async function saveAllSettings(body) {
+            const response = await fetch(apiUrl('/api/settings'), {
+                method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     ...getAuthHeaders()
@@ -1312,13 +1412,10 @@
                 error.authHandled = true;
                 throw error;
             }
-            // A proxy's error page or an empty body is not JSON.
-            const result = await response.json().catch(() => null);
             if (!response.ok) {
-                throw new Error((result && (result.error || result.message)) || `HTTP error! status: ${response.status}`);
-            }
-            if (result && result.success === false) {
-                throw new Error(result.error || '');
+                const error = new Error(await settingsErrorMessage(response));
+                error.nothingSaved = response.status <= 500;
+                throw error;
             }
         }
 
@@ -1408,194 +1505,108 @@
                 }
                 : null;
             
-            // Check everything the server would reject before sending anything:
-            // the groups are saved one by one, so a rejected group leaves the
-            // ones before it saved.
-            if (!format) {
-                showMessage('Filename format cannot be empty', 'error');
-                return;
-            }
-            
-            if (isNaN(logMaxSize) || logMaxSize <= 0) {
-                showMessage('Log max size must be a positive number', 'error');
-                return;
-            }
+            // A setting the environment pins is left out of the save, which keeps it,
+            // and its value (which may be outside what this form accepts) is not checked.
+            const pinned = field => settingsEnvLocks.has(field);
+            const unlessPinned = (field, value) => (pinned(field) ? undefined : value);
 
-            // The server keeps the size in bytes as a 32-bit integer.
-            if (logMaxSize > SETTINGS_SERVER_LIMITS.logMaxSizeMB) {
-                showMessage(`Log max size must be ${SETTINGS_SERVER_LIMITS.logMaxSizeMB} MB or less`, 'error');
-                return;
-            }
-            
-            if (!Number.isInteger(issueNumberPadding) || issueNumberPadding < 0 || issueNumberPadding > 10) {
-                showMessage('Issue number padding must be between 0 and 10', 'error');
-                return;
-            }
-            
-            if (isNaN(dbCleanupInterval) || dbCleanupInterval < 0) {
-                showMessage('Database cleanup interval must be 0 or greater', 'error');
-                return;
-            }
-
-            if (!isWholeNumberInRange(staleCleanupMaxRemovalPercent, SETTINGS_SERVER_LIMITS.staleCleanupMaxRemovalPercent)) {
-                showMessage(`Largest share removed without confirmation must be a whole number from 0 to ${SETTINGS_SERVER_LIMITS.staleCleanupMaxRemovalPercent}`, 'error');
-                return;
-            }
-
-            if (!isWholeNumberInRange(staleCleanupMissingGraceHours, SETTINGS_SERVER_LIMITS.staleCleanupMissingGraceHours)) {
-                showMessage(`Remove missing files after must be a whole number of hours from 0 to ${SETTINGS_SERVER_LIMITS.staleCleanupMissingGraceHours}`, 'error');
-                return;
-            }
-
-            if (!isWholeNumberInRange(processingHistoryRetentionDays, SETTINGS_SERVER_LIMITS.processingHistoryRetentionDays)) {
-                showMessage(`Processing history retention must be a whole number of days from 0 to ${SETTINGS_SERVER_LIMITS.processingHistoryRetentionDays}`, 'error');
-                return;
-            }
-
-            if (!isWholeNumberInRange(processingHistoryMaxEntries, SETTINGS_SERVER_LIMITS.processingHistoryMaxEntries)) {
-                showMessage(`Maximum processing history entries must be a whole number from 0 to ${SETTINGS_SERVER_LIMITS.processingHistoryMaxEntries}`, 'error');
-                return;
-            }
-            
-            if (isNaN(seriesImageMaxMB) || seriesImageMaxMB <= 0) {
-                showMessage('Max stored cover size must be a positive number', 'error');
-                return;
-            }
-            
-            if (isNaN(seriesImageMaxDownloadMB) || seriesImageMaxDownloadMB <= 0) {
-                showMessage('Max download size must be a positive number', 'error');
-                return;
-            }
-            
-            if (seriesImageMaxDownloadMB < seriesImageMaxMB) {
-                showMessage('Max download size must be greater than or equal to max stored cover size', 'error');
-                return;
-            }
-            
-            if (isNaN(seriesImageMaxDimension) || seriesImageMaxDimension <= 0) {
-                showMessage('Max cover dimension must be a positive number', 'error');
-                return;
-            }
-
-            if (smtpPortValue && (isNaN(smtpPort) || smtpPort < 1 || smtpPort > 65535)) {
-                showMessage('SMTP port must be between 1 and 65535', 'error');
-                return;
-            }
-
-            if (emailMaxAttachmentValue && (isNaN(emailMaxAttachmentMb) || emailMaxAttachmentMb <= 0)) {
-                showMessage('Max email attachment size must be a positive number', 'error');
-                return;
-            }
-
-            if (emailRateLimit) {
-                const limits = [
-                    [emailRateLimit.maxSendsPerHour, 'Max emails per hour', 10000],
-                    [emailRateLimit.maxSendsPerDay, 'Max emails per day', 100000],
-                    [emailRateLimit.minSecondsBetweenSends, 'Minimum seconds between emails', 86400]
-                ];
-                for (const [value, label, max] of limits) {
-                    if (!(value >= 0 && value <= max)) {
-                        showMessage(`${label} must be a whole number from 0 to ${max}`, 'error');
-                        return;
-                    }
-                }
-            }
-            if (emailMaxAttachmentMb > SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB) {
-                showMessage(`Max email attachment size must be ${SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB} MB or less`, 'error');
-                return;
-            }
-
-            if (errorReportingMaxPerDay < 0 || errorReportingMaxPerDay > SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay) {
-                showMessage(`Maximum issues per day must be between 0 and ${SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay}`, 'error');
-                return;
-            }
-
-            if (errorReportingDedupeHours < 1 || errorReportingDedupeHours > SETTINGS_SERVER_LIMITS.errorReportingDedupeHours) {
-                showMessage(`Recurrence comment interval must be between 1 and ${SETTINGS_SERVER_LIMITS.errorReportingDedupeHours} hours`, 'error');
-                return;
-            }
-
-            // Saved in this order; `saved` runs once the server has accepted the group.
-            const groups = [
-                {
-                    name: 'filename format',
-                    method: 'POST',
-                    path: '/api/settings/filename-format',
-                    body: { format: format },
-                    // The next rename already uses it, even if a later group fails.
-                    saved: () => {
-                        const currentFormat = document.getElementById('currentFormat');
-                        if (currentFormat) currentFormat.textContent = format;
-                    }
-                },
-                { name: 'log max size', method: 'POST', path: '/api/settings/log-max-bytes', body: { maxMB: logMaxSize } },
-                { name: 'issue number padding', method: 'POST', path: '/api/settings/issue-number-padding', body: { padding: issueNumberPadding } },
-                {
-                    name: 'database cleanup settings',
-                    method: 'PUT',
-                    path: '/api/settings/database-cleanup',
-                    body: {
-                        intervalHours: dbCleanupInterval,
-                        staleCleanupMaxRemovalPercent,
-                        staleCleanupMissingGraceHours,
-                        staleCleanupSentinelFile,
-                        processingHistoryRetentionDays,
-                        processingHistoryMaxEntries
-                    }
-                },
-                {
-                    name: 'external metadata settings',
-                    method: 'POST',
-                    path: '/api/settings/external-series-metadata',
-                    body: {
-                        enabled: enableExternalSeriesMetadata,
-                        // null keeps the stored key; '' clears it.
-                        comicVineApiKey: comicVineClearApiKey ? '' : (comicVineApiKey || null),
-                        comicVineBaseUrl: comicVineBaseUrl || 'https://comicvine.gamespot.com/api',
-                        enableMangaDex: enableMangaDexMetadata,
-                        mangaDexBaseUrl: mangaDexBaseUrl || 'https://api.mangadex.org',
-                        enableAniList: enableAniListMetadata,
-                        aniListBaseUrl: aniListBaseUrl || 'https://graphql.anilist.co'
-                    }
-                },
-                {
-                    name: 'series image limits',
-                    method: 'POST',
-                    path: '/api/settings/series-image-limits',
-                    body: {
-                        maxMB: seriesImageMaxMB,
-                        maxDownloadMB: seriesImageMaxDownloadMB,
-                        maxDimension: seriesImageMaxDimension
-                    }
-                },
-                {
-                    name: 'email settings',
-                    method: 'PUT',
-                    path: '/api/settings/email',
-                    body: {
-                        smtpHost: smtpHost || null,
-                        smtpPort: smtpPort,
-                        smtpUsername: smtpUsername || null,
-                        smtpPassword: smtpClearPassword ? '' : (smtpPasswordInput ? smtpPasswordInput : null),
-                        smtpUseSsl,
-                        smtpAllowInsecure,
-                        emailFromAddress: emailFromAddress || null,
-                        emailFromName: emailFromName || null,
-                        emailMaxAttachmentMb: emailMaxAttachmentMb
-                    },
-                    saved: () => {
-                        emailStatusCache = null;
-                    }
-                }
+            // Check what the server would reject before sending anything, so the
+            // user is told which field to fix.
+            const checks = [
+                [!format, 'Filename format cannot be empty'],
+                [isNaN(logMaxSize) || logMaxSize <= 0, 'Log max size must be a positive number'],
+                // The server keeps the size in bytes as a 32-bit integer.
+                [logMaxSize > SETTINGS_SERVER_LIMITS.logMaxSizeMB, `Log max size must be ${SETTINGS_SERVER_LIMITS.logMaxSizeMB} MB or less`],
+                [!Number.isInteger(issueNumberPadding) || issueNumberPadding < 0 || issueNumberPadding > 10, 'Issue number padding must be between 0 and 10'],
+                [isNaN(dbCleanupInterval) || dbCleanupInterval < 0, 'Database cleanup interval must be 0 or greater'],
+                [!pinned('stale_cleanup_max_removal_percent') && !isWholeNumberInRange(staleCleanupMaxRemovalPercent, SETTINGS_SERVER_LIMITS.staleCleanupMaxRemovalPercent),
+                    `Largest share removed without confirmation must be a whole number from 0 to ${SETTINGS_SERVER_LIMITS.staleCleanupMaxRemovalPercent}`],
+                [!pinned('stale_cleanup_missing_grace_hours') && !isWholeNumberInRange(staleCleanupMissingGraceHours, SETTINGS_SERVER_LIMITS.staleCleanupMissingGraceHours),
+                    `Remove missing files after must be a whole number of hours from 0 to ${SETTINGS_SERVER_LIMITS.staleCleanupMissingGraceHours}`],
+                [!pinned('processing_history_retention_days') && !isWholeNumberInRange(processingHistoryRetentionDays, SETTINGS_SERVER_LIMITS.processingHistoryRetentionDays),
+                    `Processing history retention must be a whole number of days from 0 to ${SETTINGS_SERVER_LIMITS.processingHistoryRetentionDays}`],
+                [!pinned('processing_history_max_entries') && !isWholeNumberInRange(processingHistoryMaxEntries, SETTINGS_SERVER_LIMITS.processingHistoryMaxEntries),
+                    `Maximum processing history entries must be a whole number from 0 to ${SETTINGS_SERVER_LIMITS.processingHistoryMaxEntries}`],
+                [!pinned('series_image_max_bytes') && (isNaN(seriesImageMaxMB) || seriesImageMaxMB <= 0), 'Max stored cover size must be a positive number'],
+                [!pinned('series_image_max_download_bytes') && (isNaN(seriesImageMaxDownloadMB) || seriesImageMaxDownloadMB <= 0), 'Max download size must be a positive number'],
+                [!pinned('series_image_max_bytes') && !pinned('series_image_max_download_bytes') && seriesImageMaxDownloadMB < seriesImageMaxMB,
+                    'Max download size must be greater than or equal to max stored cover size'],
+                [!pinned('series_image_max_dimension') && (isNaN(seriesImageMaxDimension) || seriesImageMaxDimension <= 0), 'Max cover dimension must be a positive number'],
+                [!pinned('smtp_port') && smtpPortValue && (isNaN(smtpPort) || smtpPort < 1 || smtpPort > 65535), 'SMTP port must be between 1 and 65535'],
+                [!pinned('email_max_attachment_mb') && emailMaxAttachmentValue && (isNaN(emailMaxAttachmentMb) || emailMaxAttachmentMb <= 0),
+                    'Max email attachment size must be a positive number'],
+                ...(emailRateLimit
+                    ? [
+                        ['email_max_sends_per_hour', emailRateLimit.maxSendsPerHour, 'Max emails per hour', 10000],
+                        ['email_max_sends_per_day', emailRateLimit.maxSendsPerDay, 'Max emails per day', 100000],
+                        ['email_min_seconds_between_sends', emailRateLimit.minSecondsBetweenSends, 'Minimum seconds between emails', 86400]
+                    ].map(([field, value, label, max]) => [
+                        !pinned(field) && !(value >= 0 && value <= max),
+                        `${label} must be a whole number from 0 to ${max}`
+                    ])
+                    : []),
+                [!pinned('email_max_attachment_mb') && emailMaxAttachmentMb > SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB,
+                    `Max email attachment size must be ${SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB} MB or less`],
+                [!pinned('error_reporting_max_issues_per_day') && (errorReportingMaxPerDay < 0 || errorReportingMaxPerDay > SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay),
+                    `Maximum issues per day must be between 0 and ${SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay}`],
+                [!pinned('error_reporting_dedupe_window_hours') && (errorReportingDedupeHours < 1 || errorReportingDedupeHours > SETTINGS_SERVER_LIMITS.errorReportingDedupeHours),
+                    `Recurrence comment interval must be between 1 and ${SETTINGS_SERVER_LIMITS.errorReportingDedupeHours} hours`]
             ];
+            const failedCheck = checks.find(([invalid]) => invalid);
+            if (failedCheck) {
+                showMessage(failedCheck[1], 'error');
+                return;
+            }
+
+            // One request for every group: the server applies all of it or none
+            // of it. In each group a field left out or sent as null keeps its
+            // value and a text field sent empty is cleared.
+            const settingsUpdate = {
+                filenameFormat: format,
+                logMaxMB: logMaxSize,
+                issueNumberPadding,
+                databaseCleanup: {
+                    intervalHours: dbCleanupInterval,
+                    staleCleanupMaxRemovalPercent: unlessPinned('stale_cleanup_max_removal_percent', staleCleanupMaxRemovalPercent),
+                    staleCleanupMissingGraceHours: unlessPinned('stale_cleanup_missing_grace_hours', staleCleanupMissingGraceHours),
+                    staleCleanupSentinelFile: unlessPinned('stale_cleanup_sentinel_file', staleCleanupSentinelFile),
+                    processingHistoryRetentionDays: unlessPinned('processing_history_retention_days', processingHistoryRetentionDays),
+                    processingHistoryMaxEntries: unlessPinned('processing_history_max_entries', processingHistoryMaxEntries)
+                },
+                externalSeriesMetadata: {
+                    enabled: unlessPinned('enable_external_series_metadata', enableExternalSeriesMetadata),
+                    // null keeps the stored key; '' clears it.
+                    comicVineApiKey: unlessPinned('comicvine_api_key_set', comicVineClearApiKey ? '' : (comicVineApiKey || null)),
+                    comicVineBaseUrl: unlessPinned('comicvine_base_url', comicVineBaseUrl || 'https://comicvine.gamespot.com/api'),
+                    enableMangaDex: unlessPinned('enable_mangadex_metadata', enableMangaDexMetadata),
+                    mangaDexBaseUrl: unlessPinned('mangadex_base_url', mangaDexBaseUrl || 'https://api.mangadex.org'),
+                    enableAniList: unlessPinned('enable_anilist_metadata', enableAniListMetadata),
+                    aniListBaseUrl: unlessPinned('anilist_base_url', aniListBaseUrl || 'https://graphql.anilist.co')
+                },
+                seriesImageLimits: {
+                    maxMB: unlessPinned('series_image_max_bytes', seriesImageMaxMB),
+                    maxDownloadMB: unlessPinned('series_image_max_download_bytes', seriesImageMaxDownloadMB),
+                    maxDimension: unlessPinned('series_image_max_dimension', seriesImageMaxDimension)
+                },
+                email: {
+                    smtpHost: unlessPinned('smtp_host', smtpHost),
+                    smtpPort: unlessPinned('smtp_port', smtpPort),
+                    smtpUsername: unlessPinned('smtp_username', smtpUsername),
+                    smtpPassword: unlessPinned('smtp_password_set', smtpClearPassword ? '' : (smtpPasswordInput || null)),
+                    smtpUseSsl: unlessPinned('smtp_use_ssl', smtpUseSsl),
+                    smtpAllowInsecure: unlessPinned('smtp_allow_insecure', smtpAllowInsecure),
+                    emailFromAddress: unlessPinned('email_from_address', emailFromAddress),
+                    emailFromName: unlessPinned('email_from_name', emailFromName),
+                    emailMaxAttachmentMb: unlessPinned('email_max_attachment_mb', emailMaxAttachmentMb)
+                }
+            };
 
             if (emailRateLimit) {
-                groups.push({
-                    name: 'email rate limit',
-                    method: 'PUT',
-                    path: '/api/settings/email-rate-limit',
-                    body: emailRateLimit
-                });
+                settingsUpdate.emailRateLimit = {
+                    maxSendsPerHour: unlessPinned('email_max_sends_per_hour', emailRateLimit.maxSendsPerHour),
+                    maxSendsPerDay: unlessPinned('email_max_sends_per_day', emailRateLimit.maxSendsPerDay),
+                    minSecondsBetweenSends: unlessPinned('email_min_seconds_between_sends', emailRateLimit.minSecondsBetweenSends)
+                };
             }
 
             const suwayomiEnabledEl = document.getElementById('enableSuwayomiCheckbox');
@@ -1604,73 +1615,58 @@
                 const suwayomiClearPasswordChecked = document.getElementById('suwayomiClearPasswordCheckbox').checked;
                 const suwayomiDownloadsDirectoryEl = document.getElementById('suwayomiDownloadsDirectory');
                 const suwayomiImportDirectoryEl = document.getElementById('suwayomiImportDirectory');
-                const suwayomiBody = {
-                    enabled: suwayomiEnabledEl.checked,
-                    baseUrl: document.getElementById('suwayomiBaseUrl').value.trim() || null,
-                    username: document.getElementById('suwayomiUsername').value.trim() || null,
+                settingsUpdate.suwayomi = {
+                    enabled: unlessPinned('enable_suwayomi', suwayomiEnabledEl.checked),
+                    baseUrl: unlessPinned('suwayomi_base_url', document.getElementById('suwayomiBaseUrl').value.trim()),
+                    username: unlessPinned('suwayomi_username', document.getElementById('suwayomiUsername').value.trim()),
                     // null keeps the stored password; '' clears it.
-                    password: suwayomiClearPasswordChecked ? '' : (suwayomiPasswordInput || null),
+                    password: unlessPinned('suwayomi_password_set', suwayomiClearPasswordChecked ? '' : (suwayomiPasswordInput || null)),
                     // Import folders: '' clears (the downloads folder turns importing off).
-                    downloadsDirectory: suwayomiDownloadsDirectoryEl ? suwayomiDownloadsDirectoryEl.value.trim() : null,
-                    importDirectory: suwayomiImportDirectoryEl ? suwayomiImportDirectoryEl.value.trim() : null
+                    downloadsDirectory: unlessPinned('suwayomi_downloads_directory', suwayomiDownloadsDirectoryEl ? suwayomiDownloadsDirectoryEl.value.trim() : null),
+                    importDirectory: unlessPinned('suwayomi_import_directory', suwayomiImportDirectoryEl ? suwayomiImportDirectoryEl.value.trim() : null)
                 };
-                groups.push({
-                    name: 'Suwayomi settings',
-                    method: 'PUT',
-                    path: '/api/settings/suwayomi',
-                    body: suwayomiBody,
-                    saved: async () => {
-                        suwayomiStatusPromise = null;
-                        await refreshSuwayomiAvailability();
-                    }
-                });
             }
 
             const errorReportingEnabledEl = document.getElementById('errorReportingEnabledCheckbox');
             if (errorReportingEnabledEl) {
                 const errorReportingTokenInput = document.getElementById('errorReportingToken').value;
                 const errorReportingClearTokenChecked = document.getElementById('errorReportingClearTokenCheckbox').checked;
-                groups.push({
-                    name: 'error reporting settings',
-                    method: 'PUT',
-                    path: '/api/settings/error-reporting',
-                    body: {
-                        enabled: errorReportingEnabledEl.checked,
-                        // null keeps the stored token; '' clears it.
-                        gitHubToken: errorReportingClearTokenChecked ? '' : (errorReportingTokenInput || null),
-                        assignee: document.getElementById('errorReportingAssignee').value.trim() || null,
-                        maxIssuesPerDay: errorReportingMaxPerDay,
-                        dedupeWindowHours: errorReportingDedupeHours,
-                        commentOnRecurrence: document.getElementById('errorReportingCommentCheckbox').checked
-                    }
-                });
+                settingsUpdate.errorReporting = {
+                    enabled: unlessPinned('error_reporting_enabled', errorReportingEnabledEl.checked),
+                    // null keeps the stored token; '' clears it.
+                    gitHubToken: unlessPinned('error_reporting_github_token_set', errorReportingClearTokenChecked ? '' : (errorReportingTokenInput || null)),
+                    assignee: unlessPinned('error_reporting_assignee', document.getElementById('errorReportingAssignee').value.trim()),
+                    maxIssuesPerDay: unlessPinned('error_reporting_max_issues_per_day', errorReportingMaxPerDay),
+                    dedupeWindowHours: unlessPinned('error_reporting_dedupe_window_hours', errorReportingDedupeHours),
+                    commentOnRecurrence: unlessPinned('error_reporting_comment_on_recurrence', document.getElementById('errorReportingCommentCheckbox').checked)
+                };
             }
 
-            const savedGroups = [];
-            for (const group of groups) {
-                try {
-                    await saveSettingsGroup(group.method, group.path, group.body);
-                } catch (error) {
-                    if (error?.authHandled) return;
-                    // Nothing is rolled back and the form keeps the edits for a
-                    // retry, so say which groups did take effect.
-                    const reason = String(error?.message || '').trim();
-                    let message = reason ? `Failed to save ${group.name}: ${reason}` : `Failed to save ${group.name}`;
-                    if (!/[.!?]$/.test(message)) message += '.';
-                    message += savedGroups.length
-                        ? ` Only these settings were saved: ${savedGroups.join(', ')}.`
-                        : ' No other settings were saved.';
-                    showMessage(message, 'error');
-                    return;
-                }
-                savedGroups.push(group.name);
-                if (group.saved) await group.saved();
+            try {
+                await saveAllSettings(settingsUpdate);
+            } catch (error) {
+                if (error.authHandled) return;
+                let message = `Failed to save settings: ${error.message}`;
+                if (!/[.!?]$/.test(message)) message += '.';
+                // The save is all or nothing, and the form keeps the edits for a retry.
+                if (error.nothingSaved) message += ' No settings were saved.';
+                showMessage(message, 'error');
+                return;
             }
 
-            showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
-            loadSettings();
+            // The new values are in effect once the request returns, so a status
+            // read from here on sees them.
+            emailStatusCache = null;
+            if (settingsUpdate.suwayomi) {
+                suwayomiStatusPromise = null;
+                await refreshSuwayomiAvailability();
+            }
+
+            if (await loadSettings(true) !== false) {
+                showMessage('Settings saved. Changes to log rotation take effect after a restart.', 'success');
+            }
         }
-        
+
         async function sendErrorReportingTest() {
             try {
                 const response = await fetch(apiUrl('/api/error-reports/test'), {

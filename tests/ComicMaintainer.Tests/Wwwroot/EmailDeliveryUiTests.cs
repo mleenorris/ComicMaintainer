@@ -278,7 +278,7 @@ public class EmailDeliveryUiTests
         Assert.Matches(new Regex(@"id=""emailMaxSendsPerHour""[^>]*min=""0""[^>]*max=""10000"""), html);
         Assert.Matches(new Regex(@"id=""emailMaxSendsPerDay""[^>]*min=""0""[^>]*max=""100000"""), html);
         Assert.Matches(new Regex(@"id=""emailMinSecondsBetweenSends""[^>]*min=""0""[^>]*max=""86400"""), html);
-        Assert.Contains("/api/settings/email-rate-limit", WwwrootFiles.ReadAppScripts());
+        Assert.Contains("settingsUpdate.emailRateLimit = {", WwwrootFiles.ReadAppScripts());
     }
 
     [Fact]
@@ -311,7 +311,7 @@ public class EmailDeliveryUiTests
         var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Matches(
-            new Regex(@"path: '/api/settings/email',.*?saved: \(\) => \{\s*emailStatusCache = null;", RegexOptions.Singleline),
+            new Regex(@"await saveAllSettings\(settingsUpdate\);.*?emailStatusCache = null;", RegexOptions.Singleline),
             js);
     }
 

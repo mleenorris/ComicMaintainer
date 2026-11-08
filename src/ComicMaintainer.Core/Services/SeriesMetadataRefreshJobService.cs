@@ -106,8 +106,10 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
 
         // What refreshing each record concluded, by record key. A series card's
         // refresh lists the canonical title and every alias, all of which
-        // belong to one record: it is looked up once and the rest share the
-        // answer, instead of each alias re-querying the providers.
+        // belong to one record: once it is matched (or its providers failed)
+        // the rest share that answer, instead of each alias re-querying the
+        // providers. "Not found" is not shared: another name of an unmatched
+        // series, such as a user alias, can still find it.
         var refreshedRecords = new Dictionary<string, RefreshResult>(StringComparer.Ordinal);
 
         try
@@ -126,7 +128,9 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 try
                 {
                     before = await _cache.GetByTitleAsync(title, cancellationToken);
-                    if (before is not null && refreshedRecords.TryGetValue(before.NormalizedKey, out var earlier))
+                    if (before is not null
+                        && refreshedRecords.TryGetValue(before.NormalizedKey, out var earlier)
+                        && earlier.Status != "not_found")
                     {
                         result = earlier;
                         if (result.Retag && SeriesKey.TryNormalize(title) is { } titleKey)

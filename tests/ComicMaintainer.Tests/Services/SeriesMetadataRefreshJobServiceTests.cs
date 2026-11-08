@@ -556,6 +556,34 @@ public class SeriesMetadataRefreshJobServiceTests
     }
 
     [Fact]
+    public async Task RunJob_UnmatchedRecord_IsStillAskedAboutItsOtherNames()
+    {
+        // The folder name found nothing, but the user added the English title
+        // as an alias: that name is what can find the series.
+        SetupOwner("Shingeki", "shingeki", "Shingeki", status: "not_found");
+        SetupOwner("Attack on Titan", "shingeki", "Shingeki", status: "not_found");
+        _cache.Setup(c => c.RefreshAsync("Shingeki", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord
+            {
+                NormalizedKey = "shingeki",
+                CanonicalTitle = "Shingeki",
+                LookupStatus = "not_found",
+                MetadataVersion = 3,
+                Aliases = new List<string>(),
+                UserAliases = new List<string>()
+            });
+        SetupRefreshOf("Attack on Titan", "shingeki", "Attack on Titan", metadataVersion: 4);
+        var service = CreateService(withFileStore: false, withProcessor: false);
+
+        var jobId = await service.StartAsync(new[] { "Shingeki", "Attack on Titan" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        _cache.Verify(c => c.RefreshAsync("Attack on Titan", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(1, job.NotFound);
+        Assert.Equal(1, job.Successes);
+    }
+
+    [Fact]
     public async Task RunJob_TitlesOfDifferentRecords_AreEachRefreshed()
     {
         // "Monster" is its own record, even though another series lists it as an alias.

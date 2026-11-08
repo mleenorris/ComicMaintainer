@@ -890,18 +890,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     }
 
     /// <summary>
-    /// DEPRECATED: Direct watcher enable/disable is no longer supported.
-    /// Watcher is now controlled by WatcherEnableRename and WatcherEnableNormalize settings.
-    /// This method is kept for backward compatibility but does nothing.
-    /// </summary>
-    [Obsolete("Direct watcher enable/disable is deprecated. Use WatcherEnableRename and WatcherEnableNormalize settings instead.")]
-    public void SetEnabled(bool enabled)
-    {
-        _logger.LogWarning("SetEnabled is deprecated. Watcher is now controlled by WatcherEnableRename and WatcherEnableNormalize settings.");
-        // No-op: watcher is now controlled by rename/normalize settings
-    }
-
-    /// <summary>
     /// Public entry point for application code that modifies a watched file on
     /// purpose (e.g. embedding a series cover into the first archive) and wants
     /// the resulting file-system events suppressed instead of reprocessed.

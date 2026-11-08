@@ -41,6 +41,13 @@ public partial class FilesController : ControllerBase
     private readonly ScheduledJobsHostedService? _scheduledJobsHostedService;
     private readonly IMemoryCache? _memoryCache;
 
+    /// <summary>
+    /// The per-file lock shared with the processor, the watcher and every job. Moves and deletes
+    /// done here hold it so they never land between another operation's read of an archive and
+    /// its replace or rename.
+    /// </summary>
+    private readonly IFileOperationLock _fileOperationLock;
+
     public FilesController(
         IFileStoreService fileStore,
         IComicProcessorService processor,
@@ -53,7 +60,8 @@ public partial class FilesController : ControllerBase
         ISeriesMetadataCacheService? metadataCache = null,
         ISeriesNameResolver? seriesNameResolver = null,
         ScheduledJobsHostedService? scheduledJobsHostedService = null,
-        IMemoryCache? memoryCache = null)
+        IMemoryCache? memoryCache = null,
+        IFileOperationLock? fileOperationLock = null)
     {
         _memoryCache = memoryCache;
         _fileStore = fileStore;
@@ -67,6 +75,7 @@ public partial class FilesController : ControllerBase
         _metadataCache = metadataCache;
         _seriesNameResolver = seriesNameResolver;
         _scheduledJobsHostedService = scheduledJobsHostedService;
+        _fileOperationLock = fileOperationLock ?? new ComicMaintainer.Core.Services.FileOperationLock();
     }
 
     /// <summary>

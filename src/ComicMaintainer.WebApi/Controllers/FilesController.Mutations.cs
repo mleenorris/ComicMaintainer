@@ -69,7 +69,7 @@ public partial class FilesController
 
     // RESTful endpoint: DELETE /api/files/{encodedFilePath}
     [HttpDelete("~/api/files/{encodedFilePath}")]
-    public async Task<ActionResult> DeleteFileByEncodedPath(string encodedFilePath)
+    public async Task<ActionResult> DeleteFileByEncodedPath(string encodedFilePath, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -85,19 +85,19 @@ public partial class FilesController
                 return BadRequest("File path is outside the allowed directory");
             }
 
-            if (System.IO.File.Exists(resolvedPath))
+            if (await DeleteSingleFileAsync(filePath, resolvedPath, cancellationToken))
             {
-                // Remove from file store first (unlikely to fail), then delete physical file
-                // This order prevents orphaned file store entries if file deletion fails
-                await _fileStore.RemoveFileAsync(filePath);
-                System.IO.File.Delete(resolvedPath);
-                
                 // Log to processing history
                 await LogHistoryAsync(filePath, "Delete", true);
-                
+
                 return Ok();
             }
             return NotFound();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancelled while waiting for the file's lock, before anything was changed.
+            return StatusCode(499, new { error = "Delete was cancelled" });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -116,7 +116,7 @@ public partial class FilesController
     [HttpDelete("~/api/delete-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
     [Obsolete("Use DELETE /api/files/{encodedFilePath} instead. This alias is scheduled for removal in v3.0.")]
-    public async Task<ActionResult> DeleteFile([FromQuery] string filePath)
+    public async Task<ActionResult> DeleteFile([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -127,28 +127,51 @@ public partial class FilesController
                 return BadRequest("File path is outside the allowed directory");
             }
 
-            if (System.IO.File.Exists(resolvedPath))
+            if (await DeleteSingleFileAsync(filePath, resolvedPath, cancellationToken))
             {
-                // Remove from file store first (unlikely to fail), then delete physical file
-                // This order prevents orphaned file store entries if file deletion fails
-                await _fileStore.RemoveFileAsync(filePath);
-                System.IO.File.Delete(resolvedPath);
-                
                 // Log to processing history
                 await LogHistoryAsync(filePath, "Delete", true);
-                
+
                 return Ok();
             }
             return NotFound();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancelled while waiting for the file's lock, before anything was changed.
+            return StatusCode(499, new { error = "Delete was cancelled" });
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error deleting file");
-            
+
             // Log to processing history
             await LogHistoryAsync(filePath, "Delete", false, ex.Message);
-            
+
             return StatusCode(500, "Error deleting file");
+        }
+    }
+
+    /// <summary>
+    /// Deletes one archive and its row while holding its file lock, so the delete never lands
+    /// in the middle of another operation's rewrite or rename of the same archive (which would
+    /// re-create it, or fail that operation). Returns false when there is no file to delete,
+    /// including when another operation moved it while this one waited for the lock.
+    /// </summary>
+    private async Task<bool> DeleteSingleFileAsync(string filePath, string resolvedPath, CancellationToken cancellationToken)
+    {
+        using (await _fileOperationLock.AcquireAsync(resolvedPath, cancellationToken))
+        {
+            if (!System.IO.File.Exists(resolvedPath))
+            {
+                return false;
+            }
+
+            // Remove from file store first (unlikely to fail), then delete physical file
+            // This order prevents orphaned file store entries if file deletion fails
+            await _fileStore.RemoveFileAsync(filePath, CancellationToken.None);
+            System.IO.File.Delete(resolvedPath);
+            return true;
         }
     }
 

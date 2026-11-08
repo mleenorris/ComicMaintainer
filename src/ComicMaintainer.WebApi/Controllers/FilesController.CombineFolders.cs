@@ -116,11 +116,18 @@ public partial class FilesController
                             System.IO.Directory.CreateDirectory(destDir);
                         }
 
-                        System.IO.File.Move(move.SourcePath, move.DestinationPath);
-                        // Suppress per-file broadcasts: combining a folder with many files would
-                        // otherwise emit one file_list_updated SSE event per move, flooding the
-                        // browser and hanging the site. We emit a single broadcast after the loop.
-                        await _fileStore.UpdateFilePathAsync(move.SourcePath, move.DestinationPath, token, broadcastUpdate: false);
+                        // Hold the archive's lock from the move until its row follows it, so the
+                        // move never lands between the watcher's, a job's or a metadata edit's
+                        // read of the archive and its replace or rename.
+                        using (await _fileOperationLock.AcquireAsync(move.SourcePath, token))
+                        {
+                            System.IO.File.Move(move.SourcePath, move.DestinationPath);
+                            // Suppress per-file broadcasts: combining a folder with many files would
+                            // otherwise emit one file_list_updated SSE event per move, flooding the
+                            // browser and hanging the site. We emit a single broadcast after the loop.
+                            // Not cancellable once the file has moved: the row must follow it.
+                            await _fileStore.UpdateFilePathAsync(move.SourcePath, move.DestinationPath, CancellationToken.None, broadcastUpdate: false);
+                        }
                         await LogHistoryAsync(move.SourcePath, "Combine Folder", true,
                             $"Moved to {move.DestinationPath}");
                         movedDestinationPaths.Add(move.DestinationPath);

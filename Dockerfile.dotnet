@@ -3,13 +3,13 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
 EXPOSE 5000
 
-# Install system dependencies for file handling, unrar, gosu for user switching, and curl
-# for the container health check.
-RUN apt-get update && apt-get install -y \
-    unrar-free \
-    p7zip-full \
-    gosu \
-    curl \
+# gosu switches from root to the PUID user after the entrypoint has prepared /Config, and curl runs the container
+# health check. Archives (CBZ/CBR/CB7) are read in-process by SharpCompress, so no unrar or 7-Zip tools are installed;
+# recommended packages are left out to keep the image, and the CVEs scanned in it, small.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gosu \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Pin the build stage to the machine doing the building rather than the image being produced.
@@ -20,7 +20,7 @@ FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
 WORKDIR /src
 
-# Copy solution and project files
+# Copy the project files first, so the restore layers are reused until a project file changes.
 COPY ["src/ComicMaintainer.Core/ComicMaintainer.Core.csproj", "src/ComicMaintainer.Core/"]
 COPY ["src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj", "src/ComicMaintainer.WebApi/"]
 
@@ -30,24 +30,20 @@ RUN dotnet restore "ComicMaintainer.Core.csproj" -a "${TARGETARCH}"
 WORKDIR "/src/src/ComicMaintainer.WebApi"
 RUN dotnet restore "ComicMaintainer.WebApi.csproj" -a "${TARGETARCH}"
 
-# Copy source files
+# Copy source files. .dockerignore keeps local bin/ and obj/ folders out, so a host build neither ends up in the
+# image nor replaces the restore above.
 WORKDIR "/src"
 COPY ["src/", "src/"]
 
-# Build the application
-WORKDIR "/src/src/ComicMaintainer.WebApi"
-RUN dotnet build "ComicMaintainer.WebApi.csproj" -c Release -a "${TARGETARCH}" -o /app/build
-
+# Publish compiles the application; a separate build step would only compile it twice.
 FROM build AS publish
 ARG TARGETARCH
-RUN dotnet publish "ComicMaintainer.WebApi.csproj" -c Release -a "${TARGETARCH}" -o /app/publish /p:UseAppHost=false
+WORKDIR "/src/src/ComicMaintainer.WebApi"
+RUN dotnet publish "ComicMaintainer.WebApi.csproj" -c Release -a "${TARGETARCH}" --no-restore -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-
-# Create config directory for persistent data
-RUN mkdir -p /Config && chmod 755 /Config
 
 # Set default environment variables
 ENV ASPNETCORE_URLS=http://+:5000
@@ -69,13 +65,10 @@ ENV ADMIN_EMAIL=admin@comicmaintainer.local
 COPY entrypoint.dotnet.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Create necessary directories with default permissions
-# User/group will be created dynamically based on PUID/PGID at runtime
+# Create the mount points. User/group are created at runtime from PUID/PGID, and the entrypoint gives /Config to
+# them; the library folders are bind mounts that keep the host's ownership.
 RUN mkdir -p /watched_dir /duplicates /Config && \
-    chmod -R 755 /watched_dir /duplicates /Config
-
-# Expose web interface port
-EXPOSE 5000
+    chmod 755 /watched_dir /duplicates /Config
 
 # Report container health from the application's own liveness probe. "/health" is used rather
 # than "/health/ready" deliberately: readiness also checks the database, and a transient

@@ -119,7 +119,7 @@ jobs:
         with:
           tag_name: v${{ steps.bump.outputs.new_version }}
           name: Release v${{ steps.bump.outputs.new_version }}
-          # The pull requests merged since the previous release, followed by this text.
+          # The text below, followed by the pull requests merged since the previous release.
           generate_release_notes: true
           body: |
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/dotnet/CHANGELOG.md) for the notable changes, and the Docker image `iceburn1/comicmaintainer:${{ steps.bump.outputs.new_version }}`.

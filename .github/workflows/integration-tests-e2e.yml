@@ -39,8 +39,8 @@ jobs:
         push: false
         load: true
         tags: comicmaintainer:ci
-        cache-from: type=gha,scope=comicmaintainer-linux-amd64
-        cache-to: type=gha,scope=comicmaintainer-linux-amd64,mode=max
+        cache-from: type=gha,scope=comicmaintainer-amd64
+        cache-to: type=gha,scope=comicmaintainer-amd64,mode=max
 
     - name: Run container smoke test
       env:
@@ -75,6 +75,8 @@ jobs:
         format: sarif
         output: trivy-image.sarif
         severity: CRITICAL,HIGH,MEDIUM
+        # Without this the SARIF report ignores the severity above and lists everything.
+        limit-severities-for-sarif: 'true'
         exit-code: '0'
 
     # A pull request from a fork gets a read-only token and cannot upload.

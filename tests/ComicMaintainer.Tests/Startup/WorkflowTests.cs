@@ -121,6 +121,23 @@ public sealed class WorkflowTests
         }
     }
 
+    [Fact]
+    public void ContainerTestAndPublish_ShareTheAmd64BuildCache()
+    {
+        // The container test builds the amd64 image first; publishing it reuses those layers only from the same scope.
+        static YamlMappingNode FirstBuild(YamlMappingNode workflow) => Mapping(
+            Steps(workflow).First(s => Scalar(s.Step, "uses")?.StartsWith("docker/build-push-action@", StringComparison.Ordinal) == true).Step,
+            "with");
+
+        var published = FirstBuild(Load(DockerPublish));
+        var tested = FirstBuild(Load(ContainerTests));
+
+        foreach (var cache in new[] { "cache-from", "cache-to" })
+        {
+            Assert.Equal(Scalar(published, cache)!.Replace("${{ matrix.arch }}", "amd64", StringComparison.Ordinal), Scalar(tested, cache));
+        }
+    }
+
     [Theory]
     [InlineData("build-windows-release.yml", "windows-release")]
     [InlineData("build-android-apk.yml", "android-release")]
@@ -189,6 +206,10 @@ public sealed class WorkflowTests
             .Select(s => Mapping(s.Step, "with"))
             .Where(with => Scalar(with, "exit-code") == "1")
             .ToList();
+
+        // The report keeps to the severities it asks for; by default a SARIF report ignores them.
+        var report = Mapping(Assert.Single(Steps(Load(file)), s => Scalar(s.Step, "name")?.Contains("(report)") == true).Step, "with");
+        Assert.Equal("true", Scalar(report, "limit-severities-for-sarif"));
 
         var gate = Assert.Single(gates);
         Assert.Equal("CRITICAL,HIGH", Scalar(gate, "severity"));

@@ -88,7 +88,7 @@ function main(files, { log = console.log, summaryFile = process.env.GITHUB_STEP_
     const vulnerabilities = [];
     const problems = [];
     for (const file of files) {
-        const report = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, ''));
+        const report = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
         vulnerabilities.push(...collectVulnerabilities(report));
         problems.push(...collectProblems(report));
     }

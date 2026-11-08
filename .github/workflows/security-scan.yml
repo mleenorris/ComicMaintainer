@@ -117,6 +117,8 @@ jobs:
           format: sarif
           output: trivy-image.sarif
           severity: CRITICAL,HIGH,MEDIUM
+          # Without this the SARIF report ignores the severity above and lists everything.
+          limit-severities-for-sarif: 'true'
           exit-code: '0'
 
       - name: Upload image scan to code scanning

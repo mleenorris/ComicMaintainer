@@ -69,6 +69,29 @@ public class SeriesLanguageAuditJobHandlerCoverageTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_MatchesTagsBySeriesKey_NotByExactText()
+    {
+        // Tags are matched the way SeriesFileMatcher identifies a series: a
+        // differently punctuated alias, or the folder title the record was
+        // first looked up under, is still a title of this series; a re-spelling
+        // of the expected title is not a language mismatch.
+        _settings.DefaultPreferredLanguage = "en";
+        var record = Record("Attack on Titan");
+        record.NormalizedKey = "shingeki-no-kyojin-digital";
+        record.Aliases = new List<string> { "Shingeki no Kyojin" };
+        _records.Add(record);
+        AddFile("/lib/k1.cbz", "Shingeki_no_Kyojin");
+        AddFile("/lib/k2.cbz", "SHINGEKI NO KYOJIN (Digital)");
+        AddFile("/lib/k3.cbz", "ATTACK ON TITAN!");
+        AddFile("/lib/k4.cbz", "attack-on-titan");
+        AddFile("/lib/k5.cbz", "Attack on Titan: Before the Fall");
+
+        var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Equal("Scanned 1 series: 1 with language mismatch (2 file(s)). Enable autoCorrect to retag.", summary);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RecordWithNullTitleCollections_IsScannedWithoutFailing()
     {
         var record = Record("Berserk");

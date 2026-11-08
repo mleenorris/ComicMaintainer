@@ -41,6 +41,36 @@ public class SeriesFileMatcherTests
             keys.OrderBy(k => k, StringComparer.Ordinal));
     }
 
+    [Fact]
+    public void KeysOf_IncludesTheRecordsOwnKey_SoAManualMatchStillFindsItsFolder()
+    {
+        // Apply-match keeps the record under the folder title it was first
+        // looked up by, while its titles become those of the matched entry.
+        var matched = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "kimetsu-no-yaiba",
+            CanonicalTitle = "Demon Slayer",
+            Aliases = new List<string> { "Demon Slayer: Blade of Demon Destruction" },
+        };
+
+        var keys = SeriesFileMatcher.KeysOf(matched);
+
+        Assert.Contains("kimetsu-no-yaiba", keys);
+        Assert.True(SeriesFileMatcher.BelongsTo(Untracked("/library/Kimetsu no Yaiba/c001.cbz"), keys));
+        Assert.True(SeriesFileMatcher.BelongsTo(Untracked("/library/Demon Slayer/c001.cbz"), keys));
+    }
+
+    [Theory]
+    [InlineData("unknown-series")]
+    [InlineData("")]
+    [InlineData("--")]
+    public void KeysOf_SkipsAnOwnKeyThatNamesNoTitle(string normalizedKey)
+    {
+        var record = new SeriesMetadataCacheRecord { NormalizedKey = normalizedKey, CanonicalTitle = "Naruto" };
+
+        Assert.Equal(new[] { "naruto" }, SeriesFileMatcher.KeysOf(record));
+    }
+
     [Theory]
     [InlineData("/library/One Piece/c001.cbz")]
     [InlineData("/library/one_piece/c001.cbz")]

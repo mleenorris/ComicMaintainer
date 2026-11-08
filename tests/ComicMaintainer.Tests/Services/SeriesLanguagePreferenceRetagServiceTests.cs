@@ -66,6 +66,37 @@ public class SeriesLanguagePreferenceRetagServiceTests
     }
 
     [Fact]
+    public async Task QueueRetagForSeriesAsync_ManualMatch_FlagsTheUntrackedFilesOfTheFolderItWasMatchedFrom()
+    {
+        // Apply-match keeps the record keyed by the folder title while its
+        // titles become the matched entry's; the files there carry no tracked
+        // metadata, as for every file that was not edited in the app.
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "kimetsu-no-yaiba",
+            CanonicalTitle = "Demon Slayer",
+            LookupStatus = "manual_match",
+            LocalizedTitles = new List<LocalizedTitle> { new("鬼滅の刃", "ja") },
+        };
+        _fileStore.Setup(s => s.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new ComicFile { FilePath = "/library/Kimetsu no Yaiba/c001.cbz" },
+                new ComicFile { FilePath = "/library/Kimetsu_no_Yaiba/c002.cbz" },
+                new ComicFile { FilePath = "/library/Naruto/c001.cbz" },
+            });
+        List<string>? capturedFiles = null;
+        _fileStore.Setup(s => s.MarkFilesNeedingBackfillAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, CancellationToken>((files, _) => capturedFiles = files.ToList())
+            .ReturnsAsync((IEnumerable<string> files, CancellationToken _) => files.Count());
+
+        var result = await BuildService().QueueRetagForSeriesAsync(record);
+
+        Assert.Equal(2, result);
+        Assert.Equal(new[] { "/library/Kimetsu no Yaiba/c001.cbz", "/library/Kimetsu_no_Yaiba/c002.cbz" }, capturedFiles);
+    }
+
+    [Fact]
     public async Task QueueRetagForSeriesAsync_NoMatchingFiles_ReturnsZero()
     {
         var record = new SeriesMetadataCacheRecord { CanonicalTitle = "One Piece" };

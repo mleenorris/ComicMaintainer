@@ -64,11 +64,22 @@ public static class SeriesFileMatcher
 
     /// <summary>
     /// The series keys of every title of <paramref name="record"/> (see
-    /// <see cref="TitlesOf"/>) plus <paramref name="extraTitles"/>, such as the
-    /// title a refresh or match was requested for.
+    /// <see cref="TitlesOf"/>), of the record's own key (the title it was first
+    /// looked up under, typically the folder name, which a manual match does
+    /// not keep among its titles) and of <paramref name="extraTitles"/>, such
+    /// as the title a refresh or match was requested for.
     /// </summary>
     public static HashSet<string> KeysOf(SeriesMetadataCacheRecord record, params string?[] extraTitles)
-        => KeysOf(TitlesOf(record).Concat(extraTitles ?? Array.Empty<string?>()));
+    {
+        var keys = KeysOf(TitlesOf(record).Concat(extraTitles ?? Array.Empty<string?>()));
+        // The stored key is already a series key; "unknown-series" names no title.
+        if (SeriesKey.TryNormalize(record.NormalizedKey) is { } ownKey
+            && !string.Equals(ownKey, SeriesKey.Unknown, StringComparison.Ordinal))
+        {
+            keys.Add(ownKey);
+        }
+        return keys;
+    }
 
     /// <summary>
     /// The series name derived from the folder that holds

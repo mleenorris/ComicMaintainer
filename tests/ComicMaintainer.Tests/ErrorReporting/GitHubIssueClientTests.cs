@@ -598,7 +598,7 @@ public sealed class GitHubIssueClientTests
         var since = new DateTimeOffset(2026, 5, 4, 8, 0, 0, TimeSpan.Zero);
         var (client, handler, _) = CreateClient(request =>
         {
-            var page = int.Parse(System.Web.HttpUtility.ParseQueryString(request.Uri!.Query)["page"]!, System.Globalization.CultureInfo.InvariantCulture);
+            var page = int.Parse(System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"]!, System.Globalization.CultureInfo.InvariantCulture);
             var issues = Enumerable.Range(0, GitHubIssueClient.LookupPageSize).Select(i => new
             {
                 number = 1000 - (page * 100) - i,

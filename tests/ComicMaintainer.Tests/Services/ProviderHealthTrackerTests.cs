@@ -57,7 +57,10 @@ public class ProviderHealthTrackerTests
     [Fact]
     public async Task PersistentRateLimit_CountsOnlyTheTerminal429AsAFailedRequest()
     {
-        // Retry-After: 0 is clamped to the invoker's 250 ms floor before the single retry.
+        // Retry-After: 0 is clamped to the invoker's 250 ms floor before the
+        // single retry. The retry is throttled for five minutes, a window that
+        // cannot run out before the health check, however slow the machine is.
+        var throttled = 0;
         var handler = new StubHandler(request =>
         {
             if (request.RequestUri!.Query.Contains("title=ping", StringComparison.Ordinal))
@@ -66,7 +69,7 @@ public class ProviderHealthTrackerTests
             }
 
             var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
-            response.Headers.TryAddWithoutValidation("Retry-After", "0");
+            response.Headers.TryAddWithoutValidation("Retry-After", Interlocked.Increment(ref throttled) == 1 ? "0" : "300");
             return response;
         });
         using var metrics = new ComicMaintainerMetrics();

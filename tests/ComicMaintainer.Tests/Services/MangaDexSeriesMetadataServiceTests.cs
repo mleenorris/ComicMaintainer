@@ -678,10 +678,14 @@ public class MangaDexSeriesMetadataServiceTests
     [Fact]
     public async Task LookupSeriesAsync_RecordsRateLimited_OnPersistent429()
     {
+        // The first 429 asks for an immediate retry; the retry is throttled
+        // again, now for five minutes. A window that long cannot run out
+        // before the health check below, however slow the test machine is.
+        var callCount = 0;
         var handler = new StubHttpMessageHandler(_ =>
         {
             var resp = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
-            resp.Headers.TryAddWithoutValidation("Retry-After", "0");
+            resp.Headers.TryAddWithoutValidation("Retry-After", Interlocked.Increment(ref callCount) == 1 ? "0" : "300");
             return resp;
         });
 
@@ -692,9 +696,11 @@ public class MangaDexSeriesMetadataServiceTests
         });
 
         var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Anything"));
+        Assert.Equal(2, callCount); // the 429, then the single retry
         var health = await service.CheckHealthAsync();
 
         Assert.Equal(ExternalMetadataFailureKind.RateLimited, failure.Kind);
+        Assert.Equal(TimeSpan.FromSeconds(300), failure.RetryAfter);
         Assert.True(health.RateLimited);
         Assert.NotNull(health.RateLimitedUntilUtc);
         // Cached probe path runs SearchInternalAsync's status, but the rate-limit

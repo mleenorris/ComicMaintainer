@@ -110,8 +110,96 @@
         // the client does no paging.
         const SERIES_ISSUES_LOAD_ALL = -1;
 
+        // Forced reloads of a list that is already shown come in bursts: a
+        // batch job broadcasts file_processed for every file it touches,
+        // anywhere in the library, and with a series open each of those asks
+        // for the series' whole issue list again. So such a refresh starts at
+        // once only when no request for the list is in flight and the last
+        // refresh has cooled down; otherwise it is folded into a single
+        // trailing reload that starts as soon as both hold. Everyone folded
+        // into it waits for that reload, which starts after their call and so
+        // sees whatever change prompted it. The cool-down grows with how long
+        // the last reload took (a big series costs more to list and render),
+        // so a long job keeps the list current while spending no more than
+        // about a tenth of its time reloading it.
+        const SERIES_ISSUES_REFRESH_MIN_COOLDOWN_MS = 1000;
+        const SERIES_ISSUES_REFRESH_MAX_COOLDOWN_MS = 10000;
+        const SERIES_ISSUES_REFRESH_LOAD_FACTOR = 10;
+        // Per series id: whether a refresh is running or cooling down, and the
+        // trailing refresh queued meanwhile ({ promise, resolve }), if any.
+        const seriesIssuesRefreshes = new Map();
+
         async function loadSeriesIssues(seriesId, force = false) {
             if (!seriesId) return;
+            const cached = seriesIssuesCache.get(seriesId);
+            // A forced reload of the list already shown (or being loaded) for
+            // the active filter is a refresh; anything else is a first load,
+            // a retry or a filter change, which must not wait.
+            if (force && cached && !cached.error && cached.filter === filterMode
+                && (cached.loaded || cached.loading)) {
+                return refreshSeriesIssues(seriesId);
+            }
+            return fetchSeriesIssues(seriesId, force);
+        }
+
+        function refreshSeriesIssues(seriesId) {
+            let state = seriesIssuesRefreshes.get(seriesId);
+            if (!state) {
+                state = { busy: false, trailing: null };
+                seriesIssuesRefreshes.set(seriesId, state);
+            }
+            if (!state.trailing) {
+                const cached = seriesIssuesCache.get(seriesId);
+                const loading = Boolean(cached && cached.loading);
+                if (!state.busy && !loading) {
+                    return startSeriesIssuesRefresh(seriesId, state);
+                }
+                let resolve;
+                const promise = new Promise(done => { resolve = done; });
+                state.trailing = { promise, resolve };
+                if (loading) {
+                    // The answer in flight predates this call; see fetchSeriesIssues.
+                    cached.stale = true;
+                }
+                if (!state.busy) {
+                    // Another load of the list (opening the series, a filter
+                    // change) is in flight: go once it has answered.
+                    Promise.resolve(cached.settled).then(() => startTrailingSeriesIssuesRefresh(seriesId, state));
+                }
+            }
+            return state.trailing.promise;
+        }
+
+        // Starts the queued refresh, if any, unless something still holds it back.
+        function startTrailingSeriesIssuesRefresh(seriesId, state) {
+            if (!state.trailing || state.busy) return;
+            const cached = seriesIssuesCache.get(seriesId);
+            if (cached && cached.loading) {
+                Promise.resolve(cached.settled).then(() => startTrailingSeriesIssuesRefresh(seriesId, state));
+                return;
+            }
+            const { resolve } = state.trailing;
+            state.trailing = null;
+            startSeriesIssuesRefresh(seriesId, state).then(resolve, resolve);
+        }
+
+        async function startSeriesIssuesRefresh(seriesId, state) {
+            state.busy = true;
+            const startedAt = Date.now();
+            try {
+                await fetchSeriesIssues(seriesId, true);
+            } finally {
+                const cooldown = Math.min(
+                    SERIES_ISSUES_REFRESH_MAX_COOLDOWN_MS,
+                    Math.max(SERIES_ISSUES_REFRESH_MIN_COOLDOWN_MS, (Date.now() - startedAt) * SERIES_ISSUES_REFRESH_LOAD_FACTOR));
+                setTimeout(() => {
+                    state.busy = false;
+                    startTrailingSeriesIssuesRefresh(seriesId, state);
+                }, cooldown);
+            }
+        }
+
+        async function fetchSeriesIssues(seriesId, force) {
             // The list that a forced reload, or a retry after a failure, replaces.
             const previous = seriesIssuesCache.get(seriesId);
             // An entry listed (or being listed) under another filter is stale.
@@ -159,6 +247,9 @@
                 seriesIssuesCache.set(seriesId, entry);
             }
             entry.loading = true;
+            // Settles when this request does, for a refresh queued meanwhile.
+            let settle;
+            entry.settled = new Promise(resolve => { settle = resolve; });
 
             let seriesMissing = false;
             try {
@@ -217,9 +308,14 @@
                 entry.error = true;
             } finally {
                 entry.loading = false;
+                settle();
             }
 
-            const selectionPruned = pruneSeriesIssueSelection(entry);
+            // A list that a queued refresh will replace was taken before the
+            // change that prompted it (e.g. while a file was being moved), so
+            // the newer list decides which selected issues are gone: this one
+            // passes the issues it had to confirm on to it.
+            const selectionPruned = entry.stale ? false : pruneSeriesIssueSelection(entry);
 
             // Re-render only if the user is still on this series and this
             // answer has not been superseded (e.g. by a filter change).
@@ -229,7 +325,7 @@
                 updateSelectInfo();
             }
 
-            if (seriesMissing) {
+            if (seriesMissing && !entry.stale) {
                 await confirmIssuesOfMissingSeries(seriesId, entry);
             }
         }
@@ -843,11 +939,18 @@
             btn.textContent = expanded ? 'Show less' : 'Show more';
         }
 
+        // The open series panel as last rendered: its markup without the issue
+        // cards (`shell`), each card's markup (`items`) and the panel element.
+        // A re-render compares against it to update only the cards that
+        // changed, and nothing at all when none did, rather than rebuilding
+        // and re-parsing the whole panel (closing any open menu) for every
+        // reload while a job processes files elsewhere in the library.
+        let lastSeriesDetailRender = null;
+        // Stands in for the issue cards in the shell markup.
+        const SERIES_ISSUES_GRID_SLOT = '<!--series-issues-grid-items-->';
+
         function renderSeriesDetail(seriesId) {
             const fileList = document.getElementById('fileList');
-            // Restore/close any open action menu (which may be portaled to
-            // <body>) before the panel's DOM is rebuilt below.
-            closeAllDropdowns();
             let series = seriesLibrary.find(item => item.id === seriesId);
             if (!series && seriesId === currentSeriesDetailId) {
                 // A metadata refresh may have changed the union-find
@@ -882,6 +985,7 @@
                 series = currentSeriesDetailSeries;
             }
             if (!series) {
+                closeAllDropdowns();
                 closeSeriesDetail();
                 return;
             }
@@ -905,13 +1009,13 @@
                 .filter(path => typeof path === 'string' && path.length > 0);
             const allIssuesSelected = selectableIssuePaths.length > 0 && selectableIssuePaths.every(path => selectedFiles.has(path));
             const someIssuesSelected = selectableIssuePaths.some(path => selectedFiles.has(path));
-            const gridItems = buildSeriesIssuesGridItems(issues);
+            const itemMarkup = buildSeriesIssuesGridItems(issues).map(renderSeriesIssueGridItemHtml);
 
             // Every Series Actions item needs write access, so read-only users
             // don't get the menu at all: data-requires-write is on the dropdown
             // and, like the issue menus, on each item (an open menu is moved
             // to <body>, out of the dropdown).
-            renderHtml(fileList, html`
+            const shell = htmlToString(html`
                 <div class="series-detail" id="seriesDetailPanel">
                     <div class="series-detail-header">
                         <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">${uiIcon('arrow-left')} Back to Series</button>
@@ -989,12 +1093,25 @@
                             ${filterMode !== 'all' ? html`<button type="button" class="btn btn-small" onclick="setHeaderFilter('all')">Clear filter</button>` : ''}
                         </div>
                     ` : html`
-                        <div class="series-issues-grid">
-                            ${rawHtml(gridItems.map(renderSeriesIssueGridItemHtml).join(''))}
-                        </div>
+                        <div class="series-issues-grid">${rawHtml(SERIES_ISSUES_GRID_SLOT)}</div>
                     `}
                 </div>
             `);
+
+            let renderedCards = patchSeriesDetail(fileList, seriesId, shell, itemMarkup);
+            if (!renderedCards) {
+                // Restore/close any open action menu (which may be portaled to
+                // <body>) before the panel's DOM is rebuilt.
+                closeAllDropdowns();
+                renderHtml(fileList, rawHtml(shell.replace(SERIES_ISSUES_GRID_SLOT, () => itemMarkup.join(''))));
+                lastSeriesDetailRender = {
+                    seriesId,
+                    shell,
+                    items: itemMarkup,
+                    panel: fileList ? fileList.querySelector('#seriesDetailPanel') : null
+                };
+                renderedCards = fileList ? [fileList] : [];
+            }
 
             const selectAllCheckbox = document.getElementById('selectAll');
             if (selectAllCheckbox) {
@@ -1003,5 +1120,65 @@
             updateSelectInfo();
             updateSelectAllCheckbox();
             updateLibraryViewLayout();
-            hydrateProtectedImages(fileList);
+            if (renderedCards.length) {
+                hydrateProtectedImages(renderedCards);
+            }
+        }
+
+        // Brings the panel rendered last for this series up to date by
+        // replacing only the issue cards whose markup changed. Returns the
+        // cards it put in (none when nothing changed), or null when the panel
+        // has to be rendered whole: another series or view was rendered since,
+        // something outside the cards changed (counts, selection, banner), or
+        // the cards are not the ones rendered.
+        function patchSeriesDetail(fileList, seriesId, shell, items) {
+            const last = lastSeriesDetailRender;
+            if (!fileList || !last || last.seriesId !== seriesId || last.shell !== shell
+                || last.items.length !== items.length || !last.panel
+                || fileList.querySelector('#seriesDetailPanel') !== last.panel) {
+                return null;
+            }
+            const grid = last.panel.querySelector('.series-issues-grid');
+            if (items.length && (!grid || grid.children.length !== items.length)) {
+                return null;
+            }
+            const changed = [];
+            items.forEach((markup, index) => {
+                if (markup !== last.items[index]) changed.push(index);
+            });
+            const oldCards = changed.map(index => grid.children[index]);
+            // An open menu (possibly moved to <body>) of a card about to be
+            // replaced is closed first; menus of the other cards stay open.
+            const menuOpenOnChangedCard = oldCards.some(card => {
+                const path = card.dataset.filePath;
+                const menu = path ? document.getElementById(getDropdownId(path)) : null;
+                return Boolean(menu && menu.classList.contains('show'));
+            });
+            if (menuOpenOnChangedCard) {
+                closeAllDropdowns();
+            }
+            const newCards = changed.map((index, i) => {
+                const card = htmlToElement(rawHtml(items[index]));
+                oldCards[i].replaceWith(card);
+                return card;
+            });
+            last.items = items;
+            if (grid) {
+                syncSeriesIssueCardSelection(grid);
+            }
+            return newCards;
+        }
+
+        // The selection also changes in place (ticking a box, clearing the
+        // selection after a job) without the cards being rendered again, so
+        // the cards a patch leaves in place are brought in line with it.
+        function syncSeriesIssueCardSelection(grid) {
+            grid.querySelectorAll('.series-issue-card[data-file-path]').forEach(card => {
+                const selected = selectedFiles.has(card.dataset.filePath);
+                card.classList.toggle('series-issue-card--selected', selected);
+                const checkbox = card.querySelector('.series-issue-select input[type="checkbox"]');
+                if (checkbox) {
+                    checkbox.checked = selected;
+                }
+            });
         }

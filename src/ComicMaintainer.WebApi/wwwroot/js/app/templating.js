@@ -136,8 +136,19 @@
         // unbounded map here would retain every row the app ever rendered.
         const TEMPLATE_CACHE = new Map();
         const MAX_TEMPLATE_CACHE_ENTRIES = 200;
+        // Only markup up to this many characters is cached. Small, repeated
+        // snippets (rows, cards, menus) are what the cache is for; a whole
+        // page or panel is rendered from data that differs almost every time,
+        // so caching it would only keep up to MAX_TEMPLATE_CACHE_ENTRIES full
+        // copies of the page (markup and parsed DOM) alive for nothing.
+        const MAX_CACHED_TEMPLATE_LENGTH = 8192;
 
         function getParsedTemplate(markup) {
+            if (markup.length > MAX_CACHED_TEMPLATE_LENGTH) {
+                const template = document.createElement('template');
+                template.innerHTML = markup;
+                return template;
+            }
             const cached = TEMPLATE_CACHE.get(markup);
             if (cached) {
                 // Re-insert so the map's insertion order doubles as recency

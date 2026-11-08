@@ -1,180 +1,139 @@
 name: Security Vulnerability Scanning
 
+# What this workflow and the others scan is described in SECURITY.md.
+#
+# - NuGet packages: every pull request and push to dotnet, and weekly, fails on a high or critical
+#   advisory in a package the server ships (direct or transitive).
+# - The Docker image: the container test (integration-tests-e2e.yml) scans the image it builds for
+#   every pull request and push to dotnet. The weekly run here rebuilds it without the build cache,
+#   so the newest base image and OS packages are scanned, and scans the published :dotnet image,
+#   which is only rebuilt when something is pushed.
 on:
   push:
-    branches: [ master, main ]
+    branches: [ dotnet ]
   pull_request:
-    branches: [ master, main ]
+    branches: [ dotnet ]
   schedule:
-    # Run security scans weekly on Monday at 9:00 AM UTC
+    # Weekly, on Monday at 9:00 UTC
     - cron: '0 9 * * 1'
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  security-scan:
-    name: Security Vulnerability Scan
+  nuget-packages:
+    name: Vulnerable NuGet packages
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-      
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install bandit[toml] pip-audit safety
-      
-      - name: Run Bandit security scan
-        continue-on-error: true
-        run: |
-          bandit -r src/ -f json -o bandit-report.json
-          bandit -r src/ -f txt -o bandit-report.txt
-      
-      - name: Upload Bandit results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: bandit-security-report
-          path: |
-            bandit-report.json
-            bandit-report.txt
-          retention-days: 30
-      
-      - name: Run pip-audit for dependency vulnerabilities
-        continue-on-error: true
-        run: |
-          pip-audit -r requirements.txt --format json --output pip-audit-report.json || true
-          pip-audit -r requirements.txt --format markdown --output pip-audit-report.md || true
-      
-      - name: Upload pip-audit results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: pip-audit-report
-          path: |
-            pip-audit-report.json
-            pip-audit-report.md
-          retention-days: 30
-      
-      - name: Check for critical vulnerabilities
-        run: |
-          echo "=== Bandit Security Scan Summary ==="
-          if [ -f bandit-report.txt ]; then
-            tail -20 bandit-report.txt
-          fi
-          
-          echo ""
-          echo "=== Dependency Vulnerability Summary ==="
-          if [ -f pip-audit-report.json ]; then
-            python3 -c "
-          import json
-          import sys
-          with open('pip-audit-report.json', 'r') as f:
-              data = json.load(f)
-          
-          total_vulns = sum(len(dep.get('vulns', [])) for dep in data.get('dependencies', []))
-          
-          if total_vulns > 0:
-              print(f'❌ Found {total_vulns} known vulnerabilities in dependencies')
-              for dep in data.get('dependencies', []):
-                  if dep.get('vulns'):
-                      print(f\"  - {dep['name']} {dep['version']}: {len(dep['vulns'])} vulnerabilities\")
-              sys.exit(1)
-          else:
-              print('✅ No known vulnerabilities found in dependencies')
-          "
-          else
-            echo "⚠️  pip-audit report not found"
-          fi
-      
-      - name: Generate security summary
-        if: always()
-        run: |
-          echo "# Security Scan Summary" > security-summary.md
-          echo "" >> security-summary.md
-          echo "**Scan Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> security-summary.md
-          echo "" >> security-summary.md
-          
-          if [ -f bandit-report.txt ]; then
-            echo "## Bandit Code Security Scan" >> security-summary.md
-            echo '```' >> security-summary.md
-            tail -30 bandit-report.txt >> security-summary.md
-            echo '```' >> security-summary.md
-          fi
-          
-          echo "" >> security-summary.md
-          
-          if [ -f pip-audit-report.md ]; then
-            echo "## Dependency Vulnerability Scan" >> security-summary.md
-            cat pip-audit-report.md >> security-summary.md
-          fi
-      
-      - name: Upload security summary
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: security-summary
-          path: security-summary.md
-          retention-days: 90
 
-  docker-security-scan:
-    name: Docker Image Security Scan
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 'lts/*'
+
+      # The projects that ship in the image and the Windows build (the MAUI app needs a workload).
+      # The vulnerability data comes from the NuGet sources during the listing.
+      - name: List vulnerable packages
+        run: |
+          for project in src/ComicMaintainer.Core/ComicMaintainer.Core.csproj src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj; do
+            name=$(basename "$project" .csproj)
+            dotnet restore "$project"
+            dotnet list "$project" package --vulnerable --include-transitive --format json > "vulnerable-$name.json"
+          done
+
+      - name: Fail on high or critical advisories
+        run: node scripts/check-vulnerable-packages.js vulnerable-*.json
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vulnerable-nuget-packages
+          path: vulnerable-*.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  image:
+    name: Docker image (weekly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write
-    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The current source with the newest base image and OS packages.
+          - image: comicmaintainer:scan
+            build: true
+            category: trivy-image-weekly
+          # What users run; it gets newer packages only when a push publishes it again.
+          - image: iceburn1/comicmaintainer:dotnet
+            build: false
+            category: trivy-image-published
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-      
+
       - name: Set up Docker Buildx
+        if: matrix.build
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
-      
-      - name: Build Docker image for scanning
+
+      - name: Build Docker image
+        if: matrix.build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
+          file: ./Dockerfile.dotnet
+          platforms: linux/amd64
           push: false
-          tags: comictagger-watcher:latest
           load: true
-      
-      - name: Run Trivy vulnerability scanner
+          pull: true
+          no-cache: true
+          tags: ${{ matrix.image }}
+
+      - name: Pull the published image
+        if: ${{ !matrix.build }}
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: docker pull "$IMAGE"
+
+      - name: Scan image for vulnerabilities (report)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: 'comictagger-watcher:latest'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-      
-      - name: Upload Trivy results to GitHub Security tab
-        if: always()
+          image-ref: ${{ matrix.image }}
+          scanners: vuln
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: '0'
+
+      - name: Upload image scan to code scanning
+        if: always() && hashFiles('trivy-image.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: 'trivy-results.sarif'
-      
-      - name: Run Trivy vulnerability scanner (table format)
+          sarif_file: trivy-image.sarif
+          category: ${{ matrix.category }}
+
+      # For the published image this means a rebuild (a push to dotnet, or a manual run of the
+      # Docker publish workflow) would pick up fixed packages.
+      - name: Fail on fixable critical or high vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: 'comictagger-watcher:latest'
-          format: 'table'
-          output: 'trivy-results.txt'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-      
-      - name: Upload Trivy results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: trivy-security-report
-          path: trivy-results.txt
-          retention-days: 30
+          image-ref: ${{ matrix.image }}
+          scanners: vuln
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'

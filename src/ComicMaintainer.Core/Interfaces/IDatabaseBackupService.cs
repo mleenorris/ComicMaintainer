@@ -30,6 +30,12 @@ public interface IDatabaseBackupService
     /// <summary>Takes a consistent copy of the live database.</summary>
     Task<DatabaseBackupInfo> CreateBackupAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Takes a consistent copy of the live database before startup applies pending migrations
+    /// (<c>comicmaintainer-yyyyMMdd-HHmmss-premigrate.db</c>), so the previous version can be run again with it.
+    /// </summary>
+    Task<DatabaseBackupInfo> CreatePreMigrationBackupAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Backups, newest first.</summary>
     IReadOnlyList<DatabaseBackupInfo> ListBackups();
 
@@ -39,7 +45,11 @@ public interface IDatabaseBackupService
     /// <summary>Opens a backup for reading, or returns null when it does not exist.</summary>
     Stream? OpenBackup(string name);
 
-    /// <summary>Deletes all but the newest <c>DatabaseBackupRetention</c> backups. Returns the number deleted.</summary>
+    /// <summary>
+    /// Deletes all but the newest <c>DatabaseBackupRetention</c> backups, counting the backups taken before migrations
+    /// separately: the newest <see cref="ComicMaintainer.Core.Services.DatabaseBackupService.PreMigrationBackupsKept"/> of those are kept.
+    /// Returns the number deleted.
+    /// </summary>
     int PruneBackups();
 
     /// <summary>

@@ -29,6 +29,14 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
     public const string FileExtension = ".db";
     public const string PendingRestoreSuffix = ".restore-pending";
     private const string SafetyBackupSuffix = "prerestore";
+    private const string PreMigrationSuffix = "premigrate";
+
+    /// <summary>
+    /// How many backups taken before startup migrations pruning keeps, newest first. They are kept apart from
+    /// <c>DatabaseBackupRetention</c>, so a week of daily backups after an upgrade does not prune the only copy of the
+    /// database that the previous version can still open.
+    /// </summary>
+    public const int PreMigrationBackupsKept = 3;
 
     private static readonly byte[] SqliteHeader = Encoding.ASCII.GetBytes("SQLite format 3\0");
 
@@ -94,6 +102,24 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         }
     }
 
+    public async Task<DatabaseBackupInfo> CreatePreMigrationBackupAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            return await CreateBackupCoreAsync(PreMigrationSuffix, cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>True when <paramref name="name"/> is a backup taken before startup migrations.</summary>
+    public static bool IsPreMigrationBackup(string name) =>
+        IsValidBackupName(name)
+        && Path.GetFileNameWithoutExtension(name).Split('-').Contains(PreMigrationSuffix, StringComparer.Ordinal);
+
     public IReadOnlyList<DatabaseBackupInfo> ListBackups()
     {
         var dir = BackupDirectory;
@@ -143,8 +169,11 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
             return 0;
         }
 
+        var backups = ListBackups();
+        var expired = backups.Where(backup => !IsPreMigrationBackup(backup.Name)).Skip(retention)
+            .Concat(backups.Where(backup => IsPreMigrationBackup(backup.Name)).Skip(PreMigrationBackupsKept));
         var deleted = 0;
-        foreach (var backup in ListBackups().Skip(retention))
+        foreach (var backup in expired)
         {
             try
             {
@@ -159,7 +188,11 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
 
         if (deleted > 0)
         {
-            _logger.LogInformation("Pruned {Count} database backup(s), keeping the newest {Retention}", deleted, retention);
+            _logger.LogInformation(
+                "Pruned {Count} database backup(s), keeping the newest {Retention} and the newest {PreMigrationKept} taken before migrations",
+                deleted,
+                retention,
+                PreMigrationBackupsKept);
         }
         return deleted;
     }

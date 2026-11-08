@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Hubs;
@@ -29,6 +30,10 @@ internal static class WebApplicationExtensions
             if (databasePath is not null)
             {
                 DatabaseBackupService.ApplyPendingRestore(databasePath, logger);
+
+                // An upgrade's migrations cannot be undone, so the database is backed up before they run.
+                await PreMigrationBackup.CreateIfMigrationsPendingAsync(
+                    db.Database, databasePath, scope.ServiceProvider.GetService<IDatabaseBackupService>(), logger);
             }
 
             db.Database.Migrate();

@@ -175,11 +175,9 @@ public sealed class ComicProcessorServiceFileLockTests : IDisposable
         var library = new Mock<ISeriesLibraryService>();
         library.Setup(l => l.GetFirstIssueFilePathForNormalizedKeyAsync("saga", It.IsAny<CancellationToken>()))
             .ReturnsAsync(file);
-        var services = new ServiceCollection();
-        services.AddScoped(_ => library.Object);
-        using var provider = services.BuildServiceProvider();
         var writer = new SeriesArchiveCoverWriter(
-            provider.GetRequiredService<IServiceScopeFactory>(),
+            library.Object,
+            Mock.Of<IFileWatcherService>(),
             new TestOptionsMonitor<AppSettings>(new AppSettings { WriteCoverToFirstArchive = true }),
             Mock.Of<ILogger<SeriesArchiveCoverWriter>>(),
             fileLock);

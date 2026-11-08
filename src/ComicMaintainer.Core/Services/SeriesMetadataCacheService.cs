@@ -43,9 +43,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ISeriesImageStore _imageStore;
-    private readonly ISeriesFolderCoverWriter _folderCoverWriter;
-    private readonly ISeriesArchiveCoverWriteQueue _archiveCoverQueue;
-    private readonly ISeriesArchiveCoverWriter _archiveCoverWriter;
+    private readonly ISeriesCoverArtifactQueue _coverArtifacts;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesMetadataCacheService> _logger;
 
@@ -53,18 +51,14 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IExternalSeriesMetadataService externalMetadata,
         ISeriesImageStore imageStore,
-        ISeriesFolderCoverWriter folderCoverWriter,
-        ISeriesArchiveCoverWriteQueue archiveCoverQueue,
-        ISeriesArchiveCoverWriter archiveCoverWriter,
+        ISeriesCoverArtifactQueue coverArtifacts,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesMetadataCacheService> logger)
     {
         _dbContextFactory = dbContextFactory;
         _externalMetadata = externalMetadata;
         _imageStore = imageStore;
-        _folderCoverWriter = folderCoverWriter;
-        _archiveCoverQueue = archiveCoverQueue;
-        _archiveCoverWriter = archiveCoverWriter;
+        _coverArtifacts = coverArtifacts;
         _settings = settings;
         _logger = logger;
     }
@@ -676,7 +670,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             entity.ImageDownloadedUtc = DateTime.UtcNow;
             entity.ImageStatus = "downloaded";
 
-            await TryWriteFolderCoverAsync(entity, cancellationToken);
+            EnqueueCoverArtifacts(entity);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -745,7 +739,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.RemoteImageUrl = "user-upload";
         entity.UpdatedAt = now;
 
-        await TryWriteFolderCoverAsync(entity, cancellationToken);
+        EnqueueCoverArtifacts(entity);
 
         await db.SaveChangesAsync(cancellationToken);
 
@@ -825,7 +819,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         }
         entity.UpdatedAt = now;
 
-        await TryWriteFolderCoverAsync(entity, cancellationToken);
+        EnqueueCoverArtifacts(entity);
 
         await db.SaveChangesAsync(cancellationToken);
 
@@ -864,21 +858,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.RemoteImageUrl = null;
         entity.UpdatedAt = DateTime.UtcNow;
 
-        try
-        {
-            await _folderCoverWriter.RemoveAsync(entity.NormalizedKey, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogDebug(ex,
-                "Failed to remove on-disk series cover for {Key}",
-                LoggingHelper.SanitizeForLog(entity.NormalizedKey));
-        }
-
-        // Embedded first-archive cover removal is deferred to the background
-        // queue: rewriting the archive on disk is comparatively expensive and
-        // does not need to block the metadata update.
-        _archiveCoverQueue.EnqueueRemove(entity.NormalizedKey);
+        _coverArtifacts.EnqueueRemove(entity.NormalizedKey);
 
         await db.SaveChangesAsync(cancellationToken);
 
@@ -886,16 +866,9 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         return ToRecord(entity);
     }
 
-    public Task<bool> ReapplyImageArtifactsAsync(
+    /// <inheritdoc />
+    public async Task<SeriesCoverSource?> GetCoverSourceAsync(
         string seriesTitle,
-        CancellationToken cancellationToken = default)
-    {
-        return ReapplyImageArtifactsAsync(seriesTitle, embedArchiveInline: false, cancellationToken);
-    }
-
-    public async Task<bool> ReapplyImageArtifactsAsync(
-        string seriesTitle,
-        bool embedArchiveInline,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
@@ -912,32 +885,21 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             || string.Equals(entity.ImageStatus, "none", StringComparison.OrdinalIgnoreCase)
             || string.Equals(entity.ImageStatus, "failed", StringComparison.OrdinalIgnoreCase))
         {
-            return false;
+            return null;
         }
 
         var sourcePath = _imageStore.ResolveAbsolutePath(entity.LocalImageFile);
-        if (string.IsNullOrWhiteSpace(sourcePath))
-        {
-            return false;
-        }
-
-        await TryWriteFolderCoverAsync(entity, cancellationToken, force: true, embedArchiveInline: embedArchiveInline);
-        return true;
+        return string.IsNullOrWhiteSpace(sourcePath)
+            ? null
+            : new SeriesCoverSource(entity.NormalizedKey, sourcePath, entity.ImageContentType);
     }
 
     /// <summary>
-    /// Best-effort: copy the freshly-persisted cached cover image into each
-    /// on-disk folder that backs the series, as <c>cover.&lt;ext&gt;</c>. The
-    /// writer itself is guarded by a feature flag and swallows per-folder
-    /// failures; this wrapper exists only to translate the persisted
-    /// LocalImageFile into an absolute path and to ensure any unexpected
-    /// throw never bubbles into the metadata update.
+    /// Best-effort: queues copying the freshly-persisted cached cover image into the series'
+    /// on-disk cover artifacts (folder sidecars and first-archive embed). Those writes happen
+    /// off the metadata update's path and can never fail it.
     /// </summary>
-    private async Task TryWriteFolderCoverAsync(
-        SeriesMetadataCacheEntity entity,
-        CancellationToken cancellationToken,
-        bool force = false,
-        bool embedArchiveInline = false)
+    private void EnqueueCoverArtifacts(SeriesMetadataCacheEntity entity)
     {
         if (string.IsNullOrEmpty(entity.LocalImageFile)
             || string.IsNullOrEmpty(entity.ImageContentType))
@@ -948,50 +910,18 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         try
         {
             var sourcePath = _imageStore.ResolveAbsolutePath(entity.LocalImageFile);
-            if (string.IsNullOrEmpty(sourcePath))
+            if (!string.IsNullOrEmpty(sourcePath))
             {
-                return;
-            }
-            await _folderCoverWriter.WriteAsync(
-                entity.NormalizedKey,
-                sourcePath,
-                entity.ImageContentType,
-                force,
-                cancellationToken);
-
-            if (embedArchiveInline)
-            {
-                // Embed the first-archive cover synchronously so an explicit,
-                // user-initiated re-apply surfaces real progress (the archive
-                // rewrite is the slow part) instead of completing instantly and
-                // deferring the heavy work to the background queue invisibly.
-                await _archiveCoverWriter.WriteAsync(
-                    entity.NormalizedKey,
-                    sourcePath,
-                    entity.ImageContentType,
-                    force,
-                    cancellationToken);
-            }
-            else
-            {
-                // Embedded first-archive cover writes are deferred to the background
-                // queue: rewriting the archive on disk is comparatively expensive
-                // and does not need to block the metadata update.
-                _archiveCoverQueue.EnqueueWrite(
-                    entity.NormalizedKey,
-                    sourcePath,
-                    entity.ImageContentType,
-                    force);
+                _coverArtifacts.EnqueueWrite(entity.NormalizedKey, sourcePath, entity.ImageContentType);
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogDebug(ex,
-                "Failed to write on-disk series cover for {Key}",
+            _logger.LogWarning(ex,
+                "Failed to queue on-disk series cover for {Key}",
                 LoggingHelper.SanitizeForLog(entity.NormalizedKey));
         }
     }
-
     /// <summary>
     /// Manually adopt an externally-supplied candidate as the cached metadata
     /// for the series. Used to correct a wrong automatic match.

@@ -255,8 +255,10 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ISeriesImageStore, SeriesImageStore>();
         services.AddSingleton<ISeriesFolderCoverWriter, SeriesFolderCoverWriter>();
         services.AddSingleton<ISeriesArchiveCoverWriter, SeriesArchiveCoverWriter>();
-        services.AddSingleton<SeriesArchiveCoverWriteQueue>();
-        services.AddSingleton<ISeriesArchiveCoverWriteQueue>(sp => sp.GetRequiredService<SeriesArchiveCoverWriteQueue>());
+        // The metadata cache queues cover changes; the writers (which depend on the library,
+        // which depends on the cache) consume them from a hosted service.
+        services.AddSingleton<ISeriesCoverArtifactQueue, SeriesCoverArtifactQueue>();
+        services.AddSingleton<ISeriesCoverArtifactWriter, SeriesCoverArtifactWriter>();
         services.AddHttpClient(SeriesImageStore.HttpClientName)
             .ConfigureHttpClient(client =>
             {
@@ -330,10 +332,9 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IAzw3ConversionService, Azw3ConversionService>();
         services.AddSingleton<IComicEmailSender, SmtpComicEmailSender>();
         services.AddSingleton<IEreaderDeviceService, EreaderDeviceService>();
-        // The queue resolves the delivery service lazily: the service enqueues work and
-        // the queue executes it, so constructor injection both ways would be a cycle.
+        // The service enqueues work and the queue executes it; the hosted service hands the
+        // queue its consumer when it starts it, so neither is constructed with the other.
         services.AddSingleton<ComicEmailQueue>(sp => new ComicEmailQueue(
-            () => sp.GetRequiredService<IComicEmailService>(),
             sp.GetRequiredService<ILogger<ComicEmailQueue>>(),
             sp.GetService<ComicMaintainerMetrics>(),
             sp.GetService<TimeProvider>()));
@@ -389,8 +390,8 @@ internal static class CoreServiceCollectionExtensions
         // Add hosted service for file watcher
         services.AddHostedService<FileWatcherHostedService>();
 
-        // Add hosted service that drains the background series archive cover write queue
-        services.AddHostedService<SeriesArchiveCoverWriteQueueHostedService>();
+        // Add hosted service that drains the background series cover artifact queue
+        services.AddHostedService<SeriesCoverArtifactQueueHostedService>();
 
         // Add hosted service that drains the background comic email delivery queue
         services.AddHostedService<ComicEmailQueueHostedService>();
@@ -419,9 +420,9 @@ internal static class CoreServiceCollectionExtensions
         {
             services.AddSingleton<IScheduledJobHandler, DatabaseBackupJobHandler>();
         }
-        services.AddSingleton<ScheduledJobService>();
-        services.AddSingleton<IScheduledJobService>(sp => sp.GetRequiredService<ScheduledJobService>());
+        services.AddSingleton<IScheduledJobService, ScheduledJobService>();
         services.AddSingleton<ScheduledJobsHostedService>();
+        services.AddSingleton<IScheduledJobRunner>(sp => sp.GetRequiredService<ScheduledJobsHostedService>());
         services.AddHostedService(sp => sp.GetRequiredService<ScheduledJobsHostedService>());
 
         // Logs Authelia outages when AUTHELIA_URL is set; does nothing otherwise. The client's request logging is

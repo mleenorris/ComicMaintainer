@@ -35,10 +35,10 @@ public class ComicEmailQueueCoverageTests
                 return Task.CompletedTask;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
 
-        var first = queue.StartAsync();
-        var second = queue.StartAsync();
+        var first = queue.StartAsync(service.Object);
+        var second = queue.StartAsync(service.Object);
         Assert.True(first.IsCompletedSuccessfully);
         Assert.True(second.IsCompletedSuccessfully);
 
@@ -67,8 +67,8 @@ public class ComicEmailQueueCoverageTests
             });
 
         var logger = new Mock<ILogger<ComicEmailQueue>>();
-        var queue = new ComicEmailQueue(() => service.Object, logger.Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(logger.Object);
+        await queue.StartAsync(service.Object);
         queue.Enqueue(7);
         queue.Enqueue(8);
         await started.Task.WaitAsync(Timeout);
@@ -117,8 +117,8 @@ public class ComicEmailQueueCoverageTests
             });
 
         var logger = new Mock<ILogger<ComicEmailQueue>>();
-        var queue = new ComicEmailQueue(() => service.Object, logger.Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(logger.Object);
+        await queue.StartAsync(service.Object);
         queue.Enqueue(1);
         await started.Task.WaitAsync(Timeout);
 
@@ -127,7 +127,7 @@ public class ComicEmailQueueCoverageTests
         // a delivery of its own.
         var firstStop = queue.StopAsync();
         Assert.False(firstStop.IsCompleted);
-        await queue.StartAsync();
+        await queue.StartAsync(service.Object);
         queue.Enqueue(2);
 
         release.SetResult();
@@ -170,12 +170,12 @@ public class ComicEmailQueueCoverageTests
                 await release.Task;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
+        await queue.StartAsync(service.Object);
         queue.Enqueue(1);
         await started.Task.WaitAsync(Timeout);
         var firstStop = queue.StopAsync();
-        await queue.StartAsync();
+        await queue.StartAsync(service.Object);
         queue.Enqueue(2);
 
         // The new run is still waiting for the previous one; a stop whose deadline
@@ -213,15 +213,15 @@ public class ComicEmailQueueCoverageTests
                 return Task.CompletedTask;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
 
         // Run A is sending; run B starts behind it and is stopped with an expired
         // deadline while still waiting, then run C starts.
-        await queue.StartAsync();
+        await queue.StartAsync(service.Object);
         queue.Enqueue(1);
         await firstStarted.Task.WaitAsync(Timeout);
         var firstStop = queue.StopAsync();
-        await queue.StartAsync();
+        await queue.StartAsync(service.Object);
         queue.Enqueue(2);
         using (var deadline = new CancellationTokenSource())
         {
@@ -229,7 +229,7 @@ public class ComicEmailQueueCoverageTests
             await queue.StopAsync(deadline.Token).WaitAsync(Timeout);
         }
 
-        await queue.StartAsync();
+        await queue.StartAsync(service.Object);
         queue.Enqueue(3);
 
         // C must not send alongside A even though B has already finished.
@@ -260,13 +260,13 @@ public class ComicEmailQueueCoverageTests
                 return Task.CompletedTask;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
+        await queue.StartAsync(service.Object);
         queue.Enqueue(1);
         await queue.StopAsync().WaitAsync(Timeout);
 
         queue.Enqueue(2);
-        await queue.StartAsync();
+        await queue.StartAsync(service.Object);
         queue.Enqueue(3);
 
         // A graceful stop drains everything queued for the run.

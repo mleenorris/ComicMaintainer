@@ -185,7 +185,10 @@ public sealed class FilesControllerFileLockTests : IDisposable
                 settings,
                 metadataCache: _metadataCache.Object,
                 fileOperationLock: _fileLock),
-            fileOperationLock: _fileLock);
+            Mock.Of<IEventBroadcaster>(),
+            Mock.Of<ISeriesNameResolver>(),
+            Mock.Of<IScheduledJobRunner>(),
+            _fileLock);
     }
 
     private static string CreateComic(string directory, string fileName)

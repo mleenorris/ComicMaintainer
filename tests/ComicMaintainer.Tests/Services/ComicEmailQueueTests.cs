@@ -26,8 +26,8 @@ public class ComicEmailQueueTests
                 return Task.CompletedTask;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
+        await queue.StartAsync(service.Object);
 
         queue.Enqueue(1);
         queue.Enqueue(2);
@@ -43,8 +43,8 @@ public class ComicEmailQueueTests
     public async Task Enqueue_IgnoresNonPositiveIds()
     {
         var service = new Mock<IComicEmailService>();
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
+        await queue.StartAsync(service.Object);
 
         queue.Enqueue(0);
         queue.Enqueue(-5);
@@ -74,8 +74,8 @@ public class ComicEmailQueueTests
                 return Task.CompletedTask;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
+        await queue.StartAsync(service.Object);
 
         queue.Enqueue(1);
         queue.Enqueue(2);
@@ -96,8 +96,8 @@ public class ComicEmailQueueTests
                 return Task.CompletedTask;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
+        await queue.StartAsync(service.Object);
 
         for (var i = 1; i <= 5; i++)
         {
@@ -122,12 +122,12 @@ public class ComicEmailQueueTests
                 await release.Task;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
         queue.Enqueue(1);
         queue.Enqueue(1);
         Assert.True(queue.IsQueued(1));
 
-        await queue.StartAsync();
+        await queue.StartAsync(service.Object);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // Still held while it is being processed.
@@ -159,11 +159,9 @@ public class ComicEmailQueueTests
                 return Task.FromResult(0);
             });
 
-        var queue = new ComicEmailQueue(
-            () => service.Object,
-            new Mock<ILogger<ComicEmailQueue>>().Object,
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object,
             timeProvider: time);
-        await queue.StartAsync();
+        await queue.StartAsync(service.Object);
 
         await time.WaitForTimersAsync(1);
         Assert.Equal(1, Volatile.Read(ref sweeps));
@@ -200,8 +198,8 @@ public class ComicEmailQueueTests
             });
 
         var logger = new Mock<ILogger<ComicEmailQueue>>();
-        var queue = new ComicEmailQueue(() => service.Object, logger.Object, timeProvider: time);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(logger.Object, timeProvider: time);
+        await queue.StartAsync(service.Object);
 
         await time.WaitForTimersAsync(1);
         time.Advance(ComicEmailQueue.PendingSweepInterval);
@@ -230,8 +228,8 @@ public class ComicEmailQueueTests
                 await Task.Delay(Timeout.Infinite, token);
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
+        await queue.StartAsync(service.Object);
         queue.Enqueue(7);
         queue.Enqueue(8);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -266,8 +264,8 @@ public class ComicEmailQueueTests
                 return Task.CompletedTask;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: time);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: time);
+        await queue.StartAsync(service.Object);
         await time.WaitForTimersAsync(1);
 
         queue.Schedule(1, time.GetUtcNow() + TimeSpan.FromMinutes(5));
@@ -301,11 +299,11 @@ public class ComicEmailQueueTests
                 return Task.CompletedTask;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: time);
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: time);
         var start = time.GetUtcNow();
         queue.Schedule(1, start + TimeSpan.FromMinutes(1));
         queue.Schedule(1, start + TimeSpan.FromMinutes(10));
-        await queue.StartAsync();
+        await queue.StartAsync(service.Object);
 
         time.Advance(TimeSpan.FromMinutes(5));
         await Task.Delay(100);
@@ -340,8 +338,8 @@ public class ComicEmailQueueTests
                 return Task.CompletedTask;
             });
 
-        queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: time);
-        await queue.StartAsync();
+        queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: time);
+        await queue.StartAsync(service.Object);
         queue.Enqueue(1);
 
         // One timer for the sweep, one for the retry once processing ended.
@@ -368,8 +366,8 @@ public class ComicEmailQueueTests
                 return Task.CompletedTask;
             });
 
-        var queue = new ComicEmailQueue(() => service.Object, new Mock<ILogger<ComicEmailQueue>>().Object);
-        await queue.StartAsync();
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
+        await queue.StartAsync(service.Object);
         queue.Schedule(3, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(1));
 
         await processed.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -379,9 +377,7 @@ public class ComicEmailQueueTests
     [Fact]
     public async Task StopAsync_WithoutStart_IsNoOp()
     {
-        var queue = new ComicEmailQueue(
-            () => new Mock<IComicEmailService>().Object,
-            new Mock<ILogger<ComicEmailQueue>>().Object);
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
 
         await queue.StopAsync();
     }

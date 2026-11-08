@@ -25,12 +25,8 @@ public class SeriesFolderCoverWriterTests : IDisposable
 
     private SeriesFolderCoverWriter CreateWriter()
     {
-        var services = new ServiceCollection();
-        services.AddScoped(_ => _library.Object);
-        var provider = services.BuildServiceProvider();
-        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
         return new SeriesFolderCoverWriter(
-            scopeFactory,
+            _library.Object,
             _settings.Object,
             new Mock<ILogger<SeriesFolderCoverWriter>>().Object);
     }

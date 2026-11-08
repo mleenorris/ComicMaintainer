@@ -23,6 +23,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     private readonly Mock<ISeriesImageStore> _imageStore = new();
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<ISeriesCoverArtifactWriter> _coverArtifacts = new();
     private readonly string _dir;
     private readonly CancellationTokenSource _cts = new();
 
@@ -67,6 +68,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
             _library.Object,
             _imageStore.Object,
             _external.Object,
+            _coverArtifacts.Object,
             _processor.Object,
             NullLogger<SeriesImagesController>.Instance)
         {
@@ -870,7 +872,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
             new SeriesLibraryDto { Title = "Flash", CanonicalTitle = "Flash", HasExternalImage = false });
         var jobId = Guid.NewGuid();
         var job = CaptureJob(jobId);
-        _cache.Setup(c => c.ReapplyImageArtifactsAsync("Saga", true, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _coverArtifacts.Setup(c => c.ReapplyAsync("Saga", It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var result = await CreateController().ApplyCurrentToAll(_cts.Token);
 
@@ -888,7 +890,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         // the job's progress tracks real work.
         using var itemCts = new CancellationTokenSource();
         Assert.True(await job.ItemOperation!("Saga", itemCts.Token));
-        _cache.Verify(c => c.ReapplyImageArtifactsAsync("Saga", true, itemCts.Token), Times.Once);
+        _coverArtifacts.Verify(c => c.ReapplyAsync("Saga", itemCts.Token), Times.Once);
     }
 
     [Fact]

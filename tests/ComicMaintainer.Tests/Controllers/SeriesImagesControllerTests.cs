@@ -14,6 +14,7 @@ public class SeriesImagesControllerTests
     private readonly Mock<ISeriesImageStore> _imageStore = new();
     private readonly Mock<IExternalSeriesMetadataService> _externalMetadata = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<ISeriesCoverArtifactWriter> _coverArtifacts = new();
     private readonly SeriesImagesController _controller;
 
     public SeriesImagesControllerTests()
@@ -23,6 +24,7 @@ public class SeriesImagesControllerTests
             _library.Object,
             _imageStore.Object,
             _externalMetadata.Object,
+            _coverArtifacts.Object,
             _processor.Object,
             new Mock<ILogger<SeriesImagesController>>().Object);
     }

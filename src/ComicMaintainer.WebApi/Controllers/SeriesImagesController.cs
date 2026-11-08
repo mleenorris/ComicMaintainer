@@ -28,6 +28,7 @@ public class SeriesImagesController : ControllerBase
     private readonly ISeriesLibraryService _library;
     private readonly ISeriesImageStore _imageStore;
     private readonly IExternalSeriesMetadataService _externalMetadata;
+    private readonly ISeriesCoverArtifactWriter _coverArtifacts;
     private readonly IComicProcessorService _processor;
     private readonly ILogger<SeriesImagesController> _logger;
 
@@ -36,6 +37,7 @@ public class SeriesImagesController : ControllerBase
         ISeriesLibraryService library,
         ISeriesImageStore imageStore,
         IExternalSeriesMetadataService externalMetadata,
+        ISeriesCoverArtifactWriter coverArtifacts,
         IComicProcessorService processor,
         ILogger<SeriesImagesController> logger)
     {
@@ -43,6 +45,7 @@ public class SeriesImagesController : ControllerBase
         _library = library;
         _imageStore = imageStore;
         _externalMetadata = externalMetadata;
+        _coverArtifacts = coverArtifacts;
         _processor = processor;
         _logger = logger;
     }
@@ -476,7 +479,7 @@ public class SeriesImagesController : ControllerBase
             operationName: operationName,
             trackedItems: embeddableTitles,
             itemOperation: (title, token) =>
-                _cache.ReapplyImageArtifactsAsync(title, embedArchiveInline: true, token),
+                _coverArtifacts.ReapplyAsync(title, token),
             failureMessage: "Cover embed failed",
             cancellationToken: cancellationToken);
 

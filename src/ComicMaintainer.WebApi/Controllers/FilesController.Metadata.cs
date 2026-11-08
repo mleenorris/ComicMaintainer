@@ -50,10 +50,6 @@ public partial class FilesController
                 return BadRequest("File path is outside the allowed directory");
             }
 
-            if (_seriesNameResolver is null)
-            {
-                return StatusCode(503, "Series name resolver not available");
-            }
 
             // Read the file's current metadata so the resolver can also
             // evaluate the file's existing <Series> tag as a candidate.
@@ -114,11 +110,8 @@ public partial class FilesController
             if (!success)
             {
                 await LogHistoryAsync(filePath, "Update Metadata", false, "Failed to update metadata");
-                if (_eventBroadcaster is not null)
-                {
-                    try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), false, "Failed to update metadata"); }
-                    catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update failure"); }
-                }
+                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), false, "Failed to update metadata"); }
+                catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update failure"); }
                 return BadRequest("Failed to update metadata");
             }
             
@@ -130,11 +123,8 @@ public partial class FilesController
             // Broadcast a file_processed event so the UI patches the affected
             // folder/series detail in place instead of waiting for a full
             // file_list_updated debounce.
-            if (_eventBroadcaster is not null)
-            {
-                try { await _eventBroadcaster.BroadcastFileProcessedAsync(filename, true); }
-                catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update"); }
-            }
+            try { await _eventBroadcaster.BroadcastFileProcessedAsync(filename, true); }
+            catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update"); }
             
             return Ok();
         }
@@ -176,12 +166,9 @@ public partial class FilesController
 
             await _fileStore.ApplyUserMetadataEditAsync(filePath, patch, lockFields, ct);
 
-            if (_scheduledJobsHostedService is not null)
-            {
-                // A backfill that is already running read its batch before this
-                // edit, so ask for one more run after it instead of being dropped.
-                _ = _scheduledJobsHostedService.RunNowOrAfterCurrentRunAsync(MetadataBackfillJobHandler.Key, CancellationToken.None);
-            }
+            // A backfill that is already running read its batch before this
+            // edit, so ask for one more run after it instead of being dropped.
+            _ = _scheduledJobs.RunNowOrAfterCurrentRunAsync(MetadataBackfillJobHandler.Key, CancellationToken.None);
 
             var updated = await _fileStore.GetFileAsync(filePath, ct);
             return Accepted(new { filePath, metadataVersion = updated?.MetadataVersion ?? 0 });
@@ -243,7 +230,7 @@ public partial class FilesController
             }
 
             var success = await _processor.UpdateMetadataAsync(filePath, metadata);
-            if (success && _eventBroadcaster is not null)
+            if (success)
             {
                 try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), true); }
                 catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for tag update"); }
@@ -302,11 +289,8 @@ public partial class FilesController
             // Broadcast a file_processed event so the UI updates the affected
             // folder / series detail in place rather than waiting for the
             // debounced file_list_updated.
-            if (_eventBroadcaster is not null)
-            {
-                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(currentPath), true); }
-                catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata removal"); }
-            }
+            try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(currentPath), true); }
+            catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata removal"); }
 
             return Ok(new { success = true, cleared, filePath = currentPath });
         }

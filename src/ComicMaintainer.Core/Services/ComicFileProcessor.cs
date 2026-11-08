@@ -1,12 +1,14 @@
 using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Handles comic file processing operations like parsing chapter numbers,
-/// formatting filenames, and checking normalization.
+/// Handles comic file processing operations like formatting filenames
+/// and checking normalization. Issue numbers are read from file names by
+/// <see cref="IssueNumberParser"/>.
 /// Converted from Python's process_file.py
 /// </summary>
 public class ComicFileProcessor
@@ -19,122 +21,11 @@ public class ComicFileProcessor
             .Distinct()
             .ToArray();
 
-    private static readonly Regex ChapterKeywordPattern = 
-        new(@"(?i)ch(?:apter)?[-._\s]*([0-9]+(?:\.[0-9]+)?)", RegexOptions.Compiled);
-    
-    private static readonly Regex NumberPattern = 
-        new(@"(?<![\(\[])[0-9]+(?:\.[0-9]+)?(?![\)\]])", RegexOptions.Compiled);
-    
-    private static readonly Regex BracketStartPattern = 
-        new(@"[\(\[]$", RegexOptions.Compiled);
-    
-    private static readonly Regex BracketEndPattern = 
-        new(@"^[\)\]]", RegexOptions.Compiled);
-
     private static readonly Regex UnreplacedPlaceholderPattern =
         new(@"\{[^}]+\}", RegexOptions.Compiled);
 
     private static readonly Regex ExtraWhitespacePattern =
         new(@"\s+", RegexOptions.Compiled);
-
-    /// <summary>
-    /// Parse chapter number from filename. Leading zeros are stripped from
-    /// the integer part while any decimal portion is preserved
-    /// (e.g. "0004" → "4", "0004.5" → "4.5").
-    /// Converted from Python's parse_chapter_number function.
-    /// </summary>
-    public static string? ParseChapterNumber(string filename)
-    {
-        // First try to find chapter keyword
-        var match = ChapterKeywordPattern.Match(filename);
-        if (match.Success)
-        {
-            return StripLeadingZeros(match.Groups[1].Value);
-        }
-
-        // Look for numbers not in brackets
-        var matches = NumberPattern.Matches(filename);
-        foreach (Match m in matches)
-        {
-            var start = m.Index;
-            var end = m.Index + m.Length;
-            var before = filename[..start];
-            var after = filename[end..];
-
-            if (!BracketStartPattern.IsMatch(before) && !BracketEndPattern.IsMatch(after))
-            {
-                return StripLeadingZeros(m.Value);
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Strip leading zeros from the integer part of a numeric chapter/issue
-    /// string while preserving the decimal portion. Returns "0" for an
-    /// all-zero integer part and passes non-numeric values through unchanged.
-    /// </summary>
-    internal static string StripLeadingZeros(string number)
-    {
-        if (string.IsNullOrEmpty(number))
-        {
-            return number;
-        }
-
-        var dotIndex = number.IndexOf('.');
-        var integerPart = dotIndex >= 0 ? number[..dotIndex] : number;
-        var fractionalPart = dotIndex >= 0 ? number[dotIndex..] : string.Empty;
-
-        var trimmed = integerPart.TrimStart('0');
-        if (trimmed.Length == 0)
-        {
-            trimmed = "0";
-        }
-
-        return trimmed + fractionalPart;
-    }
-
-    /// <summary>
-    /// Parse a chapter number from a filename only when an explicit
-    /// "Ch"/"Chapter" keyword is present. This is a stricter variant of
-    /// <see cref="ParseChapterNumber"/> that avoids false-positives on
-    /// volume-only filenames where the only numeric token is a volume
-    /// number, year, or part of a title.
-    /// </summary>
-    public static string? ParseChapterKeyword(string filename)
-    {
-        var match = ChapterKeywordPattern.Match(filename);
-        return match.Success ? StripLeadingZeros(match.Groups[1].Value) : null;
-    }
-
-    /// <summary>
-    /// Returns true when two chapter-number strings represent the same
-    /// numeric value (e.g. "1", "0001" and "0001.0" are all equivalent).
-    /// Falls back to ordinal string comparison for non-numeric values.
-    /// </summary>
-    public static bool ChapterNumbersEquivalent(string? a, string? b)
-    {
-        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
-        {
-            return string.IsNullOrEmpty(a) && string.IsNullOrEmpty(b);
-        }
-
-        if (string.Equals(a, b, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (decimal.TryParse(a, System.Globalization.NumberStyles.Number,
-                System.Globalization.CultureInfo.InvariantCulture, out var da) &&
-            decimal.TryParse(b, System.Globalization.NumberStyles.Number,
-                System.Globalization.CultureInfo.InvariantCulture, out var db))
-        {
-            return da == db;
-        }
-
-        return false;
-    }
 
     /// <summary>
     /// Limits issue-number padding to 0..<see cref="AppSettings.MaxIssueNumberPadding"/>. Configured values
@@ -290,7 +181,7 @@ public class ComicFileProcessor
 
                 if (string.IsNullOrEmpty(issueNumber))
                 {
-                    issueNumber = ParseChapterNumber(Path.GetFileNameWithoutExtension(filepath));
+                    issueNumber = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filepath));
                 }
 
                 if (!string.IsNullOrEmpty(issueNumber))

@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.IO.Compression;
-using System.Reflection;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
@@ -13,31 +12,16 @@ using Moq;
 namespace ComicMaintainer.Tests.Services;
 
 /// <summary>
-/// Covers the retry, restore and cross-device fallback paths that replace an archive on disk
-/// after its ComicInfo.xml was rewritten. Failures are provoked with real filesystem state
-/// (a directory squatting on the backup or target path) and log hooks that change that state
-/// at precise points of the algorithm. The Linux-only tests rely on POSIX unlink/rename
-/// semantics. A real cross-device link error needs two filesystems, so the fallback tests make
-/// the overridable File.Replace step throw one (<see cref="ReplaceHookService"/>).
+/// Covers how a rewritten archive replaces the original. The new archive is built next to the
+/// original and renamed over it in one step: transient failures are retried, every other failure
+/// leaves the original byte-for-byte as it was, and there is no copy fallback that could truncate
+/// it or a backup that could be restored over it. Failures are injected through the overridable
+/// replace step (<see cref="ReplaceHookService"/>) and log hooks.
 /// </summary>
 public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
 {
     private const string RetryWarning = "File replace attempt {Attempt} failed for {File}, retrying...";
-    private const string ReplaceFailedError = "File replace failed for {File}, attempting restore from backup";
-    private const string CrossDeviceWarning = "Cross-device link detected, using fallback copy strategy for {File}";
-    private const string FallbackSucceeded = "Successfully replaced file using fallback strategy: {File}";
-    private const string FallbackFailedError = "Fallback strategy failed for {File}, attempting restore from backup";
-    private const string RestoredWarning = "Restored backup file after failed replacement: {File}";
-    private const string RestoreFailedError = "Failed to restore backup file: {BackupPath}";
-
-    // The classifier is private to ComicProcessorService (no InternalsVisibleTo).
-    private static readonly Func<int, bool, bool> IsCrossDeviceLinkHResult = typeof(ComicProcessorService)
-        .GetMethod("IsCrossDeviceLinkError", BindingFlags.Static | BindingFlags.NonPublic, new[] { typeof(int), typeof(bool) })!
-        .CreateDelegate<Func<int, bool, bool>>();
-
-    private static readonly Func<IOException, bool> IsCrossDeviceLinkException = typeof(ComicProcessorService)
-        .GetMethod("IsCrossDeviceLinkError", BindingFlags.Static | BindingFlags.NonPublic, new[] { typeof(IOException) })!
-        .CreateDelegate<Func<IOException, bool>>();
+    private const string ReplaceFailedError = "File replace failed for {File}; the original archive is unchanged";
 
     private readonly string _root;
     private readonly string _library;
@@ -72,96 +56,48 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
             service.Dispose();
         }
 
-        try
-        {
-            if (Directory.Exists(_root))
-            {
-                Directory.Delete(_root, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup.
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Best-effort cleanup.
-        }
+        TestIO.TryDeleteDirectory(_root);
     }
 
     [Fact]
-    public async Task UpdateMetadataAsync_BackupPathBlockedOnFirstAttempt_SucceedsOnRetry()
+    public async Task UpdateMetadataAsync_BuildsTheNewArchiveNextToTheOriginalAndNotInTheTempDirectory()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
-        var service = CreateService();
+        string? source = null;
+        var service = CreateService((_, from, _) => source = from);
         var path = WriteBook("Series/book.cbz");
-        var backup = path + ".backup";
-        Directory.CreateDirectory(backup);
-        _logger.On(RetryWarning, _ => Directory.Delete(backup));
 
         var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None);
 
         Assert.True(result);
         Assert.Equal("New", SeriesOf(path));
-        Assert.False(Directory.Exists(backup));
-        Assert.False(File.Exists(backup));
-        var retry = Assert.Single(_logger.Entries, e => e.Template == RetryWarning);
-        Assert.Equal(1, retry.Properties["Attempt"]);
-        Assert.IsAssignableFrom<IOException>(retry.Exception);
-        Assert.Empty(TempFiles());
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ReplaceRetry_CancelledWhileBackingOff_FailsAndKeepsOriginal(bool removeMetadata)
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
-        var service = CreateService();
-        var path = WriteBook("Series/book.cbz");
-        var before = await File.ReadAllBytesAsync(path);
-        Directory.CreateDirectory(path + ".backup");
-        using var cts = new CancellationTokenSource();
-        _logger.On(RetryWarning, e =>
-        {
-            if (Equals(e.Properties["Attempt"], 2))
-            {
-                cts.Cancel();
-            }
-        });
-
-        var result = removeMetadata
-            ? await service.RemoveMetadataAsync(path, cts.Token)
-            : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, cts.Token);
-
-        Assert.False(result);
-        Assert.Equal(before, await File.ReadAllBytesAsync(path));
-        Assert.Equal(2, _logger.Entries.Count(e => e.Template == RetryWarning));
-        var error = Assert.Single(_logger.Entries, e => e.Template == ReplaceFailedError);
-        Assert.IsAssignableFrom<OperationCanceledException>(error.Exception);
-        Assert.Empty(TempFiles());
+        Assert.Equal(Path.GetDirectoryName(path), Path.GetDirectoryName(source));
+        Assert.True(ArchiveWriteRecoveryService.IsTempPath(source!), source);
+        Assert.False(Directory.Exists(_tempDir));
+        Assert.Empty(LeftoverFiles(path));
     }
 
     [Fact]
-    public async Task UpdateMetadataAsync_BackupPathPermanentlyBlocked_GivesUpAfterFiveAttempts()
+    public async Task UpdateMetadataAsync_TransientReplaceFailure_IsRetriedAndSucceeds()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
+        var service = CreateService(FailFirstReplaceWith(new IOException("The process cannot access the file because it is being used by another process.")));
+        var path = WriteBook("Series/book.cbz");
 
-        var service = CreateService();
+        var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None);
+
+        Assert.True(result);
+        Assert.Equal("New", SeriesOf(path));
+        var retry = Assert.Single(_logger.Entries, e => e.Template == RetryWarning);
+        Assert.Equal(1, retry.Properties["Attempt"]);
+        Assert.Equal(2, service.ReplaceCalls);
+        Assert.Empty(LeftoverFiles(path));
+    }
+
+    [Fact]
+    public async Task UpdateMetadataAsync_ReplaceKeepsFailing_GivesUpAfterFiveRetriesAndKeepsTheOriginal()
+    {
+        var service = CreateService(AlwaysFailReplaceWith(() => new IOException("locked")));
         var path = WriteBook("Series/book.cbz");
         var before = await File.ReadAllBytesAsync(path);
-        Directory.CreateDirectory(path + ".backup");
 
         var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None);
 
@@ -173,183 +109,73 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
         var error = Assert.Single(_logger.Entries, e => e.Template == ReplaceFailedError);
         Assert.IsAssignableFrom<IOException>(error.Exception);
         Assert.True(_logger.Has(LogLevel.Error, "Error updating metadata for {FilePath}"));
-        Assert.Empty(TempFiles());
-    }
-
-    [Fact]
-    public async Task CrossDeviceFallback_ReplacesFileAndDiscardsStaleBackup()
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
-        var path = WriteBook("Series/book.cbz");
-        var backup = path + ".backup";
-        await File.WriteAllTextAsync(backup, "stale backup");
-        var service = CreateService(FailFirstReplaceWith(CrossDeviceLinkError()));
-
-        var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None);
-
-        Assert.True(result);
-        Assert.Equal("New", SeriesOf(path));
-        Assert.False(File.Exists(backup));
-        Assert.True(_logger.Has(LogLevel.Warning, CrossDeviceWarning));
-        Assert.True(_logger.Has(LogLevel.Information, FallbackSucceeded));
-        Assert.DoesNotContain(_logger.Entries, e => e.Template == RetryWarning);
-        Assert.Equal(1, service.ReplaceCalls);
-        Assert.Empty(TempFiles());
-    }
-
-    [Fact]
-    public async Task CrossDeviceFallback_TargetAlreadyGone_StillWritesNewArchive()
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
-        var path = WriteBook("Series/book.cbz");
-        var backup = path + ".backup";
-        var service = CreateService(FailFirstReplaceWith(CrossDeviceLinkError()));
-        _logger.On(CrossDeviceWarning, _ => File.Delete(path));
-
-        var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None);
-
-        Assert.True(result);
-        Assert.Equal("New", SeriesOf(path));
-        Assert.False(File.Exists(backup));
-        Assert.Empty(TempFiles());
+        Assert.Empty(LeftoverFiles(path));
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task CrossDeviceFallback_CopyFails_RestoresOriginalFromBackup(bool targetMissingAtRestore)
+    public async Task ReplaceRetry_CancelledWhileBackingOff_FailsAndKeepsOriginal(bool removeMetadata)
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
+        var service = CreateService(AlwaysFailReplaceWith(() => new IOException("locked")));
         var path = WriteBook("Series/book.cbz");
         var before = await File.ReadAllBytesAsync(path);
-        var backup = path + ".backup";
-        var service = CreateService(FailFirstReplaceWith(CrossDeviceLinkError()));
-        _logger.On(CrossDeviceWarning, _ => DeleteTempFiles());
-        if (targetMissingAtRestore)
-        {
-            _logger.On(FallbackFailedError, _ => File.Delete(path));
-        }
-
-        var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None);
-
-        Assert.False(result);
-        Assert.Equal(before, await File.ReadAllBytesAsync(path));
-        Assert.False(File.Exists(backup));
-        var fallbackError = Assert.Single(_logger.Entries, e => e.Template == FallbackFailedError);
-        Assert.IsAssignableFrom<FileNotFoundException>(fallbackError.Exception);
-        Assert.True(_logger.Has(LogLevel.Warning, RestoredWarning));
-        Assert.False(_logger.Has(LogLevel.Error, RestoreFailedError));
-    }
-
-    [Fact]
-    public async Task CrossDeviceFallback_RestoreCancelled_LeavesBackupInPlace()
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
-        var path = WriteBook("Series/book.cbz");
-        var before = await File.ReadAllBytesAsync(path);
-        var backup = path + ".backup";
         using var cts = new CancellationTokenSource();
-        var service = CreateService(FailFirstReplaceWith(CrossDeviceLinkError()));
-        _logger.On(CrossDeviceWarning, _ => DeleteTempFiles());
-        _logger.On(FallbackFailedError, _ => cts.Cancel());
+        _logger.On(RetryWarning, e =>
+        {
+            if (Equals(e.Properties["Attempt"], 2))
+            {
+                cts.Cancel();
+            }
+        });
 
-        var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, cts.Token);
+        var result = removeMetadata
+            ? (await service.RemoveMetadataAsync(path, cts.Token)).Succeeded
+            : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, cts.Token);
 
         Assert.False(result);
-        Assert.True(_logger.Has(LogLevel.Error, RestoreFailedError));
-        Assert.False(_logger.Has(LogLevel.Warning, RestoredWarning));
         Assert.Equal(before, await File.ReadAllBytesAsync(path));
-        Assert.Equal(before, await File.ReadAllBytesAsync(backup));
+        Assert.Equal(2, _logger.Entries.Count(e => e.Template == RetryWarning));
+        Assert.Empty(LeftoverFiles(path));
     }
 
     [Fact]
-    public async Task ReplaceFailsWithFileExistsError_IsRetriedInsteadOfUsingTheCopyFallback()
+    public async Task UpdateMetadataAsync_CrossDeviceError_FailsWithoutCopyingOverTheOriginal()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
+        // The old fallback for EXDEV copied the original to '<file>.backup' and then truncated and
+        // rewrote the original in place. Now a replace that cannot rename simply fails.
+        var crossDevice = new IOException("Invalid cross-device link", OperatingSystem.IsWindows() ? unchecked((int)0x80070011) : 18);
+        var service = CreateService(AlwaysFailReplaceWith(() => crossDevice));
         var path = WriteBook("Series/book.cbz");
-        var fileExists = FileExistsError();
-        // EEXIST is errno 17 on Unix, the same value as Windows' ERROR_NOT_SAME_DEVICE.
-        Assert.Equal(17, fileExists.HResult);
-        var service = CreateService(FailFirstReplaceWith(fileExists));
+        var before = await File.ReadAllBytesAsync(path);
 
         var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None);
 
-        Assert.True(result);
-        Assert.Equal("New", SeriesOf(path));
-        var retry = Assert.Single(_logger.Entries, e => e.Template == RetryWarning);
-        Assert.Same(fileExists, retry.Exception);
-        Assert.DoesNotContain(_logger.Entries, e => e.Template == CrossDeviceWarning);
-        Assert.Equal(2, service.ReplaceCalls);
+        Assert.False(result);
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
         Assert.False(File.Exists(path + ".backup"));
-        Assert.Empty(TempFiles());
+        Assert.Empty(LeftoverFiles(path));
     }
 
     [Fact]
-    public async Task UpdateMetadataAsync_ReplaceErrorMessageMentionsCrossDevice_IsRetriedInsteadOfUsingTheCopyFallback()
+    public async Task UpdateMetadataAsync_TargetDeletedBeforeTheReplace_FailsWithoutRetryingOrRecreatingIt()
     {
-        if (!OperatingSystem.IsLinux())
+        var service = CreateService((call, _, target) =>
         {
-            return;
-        }
-
-        var service = CreateService();
-        var path = WriteBook("cross-device-lib/Series/book.cbz");
-        var backup = path + ".backup";
-        Directory.CreateDirectory(backup);
-        _logger.On(RetryWarning, _ => Directory.Delete(backup));
+            if (call == 1)
+            {
+                File.Delete(target);
+            }
+        });
+        var path = WriteBook("Series/book.cbz");
 
         var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None);
 
-        Assert.True(result);
-        Assert.Equal("New", SeriesOf(path));
-        var retry = Assert.Single(_logger.Entries, e => e.Template == RetryWarning);
-        Assert.Contains("cross-device", retry.Exception!.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(_logger.Entries, e => e.Template == CrossDeviceWarning);
-        Assert.False(File.Exists(backup));
-        Assert.Empty(TempFiles());
-    }
-
-    [Theory]
-    [InlineData(18, false, true)] // EXDEV
-    [InlineData(17, false, false)] // EEXIST
-    [InlineData(21, false, false)] // EISDIR
-    [InlineData(unchecked((int)0x80070011), false, false)]
-    [InlineData(unchecked((int)0x80070011), true, true)] // HRESULT_FROM_WIN32(ERROR_NOT_SAME_DEVICE)
-    [InlineData(unchecked((int)0x80070012), true, false)] // HRESULT_FROM_WIN32(ERROR_NO_MORE_FILES)
-    [InlineData(17, true, false)]
-    [InlineData(18, true, false)]
-    public void IsCrossDeviceLinkError_MatchesOnlyTheCodeOfTheCurrentPlatform(int hresult, bool isWindows, bool expected)
-    {
-        Assert.Equal(expected, IsCrossDeviceLinkHResult(hresult, isWindows));
-    }
-
-    [Fact]
-    public void IsCrossDeviceLinkError_IgnoresTheExceptionMessage()
-    {
-        Assert.True(IsCrossDeviceLinkException(CrossDeviceLinkError()));
-        Assert.False(IsCrossDeviceLinkException(FileExistsError()));
-        Assert.False(IsCrossDeviceLinkException(
-            new IOException("Is a directory : '/library/cross-device/book.cbz.backup'", 21)));
+        Assert.False(result);
+        Assert.False(File.Exists(path));
+        Assert.Equal(1, service.ReplaceCalls);
+        Assert.DoesNotContain(_logger.Entries, e => e.Template == RetryWarning);
+        Assert.Empty(LeftoverFiles(path));
     }
 
     [Fact]
@@ -360,7 +186,7 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
             return;
         }
 
-        var service = CreateService((call, target) =>
+        var service = CreateService((call, _, target) =>
         {
             if (call == 1)
             {
@@ -374,33 +200,53 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
 
         Assert.False(result);
         Assert.Equal(1, service.ReplaceCalls);
-        var error = Assert.Single(_logger.Entries, e => e.Template == ReplaceFailedError);
-        Assert.IsType<UnauthorizedAccessException>(error.Exception);
+        Assert.Single(_logger.Entries, e => e.Template == ReplaceFailedError);
         Assert.DoesNotContain(_logger.Entries, e => e.Template == RetryWarning);
         Assert.True(Directory.Exists(path));
-        Assert.Empty(TempFiles());
     }
 
-    private ComicProcessorService CreateService()
+    [Fact]
+    public async Task UpdateMetadataAsync_KeepsThePermissionsOfTheOriginal()
     {
-        var service = new ComicProcessorService(
-            new TestOptionsMonitor<AppSettings>(_settings),
-            _logger,
-            _fileStore.Object,
-            _history.Object);
-        _services.Add(service);
-        return service;
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var service = CreateService((_, _, _) => { });
+        var path = WriteBook("Series/book.cbz");
+        const UnixFileMode mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead;
+        File.SetUnixFileMode(path, mode);
+
+        Assert.True(await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None));
+
+        Assert.Equal(mode, File.GetUnixFileMode(path));
     }
 
-    private ReplaceHookService CreateService(Action<int, string> beforeReplace)
+    [Fact]
+    public async Task UpdateMetadataAsync_ExistingLeftoverTempFile_IsNeverOverwritten()
+    {
+        // Temp names are unique and created with CreateNew, so a write never reuses another
+        // write's file.
+        var service = CreateService((_, _, _) => { });
+        var path = WriteBook("Series/book.cbz");
+        var unrelated = ArchiveWriteRecoveryService.CreateTempPath(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(unrelated, "another write");
+
+        Assert.True(await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "New" }, CancellationToken.None));
+
+        Assert.Equal("another write", await File.ReadAllTextAsync(unrelated));
+    }
+
+    private ReplaceHookService CreateService(Action<int, string, string> beforeReplace)
     {
         var service = new ReplaceHookService(_settings, _logger, _fileStore.Object, _history.Object, beforeReplace);
         _services.Add(service);
         return service;
     }
 
-    private static Action<int, string> FailFirstReplaceWith(Exception error) =>
-        (call, _) =>
+    private static Action<int, string, string> FailFirstReplaceWith(Exception error) =>
+        (call, _, _) =>
         {
             if (call == 1)
             {
@@ -408,33 +254,14 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
             }
         };
 
-    /// <summary>
-    /// The error File.Replace reports when the temp file and the target live on different
-    /// filesystems (EXDEV on Unix, ERROR_NOT_SAME_DEVICE on Windows).
-    /// </summary>
-    private static IOException CrossDeviceLinkError() =>
-        new("Invalid cross-device link", OperatingSystem.IsWindows() ? unchecked((int)0x80070011) : 18);
+    private static Action<int, string, string> AlwaysFailReplaceWith(Func<Exception> error) =>
+        (_, _, _) => throw error();
 
-    /// <summary>A genuine "file already exists" error raised by the OS.</summary>
-    private IOException FileExistsError()
-    {
-        var source = Path.Join(_root, "exists-source");
-        var target = Path.Join(_root, "exists-target");
-        File.WriteAllText(source, "source");
-        File.WriteAllText(target, "target");
-        return Assert.Throws<IOException>(() => File.Copy(source, target));
-    }
-
-    private string[] TempFiles() =>
-        Directory.Exists(_tempDir) ? Directory.GetFiles(_tempDir, ".tmp_*.cbz") : Array.Empty<string>();
-
-    private void DeleteTempFiles()
-    {
-        foreach (var file in TempFiles())
-        {
-            File.Delete(file);
-        }
-    }
+    /// <summary>Files left next to the archive by the write: temp files or backups.</summary>
+    private static string[] LeftoverFiles(string path) =>
+        Directory.GetFiles(Path.GetDirectoryName(path)!)
+            .Where(file => ArchiveWriteRecoveryService.IsTempPath(file) || file.EndsWith(".backup", StringComparison.Ordinal))
+            .ToArray();
 
     private string WriteBook(string relativePath)
     {
@@ -472,20 +299,20 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
     private sealed record LogEntry(LogLevel Level, string Template, IReadOnlyDictionary<string, object?> Properties, Exception? Exception);
 
     /// <summary>
-    /// Calls the hook (with the 1-based call number and the target path) before every
-    /// File.Replace, so a test can change filesystem state at exactly that point or throw an
+    /// Calls the hook (with the 1-based call number, the temp file and the target path) before
+    /// every replace, so a test can change filesystem state at exactly that point or throw an
     /// error a single test filesystem cannot produce, such as a cross-device link failure.
     /// </summary>
     private sealed class ReplaceHookService : ComicProcessorService
     {
-        private readonly Action<int, string> _beforeReplace;
+        private readonly Action<int, string, string> _beforeReplace;
 
         public ReplaceHookService(
             AppSettings settings,
             ILogger<ComicProcessorService> logger,
             IFileStoreService fileStore,
             IProcessingHistoryService history,
-            Action<int, string> beforeReplace)
+            Action<int, string, string> beforeReplace)
             : base(new TestOptionsMonitor<AppSettings>(settings), logger, fileStore, history)
         {
             _beforeReplace = beforeReplace;
@@ -493,10 +320,10 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
 
         public int ReplaceCalls { get; private set; }
 
-        protected override void ReplaceFile(string sourceFile, string destinationFile, string backupFile)
+        protected override void ReplaceFile(string sourceFile, string destinationFile)
         {
-            _beforeReplace(++ReplaceCalls, destinationFile);
-            base.ReplaceFile(sourceFile, destinationFile, backupFile);
+            _beforeReplace(++ReplaceCalls, sourceFile, destinationFile);
+            base.ReplaceFile(sourceFile, destinationFile);
         }
     }
 

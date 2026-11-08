@@ -703,6 +703,16 @@
                                 When enabled, metadata will be normalized during processing.
                             </small>
                         </div>
+
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="convertRarToCbzOnWriteCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="convertRarToCbzOnWriteCheckbox" name="convertRarToCbzOnWrite" onchange="updateConvertRarToCbzOnWrite()">
+                                <span>Convert CBR/RAR to CBZ when writing tags</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                Only CBZ files can be rewritten in place. When enabled, writing tags (normalize, tag edits, batch updates) to a CBR, RAR or ZIP file saves it as a CBZ with the same name and removes the original; its read status and reading progress move with it. When disabled, those files are never modified: tag edits are kept in the database only, and files that normalize would change stay unprocessed; process them again after turning this on to normalize and convert them.
+                            </small>
+                        </div>
                     </section>
                     <section class="settings-card" id="settings-ereader" aria-labelledby="settings-ereader-title">
                         <header class="settings-card-header">
@@ -1263,20 +1273,12 @@
                         <input type="text" id="year" name="year" autocomplete="off">
                     </div>
                     <div class="form-group">
-                        <label for="month">Month</label>
-                        <input type="text" id="month" name="month" autocomplete="off">
-                    </div>
-                    <div class="form-group">
                         <label for="writer">Writer</label>
-                        <input type="text" id="writer" name="writer" autocomplete="off">
+                        <input type="text" id="writer" name="writer" autocomplete="off" placeholder="Comma-separated">
                     </div>
                     <div class="form-group">
                         <label for="summary">Summary</label>
                         <textarea id="summary" name="summary" autocomplete="off"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="notes">Notes</label>
-                        <textarea id="notes" name="notes" autocomplete="off"></textarea>
                     </div>
                 </form>
             </div>
@@ -1314,7 +1316,7 @@
                     </div>
                     <div class="form-group">
                         <label for="batch_writer">Writer</label>
-                        <input type="text" id="batch_writer" name="writer" autocomplete="off">
+                        <input type="text" id="batch_writer" name="writer" autocomplete="off" placeholder="Comma-separated">
                     </div>
                 </form>
             </div>

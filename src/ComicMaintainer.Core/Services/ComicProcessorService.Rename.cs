@@ -73,7 +73,7 @@ public partial class ComicProcessorService
                 // token, recover that chapter number into the metadata so the
                 // rename preserves it not only in the filename but also in
                 // ComicInfo.xml.
-                await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
+                filePath = await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
 
                 // Resolve the normalized series name before generating the new
                 // filename so a standalone rename produces the exact same target
@@ -266,12 +266,12 @@ public partial class ComicProcessorService
     private string EnsureChapterNumberPreserved(string filenameStem, string? metadataIssue, string originalPath)
     {
         // Preferred chapter source: the authoritative metadata.Issue.
-        // Secondary: an explicit "Ch/Chapter <n>" token in the original filename
-        // (the strict pattern avoids false-positives on volume-only filenames).
+        // Secondary: an explicitly marked "Ch 5"/"#5" number in the original filename
+        // (the strict parse avoids false-positives on volume-only filenames).
         var originalNameStem = Path.GetFileNameWithoutExtension(originalPath);
         var chapterToPreserve = !string.IsNullOrEmpty(metadataIssue)
             ? metadataIssue
-            : ComicFileProcessor.ParseChapterKeyword(originalNameStem);
+            : IssueNumberParser.ParseMarked(originalNameStem);
 
         if (string.IsNullOrEmpty(chapterToPreserve))
         {
@@ -279,12 +279,9 @@ public partial class ComicProcessorService
         }
 
         // Check whether the rendered filename already contains an equivalent
-        // chapter number. ParseChapterNumber prefers the chapter keyword and
-        // otherwise picks the first non-bracketed number, which mirrors the
-        // way the rendered template typically encodes the issue number.
-        var renderedChapter = ComicFileProcessor.ParseChapterNumber(filenameStem);
-        if (!string.IsNullOrEmpty(renderedChapter) &&
-            ComicFileProcessor.ChapterNumbersEquivalent(renderedChapter, chapterToPreserve))
+        // chapter number, marked or as a standalone number outside brackets and
+        // volume tokens, wherever the template put it.
+        if (IssueNumberParser.ContainsIssueNumber(filenameStem, chapterToPreserve))
         {
             return filenameStem;
         }

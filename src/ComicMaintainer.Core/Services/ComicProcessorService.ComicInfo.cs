@@ -13,16 +13,6 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class ComicProcessorService
 {
-    private static string? ParseIssueNumber(string filename)
-    {
-        // Simple pattern matching for issue numbers
-        var match = Regex.Match(filename, @"(?i)(?:ch|chapter|issue|#)?\s*(\d+(?:\.\d+)?)", RegexOptions.IgnoreCase);
-        // Strip leading zero padding so the per-file metadata issue field holds
-        // the bare issue number (e.g. "0012" -> "12"); only the generated
-        // filename is zero padded.
-        return match.Success ? ComicFileProcessor.StripLeadingZeros(match.Groups[1].Value) : null;
-    }
-
     private static bool IsComicArchive(string filePath)
     {
         return ComicFileExtensions.IsComicArchive(filePath);
@@ -46,22 +36,7 @@ public partial class ComicProcessorService
     {
         try
         {
-            var doc = XDocument.Parse(xmlContent);
-            var root = doc.Root;
-            if (root == null) return null;
-
-            return new ComicMetadata
-            {
-                Series = root.Element("Series")?.Value,
-                Title = root.Element("Title")?.Value,
-                Issue = root.Element("Number")?.Value,
-                Volume = root.Element("Volume")?.Value,
-                Publisher = root.Element("Publisher")?.Value,
-                Year = int.TryParse(root.Element("Year")?.Value, out var year) ? year : null,
-                Summary = root.Element("Summary")?.Value,
-                Authors = root.Elements("Writer").Select(e => e.Value).ToList(),
-                Tags = root.Elements("Tag").Select(e => e.Value).ToList()
-            };
+            return ComicInfoXml.Read(ComicInfoXml.Parse(xmlContent));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -107,23 +82,5 @@ public partial class ComicProcessorService
         using var stream = comicInfoEntry.OpenEntryStream();
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
-    }
-
-    private static string GenerateComicInfoXml(ComicMetadata metadata)
-    {
-        var doc = new XDocument(
-            new XElement("ComicInfo",
-                metadata.Series != null ? new XElement("Series", metadata.Series) : null,
-                metadata.Title != null ? new XElement("Title", metadata.Title) : null,
-                metadata.Issue != null ? new XElement("Number", metadata.Issue) : null,
-                metadata.Volume != null ? new XElement("Volume", metadata.Volume) : null,
-                metadata.Publisher != null ? new XElement("Publisher", metadata.Publisher) : null,
-                metadata.Year.HasValue ? new XElement("Year", metadata.Year.Value) : null,
-                metadata.Summary != null ? new XElement("Summary", metadata.Summary) : null,
-                metadata.Authors.Select(a => new XElement("Writer", a)),
-                metadata.Tags.Select(t => new XElement("Tag", t))
-            )
-        );
-        return doc.ToString();
     }
 }

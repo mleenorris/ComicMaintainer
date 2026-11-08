@@ -328,6 +328,6 @@ public partial class SeriesLibraryService
 
         return string.IsNullOrWhiteSpace(issue.FileName)
             ? null
-            : ComicFileProcessor.ParseChapterNumber(issue.FileName);
+            : IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(issue.FileName));
     }
 }

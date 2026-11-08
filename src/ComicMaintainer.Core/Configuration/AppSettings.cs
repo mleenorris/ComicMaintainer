@@ -39,6 +39,16 @@ public class AppSettings
     public bool WatcherEnableNormalize { get; set; } = true;
 
     /// <summary>
+    /// Whether writing tags to a CBR, RAR or ZIP archive converts it to CBZ. Only CBZ files are
+    /// rewritten in place. When true (the default), a metadata write to any other archive writes
+    /// the tagged archive as a new <c>.cbz</c> next to it, moves the file's library record (its
+    /// processing state, per-user read status and reading progress) to the new path and deletes
+    /// the original. When false, those archives are never rewritten: tag edits made in the app
+    /// are kept in the database only, and normalize leaves the archive as it is.
+    /// </summary>
+    public bool ConvertRarToCbzOnWrite { get; set; } = true;
+
+    /// <summary>
     /// Size (in kilobytes) of the FileSystemWatcher internal buffer. A larger buffer lets the
     /// watcher hold more pending file-system events before the OS drops them, which is important
     /// when a large batch of files arrives at once. The OS caps this at 64 KB and the default of

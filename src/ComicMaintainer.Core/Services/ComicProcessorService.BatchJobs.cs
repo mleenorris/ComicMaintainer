@@ -64,11 +64,24 @@ public partial class ComicProcessorService
 
     public Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(metadata);
+        return UpdateMetadataAsync(filePaths, metadata, ComicMetadataFields.Supplied(metadata), cancellationToken);
+    }
+
+    public Task<Guid> UpdateMetadataAsync(
+        IEnumerable<string> filePaths,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        // Every file gets the same partial edit; fields outside the mask keep each file's own value.
         return QueueBatchJobAsync(
             filePaths,
             "UpdateMetadataAsync",
             "updating metadata for",
-            (file, token) => UpdateMetadataCoreAsync(file, metadata, token),
+            async (file, token) => (await UpdateMetadataCoreAsync(file, metadata, fields, token, userEdit: true)).Succeeded,
             "Update metadata failed",
             cancellationToken);
     }
@@ -82,17 +95,17 @@ public partial class ComicProcessorService
             async (filePath, token) =>
             {
                 var removed = await RemoveMetadataCoreAsync(filePath, token);
-                if (!removed)
+                if (!removed.Succeeded)
                 {
                     return false;
                 }
 
-                // Mark the file as unprocessed so the rename/normalize pipeline
-                // will re-evaluate it on the next run, mirroring the per-file
-                // DELETE /api/files/{path}/metadata behavior.
+                // Mark the file (at its new path, when a CBR/RAR became a CBZ) as
+                // unprocessed so the rename/normalize pipeline will re-evaluate it on
+                // the next run, mirroring the per-file DELETE /api/files/{path}/metadata behavior.
                 try
                 {
-                    await _fileStore.ClearProcessedStatusAsync(new[] { filePath }, token);
+                    await _fileStore.ClearProcessedStatusAsync(new[] { removed.FilePath }, token);
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
@@ -226,12 +239,17 @@ public partial class ComicProcessorService
             "normalizing and renaming",
             async (filePath, token) =>
             {
-                var normalizeOk = await NormalizeFileCoreAsync(filePath, true, token);
-                if (!normalizeOk)
+                // Normalize can convert a CBR/RAR to a CBZ; the rename follows the file there.
+                var normalized = await NormalizeFileWithResultAsync(filePath, true, token);
+                if (!normalized.Succeeded && !normalized.ArchiveNotWritable)
                 {
                     return false;
                 }
-                return await RenameFileCoreAsync(filePath, true, token);
+
+                // A CBR/RAR/ZIP that is not rewritten while converting to CBZ is off is still
+                // renamed (a rename never rewrites the archive), but stays not normalized.
+                var renamed = await RenameFileCoreAsync(normalized.FilePath, true, token);
+                return renamed && normalized.Succeeded;
             },
             "Normalize and rename failed",
             cancellationToken);

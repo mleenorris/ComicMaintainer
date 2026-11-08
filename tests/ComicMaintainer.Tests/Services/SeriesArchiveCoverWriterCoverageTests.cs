@@ -120,7 +120,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
 
         Assert.Equal(garbage, File.ReadAllBytes(cbz));
-        Assert.False(File.Exists(cbz + ".cover.tmp"));
+        Assert.Empty(TempFilesIn(_root));
         _watcher.Verify(w => w.SuppressProcessing(It.IsAny<string>()), Times.Never);
     }
 
@@ -168,6 +168,35 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_BuildsTheCompleteArchiveNextToTheOriginalUnderARecoverableTempName()
+    {
+        var cbz = CreateCbz("issue1.cbz", ("01.jpg", PageBytes));
+        SetupFirstArchive(cbz);
+        string[]? tempFiles = null;
+        byte[]? tempCover = null;
+        _watcher
+            .Setup(w => w.SuppressProcessing(cbz))
+            .Callback(() =>
+            {
+                // The first call comes just before the rename: the new archive must already be
+                // complete, under a name the watcher ignores and the startup sweep cleans up.
+                if (tempFiles is null)
+                {
+                    tempFiles = TempFilesIn(_root);
+                    tempCover = tempFiles.Length == 1 ? ReadEntry(tempFiles[0], "cover.jpg") : null;
+                }
+            });
+
+        await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
+
+        var temp = Assert.Single(tempFiles!);
+        Assert.True(ArchiveWriteRecoveryService.IsTempPath(temp), temp);
+        Assert.Equal(NewCover, tempCover);
+        Assert.Equal(NewCover, ReadEntry(cbz, "cover.jpg"));
+        Assert.Empty(TempFilesIn(_root));
+    }
+
+    [Fact]
     public async Task WriteAsync_ReplaceFails_RemovesTempFileAndSwallowsError()
     {
         var cbz = CreateCbz("issue1.cbz", ("01.jpg", PageBytes));
@@ -188,7 +217,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
 
         Assert.True(Directory.Exists(cbz));
-        Assert.False(File.Exists(cbz + ".cover.tmp"));
+        Assert.Empty(TempFilesIn(_root));
         _watcher.Verify(w => w.SuppressProcessing(cbz), Times.Once);
     }
 
@@ -327,7 +356,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
 
         Assert.Equal(before, File.ReadAllBytes(cbz));
-        Assert.False(File.Exists(cbz + ".cover.tmp"));
+        Assert.Empty(TempFilesIn(_root));
         _watcher.Verify(w => w.SuppressProcessing(It.IsAny<string>()), Times.Never);
     }
 
@@ -467,6 +496,17 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         }
         return path;
     }
+
+    /// <summary>
+    /// Files in <paramref name="directory"/> other than the source cover and the archives: the
+    /// temp files a rewrite left behind, whatever they are called.
+    /// </summary>
+    private string[] TempFilesIn(string directory) =>
+        Directory.GetFiles(directory)
+            .Where(path => !string.Equals(path, _source, StringComparison.Ordinal) &&
+                           !path.EndsWith(".cbz", StringComparison.OrdinalIgnoreCase) &&
+                           !path.EndsWith(".cbr", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
 
     private static List<string> ListEntries(string cbzPath)
     {

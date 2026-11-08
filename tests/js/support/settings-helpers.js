@@ -18,6 +18,7 @@ function settingsResponse(overrides = {}) {
         issue_number_padding: 3,
         watcher_enable_rename: true,
         watcher_enable_normalize: false,
+        convert_rar_to_cbz_on_write: false,
         log_max_bytes: 10 * MB,
         database_cleanup_interval_hours: 12,
         enable_external_series_metadata: true,

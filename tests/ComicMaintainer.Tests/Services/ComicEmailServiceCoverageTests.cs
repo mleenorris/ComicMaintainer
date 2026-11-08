@@ -349,6 +349,22 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         Assert.Equal("Decimal 012.5-013", Assert.Single(plan.Books).DisplayName);
     }
 
+    [Fact]
+    public async Task PlanCondensedDeliveryAsync_ReadsIssueNumbersWithTheSharedFileNameParser()
+    {
+        // The shared parser ignores volume tokens and numbers glued to letters, so neither
+        // the "20th" of the first name nor the "v2" of the second is taken for the issue.
+        var files = new[]
+        {
+            CreateComic("Batman 005 - 20th Anniversary.cbz", folder: "Batman"),
+            CreateComic("Batman 006 v2.cbz", folder: "Batman")
+        };
+
+        var plan = await CreateService().PlanCondensedDeliveryAsync(files, EmailCondenseMode.All, null);
+
+        Assert.Equal("Batman 005-006", Assert.Single(plan.Books).DisplayName);
+    }
+
     [Theory]
     [InlineData("Resolved Name", "Canonical Title", "Resolved Name 001-002")]
     [InlineData("", "Canonical Title", "Canonical Title 001-002")]

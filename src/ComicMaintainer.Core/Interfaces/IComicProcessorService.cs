@@ -50,19 +50,46 @@ public interface IComicProcessorService
     Task<SeriesMetadata?> GetSeriesMetadataAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Update metadata for a comic file
+    /// Applies the fields of <paramref name="metadata"/> that carry a value as a metadata edit
+    /// (see <see cref="ApplyMetadataEditAsync"/>); fields left empty are kept as they are.
     /// </summary>
     Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Remove the ComicInfo.xml entry from a comic archive, leaving the file
-    /// without any embedded metadata. Returns true on success (including when
-    /// the archive had no ComicInfo.xml to begin with — the file is rewritten
-    /// either way so callers can treat it as a no-op for the metadata layer).
-    /// Returns false without touching the file when its path resolves outside
-    /// the watched and duplicate directories.
+    /// Applies a metadata edit to one file: the <paramref name="fields"/> of
+    /// <paramref name="metadata"/> are merged into the archive's ComicInfo.xml, an empty value
+    /// removes its element, and every other element is kept. When the archive is not rewritten
+    /// (a CBR/RAR/ZIP while converting them to CBZ is turned off) the edit is recorded in the
+    /// database instead.
     /// </summary>
-    Task<bool> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default);
+    Task<MetadataWriteResult> ApplyMetadataEditAsync(
+        string filePath,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Like <see cref="ApplyMetadataEditAsync"/>, but only ever writes the archive: an archive
+    /// that is not rewritten is reported as <see cref="MetadataWriteOutcome.NotWritable"/> and
+    /// nothing is recorded. Used to copy edits already stored in the database into archives.
+    /// </summary>
+    Task<MetadataWriteResult> WriteMetadataAsync(
+        string filePath,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Remove the ComicInfo.xml entry from a comic archive, leaving the file
+    /// without any embedded metadata. Succeeds, leaving the archive untouched
+    /// (<see cref="MetadataWriteOutcome.Unchanged"/>), when it had no
+    /// ComicInfo.xml to begin with. A CBR, RAR or ZIP becomes a new CBZ
+    /// (<see cref="MetadataWriteOutcome.ConvertedToCbz"/>, at the returned path);
+    /// while converting them is turned off the removal fails and the archive is
+    /// not touched. Fails without touching the file when its path resolves
+    /// outside the watched and duplicate directories.
+    /// </summary>
+    Task<MetadataWriteResult> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rename multiple comic files based on metadata as a batch job
@@ -85,9 +112,21 @@ public interface IComicProcessorService
     Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Update metadata for multiple comic files as a batch job
+    /// Applies the fields of <paramref name="metadata"/> that carry a value to multiple comic
+    /// files as a batch job; fields left empty are kept as they are.
     /// </summary>
     Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies the <paramref name="fields"/> of <paramref name="metadata"/> as a metadata edit
+    /// (see <see cref="ApplyMetadataEditAsync"/>) to multiple comic files as a batch job. Every
+    /// other field of each file is kept as it is.
+    /// </summary>
+    Task<Guid> UpdateMetadataAsync(
+        IEnumerable<string> filePaths,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Remove the embedded ComicInfo.xml from multiple comic files as a batch

@@ -165,12 +165,12 @@ public partial class FilesController
                 return BadRequest("Metadata patch is required");
 
             var patch = body.Metadata;
-            var lockFields = DetermineEditedFields(patch);
+            var lockFields = ComicMetadataFields.Supplied(patch);
             if (body.LockFields is not null)
             {
                 foreach (var field in body.LockFields)
                 {
-                    lockFields |= ParseMetadataField(field);
+                    lockFields |= ComicMetadataFields.Parse(field);
                 }
             }
 
@@ -198,38 +198,6 @@ public partial class FilesController
         }
     }
 
-    private static ComicMetadataFieldFlags DetermineEditedFields(ComicMetadata metadata)
-    {
-        var flags = ComicMetadataFieldFlags.None;
-        if (metadata.Series is not null) flags |= ComicMetadataFieldFlags.Series;
-        if (metadata.Title is not null) flags |= ComicMetadataFieldFlags.Title;
-        if (metadata.Issue is not null) flags |= ComicMetadataFieldFlags.Issue;
-        if (metadata.Volume is not null) flags |= ComicMetadataFieldFlags.Volume;
-        if (metadata.Publisher is not null) flags |= ComicMetadataFieldFlags.Publisher;
-        if (metadata.Year.HasValue) flags |= ComicMetadataFieldFlags.Year;
-        if (metadata.Summary is not null) flags |= ComicMetadataFieldFlags.Summary;
-        if (metadata.Authors.Count > 0) flags |= ComicMetadataFieldFlags.Authors;
-        if (metadata.Tags.Count > 0) flags |= ComicMetadataFieldFlags.Tags;
-        return flags;
-    }
-
-    private static ComicMetadataFieldFlags ParseMetadataField(string? field)
-    {
-        if (string.IsNullOrWhiteSpace(field)) return ComicMetadataFieldFlags.None;
-        return field.Trim().ToLowerInvariant() switch
-        {
-            "series" => ComicMetadataFieldFlags.Series,
-            "title" => ComicMetadataFieldFlags.Title,
-            "issue" or "number" => ComicMetadataFieldFlags.Issue,
-            "volume" => ComicMetadataFieldFlags.Volume,
-            "publisher" => ComicMetadataFieldFlags.Publisher,
-            "year" => ComicMetadataFieldFlags.Year,
-            "summary" or "description" => ComicMetadataFieldFlags.Summary,
-            "authors" or "writer" or "writers" => ComicMetadataFieldFlags.Authors,
-            "tags" => ComicMetadataFieldFlags.Tags,
-            _ => ComicMetadataFieldFlags.None
-        };
-    }
 
     [HttpGet("~/api/files/{encodedFilePath}/tags")]
     public async Task<ActionResult<ComicMetadata>> GetFileTags(string encodedFilePath)
@@ -317,29 +285,30 @@ public partial class FilesController
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Remove metadata requested for file: {FilePath}"), sanitizedPath);
 
-            var success = await _processor.RemoveMetadataAsync(filePath, cancellationToken);
-            if (!success)
+            var result = await _processor.RemoveMetadataAsync(filePath, cancellationToken);
+            if (!result.Succeeded)
             {
                 await LogHistoryAsync(filePath, "RemoveMetadata", false, "RemoveMetadataAsync returned false");
                 return BadRequest("Failed to remove metadata");
             }
 
-            // Mark the file as unprocessed so the rename/normalize pipeline will
-            // re-evaluate it on the next run.
-            var cleared = await _fileStore.ClearProcessedStatusAsync(new[] { filePath }, cancellationToken);
+            // A CBR/RAR/ZIP is now a CBZ at a new path. Mark the file as unprocessed
+            // so the rename/normalize pipeline will re-evaluate it on the next run.
+            var currentPath = result.FilePath;
+            var cleared = await _fileStore.ClearProcessedStatusAsync(new[] { currentPath }, cancellationToken);
 
-            await LogHistoryAsync(filePath, "RemoveMetadata", true);
+            await LogHistoryAsync(currentPath, "RemoveMetadata", true);
 
             // Broadcast a file_processed event so the UI updates the affected
             // folder / series detail in place rather than waiting for the
             // debounced file_list_updated.
             if (_eventBroadcaster is not null)
             {
-                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), true); }
+                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(currentPath), true); }
                 catch (Exception bex) when (bex is not OutOfMemoryException) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata removal"); }
             }
 
-            return Ok(new { success = true, cleared });
+            return Ok(new { success = true, cleared, filePath = currentPath });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

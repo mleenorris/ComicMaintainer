@@ -153,12 +153,27 @@ test('View/Edit loads the issue tags into the editor', async t => {
     await page.waitFor(() => isModalOpen(page, 'tagModal'));
 
     assert.equal(page.$('#modalTitle').textContent, `Edit Tags - ${FIRST}`);
+    // The Writer input shows the file's authors, which the server returns as "authors".
     assert.deepEqual(
-        ['title', 'series', 'issue', 'volume', 'publisher', 'year', 'summary'].map(id => page.$(`#${id}`).value),
-        ['Chapter One', 'Saga', '1', '2012', 'Image', '2012', 'Alana and Marko flee.']
+        ['title', 'series', 'issue', 'volume', 'publisher', 'year', 'writer', 'summary'].map(id => page.$(`#${id}`).value),
+        ['Chapter One', 'Saga', '1', '2012', 'Image', '2012', 'Brian K. Vaughan', 'Alana and Marko flee.']
     );
+    // There are no inputs for tags the server does not model.
+    assert.equal(page.$('#month'), null);
+    assert.equal(page.$('#notes'), null);
     const [call] = callsTo(page, 'GET', `/api/files/${encodedPath(FIRST)}/tags`);
     assert.match(call.headers.authorization, /^Bearer /);
+});
+
+test('View/Edit joins several authors into the Writer input', async t => {
+    const page = await boot({
+        routes: { [`GET /api/files/${encodedPath(FIRST)}/tags`]: comicMetadata({ authors: ['Brian K. Vaughan', 'Fiona Staples'] }) }
+    });
+    t.after(() => page.close());
+
+    await page.run(`viewTags(${JSON.stringify(FIRST)})`);
+
+    assert.equal(page.$('#writer').value, 'Brian K. Vaughan, Fiona Staples');
 });
 
 test('View/Edit clears fields the file has no value for', async t => {
@@ -230,15 +245,52 @@ test('Save sends the edited tags as an update-metadata job', async t => {
     assert.ok(!isModalOpen(page, 'tagModal'));
     const [call] = callsTo(page, 'POST', '/api/jobs/update-metadata-selected');
     assert.equal(call.headers['content-type'], 'application/json');
-    // Blank fields are left out and Year is sent as a number.
+    // Only the changed fields are sent and listed, so the server leaves every other tag
+    // alone; the emptied Publisher is sent as null to remove it, and Year as a number.
     assert.deepEqual(call.body, {
         Files: [FIRST],
-        Metadata: { Title: 'The Will', Series: 'Saga', Issue: '1', Volume: '2012', Year: 2013 }
+        Metadata: { Title: 'The Will', Publisher: null, Year: 2013 },
+        Fields: ['title', 'publisher', 'year']
     });
     assert.deepEqual(messageTexts(page, 'info'), ['Started updating metadata for file in background']);
     assert.equal(page.$('#progressTitle').textContent, 'Updating Metadata...');
     assert.ok(isModalOpen(page, 'progressModal'));
     assert.equal(callsTo(page, 'GET', '/api/jobs/job-7').length, 1);
+    assert.equal(page.run('currentEditFile'), null);
+});
+
+test('Save sends an edited Writer as the file\'s authors', async t => {
+    const page = await boot({
+        routes: {
+            [`GET /api/files/${encodedPath(FIRST)}/tags`]: comicMetadata(),
+            'POST /api/jobs/update-metadata-selected': { job_id: 'job-3', total_items: 1 }
+        }
+    });
+    t.after(() => page.close());
+
+    await page.run(`viewTags(${JSON.stringify(FIRST)})`);
+    page.input('#writer', 'Brian K. Vaughan,  Fiona Staples ,');
+    await page.run('saveTags()');
+
+    const [call] = callsTo(page, 'POST', '/api/jobs/update-metadata-selected');
+    assert.deepEqual(plain(call.body), {
+        Files: [FIRST],
+        Metadata: { Authors: ['Brian K. Vaughan', 'Fiona Staples'] },
+        Fields: ['authors']
+    });
+});
+
+test('Save without changes closes the editor and starts no job', async t => {
+    const page = await boot({ routes: { [`GET /api/files/${encodedPath(FIRST)}/tags`]: comicMetadata() } });
+    t.after(() => page.close());
+
+    await page.run(`viewTags(${JSON.stringify(FIRST)})`);
+    page.input('#title', ' Chapter One ');
+    await page.run('saveTags()');
+
+    assert.ok(!isModalOpen(page, 'tagModal'));
+    assert.equal(callsTo(page, 'POST', '/api/jobs/update-metadata-selected').length, 0);
+    assert.deepEqual(messageTexts(page, 'info'), ['No changes to save']);
     assert.equal(page.run('currentEditFile'), null);
 });
 
@@ -253,11 +305,13 @@ test('Save drops a Year that is not a number', async t => {
 
     await page.run(`viewTags(${JSON.stringify(FIRST)})`);
     page.input('#year', 'unknown');
+    page.input('#series', 'Saga Deluxe');
     await page.run('saveTags()');
 
     const [call] = callsTo(page, 'POST', '/api/jobs/update-metadata-selected');
     assert.equal('Year' in call.body.Metadata, false);
-    assert.equal(call.body.Metadata.Series, 'Saga');
+    assert.deepEqual(plain(call.body.Fields), ['series']);
+    assert.equal(call.body.Metadata.Series, 'Saga Deluxe');
 });
 
 test('Save reports a job the server did not start', async t => {
@@ -265,6 +319,7 @@ test('Save reports a job the server did not start', async t => {
     t.after(() => page.close());
     const save = async () => {
         await page.run(`viewTags(${JSON.stringify(FIRST)})`);
+        page.input('#title', 'The Will');
         await page.run('saveTags()');
     };
 
@@ -294,6 +349,7 @@ test('Save with an expired session closes the progress modal and goes to login',
     t.after(() => page.close());
 
     await page.run(`viewTags(${JSON.stringify(FIRST)})`);
+    page.input('#title', 'The Will');
     await page.run('saveTags()');
 
     assert.ok(!isModalOpen(page, 'progressModal'));
@@ -360,7 +416,12 @@ test('Update on a selection opens the batch editor and sends the filled tags', a
     assert.ok(!isModalOpen(page, 'batchModal'));
     assert.equal(page.$('#batch_series').value, '', 'the form is reset');
     const [call] = callsTo(page, 'POST', '/api/jobs/update-metadata-selected');
-    assert.deepEqual(call.body, { Files: [FIRST, SECOND], Metadata: { Series: 'Saga Deluxe', Year: 2014 } });
+    // Only the filled-in fields are sent and listed; the blank Publisher is left alone.
+    assert.deepEqual(call.body, {
+        Files: [FIRST, SECOND],
+        Metadata: { Series: 'Saga Deluxe', Year: 2014 },
+        Fields: ['series', 'year']
+    });
     assert.deepEqual(messageTexts(page, 'info'), ['Started updating metadata for 2 selected files in background']);
     assert.equal(page.$('#progressTitle').textContent, 'Updating Metadata for Selected Files...');
     assert.equal(callsTo(page, 'GET', '/api/jobs/job-9').length, 1);
@@ -384,7 +445,11 @@ test('the batch editor needs at least one tag and ignores a non-numeric year', a
     page.input('#batch_writer', 'Brian K. Vaughan');
     await page.run('saveBatchTags()');
     const [call] = callsTo(page, 'POST', '/api/jobs/update-metadata-selected');
-    assert.deepEqual(plain(call.body), { Files: [FIRST], Metadata: { Writer: 'Brian K. Vaughan' } });
+    assert.deepEqual(plain(call.body), {
+        Files: [FIRST],
+        Metadata: { Authors: ['Brian K. Vaughan'] },
+        Fields: ['authors']
+    });
 });
 
 test('batch update failures are reported and close the progress modal', async t => {

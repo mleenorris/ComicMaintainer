@@ -38,6 +38,12 @@ public interface ISettingsService
     Task UpdateWatcherEnableNormalizeAsync(bool enabled, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Update whether writing tags to a CBR, RAR or ZIP archive converts it to CBZ
+    /// (<see cref="Configuration.AppSettings.ConvertRarToCbzOnWrite"/>).
+    /// </summary>
+    Task UpdateConvertRarToCbzOnWriteAsync(bool enabled, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update whether the cached series cover image is embedded into the first
     /// issue's archive as a <c>cover.&lt;ext&gt;</c> entry.
     /// </summary>

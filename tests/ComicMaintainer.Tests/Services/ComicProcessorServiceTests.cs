@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -227,7 +228,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.Equal("Series With Metadata", before!.Series);
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert
         Assert.True(result);
@@ -251,7 +252,7 @@ public class ComicProcessorServiceTests : IDisposable
         var filePath = Path.Join(_testDirectory, "missing.cbz");
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert
         Assert.False(result);
@@ -265,7 +266,7 @@ public class ComicProcessorServiceTests : IDisposable
         await File.WriteAllTextAsync(filePath, "hello");
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert
         Assert.False(result);
@@ -278,7 +279,7 @@ public class ComicProcessorServiceTests : IDisposable
         var filePath = CreateTestComicArchiveNoMetadata("nometa.cbz");
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert — the operation is a no-op for the metadata layer but should
         // still succeed so callers can rely on idempotent behaviour.
@@ -1250,8 +1251,8 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange - ComicInfo.xml has no <Number> element, but the filename
         // contains a chapter number. After normalization the issue number
-        // should be populated from the filename and the title should become
-        // "Chapter <n>" instead of "Chapter Unknown".
+        // should be populated from the filename, and the file's real chapter
+        // title is kept rather than replaced with "Chapter <n>".
         var seriesFolder = Path.Join(_testDirectory, "Spider-Man");
         Directory.CreateDirectory(seriesFolder);
 
@@ -1296,7 +1297,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.NotNull(updatedMetadata);
         Assert.Equal("Spider-Man", updatedMetadata.Series);
         Assert.Equal("7", updatedMetadata.Issue);
-        Assert.Equal("Chapter 7", updatedMetadata.Title);
+        Assert.Equal("Some Old Title", updatedMetadata.Title);
     }
 
     [Fact]
@@ -2279,8 +2280,8 @@ public class ComicProcessorServiceTests : IDisposable
         // the chapter number "7".
         _mockFileStore.Verify(
             f => f.MarkFileRenamedAsync(
-                It.Is<string>(p => ComicFileProcessor.ChapterNumbersEquivalent(
-                    ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(p)),
+                It.Is<string>(p => IssueNumberParser.AreEquivalent(
+                    IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(p)),
                     "7")),
                 true,
                 It.IsAny<CancellationToken>()),
@@ -2322,8 +2323,8 @@ public class ComicProcessorServiceTests : IDisposable
         // number cannot be lost.
         _mockFileStore.Verify(
             f => f.MarkFileRenamedAsync(
-                It.Is<string>(p => ComicFileProcessor.ChapterNumbersEquivalent(
-                    ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(p)),
+                It.Is<string>(p => IssueNumberParser.AreEquivalent(
+                    IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(p)),
                     "7")),
                 true,
                 It.IsAny<CancellationToken>()),

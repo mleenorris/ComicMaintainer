@@ -405,8 +405,25 @@ public class JobsController : ControllerBase
             {
                 return BadRequest(new { error = "No metadata specified" });
             }
-            
-            var jobId = await _processor.UpdateMetadataAsync(request.Files, request.Metadata);
+
+            // Fields lists the tags to apply; a listed field without a value is cleared. Without it,
+            // only the fields that carry a value are applied, so an omitted field is never wiped.
+            ComicMetadataFieldFlags fields;
+            if (request.Fields is null)
+            {
+                fields = ComicMetadataFields.Supplied(request.Metadata);
+            }
+            else if (!ComicMetadataFields.TryParse(request.Fields, out fields, out var unknownField))
+            {
+                return BadRequest(new { error = $"Unknown metadata field: {unknownField}" });
+            }
+
+            if (fields == ComicMetadataFieldFlags.None)
+            {
+                return BadRequest(new { error = "No metadata fields specified" });
+            }
+
+            var jobId = await _processor.UpdateMetadataAsync(request.Files, request.Metadata, fields);
             _logger.LogInformation("Update metadata for selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
             
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
@@ -614,5 +631,13 @@ public class JobsController : ControllerBase
     {
         public List<string> Files { get; set; } = new();
         public ComicMetadata Metadata { get; set; } = new();
+
+        /// <summary>
+        /// The fields to apply ("series", "title", "issue", "volume", "publisher", "year",
+        /// "summary", "authors"/"writer", "tags"). A listed field without a value in
+        /// <see cref="Metadata"/> is removed; unlisted fields are kept. When omitted, every field
+        /// that carries a value is applied and nothing is removed.
+        /// </summary>
+        public List<string>? Fields { get; set; }
     }
 }

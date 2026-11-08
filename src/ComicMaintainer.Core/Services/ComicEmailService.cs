@@ -1,7 +1,6 @@
 using ComicMaintainer.Core.Telemetry;
 using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.ErrorReporting;
@@ -68,32 +67,6 @@ public class ComicEmailService : IComicEmailService
 
     /// <summary>Ticks of <see cref="RateLimitedUntil"/>; 0 when nothing is held back.</summary>
     private long _rateLimitedUntilTicks;
-
-    /// <summary>
-    /// An explicitly marked chapter/issue number ("Ch 12", "#007", "issue 3").
-    /// Preferred over <see cref="TrailingNumberPattern"/> so a year or volume in
-    /// the name cannot be mistaken for the issue number.
-    /// </summary>
-    private static readonly Regex MarkedIssueNumberPattern = new(
-        @"(?:\b(?:ch|chapter|issue)\b\s*\.?\s*|#\s*)(\d+(?:\.\d+)?)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(1));
-
-    /// <summary>
-    /// Fallback for unmarked file names: the last number in the name once
-    /// bracketed qualifiers such as "(2016)" or "[HD]" have been removed, which
-    /// is where the issue number sits in "Series 005.cbz".
-    /// </summary>
-    private static readonly Regex TrailingNumberPattern = new(
-        @"(\d+(?:\.\d+)?)(?!.*\d)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(1));
-
-    /// <summary>Bracketed qualifiers stripped before the fallback match.</summary>
-    private static readonly Regex BracketedQualifierPattern = new(
-        @"[\(\[\{][^\)\]\}]*[\)\]\}]",
-        RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(1));
 
     /// <summary>
     /// Extensions a series cover sidecar can have, in the order they are
@@ -824,31 +797,23 @@ public class ComicEmailService : IComicEmailService
 
     /// <summary>
     /// Reads the issue number out of a file name, zero padded so condensed book
-    /// names sort the way the issues do ("001-005" before "006-010"). An
-    /// explicitly marked number ("#001", "Ch 12") always wins; otherwise the
-    /// last number outside any bracketed qualifier is used so "Series (2016)
+    /// names sort the way the issues do ("001-005" before "006-010"). The
+    /// number is read by <see cref="IssueNumberParser"/>, so "Series (2016)
     /// 005.cbz" yields 005 rather than the year.
     /// </summary>
     private static string? ExtractIssueLabel(string filePath)
     {
-        var name = Path.GetFileNameWithoutExtension(filePath);
-        var match = MarkedIssueNumberPattern.Match(name);
-        if (!match.Success)
-        {
-            match = TrailingNumberPattern.Match(BracketedQualifierPattern.Replace(name, " "));
-        }
-
-        if (!match.Success)
+        var issue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filePath));
+        if (issue is null)
         {
             return null;
         }
 
-        var raw = match.Groups[1].Value;
-        var separator = raw.IndexOf('.');
-        var whole = separator < 0 ? raw : raw[..separator];
-        var fraction = separator < 0 ? string.Empty : raw[separator..];
+        var separator = issue.IndexOf('.');
+        var whole = separator < 0 ? issue : issue[..separator];
+        var fraction = separator < 0 ? string.Empty : issue[separator..];
 
-        return whole.TrimStart('0').PadLeft(3, '0') + fraction;
+        return whole.PadLeft(3, '0') + fraction;
     }
 
     private async Task<string?> ResolveSeriesTitleAsync(string filePath, CancellationToken cancellationToken)

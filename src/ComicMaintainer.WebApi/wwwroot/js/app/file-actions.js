@@ -680,6 +680,47 @@
             }
         }
         
+        // The inputs of the tag editor and the batch editor: the form field name, the
+        // ComicMetadata property it edits and the field the server's Fields list (and the
+        // camelCase GET /api/files/{path}/tags response) calls it. The Writer input edits
+        // the file's authors.
+        const TAG_FORM_FIELDS = [
+            { name: 'title', property: 'Title', field: 'title' },
+            { name: 'series', property: 'Series', field: 'series' },
+            { name: 'issue', property: 'Issue', field: 'issue' },
+            { name: 'volume', property: 'Volume', field: 'volume' },
+            { name: 'publisher', property: 'Publisher', field: 'publisher' },
+            { name: 'year', property: 'Year', field: 'year' },
+            { name: 'writer', property: 'Authors', field: 'authors' },
+            { name: 'summary', property: 'Summary', field: 'summary' }
+        ];
+
+        // What each input of the open tag editor showed when it was loaded, by form field name.
+        let tagEditorLoadedValues = null;
+
+        // The text a tag editor input shows for a field of a GET .../tags response.
+        function tagFormText(formField, tags) {
+            const value = tags[formField.field];
+            if (Array.isArray(value)) return value.join(', ');
+            return value === null || value === undefined ? '' : String(value);
+        }
+
+        // The ComicMetadata value sent for an input's text. An empty input clears the field
+        // (null, or no authors). Returns undefined for text that cannot be sent: a Year that
+        // is not a number.
+        function tagFormValue(formField, text) {
+            const trimmed = text.trim();
+            if (formField.property === 'Year') {
+                if (!trimmed) return null;
+                const year = parseInt(trimmed, 10);
+                return isNaN(year) ? undefined : year;
+            }
+            if (formField.property === 'Authors') {
+                return trimmed.split(',').map(name => name.trim()).filter(Boolean);
+            }
+            return trimmed || null;
+        }
+
         async function viewTags(filepath) {
             try {
                 const encodedPath = encodeFilePathForUrl(filepath);
@@ -698,15 +739,19 @@
                 }
                 
                 currentEditFile = filepath;
-                
-                // Populate form
-                Object.keys(tags).forEach(key => {
-                    const input = document.getElementById(key);
+
+                // Populate the form, remembering what each input showed so Save can send only
+                // the fields the user changed.
+                tagEditorLoadedValues = {};
+                for (const formField of TAG_FORM_FIELDS) {
+                    const text = tagFormText(formField, tags);
+                    tagEditorLoadedValues[formField.name] = text;
+                    const input = document.getElementById(formField.name);
                     if (input) {
-                        input.value = tags[key] || '';
+                        input.value = text;
                     }
-                });
-                
+                }
+
                 document.getElementById('modalTitle').textContent = `Edit Tags - ${filepath}`;
                 document.getElementById('tagModal').classList.add('active');
             } catch (error) {
@@ -717,41 +762,43 @@
         function closeModal() {
             document.getElementById('tagModal').classList.remove('active');
             currentEditFile = null;
+            tagEditorLoadedValues = null;
         }
-        
+
         async function saveTags() {
             if (!currentEditFile) return;
-            // Refused before the dialog closes, so the edits are not lost.
-            if (!jobProgress.canStartJob()) return;
 
             // Capture the target file path before calling closeModal(), which
             // resets currentEditFile to null. Without this snapshot, the
             // request body below would serialize Files:[null] and the server
             // would silently fail to update any file's metadata.
             const targetFile = currentEditFile;
+            const loaded = tagEditorLoadedValues || {};
 
+            // Send only the fields the user changed, listed in Fields, so the
+            // server rewrites nothing else; a field emptied in the editor is
+            // removed from the file. A Year that is not a number is left out.
             const form = document.getElementById('tagForm');
-            const formData = new FormData(form);
             const metadata = {};
-            
-            // Only include non-empty fields. Empty inputs (e.g. an empty Year)
-            // would fail JSON deserialization on the server because
-            // ComicMetadata.Year is int? — sending "" would cause a 400 and
-            // the file's tags would never get written.
-            for (let [key, value] of formData.entries()) {
-                if (typeof value !== 'string' || !value.trim()) continue;
-                // Capitalize first letter to match ComicMetadata property names
-                const propertyName = key.charAt(0).toUpperCase() + key.slice(1);
-                if (propertyName === 'Year') {
-                    const parsedYear = parseInt(value, 10);
-                    if (!isNaN(parsedYear)) {
-                        metadata[propertyName] = parsedYear;
-                    }
-                    continue;
-                }
-                metadata[propertyName] = value;
+            const fields = [];
+            for (const formField of TAG_FORM_FIELDS) {
+                const input = form.elements.namedItem(formField.name);
+                if (!input) continue;
+                if (input.value.trim() === (loaded[formField.name] || '').trim()) continue;
+                const value = tagFormValue(formField, input.value);
+                if (value === undefined) continue;
+                metadata[formField.property] = value;
+                fields.push(formField.field);
             }
-            
+
+            if (fields.length === 0) {
+                closeModal();
+                showMessage('No changes to save', 'info');
+                return;
+            }
+            // Refused before the dialog closes, so the edits are not lost.
+            if (!jobProgress.canStartJob()) return;
+
             closeModal();
             showProgressModal('Updating metadata...');
             
@@ -764,7 +811,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: [targetFile], Metadata: metadata })
+                    body: JSON.stringify({ Files: [targetFile], Metadata: metadata, Fields: fields })
                 });
                 
                 if (handleAuthError(response)) {
@@ -810,26 +857,22 @@
         
         async function saveBatchTags() {
             const form = document.getElementById('batchForm');
-            const formData = new FormData(form);
             const metadata = {};
-            
-            // Only include non-empty fields
-            for (let [key, value] of formData.entries()) {
-                if (value.trim()) {
-                    // Capitalize first letter to match ComicMetadata property names
-                    const propertyName = key.charAt(0).toUpperCase() + key.slice(1);
-                    if (propertyName === 'Year') {
-                        const parsedYear = parseInt(value, 10);
-                        if (!isNaN(parsedYear)) {
-                            metadata[propertyName] = parsedYear;
-                        }
-                        continue;
-                    }
-                    metadata[propertyName] = value;
-                }
+            const fields = [];
+
+            // Send and apply only the fields filled in, listed in Fields; every
+            // other tag of each selected file is kept. A Year that is not a
+            // number is left out.
+            for (const formField of TAG_FORM_FIELDS) {
+                const input = form.elements.namedItem(formField.name);
+                if (!input || !input.value.trim()) continue;
+                const value = tagFormValue(formField, input.value);
+                if (value === undefined) continue;
+                metadata[formField.property] = value;
+                fields.push(formField.field);
             }
-            
-            if (Object.keys(metadata).length === 0) {
+
+            if (fields.length === 0) {
                 showMessage('Please enter at least one tag to update', 'error');
                 return;
             }
@@ -850,7 +893,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: files, Metadata: metadata })
+                    body: JSON.stringify({ Files: files, Metadata: metadata, Fields: fields })
                 });
                 
                 if (handleAuthError(response)) {

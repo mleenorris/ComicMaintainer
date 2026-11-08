@@ -120,15 +120,13 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task MarkFileRead_StoreThrows_Returns500()
+    public async Task MarkFileRead_StoreThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _fileStore.Setup(f => f.MarkFileReadAsync(path, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db locked"));
 
-        var result = await _controller.MarkFileRead(Encode(path), new FilesController.ReadStatusRequest { Read = true });
-
-        AssertStatus(result, 500, "Error updating read status");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.MarkFileRead(Encode(path), new FilesController.ReadStatusRequest { Read = true }));
     }
 
     [Fact]
@@ -195,18 +193,16 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task MarkFilesReadBatch_StoreThrows_Returns500()
+    public async Task MarkFilesReadBatch_StoreThrows_Escapes()
     {
         _fileStore.Setup(f => f.MarkFilesReadAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db locked"));
 
-        var result = await _controller.MarkFilesReadBatch(new FilesController.ReadBatchRequest
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.MarkFilesReadBatch(new FilesController.ReadBatchRequest
         {
             Files = new List<string> { InRoot("Saga 001.cbz") },
             Read = true
-        });
-
-        AssertStatus(result, 500, "Error updating read status");
+        }));
     }
 
     [Fact]
@@ -301,14 +297,12 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task MarkScopeRead_StoreThrows_Returns500()
+    public async Task MarkScopeRead_StoreThrows_Escapes()
     {
         _fileStore.Setup(f => f.MarkScopeReadAsync(It.IsAny<FileReadScope>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db locked"));
 
-        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Read = true });
-
-        AssertStatus(result, 500, "Error updating read status");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Read = true }));
     }
 
     // ----------------------------------------------------------------- ProcessFile
@@ -325,14 +319,12 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task ProcessFile_ProcessorThrows_Returns500()
+    public async Task ProcessFile_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.ProcessFileAsync(path, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("corrupt"));
 
-        var result = await _controller.ProcessFile(path);
-
-        AssertStatus(result, 500, "Error processing file");
+        await Assert.ThrowsAsync<IOException>(() => _controller.ProcessFile(path));
     }
 
     [Fact]
@@ -529,19 +521,17 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task UpdateTags_ProcessorThrows_Returns500()
+    public async Task UpdateTags_ProcessorThrows_Escapes()
     {
         _processor.Setup(p => p.ApplyMetadataEditAsync(
                 It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("read-only"));
 
-        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        await Assert.ThrowsAsync<IOException>(() => _controller.UpdateTags(new FilesController.UpdateTagsRequest
         {
             Files = new List<string> { InRoot("Saga 001.cbz") },
             Metadata = new ComicMetadata { Series = "Saga" }
-        });
-
-        AssertStatus(result, 500, "Error updating tags");
+        }));
     }
 
     // A body without "files" binds to an empty list. The {"file": ..., "tags": ...}
@@ -574,13 +564,11 @@ public sealed class FilesControllerFileActionsTests
     // ---------------------------------------------------------------- ScanUnmarked
 
     [Fact]
-    public async Task ScanUnmarked_StoreThrows_Returns500()
+    public async Task ScanUnmarked_StoreThrows_Escapes()
     {
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("not loaded"));
 
-        var result = await _controller.ScanUnmarked();
-
-        AssertStatus(result, 500, "Error scanning files");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.ScanUnmarked());
     }
 
     // ---------------------------------------------------- ProcessFileByEncodedPath
@@ -619,14 +607,12 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task ProcessFileByEncodedPath_ProcessorThrows_Returns500()
+    public async Task ProcessFileByEncodedPath_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.ProcessFileAsync(path, true, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("corrupt"));
 
-        var result = await _controller.ProcessFileByEncodedPath(Encode(path), forceReprocess: true);
-
-        AssertStatus(result, 500, "Error processing file");
+        await Assert.ThrowsAsync<IOException>(() => _controller.ProcessFileByEncodedPath(Encode(path), forceReprocess: true));
     }
 
     // ----------------------------------------------------- RenameFileByEncodedPath
@@ -665,15 +651,13 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task RenameFileByEncodedPath_ProcessorThrows_Returns500()
+    public async Task RenameFileByEncodedPath_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("queue full"));
 
-        var result = await _controller.RenameFileByEncodedPath(Encode(path));
-
-        AssertStatus(result, 500, "Error renaming file");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.RenameFileByEncodedPath(Encode(path)));
     }
 
     // --------------------------------------------------------- CleanupStaleEntries

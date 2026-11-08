@@ -1,5 +1,5 @@
 using ComicMaintainer.Core.Models;
-using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -11,19 +11,12 @@ public partial class FilesController
     /// combine them. Discovery lives in <see cref="Core.Interfaces.IFolderCombineService"/>.
     /// </summary>
     [HttpGet("combinable-folders")]
+    [FailureMessage("Error retrieving combinable folders")]
     public async Task<ActionResult<object>> GetCombinableFolders(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var groups = await _folderCombine.GetCombinableFolderGroupsAsync(cancellationToken);
-            var dtos = groups.Select(ToCombinableFolderGroupDto).ToList();
-            return Ok(new { groups = dtos });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error retrieving combinable folders");
-            return StatusCode(500, "Error retrieving combinable folders");
-        }
+        var groups = await _folderCombine.GetCombinableFolderGroupsAsync(cancellationToken);
+        var dtos = groups.Select(ToCombinableFolderGroupDto).ToList();
+        return Ok(new { groups = dtos });
     }
 
     private static CombinableFolderGroupDto ToCombinableFolderGroupDto(CombinableFolderGroup group)

@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Middleware;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -18,9 +19,13 @@ namespace ComicMaintainer.WebApi.Infrastructure;
 ///
 /// The exception message itself is deliberately not returned outside
 /// Development: it can contain file-system paths, connection strings and SQL.
+/// An action says what failed with <see cref="FailureMessageAttribute"/>; this
+/// handler, not a catch block in the action, then produces the 500.
 /// </summary>
 public sealed class GlobalExceptionHandler : IExceptionHandler
 {
+    private const string GenericDetail = "The request could not be completed. Quote the reference below when reporting this.";
+
     private readonly IProblemDetailsService _problemDetailsService;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<GlobalExceptionHandler> _logger;
@@ -43,7 +48,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // A cancelled request is the client going away (navigation, reader
         // page turn, aborted upload). It is not a server fault, there is no
         // response to write, and logging it as an error is pure noise.
-        if (exception is OperationCanceledException && httpContext.RequestAborted.IsCancellationRequested)
+        if (IsClientAbort(httpContext, exception))
         {
             _logger.LogDebug(
                 "Request {Method} {Path} was aborted by the client",
@@ -54,12 +59,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
         var correlationId = httpContext.GetCorrelationId();
 
-        _logger.LogError(
-            exception,
-            "Unhandled exception for {Method} {Path} (correlation id {CorrelationId})",
-            LoggingHelper.SanitizeForLog(httpContext.Request.Method),
-            LoggingHelper.SanitizeForLog(httpContext.Request.Path.Value),
-            correlationId);
+        LogUnhandled(httpContext, exception, correlationId);
 
         // If the response has already begun there is no way to replace it with
         // a problem document; let the server tear the connection down instead
@@ -77,7 +77,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             Title = "An unexpected error occurred.",
             Detail = _environment.IsDevelopment()
                 ? exception.ToString()
-                : "The request could not be completed. Quote the reference below when reporting this.",
+                : FailureMessageOf(httpContext) ?? GenericDetail,
             Type = "https://datatracker.ietf.org/doc/html/rfc9110#section-15.6.1",
             Instance = httpContext.Request.Path
         };
@@ -94,5 +94,52 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             ProblemDetails = problemDetails,
             Exception = exception
         });
+    }
+
+    /// <summary>
+    /// Whether this exception is the client going away rather than a failure of the server.
+    /// A dropped connection also surfaces as a failed read of the request body, not only as a
+    /// cancellation. Only the request's own token counts: a timeout the server imposed on some
+    /// inner operation is a real failure, even though it is also a cancellation.
+    /// </summary>
+    private static bool IsClientAbort(HttpContext httpContext, Exception exception) =>
+        httpContext.RequestAborted.IsCancellationRequested
+        && exception is OperationCanceledException or ConnectionResetException or BadHttpRequestException;
+
+    /// <summary>
+    /// The failing action's <see cref="FailureMessageAttribute"/> text, if it has one. The
+    /// exception handling middleware has cleared the request's endpoint by the time a handler
+    /// runs, so it is read from the feature that records where the exception happened.
+    /// </summary>
+    private static string? FailureMessageOf(HttpContext httpContext) =>
+        httpContext.Features.Get<IExceptionHandlerFeature>()?.Endpoint?.Metadata
+            .GetMetadata<FailureMessageAttribute>()?.Message;
+
+    private void LogUnhandled(HttpContext httpContext, Exception exception, string correlationId)
+    {
+        var method = LoggingHelper.SanitizeForLog(httpContext.Request.Method);
+        var path = LoggingHelper.SanitizeForLog(httpContext.Request.Path.Value);
+
+        // Most single-file endpoints name the file in the query string rather than the path, so
+        // the path alone would not say which file failed. Only the file name is logged, matching
+        // every other log line in the application.
+        if (httpContext.Request.Query.TryGetValue("filePath", out var filePath) && !string.IsNullOrEmpty(filePath))
+        {
+            _logger.LogError(
+                exception,
+                "Unhandled exception for {Method} {Path} on {FilePath} (correlation id {CorrelationId})",
+                method,
+                path,
+                LoggingHelper.SanitizePathForLog(filePath.ToString()),
+                correlationId);
+            return;
+        }
+
+        _logger.LogError(
+            exception,
+            "Unhandled exception for {Method} {Path} (correlation id {CorrelationId})",
+            method,
+            path,
+            correlationId);
     }
 }

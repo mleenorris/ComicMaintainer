@@ -1,6 +1,8 @@
 using System.Text.Json;
 using ComicMaintainer.WebApi.Infrastructure;
 using ComicMaintainer.WebApi.Middleware;
+using Microsoft.AspNetCore.Connections;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
@@ -126,6 +128,161 @@ public class GlobalExceptionHandlerTests
 
         Assert.False(handled);
         Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task OutsideDevelopment_AnActionsFailureMessageReplacesTheGenericText()
+    {
+        var context = CreateContext();
+        SetFailingEndpoint(context, new FailureMessageAttribute("Error reading page"));
+        var handler = CreateHandler(context, Environments.Production);
+
+        var handled = await handler.TryHandleAsync(context, new InvalidOperationException("boom with /secret/path"), CancellationToken.None);
+
+        Assert.True(handled);
+        var root = await ReadProblemAsync(context);
+        Assert.Equal("Error reading page", root.GetProperty("detail").GetString());
+        Assert.Equal("Error reading page", root.GetProperty("error").GetString());
+        Assert.Equal("corr-123", root.GetProperty("correlationId").GetString());
+        Assert.DoesNotContain("/secret/path", root.GetRawText());
+    }
+
+    [Fact]
+    public async Task OutsideDevelopment_AnActionWithoutAFailureMessageGetsTheGenericText()
+    {
+        var context = CreateContext();
+        SetFailingEndpoint(context);
+        var handler = CreateHandler(context, Environments.Production);
+
+        await handler.TryHandleAsync(context, new InvalidOperationException("boom"), CancellationToken.None);
+
+        var root = await ReadProblemAsync(context);
+        var detail = root.GetProperty("detail").GetString();
+        Assert.Contains("could not be completed", detail);
+        Assert.Equal(detail, root.GetProperty("error").GetString());
+        Assert.DoesNotContain("boom", root.GetRawText());
+    }
+
+    [Fact]
+    public async Task InDevelopment_TheExceptionStillWinsOverAFailureMessage()
+    {
+        var context = CreateContext();
+        SetFailingEndpoint(context, new FailureMessageAttribute("Error reading page"));
+        var handler = CreateHandler(context, Environments.Development);
+
+        await handler.TryHandleAsync(context, new InvalidOperationException("boom in dev"), CancellationToken.None);
+
+        var root = await ReadProblemAsync(context);
+        Assert.Contains("boom in dev", root.GetProperty("detail").GetString());
+    }
+
+    public static TheoryData<Exception> ClientAbortExceptions => new()
+    {
+        new OperationCanceledException(),
+        new TaskCanceledException(),
+        new ConnectionResetException("reset by peer"),
+        new BadHttpRequestException("Unexpected end of request content."),
+    };
+
+    [Theory]
+    [MemberData(nameof(ClientAbortExceptions))]
+    public async Task ClientAbort_IsNeitherAnErrorNorAProblemDocument(Exception exception)
+    {
+        var context = CreateContext();
+        using var aborted = new CancellationTokenSource();
+        aborted.Cancel();
+        context.RequestAborted = aborted.Token;
+        var handler = CreateHandler(context, Environments.Production);
+
+        var handled = await handler.TryHandleAsync(context, exception, CancellationToken.None);
+
+        Assert.True(handled);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(0, context.Response.Body.Length);
+        _logger.Verify(
+            l => l.Log(LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ConnectionResetWithoutAnAbort_IsStillReportedAsAnError()
+    {
+        // The connection dropping to some other service is a server fault even
+        // though the exception type is the same one a client abort raises.
+        var context = CreateContext();
+        var exception = new ConnectionResetException("reset by upstream");
+        var handler = CreateHandler(context, Environments.Production);
+
+        var handled = await handler.TryHandleAsync(context, exception, CancellationToken.None);
+
+        Assert.True(handled);
+        Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+        VerifyErrorLogged(exception);
+    }
+
+    [Fact]
+    public async Task IOFailureWhileTheClientAborted_IsStillReportedAsAnError()
+    {
+        // Only abort-shaped exceptions are forgiven: a disk failure happening while
+        // the client also went away is still a real failure.
+        var context = CreateContext();
+        using var aborted = new CancellationTokenSource();
+        aborted.Cancel();
+        context.RequestAborted = aborted.Token;
+        var exception = new IOException("disk failure");
+        var handler = CreateHandler(context, Environments.Production);
+
+        var handled = await handler.TryHandleAsync(context, exception, CancellationToken.None);
+
+        Assert.True(handled);
+        Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+        VerifyErrorLogged(exception);
+    }
+
+    [Fact]
+    public async Task AFilePathInTheQuery_IsLoggedAsTheFileNameOnly()
+    {
+        var context = CreateContext();
+        context.Request.QueryString = new QueryString("?filePath=" + Uri.EscapeDataString("/library/Saga/Saga 001.cbz"));
+        var exception = new IOException("corrupt");
+        var handler = CreateHandler(context, Environments.Production);
+
+        await handler.TryHandleAsync(context, exception, CancellationToken.None);
+
+        _logger.Verify(
+            l => l.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString() == "Unhandled exception for POST /api/files/process on Saga 001.cbz (correlation id corr-123)"),
+                exception,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    private GlobalExceptionHandler CreateHandler(HttpContext context, string environmentName) =>
+        new(
+            context.RequestServices.GetRequiredService<IProblemDetailsService>(),
+            Environment(environmentName),
+            _logger.Object);
+
+    /// <summary>
+    /// Records the endpoint that failed the way the exception handling middleware
+    /// does: on the feature, because it has already cleared the request's endpoint.
+    /// </summary>
+    private static void SetFailingEndpoint(HttpContext context, params object[] metadata)
+    {
+        context.Features.Set<IExceptionHandlerFeature>(new ExceptionHandlerFeature
+        {
+            Error = new InvalidOperationException("recorded failure"),
+            Endpoint = new Endpoint(null, new EndpointMetadataCollection(metadata), "failing action"),
+        });
+    }
+
+    private static async Task<JsonElement> ReadProblemAsync(HttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        using var document = await JsonDocument.ParseAsync(context.Response.Body);
+        return document.RootElement.Clone();
     }
 
     private sealed class StartedResponseFeature : IHttpResponseFeature

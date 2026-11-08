@@ -9,68 +9,53 @@ public partial class FilesController
 {
     // RESTful endpoint: POST /api/files/{encodedFilePath}/rename
     [HttpPost("{encodedFilePath}/rename")]
+    [FailureMessage("Error renaming file")]
     public async Task<ActionResult> RenameFileByEncodedPath(string encodedFilePath, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var filePath = DecodeBase64UrlSafe(encodedFilePath);
-            if (string.IsNullOrEmpty(filePath))
-                return BadRequest("Invalid file path");
+        var filePath = DecodeBase64UrlSafe(encodedFilePath);
+        if (string.IsNullOrEmpty(filePath))
+            return BadRequest("Invalid file path");
 
-            if (!IsPathSafe(filePath))
-            {
-                _logger.LogWarning("Attempt to rename file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
-                return BadRequest("File path is outside the allowed directory");
-            }
-
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
-            
-            // Use the batch rename method with a single file
-            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, forceReprocess, cancellationToken);
-            
-            return Ok(new { message = "Rename job started", jobId });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        if (!IsPathSafe(filePath))
         {
-            var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming file with encoded path {EncodedPath}"), sanitizedEncodedPath);
-            return StatusCode(500, "Error renaming file");
+            _logger.LogWarning("Attempt to rename file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
+            return BadRequest("File path is outside the allowed directory");
         }
+
+        var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+        _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
+            
+        // Use the batch rename method with a single file
+        var jobId = await _processor.RenameFilesAsync(new[] { filePath }, forceReprocess, cancellationToken);
+            
+        return Ok(new { message = "Rename job started", jobId });
     }
 
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/rename-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
     [Obsolete("Use POST /api/files/{encodedFilePath}/rename instead. This alias is scheduled for removal in v3.0.")]
+    [FailureMessage("Error renaming file")]
     public async Task<ActionResult> RenameSingleFile([FromQuery] string filePath, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
-        try
+        if (!IsPathSafe(filePath))
         {
-            if (!IsPathSafe(filePath))
-            {
-                _logger.LogWarning("Attempt to rename file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
-                return BadRequest("File path is outside the allowed directory");
-            }
+            _logger.LogWarning("Attempt to rename file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
+            return BadRequest("File path is outside the allowed directory");
+        }
 
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
+        var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+        _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
             
-            // Use the batch rename method with a single file
-            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, forceReprocess, cancellationToken);
+        // Use the batch rename method with a single file
+        var jobId = await _processor.RenameFilesAsync(new[] { filePath }, forceReprocess, cancellationToken);
             
-            return Ok(new { jobId });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming file {FilePath}"), sanitizedPath);
-            return StatusCode(500, "Error renaming file");
-        }
+        return Ok(new { jobId });
     }
 
     // RESTful endpoint: DELETE /api/files/{encodedFilePath}
     [HttpDelete("~/api/files/{encodedFilePath}")]
+    [FailureMessage("Error deleting file")]
     public async Task<ActionResult> DeleteFileByEncodedPath(string encodedFilePath, CancellationToken cancellationToken = default)
     {
         try
@@ -103,14 +88,8 @@ public partial class FilesController
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
-            _logger.LogError(ex, "Error deleting file with encoded path {EncodedPath}", sanitizedEncodedPath);
-            
-            // Log to processing history
-            var filePath = DecodeBase64UrlSafe(encodedFilePath);
-            await LogHistoryAsync(filePath, "Delete", false, ex.Message);
-            
-            return StatusCode(500, "Error deleting file");
+            await RecordFailureAsync(DecodeBase64UrlSafe(encodedFilePath), "Delete", ex);
+            throw;
         }
     }
 
@@ -118,6 +97,7 @@ public partial class FilesController
     [HttpDelete("~/api/delete-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
     [Obsolete("Use DELETE /api/files/{encodedFilePath} instead. This alias is scheduled for removal in v3.0.")]
+    [FailureMessage("Error deleting file")]
     public async Task<ActionResult> DeleteFile([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {
         try
@@ -145,12 +125,8 @@ public partial class FilesController
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogError(ex, "Error deleting file");
-
-            // Log to processing history
-            await LogHistoryAsync(filePath, "Delete", false, ex.Message);
-
-            return StatusCode(500, "Error deleting file");
+            await RecordFailureAsync(filePath, "Delete", ex);
+            throw;
         }
     }
 

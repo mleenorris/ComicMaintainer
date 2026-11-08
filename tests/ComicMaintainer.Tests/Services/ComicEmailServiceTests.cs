@@ -611,6 +611,34 @@ public class ComicEmailServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SendTestEmailAsync_ReportsATransportFailureWithoutItsText()
+    {
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", null);
+        var failure = new MailKit.Security.AuthenticationException("535 secret server reply");
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+
+        var ex = await Assert.ThrowsAsync<EmailTestFailedException>(
+            () => _service.SendTestEmailAsync(TestEmailScopes.Everyone, device.Id));
+
+        Assert.Same(failure, ex.InnerException);
+        Assert.DoesNotContain("secret", ex.Message);
+        Assert.Contains("rejected the login", ex.Message);
+    }
+
+    [Fact]
+    public async Task SendTestEmailAsync_LeavesAnUnrecognisedFailureAlone()
+    {
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", null);
+        var failure = new InvalidOperationException("Email delivery is not configured.");
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.SendTestEmailAsync(TestEmailScopes.Everyone, device.Id));
+
+        Assert.Same(failure, ex);
+    }
+
+    [Fact]
     public async Task GetRecentDeliveriesAsync_ReturnsNewestFirst()
     {
         var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", null);

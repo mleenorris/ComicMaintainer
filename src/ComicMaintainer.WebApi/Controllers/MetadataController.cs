@@ -58,26 +58,19 @@ public class MetadataController : ControllerBase
 
     /// <summary>Queue an external metadata refresh for every series in the library.</summary>
     [HttpPost("refresh-all")]
+    [FailureMessage("Error queuing metadata refresh")]
     public async Task<ActionResult<object>> RefreshAll(CancellationToken cancellationToken)
     {
-        try
-        {
-            var library = await _library.GetSeriesAsync(perPage: -1, cancellationToken: cancellationToken);
-            var titles = library.Series
-                .Select(s => s.CanonicalTitle)
-                .Where(t => !string.IsNullOrWhiteSpace(t))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+        var library = await _library.GetSeriesAsync(perPage: -1, cancellationToken: cancellationToken);
+        var titles = library.Series
+            .Select(s => s.CanonicalTitle)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-            var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata refresh-all queued for {Count} series (job {JobId})"), titles.Count, jobId);
-            return Ok(new { jobId, totalSeries = titles.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh-all"));
-            return StatusCode(500, new { error = "Error queuing metadata refresh" });
-        }
+        var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
+        _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata refresh-all queued for {Count} series (job {JobId})"), titles.Count, jobId);
+        return Ok(new { jobId, totalSeries = titles.Count });
     }
 
     /// <summary>
@@ -88,39 +81,33 @@ public class MetadataController : ControllerBase
     /// slow) lookups run.
     /// </summary>
     [HttpPost("match-unmatched")]
+    [FailureMessage("Error queuing metadata match")]
     public async Task<ActionResult<object>> MatchUnmatched(CancellationToken cancellationToken)
     {
-        try
-        {
-            var library = await _library.GetSeriesAsync(
-                filter: "unmatched",
-                perPage: -1,
-                cancellationToken: cancellationToken);
-            var titles = library.Series
-                .Select(s => s.CanonicalTitle)
-                .Where(t => !string.IsNullOrWhiteSpace(t))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+        var library = await _library.GetSeriesAsync(
+            filter: "unmatched",
+            perPage: -1,
+            cancellationToken: cancellationToken);
+        var titles = library.Series
+            .Select(s => s.CanonicalTitle)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-            if (titles.Count == 0)
-            {
-                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata match-unmatched requested but no unmatched series were found"));
-                return Ok(new { jobId = default(Guid?), totalSeries = 0 });
-            }
-
-            var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata match-unmatched queued for {Count} series (job {JobId})"), titles.Count, jobId);
-            return Ok(new { jobId, totalSeries = titles.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        if (titles.Count == 0)
         {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata match-unmatched"));
-            return StatusCode(500, new { error = "Error queuing metadata match" });
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata match-unmatched requested but no unmatched series were found"));
+            return Ok(new { jobId = default(Guid?), totalSeries = 0 });
         }
+
+        var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
+        _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata match-unmatched queued for {Count} series (job {JobId})"), titles.Count, jobId);
+        return Ok(new { jobId, totalSeries = titles.Count });
     }
 
     /// <summary>Queue an external metadata refresh for a specific set of series titles.</summary>
     [HttpPost("refresh-selected")]
+    [FailureMessage("Error queuing metadata refresh")]
     public async Task<ActionResult<object>> RefreshSelected([FromBody] RefreshSelectedRequest request)
     {
         if (request?.Series == null || request.Series.Count == 0)
@@ -128,16 +115,8 @@ public class MetadataController : ControllerBase
             return BadRequest(new { error = "No series specified" });
         }
 
-        try
-        {
-            var jobId = await _refreshJobs.StartAsync(request.Series, RefreshJobCancellationToken);
-            return Ok(new { jobId, totalSeries = request.Series.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh-selected"));
-            return StatusCode(500, new { error = "Error queuing metadata refresh" });
-        }
+        var jobId = await _refreshJobs.StartAsync(request.Series, RefreshJobCancellationToken);
+        return Ok(new { jobId, totalSeries = request.Series.Count });
     }
 
     /// <summary>
@@ -152,6 +131,7 @@ public class MetadataController : ControllerBase
     /// </summary>
     [HttpPost("refresh/{seriesTitle}")]
     [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
+    [FailureMessage("Error refreshing metadata")]
     public async Task<ActionResult<object>> RefreshOne(
         string seriesTitle,
         [FromQuery] bool queue = false,
@@ -180,11 +160,6 @@ public class MetadataController : ControllerBase
                 LoggingHelper.SanitizeForLog(seriesTitle), LoggingHelper.SanitizeForLog(ex.Message));
             return ProvidersUnavailable(ex);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error refreshing metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, new { error = "Error refreshing metadata" });
-        }
     }
 
     /// <summary>
@@ -207,6 +182,7 @@ public class MetadataController : ControllerBase
     /// refresh requested from the UI.
     /// </summary>
     [HttpPost("refresh/folder")]
+    [FailureMessage("Error queuing metadata refresh")]
     public async Task<ActionResult<object>> RefreshFolder(
         [FromBody] RefreshFolderRequest request,
         CancellationToken cancellationToken)
@@ -216,35 +192,27 @@ public class MetadataController : ControllerBase
             return BadRequest(new { error = "Series id or titles required" });
         }
 
-        try
+        var titles = new List<string>();
+        if (!string.IsNullOrWhiteSpace(request.SeriesId))
         {
-            var titles = new List<string>();
-            if (!string.IsNullOrWhiteSpace(request.SeriesId))
-            {
-                var resolved = await _library.GetTitlesForSeriesIdAsync(request.SeriesId, cancellationToken: cancellationToken);
-                titles.AddRange(resolved);
-            }
-            if (request.Titles is { Count: > 0 })
-            {
-                titles = titles
-                    .Concat(request.Titles.Where(title => !string.IsNullOrWhiteSpace(title)))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-            }
-
-            if (titles.Count == 0)
-            {
-                return NotFound(new { error = "Series not found" });
-            }
-
-            var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
-            return Accepted(new { jobId, totalSeries = titles.Count, titles });
+            var resolved = await _library.GetTitlesForSeriesIdAsync(request.SeriesId, cancellationToken: cancellationToken);
+            titles.AddRange(resolved);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        if (request.Titles is { Count: > 0 })
         {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh for folder"));
-            return StatusCode(500, new { error = "Error queuing metadata refresh" });
+            titles = titles
+                .Concat(request.Titles.Where(title => !string.IsNullOrWhiteSpace(title)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
+
+        if (titles.Count == 0)
+        {
+            return NotFound(new { error = "Series not found" });
+        }
+
+        var jobId = await _refreshJobs.StartAsync(titles, RefreshJobCancellationToken);
+        return Accepted(new { jobId, totalSeries = titles.Count, titles });
     }
 
     /// <summary>Get the status of a refresh job.</summary>
@@ -261,27 +229,19 @@ public class MetadataController : ControllerBase
     /// indicator.
     /// </summary>
     [HttpGet("providers")]
+    [FailureMessage("Error retrieving provider health")]
     public async Task<ActionResult<object>> GetProviders(CancellationToken cancellationToken)
     {
-        try
+        var providers = new List<ProviderHealth>();
+        if (_externalMetadata is CompositeExternalSeriesMetadataService composite)
         {
-            var providers = new List<ProviderHealth>();
-            if (_externalMetadata is CompositeExternalSeriesMetadataService composite)
-            {
-                providers.AddRange(await composite.CheckAllHealthAsync(cancellationToken));
-            }
-            else
-            {
-                providers.Add(await _externalMetadata.CheckHealthAsync(cancellationToken));
-            }
-            return Ok(new { providers = MergeAniListProviders(providers) });
+            providers.AddRange(await composite.CheckAllHealthAsync(cancellationToken));
         }
-        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a health error.
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        else
         {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error retrieving provider health"));
-            return StatusCode(500, new { error = "Error retrieving provider health" });
+            providers.Add(await _externalMetadata.CheckHealthAsync(cancellationToken));
         }
+        return Ok(new { providers = MergeAniListProviders(providers) });
     }
 
     /// <summary>
@@ -368,6 +328,7 @@ public class MetadataController : ControllerBase
 
     /// <summary>Search external providers for series candidates by alternative names.</summary>
     [HttpGet("search")]
+    [FailureMessage("Error searching external metadata")]
     public async Task<ActionResult<object>> Search([FromQuery] string query, [FromQuery] int limit = 10, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -422,12 +383,6 @@ public class MetadataController : ControllerBase
                 LoggingHelper.SanitizeForLog(query), LoggingHelper.SanitizeForLog(ex.Message));
             return ProvidersUnavailable(ex);
         }
-        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a search error.
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error searching external metadata for {Query}"), LoggingHelper.SanitizeForLog(query));
-            return StatusCode(500, new { error = "Error searching external metadata" });
-        }
     }
 
     /// <summary>Get the cached record for a series (canonical title, aliases, user aliases).</summary>
@@ -454,6 +409,7 @@ public class MetadataController : ControllerBase
 
     /// <summary>Replace the user-managed alias list for a series.</summary>
     [HttpPut("series/{seriesTitle}/aliases")]
+    [FailureMessage("Error updating aliases")]
     public async Task<ActionResult<SeriesMetadataCacheRecord>> SetAliases(
         string seriesTitle,
         [FromBody] SetAliasesRequest request,
@@ -464,19 +420,11 @@ public class MetadataController : ControllerBase
             return BadRequest(new { error = "Series title is required" });
         }
 
-        try
-        {
-            var record = await _cache.SetUserAliasesAsync(
-                seriesTitle,
-                request?.Aliases ?? new List<string>(),
-                cancellationToken);
-            return Ok(record);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error updating aliases for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, new { error = "Error updating aliases" });
-        }
+        var record = await _cache.SetUserAliasesAsync(
+            seriesTitle,
+            request?.Aliases ?? new List<string>(),
+            cancellationToken);
+        return Ok(record);
     }
 
     /// <summary>Remove a single user alias from a series.</summary>
@@ -510,6 +458,7 @@ public class MetadataController : ControllerBase
     /// Preserves any user-overridden canonical title and the user alias list.
     /// </summary>
     [HttpPost("series/{seriesTitle}/apply-match")]
+    [FailureMessage("Error applying match")]
     public async Task<ActionResult<SeriesMetadataCacheRecord>> ApplyMatch(
         string seriesTitle,
         [FromBody] ApplyMatchRequest request,
@@ -578,11 +527,6 @@ public class MetadataController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error applying match for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, new { error = "Error applying match" });
-        }
     }
 
     /// <summary>
@@ -592,6 +536,7 @@ public class MetadataController : ControllerBase
     /// images are preserved.
     /// </summary>
     [HttpDelete("series/{seriesTitle}/external")]
+    [FailureMessage("Error clearing external metadata")]
     public async Task<ActionResult<SeriesMetadataCacheRecord>> ClearExternal(
         string seriesTitle,
         CancellationToken cancellationToken)
@@ -601,24 +546,16 @@ public class MetadataController : ControllerBase
             return BadRequest(new { error = "Series title is required" });
         }
 
-        try
+        // Resolve the owning record by title first so a series referenced
+        // by its matched canonical title (which differs from the stored
+        // key after a manual match) still targets the right record.
+        var resolved = await _cache.GetByTitleAsync(seriesTitle, cancellationToken);
+        if (resolved is null)
         {
-            // Resolve the owning record by title first so a series referenced
-            // by its matched canonical title (which differs from the stored
-            // key after a manual match) still targets the right record.
-            var resolved = await _cache.GetByTitleAsync(seriesTitle, cancellationToken);
-            if (resolved is null)
-            {
-                return NotFound();
-            }
-            var record = await _cache.ClearExternalMetadataAsync(resolved.NormalizedKey, cancellationToken);
-            return record is null ? NotFound() : Ok(record);
+            return NotFound();
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error clearing external metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, new { error = "Error clearing external metadata" });
-        }
+        var record = await _cache.ClearExternalMetadataAsync(resolved.NormalizedKey, cancellationToken);
+        return record is null ? NotFound() : Ok(record);
     }
 
     /// <summary>
@@ -627,6 +564,7 @@ public class MetadataController : ControllerBase
     /// <c>zh</c>.
     /// </summary>
     [HttpPut("series/{seriesTitle}/preferred-language")]
+    [FailureMessage("Error setting preferred language")]
     public async Task<ActionResult<SeriesMetadataCacheRecord>> SetPreferredLanguage(
         string seriesTitle,
         [FromBody] PreferredLanguageRequest? request,
@@ -675,11 +613,6 @@ public class MetadataController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting preferred language for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, new { error = "Error setting preferred language" });
-        }
     }
 
     public class PreferredLanguageRequest
@@ -706,6 +639,7 @@ public class MetadataController : ControllerBase
     /// </para>
     /// </summary>
     [HttpPut("series/{seriesTitle}/name")]
+    [FailureMessage("Error setting series name")]
     public async Task<ActionResult<SeriesMetadataCacheRecord>> SetSeriesName(
         string seriesTitle,
         [FromBody] SeriesNameRequest? request,
@@ -766,11 +700,6 @@ public class MetadataController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(new { error = ex.Message });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting series name for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, new { error = "Error setting series name" });
         }
     }
 

@@ -403,6 +403,33 @@ public class SmtpComicEmailSenderTests : IDisposable
         Assert.Equal(expected, SmtpComicEmailSender.IsTransient(exception, CancellationToken.None));
     }
 
+    public static TheoryData<Exception, string?> FailureDescriptionCases() => new()
+    {
+        { new TransientEmailSendException("x", new TimeoutException("secret")), "The mail server did not respond in time." },
+        { new TransientEmailSendException("x", new OperationCanceledException("secret")), "The mail server did not respond in time." },
+        { new TransientEmailSendException("x", new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.UnexpectedStatusCode, (MailKit.Net.Smtp.SmtpStatusCode)451, "secret reply")), "The mail server temporarily refused the message (SMTP 451). Try again later." },
+        { new TransientEmailSendException("x", new AuthenticationException("secret", new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.UnexpectedStatusCode, (MailKit.Net.Smtp.SmtpStatusCode)454, "secret reply"))), "The mail server temporarily refused the login (SMTP 454). Try again later." },
+        { new TransientEmailSendException("x", new SocketException((int)SocketError.ConnectionRefused)), "Could not reach the mail server. Check the SMTP host and port in Settings." },
+        { new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.RecipientNotAccepted, (MailKit.Net.Smtp.SmtpStatusCode)550, "secret reply"), "The mail server refused the message (SMTP 550)." },
+        { new AuthenticationException("secret"), "The mail server rejected the login. Check the SMTP username and password in Settings." },
+        { new SslHandshakeException("secret"), "A secure connection to the mail server could not be established. Check the SMTP port and TLS settings." },
+        { new System.Security.Authentication.AuthenticationException("secret"), "A secure connection to the mail server could not be established. Check the SMTP port and TLS settings." },
+        { new NotSupportedException("secret"), "The mail server does not offer a secure connection. Check the SMTP port and TLS settings." },
+        { new MimeKit.ParseException("secret", 0, 0), "The device's email address is not valid." },
+        { new InvalidOperationException("secret"), null },
+        { new OperationCanceledException("secret"), null },
+    };
+
+    [Theory]
+    [MemberData(nameof(FailureDescriptionCases))]
+    public void DescribeFailureForUser_NamesTheFailureWithoutItsText(Exception exception, string? expected)
+    {
+        var description = SmtpComicEmailSender.DescribeFailureForUser(exception);
+
+        Assert.Equal(expected, description);
+        Assert.DoesNotContain("secret", description ?? string.Empty);
+    }
+
     [Fact]
     public void IsTransient_DoesNotRetryACancellationTheCallerAskedFor()
     {

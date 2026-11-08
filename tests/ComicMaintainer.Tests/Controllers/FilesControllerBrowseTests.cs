@@ -114,31 +114,27 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetSeries_LibraryThrows_Returns500()
+    public async Task GetSeries_LibraryThrows_Escapes()
     {
         _seriesLibrary
             .Setup(s => s.GetSeriesSummariesAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(),
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("snapshot missing"));
 
-        var result = await _controller.GetSeries();
-
-        AssertStatus(result.Result, 500, "Error retrieving series library");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeries());
     }
 
     // ------------------------------------------------------------------ GetFolders
 
     [Fact]
-    public async Task GetFolders_StoreThrows_Returns500()
+    public async Task GetFolders_StoreThrows_Escapes()
     {
         _fileStore
             .Setup(f => f.GetFolderSummariesAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db locked"));
 
-        var result = await _controller.GetFolders();
-
-        AssertStatus(result.Result, 500, "Error retrieving folders");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetFolders());
     }
 
     // -------------------------------------------------------------- GetFolderFiles
@@ -173,16 +169,14 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetFolderFiles_StoreThrows_Returns500()
+    public async Task GetFolderFiles_StoreThrows_Escapes()
     {
         _fileStore
             .Setup(f => f.GetFolderFilesAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await _controller.GetFolderFiles("Zm9v");
-
-        AssertStatus(result.Result, 500, "Error retrieving folder files");
+        await Assert.ThrowsAsync<IOException>(() => _controller.GetFolderFiles("Zm9v"));
     }
 
     // --------------------------------------------------------- GetRootFolderFiles
@@ -203,30 +197,26 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetRootFolderFiles_StoreThrows_Returns500()
+    public async Task GetRootFolderFiles_StoreThrows_Escapes()
     {
         _fileStore
             .Setup(f => f.GetFolderFilesAsync("", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await _controller.GetRootFolderFiles();
-
-        AssertStatus(result.Result, 500, "Error retrieving folder files");
+        await Assert.ThrowsAsync<IOException>(() => _controller.GetRootFolderFiles());
     }
 
     // ------------------------------------------------------------- GetSeriesIssues
 
     [Fact]
-    public async Task GetSeriesIssues_LibraryThrows_Returns500()
+    public async Task GetSeriesIssues_LibraryThrows_Escapes()
     {
         _seriesLibrary
             .Setup(s => s.GetSeriesIssuesAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("snapshot missing"));
 
-        var result = await _controller.GetSeriesIssues("saga");
-
-        AssertStatus(result.Result, 500, "Error retrieving series issues");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeriesIssues("saga"));
     }
 
     // ------------------------------------------------------------ GetSeriesFolders
@@ -245,15 +235,13 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetSeriesFolders_LibraryThrows_Returns500()
+    public async Task GetSeriesFolders_LibraryThrows_Escapes()
     {
         _seriesLibrary
             .Setup(s => s.GetFoldersForSeriesIdAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("snapshot missing"));
 
-        var result = await _controller.GetSeriesFolders("saga");
-
-        AssertStatus(result.Result, 500, "Error retrieving series folders");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeriesFolders("saga"));
     }
 
     [Fact]
@@ -338,14 +326,12 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetFileCounts_CombinableCountFailsWithUnexpectedError_Returns500()
+    public async Task GetFileCounts_CombinableCountFailsWithUnexpectedError_Escapes()
     {
         _fileStore.Setup(f => f.GetFileCountsAsync(It.IsAny<CancellationToken>())).ReturnsAsync((10, 6, 4, 1));
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new NotSupportedException("nope"));
 
-        var result = await _controller.GetFileCounts();
-
-        AssertStatus(result.Result, 500, "Error retrieving file counts");
+        await Assert.ThrowsAsync<NotSupportedException>(() => _controller.GetFileCounts());
     }
 
     [Fact]
@@ -373,13 +359,11 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetFileCounts_CountQueryThrows_Returns500()
+    public async Task GetFileCounts_CountQueryThrows_Escapes()
     {
         _fileStore.Setup(f => f.GetFileCountsAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new NotSupportedException("nope"));
 
-        var result = await _controller.GetFileCounts();
-
-        AssertStatus(result.Result, 500, "Error retrieving file counts");
+        await Assert.ThrowsAsync<NotSupportedException>(() => _controller.GetFileCounts());
     }
 
     // ------------------------------------------------------------------- MapFilter

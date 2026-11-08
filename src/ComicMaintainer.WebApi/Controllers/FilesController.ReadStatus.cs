@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Authorization;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -12,6 +13,7 @@ public partial class FilesController
     /// </summary>
     [HttpPost("~/api/files/{encodedFilePath}/read")]
     [PerUserWriteOperation]
+    [FailureMessage("Error updating read status")]
     public async Task<ActionResult> MarkFileRead(string encodedFilePath, [FromBody] ReadStatusRequest request, CancellationToken cancellationToken = default)
     {
         try
@@ -33,12 +35,6 @@ public partial class FilesController
         {
             return StatusCode(499, new { error = "Read status update was cancelled" });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
-            _logger.LogError(ex, "Error marking file read status for encoded path {EncodedPath}", sanitizedEncodedPath);
-            return StatusCode(500, "Error updating read status");
-        }
     }
 
     /// <summary>
@@ -46,6 +42,7 @@ public partial class FilesController
     /// </summary>
     [HttpPost("~/api/files/read-batch")]
     [PerUserWriteOperation]
+    [FailureMessage("Error updating read status")]
     public async Task<ActionResult> MarkFilesReadBatch([FromBody] ReadBatchRequest request, CancellationToken cancellationToken = default)
     {
         try
@@ -70,11 +67,6 @@ public partial class FilesController
         {
             return StatusCode(499, new { error = "Read status update was cancelled" });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error marking files read status");
-            return StatusCode(500, "Error updating read status");
-        }
     }
 
     /// <summary>
@@ -87,6 +79,7 @@ public partial class FilesController
     /// </summary>
     [HttpPost("~/api/files/read-all")]
     [PerUserWriteOperation]
+    [FailureMessage("Error updating read status")]
     public async Task<ActionResult> MarkScopeRead([FromBody] ReadScopeRequest request, CancellationToken cancellationToken = default)
     {
         try
@@ -118,11 +111,6 @@ public partial class FilesController
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return StatusCode(499, new { error = "Read status update was cancelled" });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error marking {Scope} read status", LoggingHelper.SanitizeForLog(request.Scope));
-            return StatusCode(500, "Error updating read status");
         }
     }
 

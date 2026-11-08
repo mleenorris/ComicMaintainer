@@ -1433,12 +1433,19 @@ public class ComicEmailService : IComicEmailService
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var device = await FindDeviceAsync(db, scope, deviceId, cancellationToken);
 
-        await _sender.SendAsync(
-            new ComicEmailMessage(
-                device.EmailAddress,
-                "ComicMaintainer test email",
-                "This is a test message from ComicMaintainer. Your email delivery settings are working."),
-            cancellationToken);
+        try
+        {
+            await _sender.SendAsync(
+                new ComicEmailMessage(
+                    device.EmailAddress,
+                    "ComicMaintainer test email",
+                    "This is a test message from ComicMaintainer. Your email delivery settings are working."),
+                cancellationToken);
+        }
+        catch (Exception ex) when (SmtpComicEmailSender.DescribeFailureForUser(ex) is { } reason)
+        {
+            throw new EmailTestFailedException(reason, ex);
+        }
     }
 
     public async Task<IReadOnlyList<ComicEmailDeliveryDto>> GetRecentDeliveriesAsync(

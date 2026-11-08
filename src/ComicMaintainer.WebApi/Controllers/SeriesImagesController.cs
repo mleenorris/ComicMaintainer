@@ -194,6 +194,7 @@ public class SeriesImagesController : ControllerBase
     /// </summary>
     [HttpPut("{seriesTitle}")]
     [RequestSizeLimit(MaxUploadBytes)]
+    [FailureMessage("Error saving series image")]
     public async Task<IActionResult> Upload(
         string seriesTitle,
         IFormFile? file,
@@ -228,12 +229,6 @@ public class SeriesImagesController : ControllerBase
             // a clean 400 to the UI rather than a 500.
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error uploading series image for {SeriesTitle}"),
-                LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, "Error saving series image");
-        }
     }
 
     /// <summary>
@@ -243,6 +238,7 @@ public class SeriesImagesController : ControllerBase
     /// the image to apply via <see cref="ApplyFromProvider"/>.
     /// </summary>
     [HttpGet("candidates")]
+    [FailureMessage("Error searching provider image candidates")]
     public async Task<ActionResult<object>> SearchCandidates(
         [FromQuery] string query,
         [FromQuery] int limit = 10,
@@ -280,13 +276,6 @@ public class SeriesImagesController : ControllerBase
                 LoggingHelper.SanitizeForLog(query), LoggingHelper.SanitizeForLog(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, ex.Message);
         }
-        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a search error.
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error searching provider image candidates for {Query}"),
-                LoggingHelper.SanitizeForLog(query));
-            return StatusCode(500, "Error searching provider image candidates");
-        }
     }
 
     /// <summary>
@@ -297,6 +286,7 @@ public class SeriesImagesController : ControllerBase
     /// size cap), so unknown / hostile URLs are rejected with a 400.
     /// </summary>
     [HttpPost("{seriesTitle}/from-provider")]
+    [FailureMessage("Error applying provider image")]
     public async Task<IActionResult> ApplyFromProvider(
         string seriesTitle,
         [FromBody] ApplyFromProviderRequest? request,
@@ -333,13 +323,6 @@ public class SeriesImagesController : ControllerBase
             }
             return BadRequest(new { error = ex.Message });
         }
-        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't an apply error.
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error applying provider image for {SeriesTitle}"),
-                LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, "Error applying provider image");
-        }
     }
 
     /// <summary>
@@ -353,38 +336,31 @@ public class SeriesImagesController : ControllerBase
     /// job id immediately; progress arrives via <c>job_updated</c> SSE events.
     /// </summary>
     [HttpPost("apply-current/all")]
+    [FailureMessage("Error updating series covers")]
     public async Task<ActionResult<object>> ApplyCurrentToAll(CancellationToken cancellationToken)
     {
-        try
-        {
-            var library = await _library.GetSeriesAsync(perPage: -1, cancellationToken: cancellationToken);
-            var consideredTitles = library.Series
-                .Select(s => string.IsNullOrWhiteSpace(s.CanonicalTitle) ? s.Title : s.CanonicalTitle)
-                .Where(t => !string.IsNullOrWhiteSpace(t))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+        var library = await _library.GetSeriesAsync(perPage: -1, cancellationToken: cancellationToken);
+        var consideredTitles = library.Series
+            .Select(s => string.IsNullOrWhiteSpace(s.CanonicalTitle) ? s.Title : s.CanonicalTitle)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-            // Only series that actually have a cached image to apply become job
-            // items, so the progress bar reflects real embedding work and is
-            // not dominated by no-op "skips" for series without a cover.
-            var embeddableTitles = library.Series
-                .Where(s => s.HasExternalImage)
-                .Select(s => string.IsNullOrWhiteSpace(s.CanonicalTitle) ? s.Title : s.CanonicalTitle)
-                .Where(t => !string.IsNullOrWhiteSpace(t))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+        // Only series that actually have a cached image to apply become job
+        // items, so the progress bar reflects real embedding work and is
+        // not dominated by no-op "skips" for series without a cover.
+        var embeddableTitles = library.Series
+            .Where(s => s.HasExternalImage)
+            .Select(s => string.IsNullOrWhiteSpace(s.CanonicalTitle) ? s.Title : s.CanonicalTitle)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-            return await QueueCoverReapplyJobAsync(
-                "ApplySeriesCoversAllJob",
-                embeddableTitles,
-                consideredTitles.Count,
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error re-applying cached series images for all series"));
-            return StatusCode(500, "Error updating series covers");
-        }
+        return await QueueCoverReapplyJobAsync(
+            "ApplySeriesCoversAllJob",
+            embeddableTitles,
+            consideredTitles.Count,
+            cancellationToken);
     }
 
     /// <summary>
@@ -394,6 +370,7 @@ public class SeriesImagesController : ControllerBase
     /// job so the UI can show live per-series embedding progress.
     /// </summary>
     [HttpPost("apply-current/selected")]
+    [FailureMessage("Error updating series covers")]
     public async Task<ActionResult<object>> ApplyCurrentToSelected(
         [FromBody] ApplyCurrentSelectedRequest? request,
         CancellationToken cancellationToken)
@@ -407,27 +384,19 @@ public class SeriesImagesController : ControllerBase
             return BadRequest("No series specified");
         }
 
-        try
-        {
-            // Restrict the job to the requested series that actually have a
-            // cached image, using the library's image flag as a cheap filter so
-            // the progress bar tracks real embedding work.
-            var library = await _library.GetSeriesAsync(perPage: -1, cancellationToken: cancellationToken);
-            var embeddableTitles = titles
-                .Where(title => SeriesHasCachedImage(library.Series, title))
-                .ToList();
+        // Restrict the job to the requested series that actually have a
+        // cached image, using the library's image flag as a cheap filter so
+        // the progress bar tracks real embedding work.
+        var library = await _library.GetSeriesAsync(perPage: -1, cancellationToken: cancellationToken);
+        var embeddableTitles = titles
+            .Where(title => SeriesHasCachedImage(library.Series, title))
+            .ToList();
 
-            return await QueueCoverReapplyJobAsync(
-                "ApplySeriesCoversSelectedJob",
-                embeddableTitles,
-                titles.Count,
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error re-applying cached series images for selected series"));
-            return StatusCode(500, "Error updating series covers");
-        }
+        return await QueueCoverReapplyJobAsync(
+            "ApplySeriesCoversSelectedJob",
+            embeddableTitles,
+            titles.Count,
+            cancellationToken);
     }
 
     /// <summary>
@@ -494,6 +463,7 @@ public class SeriesImagesController : ControllerBase
     /// metadata refresh is then free to re-download an external image.
     /// </summary>
     [HttpDelete("{normalizedKey}")]
+    [FailureMessage("Error clearing series image")]
     public async Task<IActionResult> Clear(string normalizedKey, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(normalizedKey))
@@ -501,17 +471,8 @@ public class SeriesImagesController : ControllerBase
             return BadRequest("Series key is required");
         }
 
-        try
-        {
-            var record = await _cache.ClearImageAsync(normalizedKey, cancellationToken);
-            return record is null ? NotFound() : Ok(record);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error clearing series image for {Key}"),
-                LoggingHelper.SanitizeForLog(normalizedKey));
-            return StatusCode(500, "Error clearing series image");
-        }
+        var record = await _cache.ClearImageAsync(normalizedKey, cancellationToken);
+        return record is null ? NotFound() : Ok(record);
     }
 
     public class ApplyFromProviderRequest

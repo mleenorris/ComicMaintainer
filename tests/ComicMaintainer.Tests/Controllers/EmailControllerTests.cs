@@ -316,21 +316,35 @@ public sealed class EmailControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task SendTestEmail_DeliveryFailureIsBadGatewayAndLogged()
+    public async Task SendTestEmail_DeliveryFailureIsBadGatewayWithTheSafeReason()
     {
-        var failure = new IOException("Connection refused");
+        var failure = new EmailTestFailedException("The mail server rejected the login.", new IOException("535 secret reply"));
         _email.Setup(e => e.SendTestEmailAsync(It.IsAny<EmailAccessScope>(), 4, It.IsAny<CancellationToken>())).ThrowsAsync(failure);
 
         var result = Assert.IsType<ObjectResult>(await CreateController().SendTestEmail(4, CancellationToken.None));
 
         Assert.Equal(502, result.StatusCode);
-        Assert.Equal("Failed to send test email: Connection refused", ToJson(result.Value).GetProperty("error").GetString());
+        var error = ToJson(result.Value).GetProperty("error").GetString();
+        Assert.Equal("The mail server rejected the login.", error);
+        Assert.DoesNotContain("secret", error);
+        // An expected failure (wrong settings, server down) is a warning: an Error would file a bug report.
         _logger.Verify(l => l.Log(
-            LogLevel.Error,
+            LogLevel.Warning,
             It.IsAny<EventId>(),
             It.IsAny<It.IsAnyType>(),
             failure,
             (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SendTestEmail_UnexpectedFailureEscapes()
+    {
+        var failure = new ApplicationException("connection string with a password");
+        _email.Setup(e => e.SendTestEmailAsync(It.IsAny<EmailAccessScope>(), 4, It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+
+        var thrown = await Assert.ThrowsAsync<ApplicationException>(() => CreateController().SendTestEmail(4, CancellationToken.None));
+
+        Assert.Same(failure, thrown);
     }
 
     // ─── Sending files ──────────────────────────────────────────────────────
@@ -861,17 +875,13 @@ public sealed class EmailControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadCondensedBook_UnexpectedBuildFailureIsServerErrorAndLogged()
+    public async Task DownloadCondensedBook_UnexpectedBuildFailureEscapes()
     {
         SetupCreateBookThrows(new IOException("Disk full"));
 
-        var result = Assert.IsType<ObjectResult>(await CreateController().DownloadCondensedBook(
+        await Assert.ThrowsAsync<IOException>(() => CreateController().DownloadCondensedBook(
             new EmailController.CondenseRequest { Files = new List<string> { "/lib/a.cbz" }, CondenseMode = "all" },
             CancellationToken.None));
-
-        Assert.Equal(500, result.StatusCode);
-        Assert.Equal("Failed to build the condensed book: Disk full", ToJson(result.Value).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, Times.Once());
     }
 
     [Fact]

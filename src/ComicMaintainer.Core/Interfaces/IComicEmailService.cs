@@ -145,7 +145,11 @@ public interface IComicEmailService
     /// </summary>
     Task<int> ResumePendingDeliveriesAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Sends a short test email to a device so the user can verify SMTP settings.</summary>
+    /// <summary>
+    /// Sends a short test email to a device so the user can verify SMTP settings.
+    /// Throws <see cref="EmailTestFailedException"/> when the mail server could not be
+    /// reached or refused the login or the message.
+    /// </summary>
     Task SendTestEmailAsync(EmailAccessScope scope, int deviceId, CancellationToken cancellationToken = default);
 
     /// <summary>Most recent deliveries, newest first.</summary>

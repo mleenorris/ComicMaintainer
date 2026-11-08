@@ -40,6 +40,21 @@ public sealed class TransientEmailSendException : Exception
     }
 }
 
+/// <summary>
+/// Raised by <see cref="IComicEmailService.SendTestEmailAsync"/> when the test
+/// message could not be delivered: the mail server was unreachable or refused
+/// the login or the message. Its message is a fixed description of the failure
+/// and is safe to return to the client, unlike the transport's own exception
+/// text, which can carry host names and the server's wording.
+/// </summary>
+public sealed class EmailTestFailedException : Exception
+{
+    public EmailTestFailedException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
 /// <summary>An outgoing email with at most one comic attachment.</summary>
 public record ComicEmailMessage(
     string ToAddress,

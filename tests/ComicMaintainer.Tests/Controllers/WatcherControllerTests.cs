@@ -89,17 +89,13 @@ public class WatcherControllerTests
     }
 
     [Fact]
-    public void GetStatus_WhenExceptionThrown_ReturnsInternalServerError()
+    public void GetStatus_WhenExceptionThrown_Escapes()
     {
         // Arrange
         _mockWatcher.Setup(w => w.IsRunning).Throws(new InvalidOperationException("Test error"));
 
-        // Act
-        var result = _controller.GetStatus();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        Assert.Throws<InvalidOperationException>(() => _controller.GetStatus());
     }
 
     [Fact]
@@ -211,17 +207,13 @@ public class WatcherControllerTests
     }
 
     [Fact]
-    public void GetWatcher_WhenIsRunningThrows_ReturnsInternalServerError()
+    public void GetWatcher_WhenIsRunningThrows_Escapes()
     {
         // Arrange
         _mockWatcher.Setup(w => w.IsRunning).Throws(new InvalidOperationException("Test error"));
 
-        // Act
-        var result = _controller.GetWatcher();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        Assert.Throws<InvalidOperationException>(() => _controller.GetWatcher());
     }
 
     [Fact]

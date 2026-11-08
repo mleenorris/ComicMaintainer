@@ -108,7 +108,7 @@ public class ServiceWorkerControllerTests : IDisposable
     }
 
     [Fact]
-    public void GetServiceWorker_WhenExceptionOccurs_ReturnsServerError()
+    public void GetServiceWorker_WhenExceptionOccurs_Escapes()
     {
         // Arrange - Set WebRootPath to null to cause an exception
         _mockEnvironment.Setup(e => e.WebRootPath).Returns(default(string)!);
@@ -118,12 +118,8 @@ public class ServiceWorkerControllerTests : IDisposable
             _mockLogger.Object,
             _mockAppSettings.Object);
 
-        // Act
-        var result = controller.GetServiceWorker();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<StatusCodeResult>(result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        Assert.Throws<InvalidOperationException>(() => controller.GetServiceWorker());
     }
 
     [Fact]
@@ -213,7 +209,7 @@ public class ServiceWorkerControllerTests : IDisposable
     }
 
     [Fact]
-    public void GetManifest_WhenExceptionOccurs_ReturnsServerError()
+    public void GetManifest_WhenExceptionOccurs_Escapes()
     {
         // Arrange - Set WebRootPath to null to cause an exception
         _mockEnvironment.Setup(e => e.WebRootPath).Returns(default(string)!);
@@ -223,12 +219,8 @@ public class ServiceWorkerControllerTests : IDisposable
             _mockLogger.Object,
             _mockAppSettings.Object);
 
-        // Act
-        var result = controller.GetManifest();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<StatusCodeResult>(result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        Assert.Throws<InvalidOperationException>(() => controller.GetManifest());
     }
 
     [Fact]

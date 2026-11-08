@@ -198,6 +198,35 @@ public class SmtpComicEmailSender : IComicEmailSender
         _ => false,
     };
 
+    /// <summary>
+    /// A fixed description of a failed send for the person testing their settings, or
+    /// <c>null</c> when the exception is not a recognised transport failure. It is built
+    /// from the failure's type and SMTP status rather than its message, which can carry
+    /// host names, addresses and the server's own wording.
+    /// </summary>
+    internal static string? DescribeFailureForUser(Exception exception) => exception switch
+    {
+        TransientEmailSendException { InnerException: OperationCanceledException or TimeoutException } =>
+            "The mail server did not respond in time.",
+        TransientEmailSendException { InnerException: SmtpCommandException command } =>
+            $"The mail server temporarily refused the message (SMTP {(int)command.StatusCode}). Try again later.",
+        TransientEmailSendException { InnerException: AuthenticationException { InnerException: SmtpCommandException command } } =>
+            $"The mail server temporarily refused the login (SMTP {(int)command.StatusCode}). Try again later.",
+        TransientEmailSendException =>
+            "Could not reach the mail server. Check the SMTP host and port in Settings.",
+        SmtpCommandException command =>
+            $"The mail server refused the message (SMTP {(int)command.StatusCode}).",
+        AuthenticationException =>
+            "The mail server rejected the login. Check the SMTP username and password in Settings.",
+        SslHandshakeException or System.Security.Authentication.AuthenticationException =>
+            "A secure connection to the mail server could not be established. Check the SMTP port and TLS settings.",
+        NotSupportedException =>
+            "The mail server does not offer a secure connection. Check the SMTP port and TLS settings.",
+        ParseException =>
+            "The device's email address is not valid.",
+        _ => null,
+    };
+
     private static bool IsTemporaryReply(SmtpCommandException command) =>
         (int)command.StatusCode is >= 400 and < 500;
 

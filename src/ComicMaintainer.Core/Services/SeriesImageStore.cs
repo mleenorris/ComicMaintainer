@@ -451,37 +451,22 @@ public class SeriesImageStore : ISeriesImageStore
     private static async Task EnsurePublicHostAsync(Uri uri, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        IPAddress[] addresses;
-        if (IPAddress.TryParse(uri.Host.Trim('[', ']'), out var literal))
+        try
         {
-            addresses = [literal];
+            await PublicNetworkGuard.ResolvePublicAddressesAsync(uri.Host, resolver: null, cancellationToken);
         }
-        else
-        {
-            try
-            {
-                addresses = await Dns.GetHostAddressesAsync(uri.Host, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                // The request was cancelled or timed out; the host isn't unresolvable.
-                throw;
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                throw new InvalidOperationException($"Cannot resolve image host: {ex.Message}", ex);
-            }
-        }
-
-        if (addresses.Length == 0)
-        {
-            throw new InvalidOperationException("Image host did not resolve to any address");
-        }
-
-        if (Array.Exists(addresses, PublicNetworkGuard.IsBlockedAddress))
+        catch (NonPublicAddressException ex)
         {
             throw new InvalidOperationException(
-                $"Image host '{LoggingHelper.SanitizeForLog(uri.Host)}' {PublicNetworkGuard.NonPublicAddressMessage}");
+                $"Image host '{LoggingHelper.SanitizeForLog(uri.Host)}' {PublicNetworkGuard.NonPublicAddressMessage}", ex);
+        }
+        catch (HttpRequestException ex) when (ex.InnerException is not null)
+        {
+            throw new InvalidOperationException($"Cannot resolve image host: {ex.InnerException.Message}", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new InvalidOperationException("Image host did not resolve to any address", ex);
         }
     }
 }

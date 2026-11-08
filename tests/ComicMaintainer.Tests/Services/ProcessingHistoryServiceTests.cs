@@ -85,7 +85,7 @@ public class ProcessingHistoryServiceTests
             x => x.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("cancelled")),
+                It.Is<It.IsAnyType>((v, t) => v!.ToString()!.Contains("cancelled")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

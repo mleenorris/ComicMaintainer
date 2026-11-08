@@ -99,7 +99,7 @@ public sealed class RateLimitRejectionTests
             l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("TRUSTED_PROXIES") && state.ToString()!.Contains(Proxy.ToString())),
+                It.Is<It.IsAnyType>((state, _) => state!.ToString()!.Contains("TRUSTED_PROXIES") && state.ToString()!.Contains(Proxy.ToString())),
                 null,
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

@@ -64,7 +64,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
             x => x.Log(
                 level,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains(fragment)),
+                It.Is<It.IsAnyType>((v, t) => v!.ToString()!.Contains(fragment)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times);

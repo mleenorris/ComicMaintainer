@@ -518,7 +518,7 @@ public class LogsControllerTests : IDisposable
         // Arrange - Set ConfigDirectory to null
         var settings = new AppSettings
         {
-            ConfigDirectory = null
+            ConfigDirectory = null!
         };
         _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
         var controller = new LogsController(_mockSettings.Object, _mockLogger.Object);

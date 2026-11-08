@@ -227,10 +227,10 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
             await BroadcastAsync(job);
         }
 
-        // A refresh run looks up the canonical title AND every alias of each
-        // series, so it can leave behind redundant "stale sibling" cache rows
-        // (e.g. a not_found result keyed by an alias already owned by the
-        // authoritative record). Prune them so they don't clutter the cache or
+        // A refresh run can leave behind redundant "stale sibling" cache rows
+        // (e.g. a not_found result keyed by a title that was not yet known to
+        // be an alias of the authoritative record, or rows from earlier
+        // versions). Prune them so they don't clutter the cache or
         // shadow the authoritative record's resolved name. Best-effort: a
         // failure here must not affect the job outcome or the retag step below.
         try

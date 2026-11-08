@@ -1,8 +1,12 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Services;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -251,6 +255,40 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
 
         VerifyLog(LogLevel.Warning, "Failed to prune processing history", Times.Once());
         VerifyLog(LogLevel.Error, "Error during scheduled database cleanup", Times.Never());
+    }
+
+    [Fact]
+    public async Task ScheduledRun_RefreshesTheSqlitePlannerStatistics()
+    {
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ComicMaintainerDbContext>(o => o.UseSqlite(connection));
+        await using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.EnsureCreatedAsync();
+            db.ComicFiles.AddRange(Enumerable.Range(1, 20).Select(i => new ComicFileEntity
+            {
+                FilePath = $"/library/Saga/Saga {i:000}.cbz",
+                FileName = $"Saga {i:000}.cbz",
+                Directory = "/library/Saga",
+                FileSize = i,
+                LastModified = DateTime.UtcNow.AddMinutes(-i),
+            }));
+            await db.SaveChangesAsync();
+        }
+        using var service = new DatabaseCleanupHostedService(
+            _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
+            dbContextFactory: factory, startupDelay: TimeSpan.Zero);
+
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl = 'ComicFiles'";
+        Assert.True(Convert.ToInt64(await command.ExecuteScalarAsync()) > 0);
+        VerifyLog(LogLevel.Warning, "Failed to refresh SQLite query-planner statistics", Times.Never());
     }
 
     [Fact]

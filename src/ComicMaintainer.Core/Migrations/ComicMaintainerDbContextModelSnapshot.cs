@@ -367,6 +367,28 @@ namespace ComicMaintainer.Core.Migrations
                     b.ToTable("FileReadStatuses");
                 });
 
+            modelBuilder.Entity("ComicMaintainer.Core.Data.LibraryScanEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Directory")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Directory")
+                        .IsUnique();
+
+                    b.ToTable("LibraryScans");
+                });
+
             modelBuilder.Entity("ComicMaintainer.Core.Data.ProcessingHistoryEntity", b =>
                 {
                     b.Property<int>("Id")

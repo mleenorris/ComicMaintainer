@@ -28,6 +28,10 @@ internal static class CoreServiceCollectionExtensions
         services.Configure<AppSettings>(configuration.GetSection("AppSettings"));
         services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<AppSettings>, AppSettingsEnvironmentPostConfigure>();
 
+        // SettingsService reloads this root after each save, so a saved value is visible before the
+        // request returns instead of after the file watcher's debounce.
+        services.AddSingleton((IConfigurationRoot)configuration);
+
         // Configure JWT settings from the section and JWT_SECRET. AddComicMaintainerAuth also resolves JWT_SECRET_FILE
         // and generated keys, then applies the resolved signing secret to these options.
         services.Configure<JwtSettings>(options => JwtSettingsBinder.Bind(configuration, options));

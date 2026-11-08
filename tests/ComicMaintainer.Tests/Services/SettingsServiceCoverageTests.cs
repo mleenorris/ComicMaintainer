@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace ComicMaintainer.Tests.Services;
@@ -21,7 +22,8 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         _settingsPath = Path.Join(_configDir, "user-settings.json");
         _service = new SettingsService(
             _logger,
-            new TestOptionsMonitor<AppSettings>(new AppSettings { ConfigDirectory = _configDir }));
+            new TestOptionsMonitor<AppSettings>(new AppSettings { ConfigDirectory = _configDir }),
+            new ConfigurationBuilder().Build());
     }
 
     public void Dispose()
@@ -42,7 +44,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     [Fact]
     public async Task UpdateIssueNumberPaddingAsync_RejectsNegativePadding()
     {
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateIssueNumberPaddingAsync(-1));
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateIssueNumberPaddingAsync(-1));
 
         Assert.Equal("padding", ex.ParamName);
         Assert.False(File.Exists(_settingsPath));
@@ -62,7 +64,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     [InlineData(int.MaxValue)]
     public async Task UpdateIssueNumberPaddingAsync_RejectsPaddingAbove10(int padding)
     {
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateIssueNumberPaddingAsync(padding));
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateIssueNumberPaddingAsync(padding));
 
         Assert.Equal("padding", ex.ParamName);
         Assert.StartsWith("Padding must be between 0 and 10", ex.Message, StringComparison.Ordinal);
@@ -130,8 +132,8 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         await update(4096);
         Assert.Equal(4096, ReadSection()[settingName].GetInt32());
 
-        var zero = await Assert.ThrowsAsync<ArgumentException>(() => update(0));
-        var negative = await Assert.ThrowsAsync<ArgumentException>(() => update(-5));
+        var zero = await Assert.ThrowsAsync<SettingsValidationException>(() => update(0));
+        var negative = await Assert.ThrowsAsync<SettingsValidationException>(() => update(-5));
 
         Assert.Equal(parameterName, zero.ParamName);
         Assert.Equal(parameterName, negative.ParamName);
@@ -165,7 +167,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     public async Task UpdateSeriesImageLimitsAsync_AnInvalidLimitSavesNoneOfThem(
         int maxBytes, int maxDownloadBytes, int maxDimension, string parameterName)
     {
-        var ex = await Assert.ThrowsAsync<ArgumentException>(
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(
             () => _service.UpdateSeriesImageLimitsAsync(maxBytes, maxDownloadBytes, maxDimension));
 
         Assert.Equal(parameterName, ex.ParamName);
@@ -213,7 +215,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     [MemberData(nameof(InvalidDatabaseCleanupSettings))]
     public async Task UpdateDatabaseCleanupSettingsAsync_AnInvalidValueSavesNoneOfThem(DatabaseCleanupSettings settings, string expected)
     {
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateDatabaseCleanupSettingsAsync(settings));
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateDatabaseCleanupSettingsAsync(settings));
 
         Assert.StartsWith(expected, ex.Message, StringComparison.Ordinal);
         Assert.False(File.Exists(_settingsPath));
@@ -386,7 +388,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     [Fact]
     public async Task UpdateDefaultPreferredLanguageAsync_RejectsUnsupportedLanguages()
     {
-        await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateDefaultPreferredLanguageAsync("fr"));
+        await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateDefaultPreferredLanguageAsync("fr"));
 
         Assert.False(File.Exists(_settingsPath));
     }
@@ -463,7 +465,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     [InlineData(25, 201, "maxAttachmentMegabytes")]
     public async Task UpdateEmailSettingsAsync_RejectsOutOfRangeNumbers(int port, int maxMegabytes, string parameterName)
     {
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateEmailSettingsAsync(
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateEmailSettingsAsync(
             "smtp.example.com", port, null, null, true, false, null, null, maxMegabytes));
 
         Assert.Equal(parameterName, ex.ParamName);
@@ -475,7 +477,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     [InlineData("Sender <sender@example.com>")]
     public async Task UpdateEmailSettingsAsync_RejectsAnInvalidFromAddress(string fromAddress)
     {
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateEmailSettingsAsync(
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateEmailSettingsAsync(
             "smtp.example.com", 25, null, null, true, false, fromAddress, null, 10));
 
         Assert.Equal("fromAddress", ex.ParamName);
@@ -522,7 +524,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         string parameterName,
         string expectedMessage)
     {
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateEmailRateLimitSettingsAsync(
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateEmailRateLimitSettingsAsync(
             maxSendsPerHour, maxSendsPerDay, minSecondsBetweenSends));
 
         Assert.Equal(parameterName, ex.ParamName);
@@ -547,7 +549,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     [Fact]
     public async Task UpdateErrorReportingSettingsAsync_RefusesAWhitespaceTokenWhenEnabling()
     {
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateErrorReportingSettingsAsync(
             enabled: true,
             gitHubToken: "   ",
             assignee: null,
@@ -569,7 +571,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         // An exclusive lock makes the settings file unreadable for the service.
         using (new FileStream(_settingsPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+            var ex = await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateErrorReportingSettingsAsync(
                 enabled: true,
                 gitHubToken: null,
                 assignee: null,
@@ -590,7 +592,7 @@ public sealed class SettingsServiceCoverageTests : IDisposable
             _settingsPath,
             """{ "AppSettings": { "ErrorReportingGitHubToken": 12345 } }""");
 
-        await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+        await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateErrorReportingSettingsAsync(
             true, null, null, 5, 12, true));
     }
 
@@ -717,7 +719,8 @@ public sealed class SettingsServiceEnvironmentTokenTests : IDisposable
         _configDir = Path.Join(Path.GetTempPath(), $"SettingsServiceEnvToken_{Guid.NewGuid():N}");
         _service = new SettingsService(
             new SettingsServiceCoverageTests.CapturingLogger(),
-            new TestOptionsMonitor<AppSettings>(new AppSettings { ConfigDirectory = _configDir }));
+            new TestOptionsMonitor<AppSettings>(new AppSettings { ConfigDirectory = _configDir }),
+            new ConfigurationBuilder().Build());
     }
 
     public void Dispose()

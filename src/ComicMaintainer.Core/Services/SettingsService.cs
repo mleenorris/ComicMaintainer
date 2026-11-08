@@ -2,6 +2,7 @@ using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -15,6 +16,7 @@ public class SettingsService : ISettingsService
 {
     private readonly ILogger<SettingsService> _logger;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
+    private readonly IConfigurationRoot _configuration;
     private readonly string _settingsFilePath;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -24,7 +26,6 @@ public class SettingsService : ISettingsService
 
     /// <summary>
     /// Setting names whose values are secrets and must never be written to the log.
-    /// Updates for these names go through <c>UpdateSecretSettingAsync</c>.
     /// </summary>
     private static readonly HashSet<string> SecretSettingNames = new(StringComparer.Ordinal)
     {
@@ -37,10 +38,12 @@ public class SettingsService : ISettingsService
 
     public SettingsService(
         ILogger<SettingsService> logger,
-        IOptionsMonitor<AppSettings> appSettings)
+        IOptionsMonitor<AppSettings> appSettings,
+        IConfigurationRoot configuration)
     {
         _logger = logger;
         _appSettings = appSettings;
+        _configuration = configuration;
         
         var configDir = appSettings.CurrentValue.ConfigDirectory;
         
@@ -67,93 +70,80 @@ public class SettingsService : ISettingsService
 
     public async Task UpdateLogMaxBytesAsync(int maxBytes, CancellationToken cancellationToken = default)
     {
-        if (maxBytes <= 0)
-        {
-            throw new ArgumentException("Max bytes must be greater than 0", nameof(maxBytes));
-        }
-
-        await UpdateSettingAsync("LogMaxBytes", maxBytes, cancellationToken);
+        ValidateLogMaxBytes(maxBytes);
+        await SaveValueAsync("LogMaxBytes", maxBytes, cancellationToken);
     }
 
     public async Task UpdateFilenameFormatAsync(string format, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(format))
-        {
-            throw new ArgumentException("Format cannot be null or whitespace", nameof(format));
-        }
-
-        await UpdateSettingAsync("FilenameFormat", format, cancellationToken);
+        ValidateFilenameFormat(format);
+        await SaveValueAsync("FilenameFormat", format, cancellationToken);
     }
 
     public async Task UpdateIssueNumberPaddingAsync(int padding, CancellationToken cancellationToken = default)
     {
-        if (padding is < 0 or > AppSettings.MaxIssueNumberPadding)
-        {
-            throw new ArgumentException(
-                $"Padding must be between 0 and {AppSettings.MaxIssueNumberPadding}", nameof(padding));
-        }
-
-        await UpdateSettingAsync("IssueNumberPadding", padding, cancellationToken);
+        ValidateIssueNumberPadding(padding);
+        await SaveValueAsync("IssueNumberPadding", padding, cancellationToken);
     }
 
     public async Task UpdateWatcherEnableRenameAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("WatcherEnableRename", enabled, cancellationToken);
+        await SaveValueAsync("WatcherEnableRename", enabled, cancellationToken);
     }
 
     public async Task UpdateWatcherEnableNormalizeAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("WatcherEnableNormalize", enabled, cancellationToken);
+        await SaveValueAsync("WatcherEnableNormalize", enabled, cancellationToken);
     }
 
     public async Task UpdateConvertRarToCbzOnWriteAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("ConvertRarToCbzOnWrite", enabled, cancellationToken);
+        await SaveValueAsync("ConvertRarToCbzOnWrite", enabled, cancellationToken);
     }
 
     public async Task UpdateWriteCoverToFirstArchiveAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("WriteCoverToFirstArchive", enabled, cancellationToken);
+        await SaveValueAsync("WriteCoverToFirstArchive", enabled, cancellationToken);
     }
 
     public async Task UpdateWriteCoverToSeriesFolderAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("WriteCoverToSeriesFolder", enabled, cancellationToken);
+        await SaveValueAsync("WriteCoverToSeriesFolder", enabled, cancellationToken);
     }
 
     public async Task UpdateDownloadExternalSeriesImagesAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("DownloadExternalSeriesImages", enabled, cancellationToken);
+        await SaveValueAsync("DownloadExternalSeriesImages", enabled, cancellationToken);
     }
 
     public async Task UpdateSeriesImageMaxBytesAsync(int maxBytes, CancellationToken cancellationToken = default)
     {
         if (maxBytes <= 0)
         {
-            throw new ArgumentException("Series image max bytes must be greater than 0", nameof(maxBytes));
+            throw new SettingsValidationException("Series image max bytes must be greater than 0", nameof(maxBytes));
         }
 
-        await UpdateSettingAsync("SeriesImageMaxBytes", maxBytes, cancellationToken);
+        await SaveValueAsync("SeriesImageMaxBytes", maxBytes, cancellationToken);
     }
 
     public async Task UpdateSeriesImageMaxDownloadBytesAsync(int maxDownloadBytes, CancellationToken cancellationToken = default)
     {
         if (maxDownloadBytes <= 0)
         {
-            throw new ArgumentException("Series image max download bytes must be greater than 0", nameof(maxDownloadBytes));
+            throw new SettingsValidationException("Series image max download bytes must be greater than 0", nameof(maxDownloadBytes));
         }
 
-        await UpdateSettingAsync("SeriesImageMaxDownloadBytes", maxDownloadBytes, cancellationToken);
+        await SaveValueAsync("SeriesImageMaxDownloadBytes", maxDownloadBytes, cancellationToken);
     }
 
     public async Task UpdateSeriesImageMaxDimensionAsync(int maxDimension, CancellationToken cancellationToken = default)
     {
         if (maxDimension <= 0)
         {
-            throw new ArgumentException("Series image max dimension must be greater than 0", nameof(maxDimension));
+            throw new SettingsValidationException("Series image max dimension must be greater than 0", nameof(maxDimension));
         }
 
-        await UpdateSettingAsync("SeriesImageMaxDimension", maxDimension, cancellationToken);
+        await SaveValueAsync("SeriesImageMaxDimension", maxDimension, cancellationToken);
     }
 
     public async Task UpdateSeriesImageLimitsAsync(
@@ -162,164 +152,107 @@ public class SettingsService : ISettingsService
         int maxDimension,
         CancellationToken cancellationToken = default)
     {
-        if (maxBytes <= 0)
-        {
-            throw new ArgumentException("Series image max bytes must be greater than 0", nameof(maxBytes));
-        }
-
-        if (maxDownloadBytes <= 0)
-        {
-            throw new ArgumentException("Series image max download bytes must be greater than 0", nameof(maxDownloadBytes));
-        }
-
-        if (maxDimension <= 0)
-        {
-            throw new ArgumentException("Series image max dimension must be greater than 0", nameof(maxDimension));
-        }
-
-        if (maxDownloadBytes < maxBytes)
-        {
-            throw new ArgumentException("Series image max download bytes must be greater than or equal to series image max bytes", nameof(maxDownloadBytes));
-        }
-
-        await UpdateSettingsAsync(
-            new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["SeriesImageMaxBytes"] = maxBytes,
-                ["SeriesImageMaxDownloadBytes"] = maxDownloadBytes,
-                ["SeriesImageMaxDimension"] = maxDimension
-            },
-            cancellationToken);
+        var values = NewValues();
+        StageSeriesImageLimits(values, new SeriesImageLimitsUpdate(maxBytes, maxDownloadBytes, maxDimension), _appSettings.CurrentValue);
+        await SaveValuesAsync(values, cancellationToken);
     }
 
     public async Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default)
     {
-        await UpdateSecretSettingAsync("GitHubToken", token, cancellationToken);
+        await SaveValueAsync("GitHubToken", token, cancellationToken);
     }
 
     public async Task UpdateGitHubRepositoryAsync(string? repository, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("GitHubRepository", repository, cancellationToken);
+        await SaveValueAsync("GitHubRepository", repository, cancellationToken);
     }
 
     public async Task UpdateGitHubIssueAssigneeAsync(string? assignee, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("GitHubIssueAssignee", assignee, cancellationToken);
+        await SaveValueAsync("GitHubIssueAssignee", assignee, cancellationToken);
     }
 
     public async Task UpdateDatabaseCleanupIntervalHoursAsync(int hours, CancellationToken cancellationToken = default)
     {
         if (hours < 0)
         {
-            throw new ArgumentException("Cleanup interval hours must be non-negative (0 = only on startup)", nameof(hours));
+            throw new SettingsValidationException("Cleanup interval hours must be non-negative (0 = only on startup)", nameof(hours));
         }
 
-        await UpdateSettingAsync("DatabaseCleanupIntervalHours", hours, cancellationToken);
+        await SaveValueAsync("DatabaseCleanupIntervalHours", hours, cancellationToken);
     }
 
     public async Task UpdateDatabaseCleanupSettingsAsync(DatabaseCleanupSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        if (settings.IntervalHours < 0)
-        {
-            throw new ArgumentException("Cleanup interval hours must be non-negative (0 = only on startup)", nameof(settings));
-        }
-
-        if (settings.StaleCleanupMaxRemovalPercent is < 0 or > AppSettings.MaxStaleCleanupRemovalPercent)
-        {
-            throw new ArgumentException($"Max removal percent must be between 0 and {AppSettings.MaxStaleCleanupRemovalPercent}", nameof(settings));
-        }
-
-        if (settings.StaleCleanupMissingGraceHours is < 0 or > AppSettings.MaxStaleCleanupMissingGraceHours)
-        {
-            throw new ArgumentException($"Missing-file grace period must be between 0 and {AppSettings.MaxStaleCleanupMissingGraceHours} hours", nameof(settings));
-        }
-
-        var sentinel = string.IsNullOrWhiteSpace(settings.StaleCleanupSentinelFile) ? string.Empty : settings.StaleCleanupSentinelFile.Trim();
-        if (sentinel.Length > DatabaseCleanupSettings.MaxSentinelFileLength || sentinel.Any(char.IsControl))
-        {
-            throw new ArgumentException($"Sentinel file must be a path of at most {DatabaseCleanupSettings.MaxSentinelFileLength} characters without control characters", nameof(settings));
-        }
-
-        if (settings.ProcessingHistoryRetentionDays is < 0 or > AppSettings.MaxProcessingHistoryRetentionDays)
-        {
-            throw new ArgumentException($"History retention must be between 0 and {AppSettings.MaxProcessingHistoryRetentionDays} days (0 = keep regardless of age)", nameof(settings));
-        }
-
-        if (settings.ProcessingHistoryMaxEntries is < 0 or > AppSettings.MaxProcessingHistoryEntries)
-        {
-            throw new ArgumentException($"History max entries must be between 0 and {AppSettings.MaxProcessingHistoryEntries} (0 = no cap)", nameof(settings));
-        }
-
-        await UpdateSettingsAsync(
-            new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["DatabaseCleanupIntervalHours"] = settings.IntervalHours,
-                ["StaleCleanupMaxRemovalPercent"] = settings.StaleCleanupMaxRemovalPercent,
-                ["StaleCleanupMissingGraceHours"] = settings.StaleCleanupMissingGraceHours,
-                // Saved as "" rather than null so clearing it also overrides appsettings.json.
-                ["StaleCleanupSentinelFile"] = sentinel,
-                ["ProcessingHistoryRetentionDays"] = settings.ProcessingHistoryRetentionDays,
-                ["ProcessingHistoryMaxEntries"] = settings.ProcessingHistoryMaxEntries
-            },
-            cancellationToken);
+        var values = NewValues();
+        StageDatabaseCleanup(
+            values,
+            new DatabaseCleanupUpdate(
+                settings.IntervalHours,
+                settings.StaleCleanupMaxRemovalPercent,
+                settings.StaleCleanupMissingGraceHours,
+                settings.StaleCleanupSentinelFile ?? string.Empty,
+                settings.ProcessingHistoryRetentionDays,
+                settings.ProcessingHistoryMaxEntries));
+        await SaveValuesAsync(values, cancellationToken);
     }
 
     public async Task UpdateDefaultLibraryViewAsync(string view, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(view))
         {
-            throw new ArgumentException("View cannot be null or whitespace", nameof(view));
+            throw new SettingsValidationException("View cannot be null or whitespace", nameof(view));
         }
 
         var normalized = view.Trim().ToLowerInvariant();
         if (normalized != "files" && normalized != "series")
         {
-            throw new ArgumentException("View must be either 'files' or 'series'", nameof(view));
+            throw new SettingsValidationException("View must be either 'files' or 'series'", nameof(view));
         }
 
-        await UpdateSettingAsync("DefaultLibraryView", normalized, cancellationToken);
+        await SaveValueAsync("DefaultLibraryView", normalized, cancellationToken);
     }
 
     public async Task UpdateAllowRegistrationAsync(bool allowed, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("AllowRegistration", allowed, cancellationToken);
+        await SaveValueAsync("AllowRegistration", allowed, cancellationToken);
     }
 
     public async Task UpdateExternalSeriesMetadataEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("EnableExternalSeriesMetadata", enabled, cancellationToken);
+        await SaveValueAsync("EnableExternalSeriesMetadata", enabled, cancellationToken);
     }
 
     public async Task UpdateComicVineApiKeyAsync(string? apiKey, CancellationToken cancellationToken = default)
     {
-        await UpdateSecretSettingAsync("ComicVineApiKey", apiKey, cancellationToken);
+        await SaveValueAsync("ComicVineApiKey", apiKey, cancellationToken);
     }
 
     public async Task UpdateComicVineBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("ComicVineBaseUrl", baseUrl, cancellationToken);
+        await SaveValueAsync("ComicVineBaseUrl", baseUrl, cancellationToken);
     }
 
     public async Task UpdateMangaDexEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("EnableMangaDexMetadata", enabled, cancellationToken);
+        await SaveValueAsync("EnableMangaDexMetadata", enabled, cancellationToken);
     }
 
     public async Task UpdateMangaDexBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("MangaDexBaseUrl", baseUrl, cancellationToken);
+        await SaveValueAsync("MangaDexBaseUrl", baseUrl, cancellationToken);
     }
 
     public async Task UpdateAniListEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("EnableAniListMetadata", enabled, cancellationToken);
+        await SaveValueAsync("EnableAniListMetadata", enabled, cancellationToken);
     }
 
     public async Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("AniListBaseUrl", baseUrl, cancellationToken);
+        await SaveValueAsync("AniListBaseUrl", baseUrl, cancellationToken);
     }
 
     public async Task UpdateExternalSeriesMetadataSettingsAsync(
@@ -332,36 +265,11 @@ public class SettingsService : ISettingsService
         string? aniListBaseUrl,
         CancellationToken cancellationToken = default)
     {
-        // The group is written in a single atomic file replacement. Saving the
-        // fields one at a time let an aborted request or a failed write leave
-        // lookups switched on beside the previous key and URLs.
-        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["EnableExternalSeriesMetadata"] = enabled
-        };
-
-        // A null key means "keep the stored secret"; a blank one clears it.
-        if (comicVineApiKey is not null)
-        {
-            values["ComicVineApiKey"] = Normalize(comicVineApiKey);
-        }
-
-        // A blank base URL keeps the stored one.
-        SetUnlessBlank("ComicVineBaseUrl", comicVineBaseUrl);
-        values["EnableMangaDexMetadata"] = enableMangaDex;
-        SetUnlessBlank("MangaDexBaseUrl", mangaDexBaseUrl);
-        values["EnableAniListMetadata"] = enableAniList;
-        SetUnlessBlank("AniListBaseUrl", aniListBaseUrl);
-
-        await UpdateSettingsAsync(values, cancellationToken);
-
-        void SetUnlessBlank(string settingName, string? value)
-        {
-            if (Normalize(value) is { } normalized)
-            {
-                values[settingName] = normalized;
-            }
-        }
+        var values = NewValues();
+        StageExternalSeriesMetadata(
+            values,
+            new ExternalSeriesMetadataUpdate(enabled, comicVineApiKey, comicVineBaseUrl, enableMangaDex, mangaDexBaseUrl, enableAniList, aniListBaseUrl));
+        await SaveValuesAsync(values, cancellationToken);
     }
 
     public async Task UpdateSuwayomiSettingsAsync(
@@ -373,61 +281,12 @@ public class SettingsService : ISettingsService
         string? importDirectory = null,
         CancellationToken cancellationToken = default)
     {
-        var normalizedUrl = string.IsNullOrWhiteSpace(baseUrl) ? null : baseUrl.Trim().TrimEnd('/');
-        if (enabled && normalizedUrl is null)
-        {
-            throw new ArgumentException("A Suwayomi server URL is required to enable the integration", nameof(baseUrl));
-        }
-
-        if (normalizedUrl is not null && !SuwayomiService.TryBuildEndpoint(normalizedUrl, out _))
-        {
-            throw new ArgumentException($"'{normalizedUrl}' is not a valid http(s) URL", nameof(baseUrl));
-        }
-
-        // The import folders are validated against the current library
-        // directories so a typo or an overlapping folder is reported now
-        // rather than silently skipped by every scheduled import.
-        var currentSettings = _appSettings.CurrentValue;
-        var normalizedDownloadsDirectory = Normalize(downloadsDirectory);
-        if (normalizedDownloadsDirectory is not null
-            && !SuwayomiDownloadImportService.TryResolveDownloadsDirectory(normalizedDownloadsDirectory, currentSettings, out _, out var downloadsError))
-        {
-            throw new ArgumentException(downloadsError, nameof(downloadsDirectory));
-        }
-
-        var normalizedImportDirectory = Normalize(importDirectory);
-        if (normalizedImportDirectory is not null
-            && !SuwayomiDownloadImportService.TryResolveImportDirectory(normalizedImportDirectory, currentSettings, out _, out var importError))
-        {
-            throw new ArgumentException(importError, nameof(importDirectory));
-        }
-
-        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["EnableSuwayomi"] = enabled,
-            ["SuwayomiBaseUrl"] = normalizedUrl,
-            ["SuwayomiUsername"] = string.IsNullOrWhiteSpace(username) ? null : username.Trim()
-        };
-
-        // A null password means "keep the stored secret"; an empty string clears it.
-        if (password is not null)
-        {
-            values["SuwayomiPassword"] = password.Length == 0 ? null : password;
-        }
-
-        // Likewise a null folder keeps the stored value, so API clients that
-        // predate the import settings do not wipe them on every save.
-        if (downloadsDirectory is not null)
-        {
-            values["SuwayomiDownloadsDirectory"] = normalizedDownloadsDirectory;
-        }
-
-        if (importDirectory is not null)
-        {
-            values["SuwayomiImportDirectory"] = normalizedImportDirectory;
-        }
-
-        await UpdateSettingsAsync(values, cancellationToken);
+        var values = NewValues();
+        StageSuwayomi(
+            values,
+            new SuwayomiUpdate(enabled, baseUrl ?? string.Empty, username ?? string.Empty, password, downloadsDirectory, importDirectory),
+            _appSettings.CurrentValue);
+        await SaveValuesAsync(values, cancellationToken);
     }
 
     public async Task UpdateDefaultPreferredLanguageAsync(string? language, CancellationToken cancellationToken = default)
@@ -435,8 +294,17 @@ public class SettingsService : ISettingsService
         // Null/empty is allowed (clears the default); otherwise validate
         // against the same allow-list the per-series API uses so the JSON
         // file never persists a code that no one will honour at read time.
-        var normalized = Models.SeriesLanguagePreference.ValidateOrThrow(language);
-        await UpdateSettingAsync("DefaultPreferredLanguage", normalized, cancellationToken);
+        string? normalized;
+        try
+        {
+            normalized = Models.SeriesLanguagePreference.ValidateOrThrow(language);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new SettingsValidationException(ex.Message, nameof(language));
+        }
+
+        await SaveValueAsync("DefaultPreferredLanguage", normalized, cancellationToken);
     }
 
     public async Task UpdateEmailSettingsAsync(
@@ -451,36 +319,20 @@ public class SettingsService : ISettingsService
         int maxAttachmentMegabytes,
         CancellationToken cancellationToken = default)
     {
-        if (smtpPort is < 1 or > 65535)
-        {
-            throw new ArgumentException("SMTP port must be between 1 and 65535", nameof(smtpPort));
-        }
-
-        if (maxAttachmentMegabytes is < 1 or > 200)
-        {
-            throw new ArgumentException("Max attachment size must be between 1 and 200 MB", nameof(maxAttachmentMegabytes));
-        }
-
-        var normalizedFrom = string.IsNullOrWhiteSpace(fromAddress) ? null : fromAddress.Trim();
-        if (normalizedFrom is not null && !EmailAddressUtils.IsValid(normalizedFrom))
-        {
-            throw new ArgumentException($"'{normalizedFrom}' is not a valid email address", nameof(fromAddress));
-        }
-
-        await UpdateSettingAsync("SmtpHost", string.IsNullOrWhiteSpace(smtpHost) ? null : smtpHost.Trim(), cancellationToken);
-        await UpdateSettingAsync("SmtpPort", smtpPort, cancellationToken);
-        await UpdateSettingAsync("SmtpUsername", string.IsNullOrWhiteSpace(smtpUsername) ? null : smtpUsername.Trim(), cancellationToken);
-        await UpdateSettingAsync("SmtpUseSsl", smtpUseSsl, cancellationToken);
-        await UpdateSettingAsync("SmtpAllowInsecure", smtpAllowInsecure, cancellationToken);
-        await UpdateSettingAsync("EmailFromAddress", normalizedFrom, cancellationToken);
-        await UpdateSettingAsync("EmailFromName", string.IsNullOrWhiteSpace(fromName) ? "ComicMaintainer" : fromName.Trim(), cancellationToken);
-        await UpdateSettingAsync("EmailMaxAttachmentMegabytes", maxAttachmentMegabytes, cancellationToken);
-
-        // A null password means "keep the stored secret"; an empty string clears it.
-        if (smtpPassword is not null)
-        {
-            await UpdateSecretSettingAsync("SmtpPassword", smtpPassword.Length == 0 ? null : smtpPassword, cancellationToken);
-        }
+        var values = NewValues();
+        StageEmail(
+            values,
+            new EmailUpdate(
+                smtpHost ?? string.Empty,
+                smtpPort,
+                smtpUsername ?? string.Empty,
+                smtpPassword,
+                smtpUseSsl,
+                smtpAllowInsecure,
+                fromAddress ?? string.Empty,
+                fromName ?? string.Empty,
+                maxAttachmentMegabytes));
+        await SaveValuesAsync(values, cancellationToken);
     }
 
     public async Task UpdateEmailRateLimitSettingsAsync(
@@ -489,42 +341,9 @@ public class SettingsService : ISettingsService
         int minSecondsBetweenSends,
         CancellationToken cancellationToken = default)
     {
-        if (maxSendsPerHour is < 0 or > Models.EmailRateLimitBounds.MaxSendsPerHour)
-        {
-            throw new ArgumentException(
-                $"Maximum emails per hour must be between 0 and {Models.EmailRateLimitBounds.MaxSendsPerHour}",
-                nameof(maxSendsPerHour));
-        }
-
-        if (maxSendsPerDay is < 0 or > Models.EmailRateLimitBounds.MaxSendsPerDay)
-        {
-            throw new ArgumentException(
-                $"Maximum emails per day must be between 0 and {Models.EmailRateLimitBounds.MaxSendsPerDay}",
-                nameof(maxSendsPerDay));
-        }
-
-        if (minSecondsBetweenSends is < 0 or > Models.EmailRateLimitBounds.MaxMinSecondsBetweenSends)
-        {
-            throw new ArgumentException(
-                $"Minimum seconds between emails must be between 0 and {Models.EmailRateLimitBounds.MaxMinSecondsBetweenSends}",
-                nameof(minSecondsBetweenSends));
-        }
-
-        // Written together so the delivery queue, which re-reads the limits
-        // while it waits, never sees half of an update.
-        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["EmailMaxSendsPerHour"] = maxSendsPerHour,
-            ["EmailMaxSendsPerDay"] = maxSendsPerDay,
-            ["EmailMinSecondsBetweenSends"] = minSecondsBetweenSends
-        };
-
-        await PersistSettingsAsync(values, cancellationToken);
-
-        foreach (var (name, value) in values)
-        {
-            _logger.LogInformation("Updated setting {SettingName} to {Value}", name, value);
-        }
+        var values = NewValues();
+        StageEmailRateLimit(values, new EmailRateLimitUpdate(maxSendsPerHour, maxSendsPerDay, minSecondsBetweenSends));
+        await SaveValuesAsync(values, cancellationToken);
     }
 
     /// <summary>
@@ -544,28 +363,342 @@ public class SettingsService : ISettingsService
         bool commentOnRecurrence,
         CancellationToken cancellationToken = default)
     {
-        var normalizedAssignee = Normalize(assignee);
+        var values = NewValues();
+        StageErrorReporting(
+            values,
+            new ErrorReportingUpdate(enabled, gitHubToken, assignee ?? string.Empty, maxIssuesPerDay, dedupeWindowHours, commentOnRecurrence),
+            _appSettings.CurrentValue);
+        await SaveValuesAsync(values, cancellationToken);
+    }
+
+    public async Task UpdateSettingsAsync(SettingsUpdate update, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+
+        // Every group is validated before anything is written, and they are all
+        // written in one atomic file replacement: the save applies completely or
+        // not at all, and live-reloading readers never see half of it.
+        var values = NewValues();
+        var current = _appSettings.CurrentValue;
+
+        if (update.FilenameFormat is { } format)
+        {
+            ValidateFilenameFormat(format);
+            values["FilenameFormat"] = format;
+        }
+
+        if (update.LogMaxBytes is { } logMaxBytes)
+        {
+            ValidateLogMaxBytes(logMaxBytes);
+            values["LogMaxBytes"] = logMaxBytes;
+        }
+
+        if (update.IssueNumberPadding is { } padding)
+        {
+            ValidateIssueNumberPadding(padding);
+            values["IssueNumberPadding"] = padding;
+        }
+
+        if (update.DatabaseCleanup is { } cleanup)
+        {
+            StageDatabaseCleanup(values, cleanup);
+        }
+
+        if (update.ExternalSeriesMetadata is { } metadata)
+        {
+            StageExternalSeriesMetadata(values, metadata);
+        }
+
+        if (update.SeriesImageLimits is { } imageLimits)
+        {
+            StageSeriesImageLimits(values, imageLimits, current);
+        }
+
+        if (update.Email is { } email)
+        {
+            StageEmail(values, email);
+        }
+
+        if (update.EmailRateLimit is { } rateLimit)
+        {
+            StageEmailRateLimit(values, rateLimit);
+        }
+
+        if (update.Suwayomi is { } suwayomi)
+        {
+            StageSuwayomi(values, suwayomi, current);
+        }
+
+        if (update.ErrorReporting is { } errorReporting)
+        {
+            StageErrorReporting(values, errorReporting, current);
+        }
+
+        await SaveValuesAsync(values, cancellationToken);
+    }
+
+    private static Dictionary<string, object?> NewValues() => new(StringComparer.Ordinal);
+
+    private static void ValidateFilenameFormat(string format)
+    {
+        if (string.IsNullOrWhiteSpace(format))
+        {
+            throw new SettingsValidationException("Format cannot be null or whitespace", nameof(format));
+        }
+    }
+
+    private static void ValidateLogMaxBytes(int maxBytes)
+    {
+        if (maxBytes <= 0)
+        {
+            throw new SettingsValidationException("Max bytes must be greater than 0", nameof(maxBytes));
+        }
+    }
+
+    private static void ValidateIssueNumberPadding(int padding)
+    {
+        if (padding is < 0 or > AppSettings.MaxIssueNumberPadding)
+        {
+            throw new SettingsValidationException(
+                $"Padding must be between 0 and {AppSettings.MaxIssueNumberPadding}", nameof(padding));
+        }
+    }
+
+    private static void StageSeriesImageLimits(Dictionary<string, object?> values, SeriesImageLimitsUpdate limits, AppSettings current)
+    {
+        if (limits.MaxBytes <= 0)
+        {
+            throw new SettingsValidationException("Series image max bytes must be greater than 0", "maxBytes");
+        }
+
+        if (limits.MaxDownloadBytes <= 0)
+        {
+            throw new SettingsValidationException("Series image max download bytes must be greater than 0", "maxDownloadBytes");
+        }
+
+        if (limits.MaxDimension <= 0)
+        {
+            throw new SettingsValidationException("Series image max dimension must be greater than 0", "maxDimension");
+        }
+
+        if ((limits.MaxBytes is not null || limits.MaxDownloadBytes is not null)
+            && (limits.MaxDownloadBytes ?? current.SeriesImageMaxDownloadBytes) < (limits.MaxBytes ?? current.SeriesImageMaxBytes))
+        {
+            throw new SettingsValidationException("Series image max download bytes must be greater than or equal to series image max bytes", "maxDownloadBytes");
+        }
+
+        StageIfSet(values, "SeriesImageMaxBytes", limits.MaxBytes);
+        StageIfSet(values, "SeriesImageMaxDownloadBytes", limits.MaxDownloadBytes);
+        StageIfSet(values, "SeriesImageMaxDimension", limits.MaxDimension);
+    }
+
+    private static void StageDatabaseCleanup(Dictionary<string, object?> values, DatabaseCleanupUpdate settings)
+    {
+        if (settings.IntervalHours < 0)
+        {
+            throw new SettingsValidationException("Cleanup interval hours must be non-negative (0 = only on startup)", nameof(settings));
+        }
+
+        if (settings.StaleCleanupMaxRemovalPercent is < 0 or > AppSettings.MaxStaleCleanupRemovalPercent)
+        {
+            throw new SettingsValidationException($"Max removal percent must be between 0 and {AppSettings.MaxStaleCleanupRemovalPercent}", nameof(settings));
+        }
+
+        if (settings.StaleCleanupMissingGraceHours is < 0 or > AppSettings.MaxStaleCleanupMissingGraceHours)
+        {
+            throw new SettingsValidationException($"Missing-file grace period must be between 0 and {AppSettings.MaxStaleCleanupMissingGraceHours} hours", nameof(settings));
+        }
+
+        if (settings.StaleCleanupSentinelFile is { } sentinelFile)
+        {
+            var sentinel = sentinelFile.Trim();
+            if (sentinel.Length > DatabaseCleanupSettings.MaxSentinelFileLength || sentinel.Any(char.IsControl))
+            {
+                throw new SettingsValidationException($"Sentinel file must be a path of at most {DatabaseCleanupSettings.MaxSentinelFileLength} characters without control characters", nameof(settings));
+            }
+
+            // Saved as "" rather than null so clearing it also overrides appsettings.json.
+            values["StaleCleanupSentinelFile"] = sentinel;
+        }
+
+        if (settings.ProcessingHistoryRetentionDays is < 0 or > AppSettings.MaxProcessingHistoryRetentionDays)
+        {
+            throw new SettingsValidationException($"History retention must be between 0 and {AppSettings.MaxProcessingHistoryRetentionDays} days (0 = keep regardless of age)", nameof(settings));
+        }
+
+        if (settings.ProcessingHistoryMaxEntries is < 0 or > AppSettings.MaxProcessingHistoryEntries)
+        {
+            throw new SettingsValidationException($"History max entries must be between 0 and {AppSettings.MaxProcessingHistoryEntries} (0 = no cap)", nameof(settings));
+        }
+
+        StageIfSet(values, "DatabaseCleanupIntervalHours", settings.IntervalHours);
+        StageIfSet(values, "StaleCleanupMaxRemovalPercent", settings.StaleCleanupMaxRemovalPercent);
+        StageIfSet(values, "StaleCleanupMissingGraceHours", settings.StaleCleanupMissingGraceHours);
+        StageIfSet(values, "ProcessingHistoryRetentionDays", settings.ProcessingHistoryRetentionDays);
+        StageIfSet(values, "ProcessingHistoryMaxEntries", settings.ProcessingHistoryMaxEntries);
+    }
+
+    private static void StageExternalSeriesMetadata(Dictionary<string, object?> values, ExternalSeriesMetadataUpdate metadata)
+    {
+        // The group is written in a single atomic file replacement. Saving the
+        // fields one at a time let an aborted request or a failed write leave
+        // lookups switched on beside the previous key and URLs.
+        StageIfSet(values, "EnableExternalSeriesMetadata", metadata.Enabled);
+
+        // A null key means "keep the stored secret"; a blank one clears it.
+        StageTextIfSet(values, "ComicVineApiKey", metadata.ComicVineApiKey);
+
+        // A blank base URL keeps the stored one.
+        StageIfNotBlank(values, "ComicVineBaseUrl", metadata.ComicVineBaseUrl);
+        StageIfSet(values, "EnableMangaDexMetadata", metadata.EnableMangaDex);
+        StageIfNotBlank(values, "MangaDexBaseUrl", metadata.MangaDexBaseUrl);
+        StageIfSet(values, "EnableAniListMetadata", metadata.EnableAniList);
+        StageIfNotBlank(values, "AniListBaseUrl", metadata.AniListBaseUrl);
+    }
+
+    private static void StageSuwayomi(Dictionary<string, object?> values, SuwayomiUpdate suwayomi, AppSettings current)
+    {
+        var normalizedUrl = string.IsNullOrWhiteSpace(suwayomi.BaseUrl) ? null : suwayomi.BaseUrl.Trim().TrimEnd('/');
+
+        // Checked against the URL in effect after this save, so a pinned URL the page
+        // left out still counts. A save that touches neither is not asked to prove it.
+        var enabling = suwayomi.Enabled ?? (current.EnableSuwayomi && suwayomi.BaseUrl is not null);
+        var effectiveUrl = suwayomi.BaseUrl is null ? current.SuwayomiBaseUrl : normalizedUrl;
+        if (enabling && string.IsNullOrWhiteSpace(effectiveUrl))
+        {
+            throw new SettingsValidationException("A Suwayomi server URL is required to enable the integration", "baseUrl");
+        }
+
+        if (normalizedUrl is not null && !SuwayomiService.TryBuildEndpoint(normalizedUrl, out _))
+        {
+            throw new SettingsValidationException($"'{normalizedUrl}' is not a valid http(s) URL", "baseUrl");
+        }
+
+        // The import folders are validated against the current library
+        // directories so a typo or an overlapping folder is reported now
+        // rather than silently skipped by every scheduled import.
+        var normalizedDownloadsDirectory = Normalize(suwayomi.DownloadsDirectory);
+        if (normalizedDownloadsDirectory is not null
+            && !SuwayomiDownloadImportService.TryResolveDownloadsDirectory(normalizedDownloadsDirectory, current, out _, out var downloadsError))
+        {
+            throw new SettingsValidationException(downloadsError!, "downloadsDirectory");
+        }
+
+        var normalizedImportDirectory = Normalize(suwayomi.ImportDirectory);
+        if (normalizedImportDirectory is not null
+            && !SuwayomiDownloadImportService.TryResolveImportDirectory(normalizedImportDirectory, current, out _, out var importError))
+        {
+            throw new SettingsValidationException(importError!, "importDirectory");
+        }
+
+        StageIfSet(values, "EnableSuwayomi", suwayomi.Enabled);
+        if (suwayomi.BaseUrl is not null)
+        {
+            values["SuwayomiBaseUrl"] = normalizedUrl;
+        }
+
+        StageTextIfSet(values, "SuwayomiUsername", suwayomi.Username);
+
+        // A null password means "keep the stored secret"; an empty string clears it.
+        StageSecretIfSet(values, "SuwayomiPassword", suwayomi.Password);
+
+        // Likewise a null folder keeps the stored value, so API clients that
+        // predate the import settings do not wipe them on every save.
+        StageTextIfSet(values, "SuwayomiDownloadsDirectory", suwayomi.DownloadsDirectory);
+        StageTextIfSet(values, "SuwayomiImportDirectory", suwayomi.ImportDirectory);
+    }
+
+    private static void StageEmail(Dictionary<string, object?> values, EmailUpdate email)
+    {
+        if (email.SmtpPort is < 1 or > 65535)
+        {
+            throw new SettingsValidationException("SMTP port must be between 1 and 65535", "smtpPort");
+        }
+
+        if (email.EmailMaxAttachmentMb is < 1 or > 200)
+        {
+            throw new SettingsValidationException("Max attachment size must be between 1 and 200 MB", "maxAttachmentMegabytes");
+        }
+
+        var normalizedFrom = Normalize(email.EmailFromAddress);
+        if (normalizedFrom is not null && !EmailAddressUtils.IsValid(normalizedFrom))
+        {
+            throw new SettingsValidationException($"'{normalizedFrom}' is not a valid email address", "fromAddress");
+        }
+
+        StageTextIfSet(values, "SmtpHost", email.SmtpHost);
+        StageIfSet(values, "SmtpPort", email.SmtpPort);
+        StageTextIfSet(values, "SmtpUsername", email.SmtpUsername);
+        StageIfSet(values, "SmtpUseSsl", email.SmtpUseSsl);
+        StageIfSet(values, "SmtpAllowInsecure", email.SmtpAllowInsecure);
+        StageTextIfSet(values, "EmailFromAddress", email.EmailFromAddress);
+        if (email.EmailFromName is not null)
+        {
+            values["EmailFromName"] = Normalize(email.EmailFromName) ?? "ComicMaintainer";
+        }
+
+        StageIfSet(values, "EmailMaxAttachmentMegabytes", email.EmailMaxAttachmentMb);
+
+        // A null password means "keep the stored secret"; an empty string clears it.
+        StageSecretIfSet(values, "SmtpPassword", email.SmtpPassword);
+    }
+
+    private static void StageEmailRateLimit(Dictionary<string, object?> values, EmailRateLimitUpdate rateLimit)
+    {
+        if (rateLimit.MaxSendsPerHour is < 0 or > Models.EmailRateLimitBounds.MaxSendsPerHour)
+        {
+            throw new SettingsValidationException(
+                $"Maximum emails per hour must be between 0 and {Models.EmailRateLimitBounds.MaxSendsPerHour}",
+                "maxSendsPerHour");
+        }
+
+        if (rateLimit.MaxSendsPerDay is < 0 or > Models.EmailRateLimitBounds.MaxSendsPerDay)
+        {
+            throw new SettingsValidationException(
+                $"Maximum emails per day must be between 0 and {Models.EmailRateLimitBounds.MaxSendsPerDay}",
+                "maxSendsPerDay");
+        }
+
+        if (rateLimit.MinSecondsBetweenSends is < 0 or > Models.EmailRateLimitBounds.MaxMinSecondsBetweenSends)
+        {
+            throw new SettingsValidationException(
+                $"Minimum seconds between emails must be between 0 and {Models.EmailRateLimitBounds.MaxMinSecondsBetweenSends}",
+                "minSecondsBetweenSends");
+        }
+
+        // Written together so the delivery queue, which re-reads the limits
+        // while it waits, never sees half of an update.
+        StageIfSet(values, "EmailMaxSendsPerHour", rateLimit.MaxSendsPerHour);
+        StageIfSet(values, "EmailMaxSendsPerDay", rateLimit.MaxSendsPerDay);
+        StageIfSet(values, "EmailMinSecondsBetweenSends", rateLimit.MinSecondsBetweenSends);
+    }
+
+    private static void StageErrorReporting(Dictionary<string, object?> values, ErrorReportingUpdate reporting, AppSettings current)
+    {
+        var normalizedAssignee = Normalize(reporting.Assignee);
 
         if (normalizedAssignee is not null && !GitHubNameValidator.IsValidOwner(normalizedAssignee))
         {
-            throw new ArgumentException($"'{normalizedAssignee}' is not a valid GitHub login", nameof(assignee));
+            throw new SettingsValidationException($"'{normalizedAssignee}' is not a valid GitHub login", "assignee");
         }
 
         // Turning reporting on without a token would queue reports that can
-        // never be delivered, so refuse rather than fail silently later.
-        if (enabled && !await HasUsableTokenAsync(gitHubToken, cancellationToken))
+        // never be delivered, so refuse rather than fail silently later. When
+        // the switch is left out, only a change to the token can break it.
+        var enabling = reporting.Enabled ?? (current.ErrorReportingEnabled && reporting.GitHubToken is not null);
+        if (enabling && !HasUsableToken(reporting.GitHubToken, current))
         {
-            throw new ArgumentException("A GitHub token is required to enable error reporting", nameof(gitHubToken));
+            throw new SettingsValidationException("A GitHub token is required to enable error reporting", "gitHubToken");
         }
 
-        if (maxIssuesPerDay is < 0 or > 100)
+        if (reporting.MaxIssuesPerDay is < 0 or > 100)
         {
-            throw new ArgumentException("Maximum issues per day must be between 0 and 100", nameof(maxIssuesPerDay));
+            throw new SettingsValidationException("Maximum issues per day must be between 0 and 100", "maxIssuesPerDay");
         }
 
-        if (dedupeWindowHours is < 1 or > 720)
+        if (reporting.DedupeWindowHours is < 1 or > 720)
         {
-            throw new ArgumentException("Dedupe window must be between 1 and 720 hours", nameof(dedupeWindowHours));
+            throw new SettingsValidationException("Dedupe window must be between 1 and 720 hours", "dedupeWindowHours");
         }
 
         // The whole reporting block is written in a single atomic file
@@ -573,22 +706,54 @@ public class SettingsService : ISettingsService
         // live-reloading sink observe reporting switched on beside a token that
         // has not been written yet — and a failure partway through would leave
         // that mixed state active.
-        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["ErrorReportingAssignee"] = normalizedAssignee,
-            ["ErrorReportingMaxIssuesPerDay"] = maxIssuesPerDay,
-            ["ErrorReportingDedupeWindowHours"] = dedupeWindowHours,
-            ["ErrorReportingCommentOnRecurrence"] = commentOnRecurrence,
-            ["ErrorReportingEnabled"] = enabled
-        };
+        StageTextIfSet(values, "ErrorReportingAssignee", reporting.Assignee);
+        StageIfSet(values, "ErrorReportingMaxIssuesPerDay", reporting.MaxIssuesPerDay);
+        StageIfSet(values, "ErrorReportingDedupeWindowHours", reporting.DedupeWindowHours);
+        StageIfSet(values, "ErrorReportingCommentOnRecurrence", reporting.CommentOnRecurrence);
+        StageIfSet(values, "ErrorReportingEnabled", reporting.Enabled);
 
         // A null token means "keep the stored secret"; an empty string clears it.
-        if (gitHubToken is not null)
+        if (reporting.GitHubToken is not null)
         {
-            values["ErrorReportingGitHubToken"] = gitHubToken.Length == 0 ? null : gitHubToken.Trim();
+            values["ErrorReportingGitHubToken"] = reporting.GitHubToken.Length == 0 ? null : reporting.GitHubToken.Trim();
         }
+    }
 
-        await UpdateSettingsAsync(values, cancellationToken);
+    /// <summary>Stages a value unless it is null, which means "keep the current value".</summary>
+    private static void StageIfSet<T>(Dictionary<string, object?> values, string settingName, T? value)
+        where T : struct
+    {
+        if (value is { } set)
+        {
+            values[settingName] = set;
+        }
+    }
+
+    /// <summary>Stages a trimmed text value: null keeps the current value, blank clears it.</summary>
+    private static void StageTextIfSet(Dictionary<string, object?> values, string settingName, string? value)
+    {
+        if (value is not null)
+        {
+            values[settingName] = Normalize(value);
+        }
+    }
+
+    /// <summary>Stages a text value only when it is not blank: a blank one keeps the current value.</summary>
+    private static void StageIfNotBlank(Dictionary<string, object?> values, string settingName, string? value)
+    {
+        if (Normalize(value) is { } normalized)
+        {
+            values[settingName] = normalized;
+        }
+    }
+
+    /// <summary>Stages a secret exactly as given, never trimmed: null keeps it, an empty string clears it.</summary>
+    private static void StageSecretIfSet(Dictionary<string, object?> values, string settingName, string? value)
+    {
+        if (value is not null)
+        {
+            values[settingName] = value.Length == 0 ? null : value;
+        }
     }
 
     private static string? Normalize(string? value)
@@ -596,87 +761,35 @@ public class SettingsService : ISettingsService
 
     /// <summary>
     /// True when a token is available to report with: one supplied in this
-    /// request, one supplied by the environment, or one already persisted. A
-    /// null request token means "keep the stored one".
+    /// request, one supplied by the environment, or one already stored. A null
+    /// request token means "keep the stored one".
     /// </summary>
-    /// <remarks>
-    /// The persisted file is consulted directly because the options monitor can
-    /// lag a just-written change by a file-watcher tick. The explicit
-    /// environment override takes precedence over the persisted value.
-    /// </remarks>
-    private async Task<bool> HasUsableTokenAsync(string? requestedToken, CancellationToken cancellationToken)
+    private static bool HasUsableToken(string? requestedToken, AppSettings current) =>
+        !string.IsNullOrWhiteSpace(requestedToken)
+        || AppSettingsEnvironmentOverrides.Active().Any(o => o.SettingName == nameof(AppSettings.ErrorReportingGitHubToken))
+        || (requestedToken is null && !string.IsNullOrWhiteSpace(current.ErrorReportingGitHubToken));
+
+    private Task SaveValueAsync(string settingName, object? value, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(requestedToken))
-        {
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN")))
-        {
-            return true;
-        }
-
-        if (requestedToken is not null)
-        {
-            return false;
-        }
-
-        if (!File.Exists(_settingsFilePath))
-        {
-            return false;
-        }
-
-        try
-        {
-            var json = await File.ReadAllTextAsync(_settingsFilePath, cancellationToken);
-            return ReadAppSettingsSection(json).TryGetValue("ErrorReportingGitHubToken", out var stored)
-                && stored is string token
-                && !string.IsNullOrWhiteSpace(token);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Unreadable settings file: the write that follows would fail too,
-            // so report "no token" rather than guessing.
-            return false;
-        }
-    }
-
-    private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
-    {
-        if (SecretSettingNames.Contains(settingName))
-        {
-            throw new InvalidOperationException(
-                $"'{settingName}' is a secret and must be persisted with UpdateSecretSettingAsync so its value is never logged");
-        }
-
-        await PersistSettingAsync(settingName, value, cancellationToken);
-
-        // Sanitize value for logging to prevent log forging.
-        var sanitizedValue = LoggingHelper.SanitizeForLog(value?.ToString() ?? "null");
-        _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
+        var values = NewValues();
+        values[settingName] = value;
+        return SaveValuesAsync(values, cancellationToken);
     }
 
     /// <summary>
-    /// Persists a setting whose value is a secret. The value is never passed to the
-    /// logger, only the fact that it was set or cleared.
+    /// Saves settings in one atomic write, so they are saved entirely or not at all,
+    /// then logs each one. Secret values are never passed to the logger, only whether
+    /// they were set or cleared.
     /// </summary>
-    private async Task UpdateSecretSettingAsync(string settingName, string? value, CancellationToken cancellationToken)
+    /// <exception cref="SettingsLockedException">A value would change a setting the environment pins.</exception>
+    private async Task SaveValuesAsync(Dictionary<string, object?> values, CancellationToken cancellationToken)
     {
-        var cleared = string.IsNullOrEmpty(value);
-        await PersistSettingAsync(settingName, value, cancellationToken);
-        _logger.LogInformation(
-            "Updated setting {SettingName} ({State})",
-            settingName,
-            cleared ? "cleared" : "value hidden");
-    }
+        DropUnchangedPinnedValues(values);
+        if (values.Count == 0)
+        {
+            return;
+        }
 
-    /// <summary>
-    /// Persists a group of related settings in one atomic write, so the group is
-    /// saved entirely or not at all, then logs each one. Secret values are never
-    /// passed to the logger, only whether they were set or cleared.
-    /// </summary>
-    private async Task UpdateSettingsAsync(IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
-    {
         await PersistSettingsAsync(values, cancellationToken);
 
         foreach (var (settingName, value) in values)
@@ -686,26 +799,67 @@ public class SettingsService : ISettingsService
                 _logger.LogInformation(
                     "Updated setting {SettingName} ({State})",
                     settingName,
-                    value is null ? "cleared" : "value hidden");
+                    string.IsNullOrEmpty(value as string) ? "cleared" : "value hidden");
                 continue;
             }
 
+            // Sanitize value for logging to prevent log forging.
             var sanitizedValue = LoggingHelper.SanitizeForLog(value?.ToString() ?? "null");
             _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
         }
     }
 
-    private Task PersistSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
-        => PersistSettingsAsync(
-            new Dictionary<string, object?>(StringComparer.Ordinal) { [settingName] = value },
-            cancellationToken);
+    /// <summary>
+    /// Refuses to save a setting an environment variable pins, because the saved value
+    /// would never take effect. A value equal to the pinned one changes nothing, so a
+    /// client that sends a whole group back is not refused for it; it is dropped instead
+    /// of copying the environment's value into the file. A secret is never compared: the
+    /// answer would let a caller test guesses at it, so any write to a pinned one is refused.
+    /// </summary>
+    private static void DropUnchangedPinnedValues(Dictionary<string, object?> values)
+    {
+        var refused = new List<EnvironmentOverride>();
+        foreach (var environmentOverride in AppSettingsEnvironmentOverrides.All)
+        {
+            if (!values.TryGetValue(environmentOverride.SettingName, out var requested)
+                || !environmentOverride.TryGetForcedValue(out var forced))
+            {
+                continue;
+            }
+
+            if (SecretSettingNames.Contains(environmentOverride.SettingName) || !IsSameValue(forced, requested))
+            {
+                refused.Add(environmentOverride);
+            }
+            else
+            {
+                values.Remove(environmentOverride.SettingName);
+            }
+        }
+
+        if (refused.Count > 0)
+        {
+            throw new SettingsLockedException(refused);
+        }
+    }
+
+    /// <summary>
+    /// Compares a pinned value with a requested one. Text is compared as the save would
+    /// store it, trimmed and without a trailing slash, since a pinned value is not normalized.
+    /// </summary>
+    private static bool IsSameValue(object? forced, object? requested) =>
+        forced is string
+            ? CanonicalText(forced as string) == CanonicalText(requested as string)
+            : Equals(forced, requested);
+
+    private static string CanonicalText(string? value) => (value ?? string.Empty).Trim().TrimEnd('/');
 
     /// <summary>
     /// Writes one or more settings in a single atomic replacement of
     /// user-settings.json, so a reader that reloads on change never observes a
     /// partially applied group of related settings.
     /// </summary>
-    private async Task PersistSettingsAsync(IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
+    private async Task PersistSettingsAsync(Dictionary<string, object?> values, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         try
@@ -742,6 +896,9 @@ public class SettingsService : ISettingsService
             var tempPath = _settingsFilePath + ".tmp";
             await File.WriteAllTextAsync(tempPath, updatedJson, cancellationToken);
             File.Move(tempPath, _settingsFilePath, overwrite: true);
+
+            // Inside the lock so concurrent saves reload in the order they wrote.
+            ReloadConfiguration();
         }
         catch (Exception ex)
         {
@@ -751,6 +908,24 @@ public class SettingsService : ISettingsService
         finally
         {
             _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Makes a save visible through <see cref="IOptionsMonitor{TOptions}"/> before it returns.
+    /// The configuration provider's file watcher (kept for hand edits of the file) would apply
+    /// it too, but only after its debounce, and the caller would meanwhile read the old values.
+    /// </summary>
+    private void ReloadConfiguration()
+    {
+        try
+        {
+            _configuration.Reload();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            // The file is saved, so the save stands; the file watcher applies it shortly.
+            _logger.LogWarning(ex, "The saved settings could not be reloaded immediately");
         }
     }
 

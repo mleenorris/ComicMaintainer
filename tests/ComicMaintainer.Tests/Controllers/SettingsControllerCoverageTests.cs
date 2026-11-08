@@ -79,6 +79,11 @@ public class SettingsControllerCoverageTests
         return JsonSerializer.SerializeToElement(objectResult.Value);
     }
 
+    // An unexpected failure is not answered by the controller: it reaches GlobalExceptionHandler,
+    // which logs it once and answers with a problem document that withholds the message.
+    private static async Task AssertReachesGlobalHandler(Exception failure, Func<Task<ActionResult>> call) =>
+        Assert.Same(failure, await Assert.ThrowsAsync(failure.GetType(), call));
+
     private void VerifyLogged(LogLevel level, string fragment, Times times, Exception? exception = null) =>
         _logger.Verify(
             l => l.Log(
@@ -201,13 +206,6 @@ public class SettingsControllerCoverageTests
         "allow-registration",
     };
 
-    private static string ToggleError(string toggle) => toggle switch
-    {
-        "allow-registration" => "Failed to update self-service registration setting",
-        "convert-rar-to-cbz-on-write" => "Failed to update convert CBR/RAR to CBZ on write",
-        _ => "Failed to update " + toggle.Replace('-', ' '),
-    };
-
     private void SetToggle(string toggle, bool value)
     {
         switch (toggle)
@@ -235,25 +233,17 @@ public class SettingsControllerCoverageTests
         _ => throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null),
     };
 
-    private static Task<ActionResult> PutToggle(SettingsController c, string toggle, bool enabled, bool legacyPost) =>
-        (toggle, legacyPost) switch
-        {
-            ("watcher-enable-rename", false) => c.UpdateWatcherEnableRename(new() { Enabled = enabled }),
-            ("watcher-enable-rename", true) => c.SetWatcherEnableRename(new() { Enabled = enabled }),
-            ("watcher-enable-normalize", false) => c.UpdateWatcherEnableNormalize(new() { Enabled = enabled }),
-            ("watcher-enable-normalize", true) => c.SetWatcherEnableNormalize(new() { Enabled = enabled }),
-            ("convert-rar-to-cbz-on-write", false) => c.UpdateConvertRarToCbzOnWrite(new() { Enabled = enabled }),
-            ("convert-rar-to-cbz-on-write", true) => c.SetConvertRarToCbzOnWrite(new() { Enabled = enabled }),
-            ("write-cover-to-first-archive", false) => c.UpdateWriteCoverToFirstArchive(new() { Enabled = enabled }),
-            ("write-cover-to-first-archive", true) => c.SetWriteCoverToFirstArchive(new() { Enabled = enabled }),
-            ("write-cover-to-series-folder", false) => c.UpdateWriteCoverToSeriesFolder(new() { Enabled = enabled }),
-            ("write-cover-to-series-folder", true) => c.SetWriteCoverToSeriesFolder(new() { Enabled = enabled }),
-            ("download-external-series-images", false) => c.UpdateDownloadExternalSeriesImages(new() { Enabled = enabled }),
-            ("download-external-series-images", true) => c.SetDownloadExternalSeriesImages(new() { Enabled = enabled }),
-            ("allow-registration", false) => c.UpdateAllowRegistration(new() { Enabled = enabled }),
-            ("allow-registration", true) => c.SetAllowRegistration(new() { Enabled = enabled }),
-            _ => throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null),
-        };
+    private static Task<ActionResult> PutToggle(SettingsController c, string toggle, bool enabled) => toggle switch
+    {
+        "watcher-enable-rename" => c.UpdateWatcherEnableRename(new() { Enabled = enabled }),
+        "watcher-enable-normalize" => c.UpdateWatcherEnableNormalize(new() { Enabled = enabled }),
+        "convert-rar-to-cbz-on-write" => c.UpdateConvertRarToCbzOnWrite(new() { Enabled = enabled }),
+        "write-cover-to-first-archive" => c.UpdateWriteCoverToFirstArchive(new() { Enabled = enabled }),
+        "write-cover-to-series-folder" => c.UpdateWriteCoverToSeriesFolder(new() { Enabled = enabled }),
+        "download-external-series-images" => c.UpdateDownloadExternalSeriesImages(new() { Enabled = enabled }),
+        "allow-registration" => c.UpdateAllowRegistration(new() { Enabled = enabled }),
+        _ => throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null),
+    };
 
     private static Expression<Func<ISettingsService, Task>> ToggleCall(string toggle, bool enabled) => toggle switch
     {
@@ -282,15 +272,15 @@ public class SettingsControllerCoverageTests
 
     [Theory]
     [MemberData(nameof(Toggles))]
-    public async Task Toggle_PutAndLegacyPost_PersistRequestedValue(string toggle)
+    public async Task Toggle_Put_PersistsRequestedValue(string toggle)
     {
         var controller = CreateController();
 
-        var put = await PutToggle(controller, toggle, enabled: true, legacyPost: false);
-        var post = await PutToggle(controller, toggle, enabled: false, legacyPost: true);
+        var on = await PutToggle(controller, toggle, enabled: true);
+        var off = await PutToggle(controller, toggle, enabled: false);
 
-        Assert.Contains("updated successfully", OkJson(put).GetProperty("message").GetString());
-        Assert.Contains("updated successfully", OkJson(post).GetProperty("message").GetString());
+        Assert.Contains("updated successfully", OkJson(on).GetProperty("message").GetString());
+        Assert.Contains("updated successfully", OkJson(off).GetProperty("message").GetString());
         _settingsService.Verify(ToggleCall(toggle, true), Times.Once());
         _settingsService.Verify(ToggleCall(toggle, false), Times.Once());
         _settingsService.VerifyNoOtherCalls();
@@ -298,18 +288,12 @@ public class SettingsControllerCoverageTests
 
     [Theory]
     [MemberData(nameof(Toggles))]
-    public async Task Toggle_ServiceFailure_Returns500WithoutLeakingExceptionDetails(string toggle)
+    public async Task Toggle_ServiceFailure_ReachesTheGlobalHandler(string toggle)
     {
-        var expectedError = ToggleError(toggle);
         var failure = new InvalidOperationException("disk full: /config/settings.json");
         _settingsService.Setup(ToggleCall(toggle, true)).ThrowsAsync(failure);
 
-        var result = await PutToggle(CreateController(), toggle, enabled: true, legacyPost: false);
-
-        var json = ServerErrorJson(result);
-        Assert.Equal(expectedError, json.GetProperty("error").GetString());
-        Assert.DoesNotContain("disk full", json.GetRawText());
-        VerifyLogged(LogLevel.Error, expectedError, Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => PutToggle(CreateController(), toggle, enabled: true));
     }
 
     [Fact]
@@ -324,86 +308,68 @@ public class SettingsControllerCoverageTests
     // ---------------------------------------------------------------- scalar settings
 
     [Fact]
-    public async Task UpdateFilenameFormat_ServiceFailure_Returns500()
+    public async Task UpdateFilenameFormat_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new IOException("settings file locked");
         _settingsService.Setup(s => s.UpdateFilenameFormatAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController().UpdateFilenameFormat(new() { Format = "{series}" });
-
-        Assert.Equal("Failed to update filename format", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update filename format", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateFilenameFormat(new() { Format = "{series}" }));
     }
 
     [Fact]
-    public async Task SetIssueNumberPadding_LegacyPost_PersistsPadding()
+    public async Task UpdateIssueNumberPadding_PersistsPadding()
     {
-        var result = await CreateController().SetIssueNumberPadding(new() { Padding = 5 });
+        var result = await CreateController().UpdateIssueNumberPadding(new() { Padding = 5 });
 
         Assert.Equal("Issue number padding updated successfully", OkJson(result).GetProperty("message").GetString());
         _settingsService.Verify(s => s.UpdateIssueNumberPaddingAsync(5, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
-    public async Task UpdateIssueNumberPadding_ServiceFailure_Returns500()
+    public async Task UpdateIssueNumberPadding_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new InvalidOperationException("boom");
         _settingsService.Setup(s => s.UpdateIssueNumberPaddingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController().UpdateIssueNumberPadding(new() { Padding = 2 });
-
-        Assert.Equal("Failed to update issue number padding", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update issue number padding", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateIssueNumberPadding(new() { Padding = 2 }));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task UpdateIssueNumberPadding_OutOfRange_ReturnsBadRequestWithoutLoggingAnError(bool legacyPost)
+    [Fact]
+    public async Task UpdateIssueNumberPadding_OutOfRange_ReturnsBadRequestWithoutLoggingAnError()
     {
-        var invalid = new ArgumentException("Padding must be between 0 and 10", "padding");
+        var invalid = new SettingsValidationException("Padding must be between 0 and 10", "padding");
         _settingsService.Setup(s => s.UpdateIssueNumberPaddingAsync(1_000_000_000, It.IsAny<CancellationToken>()))
             .ThrowsAsync(invalid);
-        var controller = CreateController();
-        var request = new SettingsController.IssueNumberPaddingRequest { Padding = 1_000_000_000 };
 
-        var result = legacyPost
-            ? await controller.SetIssueNumberPadding(request)
-            : await controller.UpdateIssueNumberPadding(request);
+        var result = await CreateController().UpdateIssueNumberPadding(new() { Padding = 1_000_000_000 });
 
-        Assert.Equal(invalid.Message, BadRequestError(result));
-        VerifyLogged(LogLevel.Error, "Failed to update issue number padding", Times.Never());
+        Assert.Equal("Padding must be between 0 and 10", BadRequestError(result));
+        VerifyLogged(LogLevel.Error, "issue number padding", Times.Never());
     }
 
     [Theory]
-    [InlineData(false, null)]
-    [InlineData(false, "other")]
-    [InlineData(true, null)]
-    [InlineData(true, "other")]
-    public async Task UpdateIssueNumberPadding_UnrelatedArgumentFailure_Returns500(bool legacyPost, string? paramName)
+    [InlineData(null)]
+    [InlineData("other")]
+    [InlineData("padding")]
+    public async Task UpdateIssueNumberPadding_ArgumentFailureFromABug_ReachesTheGlobalHandler(string? paramName)
     {
+        // Only SettingsValidationException means the value was refused; a stray
+        // ArgumentException is a bug and must not become a 400 with its internal message.
         var failure = new ArgumentException("Unexpected argument failure", paramName);
         _settingsService.Setup(s => s.UpdateIssueNumberPaddingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
-        var controller = CreateController();
-        var request = new SettingsController.IssueNumberPaddingRequest { Padding = 2 };
 
-        var result = legacyPost
-            ? await controller.SetIssueNumberPadding(request)
-            : await controller.UpdateIssueNumberPadding(request);
-
-        Assert.Equal("Failed to update issue number padding", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update issue number padding", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateIssueNumberPadding(new() { Padding = 2 }));
     }
 
     [Theory]
     [InlineData(1.5, 1572864)]
     [InlineData(2047, 2146435072)]
-    public async Task SetLogMaxBytes_LegacyPost_ConvertsMegabytesToBytes(double maxMb, int expectedBytes)
+    public async Task UpdateLogMaxBytes_ConvertsMegabytesToBytes(double maxMb, int expectedBytes)
     {
-        var result = await CreateController().SetLogMaxBytes(new() { MaxMB = maxMb });
+        var result = await CreateController().UpdateLogMaxBytes(new() { MaxMB = maxMb });
 
         Assert.IsType<OkObjectResult>(result);
         _settingsService.Verify(s => s.UpdateLogMaxBytesAsync(expectedBytes, It.IsAny<CancellationToken>()), Times.Once());
@@ -421,22 +387,19 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task UpdateLogMaxBytes_ServiceFailure_Returns500()
+    public async Task UpdateLogMaxBytes_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new InvalidOperationException("boom");
         _settingsService.Setup(s => s.UpdateLogMaxBytesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController().UpdateLogMaxBytes(new() { MaxMB = 10 });
-
-        Assert.Equal("Failed to update log max bytes", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update log max bytes", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateLogMaxBytes(new() { MaxMB = 10 }));
     }
 
     [Fact]
-    public async Task SetSeriesImageLimits_LegacyPost_PersistsAllThreeLimitsInOneSave()
+    public async Task UpdateSeriesImageLimits_PersistsAllThreeLimitsInOneSave()
     {
-        var result = await CreateController().SetSeriesImageLimits(new() { MaxMB = 0.5, MaxDownloadMB = 2, MaxDimension = 900 });
+        var result = await CreateController().UpdateSeriesImageLimits(new() { MaxMB = 0.5, MaxDownloadMB = 2, MaxDimension = 900 });
 
         Assert.Equal("Series image limits updated successfully", OkJson(result).GetProperty("message").GetString());
         _settingsService.Verify(s => s.UpdateSeriesImageLimitsAsync(BytesPerMb / 2, 2 * BytesPerMb, 900, It.IsAny<CancellationToken>()), Times.Once());
@@ -457,16 +420,13 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task UpdateSeriesImageLimits_ServiceFailure_Returns500()
+    public async Task UpdateSeriesImageLimits_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new InvalidOperationException("boom");
         _settingsService.Setup(s => s.UpdateSeriesImageLimitsAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController().UpdateSeriesImageLimits(new() { MaxMB = 1, MaxDownloadMB = 1, MaxDimension = 800 });
-
-        Assert.Equal("Failed to update series image limits", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update series image limits", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateSeriesImageLimits(new() { MaxMB = 1, MaxDownloadMB = 1, MaxDimension = 800 }));
     }
 
     [Fact]
@@ -475,34 +435,31 @@ public class SettingsControllerCoverageTests
         // A positive size too small to be a whole byte rounds to 0, which the
         // service rejects; that is the caller's mistake, not a server error.
         _settingsService.Setup(s => s.UpdateSeriesImageLimitsAsync(0, BytesPerMb, 800, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ArgumentException("Series image max bytes must be greater than 0", "maxBytes"));
+            .ThrowsAsync(new SettingsValidationException("Series image max bytes must be greater than 0", "maxBytes"));
 
         var result = await CreateController().UpdateSeriesImageLimits(new() { MaxMB = 0.0000001, MaxDownloadMB = 1, MaxDimension = 800 });
 
-        Assert.Equal("Series image max bytes must be greater than 0 (Parameter 'maxBytes')", BadRequestError(result));
-        VerifyLogged(LogLevel.Error, "Failed to update series image limits", Times.Never());
+        Assert.Equal("Series image max bytes must be greater than 0", BadRequestError(result));
+        VerifyLogged(LogLevel.Error, "series image limits", Times.Never());
     }
 
     [Fact]
-    public async Task SetDatabaseCleanupIntervalHours_LegacyPost_PersistsHours()
+    public async Task UpdateDatabaseCleanupIntervalHours_PersistsHours()
     {
-        var result = await CreateController().SetDatabaseCleanupIntervalHours(new() { Hours = 48 });
+        var result = await CreateController().UpdateDatabaseCleanupIntervalHours(new() { Hours = 48 });
 
         Assert.Equal("Database cleanup interval updated successfully", OkJson(result).GetProperty("message").GetString());
         _settingsService.Verify(s => s.UpdateDatabaseCleanupIntervalHoursAsync(48, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
-    public async Task UpdateDatabaseCleanupIntervalHours_ServiceFailure_Returns500()
+    public async Task UpdateDatabaseCleanupIntervalHours_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new InvalidOperationException("boom");
         _settingsService.Setup(s => s.UpdateDatabaseCleanupIntervalHoursAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController().UpdateDatabaseCleanupIntervalHours(new() { Hours = 1 });
-
-        Assert.Equal("Failed to update database cleanup interval", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update database cleanup interval", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateDatabaseCleanupIntervalHours(new() { Hours = 1 }));
     }
 
     // ---------------------------------------------------------------- default library view
@@ -550,25 +507,22 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task SetDefaultLibraryView_LegacyPost_PersistsView()
+    public async Task UpdateDefaultLibraryView_PersistsView()
     {
-        var result = await CreateController().SetDefaultLibraryView(new() { View = "files" });
+        var result = await CreateController().UpdateDefaultLibraryView(new() { View = "files" });
 
         Assert.IsType<OkObjectResult>(result);
         _settingsService.Verify(s => s.UpdateDefaultLibraryViewAsync("files", It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
-    public async Task UpdateDefaultLibraryView_ServiceFailure_Returns500()
+    public async Task UpdateDefaultLibraryView_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new InvalidOperationException("boom");
         _settingsService.Setup(s => s.UpdateDefaultLibraryViewAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController().UpdateDefaultLibraryView(new() { View = "series" });
-
-        Assert.Equal("Failed to update default library view", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update default library view", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateDefaultLibraryView(new() { View = "series" }));
     }
 
     // ---------------------------------------------------------------- default preferred language
@@ -627,13 +581,22 @@ public class SettingsControllerCoverageTests
     [Fact]
     public async Task UpdateDefaultPreferredLanguage_RetagFailure_IsLoggedButStillSucceeds()
     {
-        var failure = new InvalidOperationException("retag store unavailable");
+        var failure = new DbUpdateException("retag store unavailable");
         _retag.Setup(r => r.QueueRetagForGlobalDefaultAsync(It.IsAny<CancellationToken>())).ThrowsAsync(failure);
 
         var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "zh" });
 
         Assert.Equal("Default preferred language updated successfully", OkJson(result).GetProperty("message").GetString());
         VerifyLogged(LogLevel.Warning, "Failed to flag files for metadata backfill", Times.Once(), failure);
+    }
+
+    [Fact]
+    public async Task UpdateDefaultPreferredLanguage_UnexpectedRetagFailure_ReachesTheGlobalHandler()
+    {
+        var failure = new InvalidOperationException("retag bug");
+        _retag.Setup(r => r.QueueRetagForGlobalDefaultAsync(It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+
+        await AssertReachesGlobalHandler(failure, () => CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "zh" }));
     }
 
     [Fact]
@@ -650,7 +613,7 @@ public class SettingsControllerCoverageTests
     public async Task UpdateDefaultPreferredLanguage_InvalidLanguage_ReturnsBadRequestWithServiceMessage()
     {
         _settingsService.Setup(s => s.UpdateDefaultPreferredLanguageAsync("fr", It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ArgumentException("Unsupported language 'fr'"));
+            .ThrowsAsync(new SettingsValidationException("Unsupported language 'fr'"));
 
         var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "fr" });
 
@@ -659,16 +622,13 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task UpdateDefaultPreferredLanguage_ServiceFailure_Returns500()
+    public async Task UpdateDefaultPreferredLanguage_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new InvalidOperationException("boom");
         _settingsService.Setup(s => s.UpdateDefaultPreferredLanguageAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "ja" });
-
-        Assert.Equal("Failed to update default preferred language", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update default preferred language", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "ja" }));
         _retag.VerifyNoOtherCalls();
     }
 
@@ -708,7 +668,7 @@ public class SettingsControllerCoverageTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task SetExternalSeriesMetadata_LegacyPost_PassesBlankValuesToTheGroupSave(string blank)
+    public async Task UpdateExternalSeriesMetadata_PassesBlankValuesToTheGroupSave(string blank)
     {
         // The service decides what blanks mean (clear the key, keep the URLs).
         var request = new SettingsController.ExternalSeriesMetadataSettingsRequest
@@ -720,7 +680,7 @@ public class SettingsControllerCoverageTests
             AniListBaseUrl = blank,
         };
 
-        var result = await CreateController().SetExternalSeriesMetadata(request);
+        var result = await CreateController().UpdateExternalSeriesMetadata(request);
 
         Assert.IsType<OkObjectResult>(result);
         _settingsService.Verify(s => s.UpdateExternalSeriesMetadataSettingsAsync(
@@ -750,7 +710,7 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task UpdateExternalSeriesMetadata_ServiceFailure_Returns500WithoutLeakingDetails()
+    public async Task UpdateExternalSeriesMetadata_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new InvalidOperationException("cv-key-do-not-echo rejected");
         _settingsService.Setup(s => s.UpdateExternalSeriesMetadataSettingsAsync(
@@ -758,12 +718,7 @@ public class SettingsControllerCoverageTests
                 It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController().UpdateExternalSeriesMetadata(new() { ComicVineApiKey = "cv-key-do-not-echo" });
-
-        var json = ServerErrorJson(result);
-        Assert.Equal("Failed to update external series metadata settings", json.GetProperty("error").GetString());
-        Assert.DoesNotContain("cv-key-do-not-echo", json.GetRawText());
-        VerifyLogged(LogLevel.Error, "Failed to update external series metadata settings", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateExternalSeriesMetadata(new() { ComicVineApiKey = "cv-key-do-not-echo" }));
     }
 
     // ---------------------------------------------------------------- cleanup-database
@@ -915,26 +870,23 @@ public class SettingsControllerCoverageTests
     {
         _settingsService
             .Setup(s => s.UpdateDatabaseCleanupSettingsAsync(It.IsAny<DatabaseCleanupSettings>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ArgumentException("Max removal percent must be between 0 and 100"));
+            .ThrowsAsync(new SettingsValidationException("Max removal percent must be between 0 and 100"));
 
         var result = await CreateController().UpdateDatabaseCleanupSettings(new() { StaleCleanupMaxRemovalPercent = 101 });
 
         Assert.Equal("Max removal percent must be between 0 and 100", BadRequestError(result));
-        VerifyLogged(LogLevel.Error, "Failed to update database cleanup settings", Times.Never());
+        VerifyLogged(LogLevel.Error, "database cleanup settings", Times.Never());
     }
 
     [Fact]
-    public async Task UpdateDatabaseCleanupSettings_ServiceFailure_Returns500()
+    public async Task UpdateDatabaseCleanupSettings_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new IOException("disk full");
         _settingsService
             .Setup(s => s.UpdateDatabaseCleanupSettingsAsync(It.IsAny<DatabaseCleanupSettings>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController().UpdateDatabaseCleanupSettings(new());
-
-        Assert.Equal("Failed to update database cleanup settings", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update database cleanup settings", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateDatabaseCleanupSettings(new()));
     }
 
     // ---------------------------------------------------------------- reset
@@ -1026,20 +978,6 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task ResetDatabase_BroadcastFailure_IsLoggedButStillSucceeds()
-    {
-        await using var db = await SqliteDb.CreateAsync();
-        var failure = new InvalidOperationException("hub down");
-        _broadcaster.Setup(b => b.BroadcastFileListUpdateAsync()).ThrowsAsync(failure);
-
-        var result = await CreateController(withBroadcaster: true, dbFactory: db.Factory).ResetDatabase();
-
-        Assert.True(OkJson(result).GetProperty("success").GetBoolean());
-        _fileStore.Verify(f => f.InitializeFromDatabaseAsync(It.IsAny<CancellationToken>()), Times.Once());
-        VerifyLogged(LogLevel.Warning, "Failed to broadcast file list update after database reset", Times.Once(), failure);
-    }
-
-    [Fact]
     public async Task ResetDatabase_WithoutBroadcaster_Succeeds()
     {
         await using var db = await SqliteDb.CreateAsync();
@@ -1051,34 +989,26 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task ResetDatabase_DatabaseUnavailable_Returns500AndLeavesStoreAlone()
+    public async Task ResetDatabase_DatabaseUnavailable_ReachesTheGlobalHandlerAndLeavesStoreAlone()
     {
         var failure = new InvalidOperationException("database file is read-only");
 
-        var result = await CreateController(withBroadcaster: true, dbFactory: new ThrowingDbContextFactory(failure)).ResetDatabase();
+        await AssertReachesGlobalHandler(failure, () => CreateController(withBroadcaster: true, dbFactory: new ThrowingDbContextFactory(failure)).ResetDatabase());
 
-        var json = ServerErrorJson(result);
-        Assert.False(json.GetProperty("success").GetBoolean());
-        Assert.Equal("Error resetting database: database file is read-only", json.GetProperty("error").GetString());
         _fileStore.Verify(f => f.InitializeFromDatabaseAsync(It.IsAny<CancellationToken>()), Times.Never());
         _broadcaster.VerifyNoOtherCalls();
-        VerifyLogged(LogLevel.Error, "Error resetting database", Times.Once(), failure);
     }
 
     [Fact]
-    public async Task ResetDatabase_StoreReinitializationFailure_Returns500WithoutBroadcast()
+    public async Task ResetDatabase_StoreReinitializationFailure_ReachesTheGlobalHandlerWithoutBroadcast()
     {
         await using var db = await SqliteDb.CreateAsync();
         var failure = new InvalidOperationException("file store busy");
         _fileStore.Setup(f => f.InitializeFromDatabaseAsync(It.IsAny<CancellationToken>())).ThrowsAsync(failure);
 
-        var result = await CreateController(withBroadcaster: true, dbFactory: db.Factory).ResetDatabase();
+        await AssertReachesGlobalHandler(failure, () => CreateController(withBroadcaster: true, dbFactory: db.Factory).ResetDatabase());
 
-        var json = ServerErrorJson(result);
-        Assert.False(json.GetProperty("success").GetBoolean());
-        Assert.Equal("Error resetting database: file store busy", json.GetProperty("error").GetString());
         _broadcaster.VerifyNoOtherCalls();
-        VerifyLogged(LogLevel.Error, "Error resetting database", Times.Once(), failure);
     }
 
     [Fact]
@@ -1131,7 +1061,7 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public void RestartApplication_FailureWhileInitiating_Returns500AndDoesNotStop()
+    public void RestartApplication_FailureWhileInitiating_ReachesTheGlobalHandlerAndDoesNotStop()
     {
         var failure = new InvalidOperationException("log sink offline");
         _logger.Setup(l => l.Log(
@@ -1145,13 +1075,8 @@ public class SettingsControllerCoverageTests
         controller.ControllerContext = ContextFor(new ClaimsPrincipal(new ClaimsIdentity(
             new[] { new Claim(ClaimTypes.NameIdentifier, "42") }, "test")));
 
-        var result = controller.RestartApplication();
-
-        var json = ServerErrorJson(result);
-        Assert.False(json.GetProperty("success").GetBoolean());
-        Assert.Equal("Error initiating restart: log sink offline", json.GetProperty("error").GetString());
+        Assert.Same(failure, Assert.Throws<InvalidOperationException>(() => controller.RestartApplication()));
         _lifetime.Verify(l => l.StopApplication(), Times.Never());
-        VerifyLogged(LogLevel.Error, "Error initiating application restart", Times.Once(), failure);
     }
 
     // ---------------------------------------------------------------- secret-bearing settings groups
@@ -1220,7 +1145,7 @@ public class SettingsControllerCoverageTests
     [MemberData(nameof(SecretGroups))]
     public async Task SecretGroup_ValidationFailure_ReturnsBadRequestWithServiceMessage(string group)
     {
-        SetupSecretGroupFailure(group, new ArgumentException("Value is out of range"));
+        SetupSecretGroupFailure(group, new SettingsValidationException("Value is out of range"));
 
         var result = await PutSecretGroup(CreateController(), group, nullBody: false);
 
@@ -1228,20 +1153,13 @@ public class SettingsControllerCoverageTests
     }
 
     [Theory]
-    [InlineData("email", "Failed to update email settings")]
-    [InlineData("suwayomi", "Failed to update Suwayomi settings")]
-    [InlineData("error-reporting", "Failed to update error reporting settings")]
-    public async Task SecretGroup_UnexpectedFailure_Returns500WithoutLeakingSecret(string group, string expectedError)
+    [MemberData(nameof(SecretGroups))]
+    public async Task SecretGroup_UnexpectedFailure_ReachesTheGlobalHandler(string group)
     {
         var failure = new InvalidOperationException("could not persist " + Secret);
         SetupSecretGroupFailure(group, failure);
 
-        var result = await PutSecretGroup(CreateController(), group, nullBody: false);
-
-        var json = ServerErrorJson(result);
-        Assert.Equal(expectedError, json.GetProperty("error").GetString());
-        Assert.DoesNotContain(Secret, json.GetRawText());
-        VerifyLogged(LogLevel.Error, expectedError, Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => PutSecretGroup(CreateController(), group, nullBody: false));
     }
 
     [Fact]
@@ -1322,7 +1240,7 @@ public class SettingsControllerCoverageTests
     {
         _settingsService.Setup(s => s.UpdateEmailRateLimitSettingsAsync(
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ArgumentException("Maximum emails per hour must be between 0 and 10000"));
+            .ThrowsAsync(new SettingsValidationException("Maximum emails per hour must be between 0 and 10000"));
 
         var result = await CreateController().UpdateEmailRateLimitSettings(
             new SettingsController.EmailRateLimitSettingsRequest { MaxSendsPerHour = -1 });
@@ -1338,11 +1256,8 @@ public class SettingsControllerCoverageTests
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController().UpdateEmailRateLimitSettings(
-            new SettingsController.EmailRateLimitSettingsRequest());
-
-        Assert.Equal("Failed to update email rate limit", ServerErrorJson(result).GetProperty("error").GetString());
-        VerifyLogged(LogLevel.Error, "Failed to update email rate limit", Times.Once(), failure);
+        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateEmailRateLimitSettings(
+            new SettingsController.EmailRateLimitSettingsRequest()));
     }
 
     [Fact]

@@ -79,7 +79,7 @@ public class SettingsControllerTests
         };
 
         // Act
-        var result = await _controller.SetFilenameFormat(request);
+        var result = await _controller.UpdateFilenameFormat(request);
 
         // Assert
         Assert.IsType<OkObjectResult>(result);

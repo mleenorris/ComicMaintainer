@@ -13,6 +13,15 @@ public interface ISettingsService
     Task<AppSettings> GetSettingsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Saves every group in <paramref name="update"/> in a single atomic write, visible through
+    /// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/> before the call
+    /// returns. Nothing is saved when any value is refused.
+    /// </summary>
+    /// <exception cref="SettingsValidationException">A value is invalid; its reason says why.</exception>
+    /// <exception cref="SettingsLockedException">A value would change a setting the environment pins.</exception>
+    Task UpdateSettingsAsync(SettingsUpdate update, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update the log max bytes setting
     /// </summary>
     Task UpdateLogMaxBytesAsync(int maxBytes, CancellationToken cancellationToken = default);

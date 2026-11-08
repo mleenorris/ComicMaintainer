@@ -100,9 +100,15 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         job.Status = JobStatus.Running;
         await BroadcastAsync(job);
 
-        // Series keys of every series whose refresh produced a usable match,
-        // so the files of those series can be re-tagged at the end of the run.
+        // Series keys of every series whose refresh changed what its files
+        // should say, so those files can be re-tagged at the end of the run.
         var seriesKeysToRetag = new HashSet<string>(StringComparer.Ordinal);
+
+        // What refreshing each record concluded, by record key. A series card's
+        // refresh lists the canonical title and every alias, all of which
+        // belong to one record: it is looked up once and the rest share the
+        // answer, instead of each alias re-querying the providers.
+        var refreshedRecords = new Dictionary<string, RefreshResult>(StringComparer.Ordinal);
 
         try
         {
@@ -115,35 +121,32 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 }
 
                 job.CurrentSeries = title;
-                string outcomeStatus;
-                string? outcomeSource = null;
-                string? outcomeError = null;
+                RefreshResult result;
+                SeriesMetadataCacheRecord? before = null;
                 try
                 {
-                    var record = await _cache.RefreshAsync(title, cancellationToken);
-                    outcomeStatus = record.LookupStatus ?? "error";
-                    outcomeSource = record.Source;
-                    switch (record.LookupStatus)
+                    before = await _cache.GetByTitleAsync(title, cancellationToken);
+                    if (before is not null && refreshedRecords.TryGetValue(before.NormalizedKey, out var earlier))
                     {
-                        case "success":
-                        case "manual_match":
-                            // A manually-matched series that successfully
-                            // re-resolves to its user-selected match is a
-                            // successful refresh outcome.
-                            job.Successes++;
+                        result = earlier;
+                        if (result.Retag && SeriesKey.TryNormalize(title) is { } titleKey)
+                        {
+                            seriesKeysToRetag.Add(titleKey);
+                        }
+                    }
+                    else
+                    {
+                        var record = await _cache.RefreshAsync(title, cancellationToken);
+                        result = new RefreshResult(record.LookupStatus ?? "error", record.Source, null, RefreshChangedTheSeries(before, record));
+                        Remember(refreshedRecords, record, result);
+                        if (result.Retag)
+                        {
                             // Retag the files of the series: those under the
                             // requested title (typically the folder name) and
                             // under any title of the refreshed record, so the
                             // freshly resolved name reaches each file.
                             seriesKeysToRetag.UnionWith(SeriesFileMatcher.KeysOf(record, title));
-                            break;
-                        case "not_found":
-                            // Nothing new is known, so the files keep their tags.
-                            job.NotFound++;
-                            break;
-                        default:
-                            job.Failures++;
-                            break;
+                        }
                     }
                 }
                 catch (OperationCanceledException)
@@ -157,16 +160,31 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     // was, and the series counts as failed, not as not found.
                     _logger.LogWarning("Metadata refresh failed for {SeriesTitle}: {Reason}",
                         LoggingHelper.SanitizeForLog(title), LoggingHelper.SanitizeForLog(ex.Message));
-                    job.Failures++;
-                    outcomeStatus = "error";
-                    outcomeError = ex.Message;
+                    result = new RefreshResult("error", null, ex.Message, Retag: false);
+                    Remember(refreshedRecords, before, result);
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex, "Metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(title));
-                    job.Failures++;
-                    outcomeStatus = "error";
-                    outcomeError = "Refresh failed; see the server log";
+                    result = new RefreshResult("error", null, "Refresh failed; see the server log", Retag: false);
+                    Remember(refreshedRecords, before, result);
+                }
+
+                switch (result.Status)
+                {
+                    case "success":
+                    case "manual_match":
+                        // A manually-matched series that successfully
+                        // re-resolves to its user-selected match is a
+                        // successful refresh outcome.
+                        job.Successes++;
+                        break;
+                    case "not_found":
+                        job.NotFound++;
+                        break;
+                    default:
+                        job.Failures++;
+                        break;
                 }
 
                 lock (job.RecentResults)
@@ -174,9 +192,9 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     job.RecentResults.Add(new MetadataRefreshOutcome
                     {
                         SeriesTitle = title,
-                        Status = outcomeStatus,
-                        Source = outcomeSource,
-                        Error = outcomeError,
+                        Status = result.Status,
+                        Source = result.Source,
+                        Error = result.Error,
                         TimestampUtc = _timeProvider.GetUtcNow().UtcDateTime
                     });
                     while (job.RecentResults.Count > MaxRecentResults)
@@ -254,6 +272,42 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
             }
         }
     }
+
+    /// <summary>Remembers a refresh's result, so the record's other titles do not repeat it.</summary>
+    private static void Remember(
+        Dictionary<string, RefreshResult> refreshedRecords,
+        SeriesMetadataCacheRecord? record,
+        RefreshResult result)
+    {
+        if (!string.IsNullOrEmpty(record?.NormalizedKey))
+        {
+            refreshedRecords[record.NormalizedKey] = result;
+        }
+    }
+
+    /// <summary>
+    /// True when the refresh left a usable match that differs from what was
+    /// cached before it, so the series' files have something new to pick up.
+    /// A refresh that confirms the existing match re-tags nothing: re-opening
+    /// every archive of a matched library would achieve nothing.
+    /// </summary>
+    private static bool RefreshChangedTheSeries(SeriesMetadataCacheRecord? before, SeriesMetadataCacheRecord after)
+    {
+        if (!IsMatched(after.LookupStatus))
+        {
+            return false;
+        }
+
+        return before is null
+               || !IsMatched(before.LookupStatus)
+               || before.MetadataVersion != after.MetadataVersion
+               || !string.Equals(before.CanonicalTitle, after.CanonicalTitle, StringComparison.Ordinal);
+
+        static bool IsMatched(string? status) => status is "success" or "manual_match";
+    }
+
+    /// <summary>What refreshing one record concluded, shared by its other titles in the same run.</summary>
+    private sealed record RefreshResult(string Status, string? Source, string? Error, bool Retag);
 
     /// <summary>
     /// Enumerate every tracked comic file of the just-refreshed series (by

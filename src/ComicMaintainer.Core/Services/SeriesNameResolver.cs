@@ -272,13 +272,17 @@ public class SeriesNameResolver : ISeriesNameResolver
     /// </summary>
     internal static string ExtractFolderSeries(string filePath)
     {
-        var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
-        if (string.IsNullOrEmpty(folderName))
+        var folderSeries = SeriesFileMatcher.FolderSeriesOf(filePath);
+        if (folderSeries is not null)
         {
-            return UnknownSeries;
+            return folderSeries;
         }
-        var series = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
-        return string.IsNullOrEmpty(series) ? UnknownSeries : series;
+
+        // No parent folder at all, or one whose name is blank: a blank name
+        // stays blank so the resolver falls through to its sentinel step.
+        return string.IsNullOrEmpty(Path.GetFileName(Path.GetDirectoryName(filePath)))
+            ? UnknownSeries
+            : string.Empty;
     }
 
     private static string ResolveDisplayTitle(SeriesMetadataCacheRecord record, string? globalPreferredLanguage)

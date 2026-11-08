@@ -127,15 +127,16 @@ public static class SeriesFileMatcher
     }
 
     /// <summary>
-    /// The distinct paths (case-insensitive) of the files in
-    /// <paramref name="files"/> that belong to the series identified by
-    /// <paramref name="seriesKeys"/>, in their original order.
+    /// The distinct paths of the files in <paramref name="files"/> that belong
+    /// to the series identified by <paramref name="seriesKeys"/>, in their
+    /// original order. Paths are compared exactly: on a case-sensitive
+    /// filesystem two paths that differ only in case are two different files.
     /// </summary>
     public static List<string> SelectFilePaths(IEnumerable<ComicFile> files, IReadOnlySet<string> seriesKeys)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(seriesKeys);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         var paths = new List<string>();
         foreach (var file in files)
         {

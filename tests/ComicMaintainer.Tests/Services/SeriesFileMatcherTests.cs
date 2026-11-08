@@ -116,13 +116,28 @@ public class SeriesFileMatcherTests
             Untracked("/library/One Piece/c002.cbz"),
             Untracked("/library/Naruto/c001.cbz"),
             Untracked("/library/One Piece/c001.cbz"),
-            Untracked("/LIBRARY/ONE PIECE/C002.CBZ"),
+            Untracked("/library/One Piece/c002.cbz"),
             null!,
             Untracked("   "),
         };
 
         Assert.Equal(
             new[] { "/library/One Piece/c002.cbz", "/library/One Piece/c001.cbz" },
+            SeriesFileMatcher.SelectFilePaths(files, SeriesFileMatcher.KeysOf(OnePiece)));
+    }
+
+    [Fact]
+    public void SelectFilePaths_KeepsPathsThatDifferOnlyInCase()
+    {
+        // Two distinct files on a case-sensitive filesystem.
+        var files = new[]
+        {
+            Untracked("/library/One Piece/c001.cbz"),
+            Untracked("/library/One Piece/C001.cbz"),
+        };
+
+        Assert.Equal(
+            new[] { "/library/One Piece/c001.cbz", "/library/One Piece/C001.cbz" },
             SeriesFileMatcher.SelectFilePaths(files, SeriesFileMatcher.KeysOf(OnePiece)));
     }
 

@@ -377,14 +377,13 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         // manually matched.
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
-        var wasManualMatch = string.Equals(entity?.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase);
+        var wasManualMatch = HasStatus(entity, "manual_match");
+        var previousStatus = entity?.LookupStatus;
 
         ExternalSeriesMetadata? lookup;
         try
         {
-            lookup = wasManualMatch
-                ? await LookupManualMatchAsync(entity!, cancellationToken)
-                : await _externalMetadata.LookupSeriesAsync(trimmedTitle, cancellationToken);
+            lookup = await LookupForRefreshAsync(entity, key, trimmedTitle, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -424,32 +423,44 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         {
             if (lookup is not null)
             {
-                entity.CanonicalTitle = string.IsNullOrWhiteSpace(lookup.CanonicalTitle) ? entity.CanonicalTitle : lookup.CanonicalTitle;
-                entity.Aliases = lookup.Aliases?.ToList() ?? new List<string>();
+                var canonicalTitle = string.IsNullOrWhiteSpace(lookup.CanonicalTitle) ? entity.CanonicalTitle : lookup.CanonicalTitle;
+                var aliases = lookup.Aliases?.ToList() ?? new List<string>();
+                var localizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(lookup));
+                // A manually-matched series stays manually matched after a
+                // successful refresh — the lookup just updates the cached
+                // fields for the user-selected match.
+                var newStatus = wasManualMatch ? "manual_match" : status;
+                var namesChanged = !string.Equals(entity.CanonicalTitle, canonicalTitle, StringComparison.Ordinal)
+                    || !(entity.Aliases ?? new List<string>()).SequenceEqual(aliases, StringComparer.Ordinal)
+                    || !string.Equals(entity.LocalizedTitlesJson, localizedTitlesJson, StringComparison.Ordinal)
+                    || !string.Equals(previousStatus, newStatus, StringComparison.OrdinalIgnoreCase);
+
+                entity.CanonicalTitle = canonicalTitle;
+                entity.Aliases = aliases;
                 // A refresh by title may not report the id; keep the known one
                 // when the entry is still from the same provider.
                 entity.SourceId = lookup.SourceId
                     ?? (string.Equals(entity.Source, lookup.Source, StringComparison.OrdinalIgnoreCase) ? entity.SourceId : null);
                 entity.Source = lookup.Source;
                 entity.LastLookupUtc = now;
-                entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(lookup));
-                // A manually-matched series stays manually matched after a
-                // successful refresh — the lookup just updates the cached
-                // fields for the user-selected match.
-                entity.LookupStatus = wasManualMatch ? "manual_match" : status;
+                entity.LocalizedTitlesJson = localizedTitlesJson;
+                entity.LookupStatus = newStatus;
                 entity.UpdatedAt = now;
-                // Successful refreshes can change canonical title, aliases,
-                // or localized titles — bump so library scan re-normalizes
-                // affected files.
-                BumpMetadataVersion(entity);
+                if (namesChanged)
+                {
+                    // A new title, alias or match can change what is written
+                    // to the series' files, so bump for the library scan to
+                    // re-normalize them. An unchanged answer leaves them be.
+                    BumpMetadataVersion(entity);
+                }
             }
-            else if (wasManualMatch)
+            else if (KeepsStatusOnMiss(entity, key))
             {
-                // The matched entry is gone (or its provider is disabled) for
-                // a series the user had manually matched. Don't clobber the
-                // user's selection — preserve the existing canonical title,
-                // aliases, and source, and keep the manual_match status. Only
-                // record that a refresh was attempted.
+                // Nothing was found for this title, but that does not undo
+                // what the record holds: a match made by hand, the match of
+                // another of the series' names, or a user decision. Keep the
+                // existing titles, source and status; only record that a
+                // refresh was attempted.
                 entity.LastLookupUtc = now;
                 entity.UpdatedAt = now;
             }
@@ -473,11 +484,88 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
     }
 
     /// <summary>
-    /// Re-fetches a manual match from the provider that supplied it (by the
-    /// stored entry id when known). A match without a recorded source cannot
-    /// be re-fetched; it is left as the user chose it.
+    /// Asks the external providers about a series being refreshed.
     /// </summary>
-    private Task<ExternalSeriesMetadata?> LookupManualMatchAsync(
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>A manual match is re-fetched from its own provider only.</item>
+    /// <item>
+    /// An automatic match reached through another of the series' names (a user
+    /// alias, a merged folder, a provider alias) is also re-fetched from its
+    /// own provider. That name was never what the match was made on: searching
+    /// for it could miss, or find a different series that happens to use it.
+    /// </item>
+    /// <item>
+    /// An automatic match refreshed by its own title (the record's key or its
+    /// canonical title) is re-fetched by entry id when the id is known, which
+    /// also survives a provider renaming the entry. If that entry is gone or
+    /// its provider is disabled, the title decides.
+    /// </item>
+    /// <item>
+    /// Everything else, including older matches without an id, is an ordinary
+    /// strict lookup across every provider. An explicit refresh must ask, so a
+    /// remembered "no match" is forgotten first.
+    /// </item>
+    /// </list>
+    /// </remarks>
+    private async Task<ExternalSeriesMetadata?> LookupForRefreshAsync(
+        SeriesMetadataCacheEntity? entity,
+        string key,
+        string title,
+        CancellationToken cancellationToken)
+    {
+        if (HasStatus(entity, "manual_match"))
+        {
+            return await LookupStoredMatchAsync(entity!, cancellationToken);
+        }
+
+        if (HasStatus(entity, "success"))
+        {
+            var isOwnTitle = IsOwnTitle(entity!, key);
+            if (!isOwnTitle || !string.IsNullOrWhiteSpace(entity!.SourceId))
+            {
+                var stored = await LookupStoredMatchAsync(entity!, cancellationToken);
+                if (stored is not null || !isOwnTitle)
+                {
+                    return stored;
+                }
+            }
+        }
+
+        _externalMetadata.ForgetNoMatch(title);
+        return await _externalMetadata.LookupSeriesAsync(title, cancellationToken);
+    }
+
+    private static bool HasStatus(SeriesMetadataCacheEntity? entity, string status)
+        => string.Equals(entity?.LookupStatus, status, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when <paramref name="key"/> is the record's own identity: the key
+    /// it was stored under or its canonical title, as opposed to one of the
+    /// other names it is known by.
+    /// </summary>
+    private static bool IsOwnTitle(SeriesMetadataCacheEntity entity, string key)
+        => string.Equals(entity.NormalizedKey, key, StringComparison.Ordinal)
+           || string.Equals(SeriesKey.Normalize(entity.CanonicalTitle), key, StringComparison.Ordinal);
+
+    /// <summary>
+    /// True when a lookup that found nothing must leave the record's status
+    /// alone: it holds a manual match, a user decision (<c>manual</c>,
+    /// <c>cleared</c>), or an automatic match that was refreshed through a
+    /// name other than its own.
+    /// </summary>
+    private static bool KeepsStatusOnMiss(SeriesMetadataCacheEntity entity, string key)
+        => HasStatus(entity, "manual_match")
+           || HasStatus(entity, "manual")
+           || HasStatus(entity, "cleared")
+           || (HasStatus(entity, "success") && !IsOwnTitle(entity, key));
+
+    /// <summary>
+    /// Re-fetches a match from the provider that supplied it (by the stored
+    /// entry id when known). A match without a recorded source cannot be
+    /// re-fetched; it is left as it is.
+    /// </summary>
+    private Task<ExternalSeriesMetadata?> LookupStoredMatchAsync(
         SeriesMetadataCacheEntity entity,
         CancellationToken cancellationToken)
     {
@@ -728,10 +816,10 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.ImageDownloadedUtc = now;
         entity.ImageStatus = "downloaded";
         // Attribute the record to the image's provider only while it has no
-        // matched entry: Source and SourceId together identify the match a
+        // match: Source (with SourceId, when known) identifies the entry a
         // refresh re-fetches, so a cover picked from another provider must not
-        // re-point it.
-        if (!string.IsNullOrWhiteSpace(source) && string.IsNullOrWhiteSpace(entity.SourceId))
+        // re-point a matched series.
+        if (!string.IsNullOrWhiteSpace(source) && !HasStatus(entity, "manual_match") && !HasStatus(entity, "success"))
         {
             entity.Source = source;
         }

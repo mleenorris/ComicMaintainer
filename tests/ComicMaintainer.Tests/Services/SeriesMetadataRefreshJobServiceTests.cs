@@ -463,7 +463,7 @@ public class SeriesMetadataRefreshJobServiceTests
             TrackedFile("/library/One Piece (Official)/c001.cbz"),
             TrackedFile("/library/WAN_PISU/c001.cbz"),
             TrackedFile("/library/OP/c001.cbz"),
-            TrackedFile("/LIBRARY/ONE PIECE/C001.CBZ"),
+            TrackedFile("/library/one piece/c001.cbz"),
             TrackedFile("/library/Naruto/c001.cbz"),
             TrackedFile("/library/loose.cbz"),
             // A file edited in the app belongs by its <Series>, wherever it lives.
@@ -510,6 +510,121 @@ public class SeriesMetadataRefreshJobServiceTests
         Assert.Equal(JobStatus.Completed, job.Status);
         _fileStore.Verify(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Never);
         _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private void SetupOwner(string title, string normalizedKey, string canonical, string? status = "success", int metadataVersion = 3) =>
+        _cache.Setup(c => c.GetByTitleAsync(title, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord
+            {
+                NormalizedKey = normalizedKey,
+                CanonicalTitle = canonical,
+                LookupStatus = status,
+                MetadataVersion = metadataVersion,
+                Aliases = new List<string>(),
+                UserAliases = new List<string>()
+            });
+
+    private void SetupRefreshOf(string title, string normalizedKey, string canonical, int metadataVersion) =>
+        _cache.Setup(c => c.RefreshAsync(title, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord
+            {
+                NormalizedKey = normalizedKey,
+                CanonicalTitle = canonical,
+                LookupStatus = "success",
+                MetadataVersion = metadataVersion,
+                Aliases = new List<string>(),
+                UserAliases = new List<string>()
+            });
+
+    [Fact]
+    public async Task RunJob_SeveralTitlesOfOneRecord_AreRefreshedOnce()
+    {
+        // A series card's Refresh sends the canonical title and every alias.
+        SetupOwner("Attack on Titan", "shingeki-no-kyojin", "Attack on Titan");
+        SetupOwner("AoT", "shingeki-no-kyojin", "Attack on Titan");
+        SetupRefreshOf("Attack on Titan", "shingeki-no-kyojin", "Attack on Titan", metadataVersion: 3);
+        var service = CreateService(withFileStore: false, withProcessor: false);
+
+        var jobId = await service.StartAsync(new[] { "Attack on Titan", "AoT" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        _cache.Verify(c => c.RefreshAsync("Attack on Titan", It.IsAny<CancellationToken>()), Times.Once);
+        _cache.Verify(c => c.RefreshAsync("AoT", It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(2, job.ProcessedSeries);
+        Assert.Equal(2, job.Successes);
+        Assert.Equal(new[] { "success", "success" }, job.RecentResults.Select(r => r.Status));
+    }
+
+    [Fact]
+    public async Task RunJob_TitlesOfDifferentRecords_AreEachRefreshed()
+    {
+        // "Monster" is its own record, even though another series lists it as an alias.
+        SetupOwner("Pluto", "pluto", "Pluto");
+        SetupOwner("Monster", "monster", "Monster");
+        SetupRefreshOf("Pluto", "pluto", "Pluto", metadataVersion: 3);
+        SetupRefreshOf("Monster", "monster", "Monster", metadataVersion: 3);
+        var service = CreateService(withFileStore: false, withProcessor: false);
+
+        var jobId = await service.StartAsync(new[] { "Pluto", "Monster" });
+        await WaitForCleanupAsync(service, jobId);
+
+        _cache.Verify(c => c.RefreshAsync("Pluto", It.IsAny<CancellationToken>()), Times.Once);
+        _cache.Verify(c => c.RefreshAsync("Monster", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunJob_FailedRefresh_IsNotRepeatedForTheRecordsOtherTitles()
+    {
+        SetupOwner("Attack on Titan", "shingeki-no-kyojin", "Attack on Titan");
+        SetupOwner("AoT", "shingeki-no-kyojin", "Attack on Titan");
+        _cache.Setup(c => c.RefreshAsync("Attack on Titan", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException(
+                "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s"));
+        var service = CreateService(withFileStore: false, withProcessor: false);
+
+        var jobId = await service.StartAsync(new[] { "Attack on Titan", "AoT" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        _cache.Verify(c => c.RefreshAsync("AoT", It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(2, job.Failures);
+        Assert.All(job.RecentResults, r => Assert.Equal("MangaDex did not answer within 15s", r.Error));
+    }
+
+    [Fact]
+    public async Task RunJob_UnchangedMatch_DoesNotRetag()
+    {
+        // Refresh All of a matched library must not re-open every archive.
+        SetupOwner("Alpha", "alpha", "Alpha", metadataVersion: 3);
+        SetupRefreshOf("Alpha", "alpha", "Alpha", metadataVersion: 3);
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
+        var service = CreateService();
+
+        var jobId = await service.StartAsync(new[] { "Alpha" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        Assert.Equal(1, job.Successes);
+        _fileStore.Verify(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("success", 3, "Alpha New", "Alpha")] // canonical title changed
+    [InlineData("success", 4, "Alpha", "Alpha")] // aliases or localized titles changed (version bumped)
+    [InlineData("not_found", 3, "Alpha", "Alpha")] // newly matched
+    public async Task RunJob_ChangedMatch_Retags(string statusBefore, int versionAfter, string canonicalAfter, string canonicalBefore)
+    {
+        SetupOwner("Alpha", "alpha", canonicalBefore, statusBefore, metadataVersion: 3);
+        SetupRefreshOf("Alpha", "alpha", canonicalAfter, versionAfter);
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
+        var normalized = new TaskCompletionSource<List<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => normalized.TrySetResult(paths.ToList()))
+            .ReturnsAsync(Guid.NewGuid());
+        var service = CreateService();
+
+        await service.StartAsync(new[] { "Alpha" });
+
+        Assert.Equal(new[] { "/library/Alpha/c001.cbz" }, await normalized.Task.WaitAsync(WaitTimeout));
     }
 
     [Fact]

@@ -339,7 +339,8 @@ public class SeriesMetadataCacheServiceTests
             source: "MangaDex");
 
         Assert.Equal("batman-new.png", record.LocalImageFile);
-        Assert.Equal("MangaDex", record.Source);
+        // A cover from another provider does not re-point the matched series.
+        Assert.Equal("ComicVine", record.Source);
         _imageStore.Verify(s => s.DownloadAsync(
                 It.IsAny<string>(), "https://example.com/new.png", "batman-old.jpg", It.IsAny<CancellationToken>()),
             Times.Once);

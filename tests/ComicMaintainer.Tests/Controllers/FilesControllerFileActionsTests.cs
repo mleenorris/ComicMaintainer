@@ -39,7 +39,7 @@ public sealed class FilesControllerFileActionsTests
             _seriesLibrary.Object,
             _logger.Object,
             _settings.Object,
-            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, _history.Object, _seriesLibrary.Object, _settings.Object));
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, Mock.Of<IBatchJobRegistry>(), _history.Object, _seriesLibrary.Object, _settings.Object));
     }
 
     private string InRoot(params string[] parts) => Path.Join(new[] { _root }.Concat(parts).ToArray());

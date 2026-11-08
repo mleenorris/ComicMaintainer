@@ -28,6 +28,7 @@ public sealed class FilesControllerFileLockTests : IDisposable
     private readonly string _root = Path.Join(Path.GetTempPath(), $"fc_lock_{Guid.NewGuid():N}");
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<ISeriesLibraryService> _seriesLibrary = new();
     private readonly Mock<ISeriesMetadataCacheService> _metadataCache = new();
     private readonly RecordingFileLock _fileLock = new();
@@ -40,7 +41,7 @@ public sealed class FilesControllerFileLockTests : IDisposable
             .Returns((string? title) => title?.Trim().ToLowerInvariant() ?? string.Empty);
 
         // Run the combine job's items and post-loop hook inline, as the job runner would.
-        _processor.RunCustomBatchJobsInline();
+        _jobRegistry.RunCustomBatchJobsInline();
         _processor
             .Setup(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Guid.NewGuid());
@@ -180,6 +181,7 @@ public sealed class FilesControllerFileLockTests : IDisposable
             TestFolderCombineService.Create(
                 _fileStore.Object,
                 _processor.Object,
+                _jobRegistry.Object,
                 history,
                 _seriesLibrary.Object,
                 settings,

@@ -38,7 +38,7 @@ public class SettingsControllerCoverageTests
 
     private readonly Mock<ILogger<SettingsController>> _logger = new();
     private readonly Mock<IDbContextFactory<ComicMaintainerDbContext>> _dbFactory = new(MockBehavior.Strict);
-    private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<ISettingsService> _settingsService = new();
     private readonly Mock<IHostApplicationLifetime> _lifetime = new();
@@ -54,7 +54,7 @@ public class SettingsControllerCoverageTests
             new TestOptionsMonitor<AppSettings>(_settings),
             _logger.Object,
             dbFactory ?? _dbFactory.Object,
-            _processor.Object,
+            _jobRegistry.Object,
             _fileStore.Object,
             _settingsService.Object,
             _lifetime.Object,
@@ -958,10 +958,7 @@ public class SettingsControllerCoverageTests
             await seed.SaveChangesAsync();
         }
 
-        var running = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Running };
-        var queued = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Queued };
-        var completed = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Completed };
-        _processor.Setup(p => p.GetAllJobs()).Returns(new[] { running, queued, completed });
+        _jobRegistry.Setup(j => j.CancelActiveJobs()).Returns(2);
 
         (int Files, int History)? countsWhenStoreReinitialized = null;
         _fileStore.Setup(f => f.InitializeFromDatabaseAsync(It.IsAny<CancellationToken>()))
@@ -980,9 +977,7 @@ public class SettingsControllerCoverageTests
         // The history page must not keep reporting the entries that were just deleted.
         _history.Verify(h => h.InvalidateTotalCount(), Times.Once());
         _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once());
-        VerifyLogged(LogLevel.Information, running.JobId.ToString(), Times.Once());
-        VerifyLogged(LogLevel.Information, queued.JobId.ToString(), Times.Once());
-        VerifyLogged(LogLevel.Information, completed.JobId.ToString(), Times.Never());
+        VerifyLogged(LogLevel.Information, "Cancelled 2 active job(s) due to reset", Times.Once());
     }
 
     [Fact]
@@ -995,32 +990,20 @@ public class SettingsControllerCoverageTests
             await seed.SaveChangesAsync();
         }
 
-        var running = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Running };
-        var queued = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Queued };
-        // Finishes between GetAllJobs and CancelJob, so there is nothing left to cancel.
-        var finishedMeanwhile = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Running };
-        var finished = new[] { JobStatus.Completed, JobStatus.Failed, JobStatus.Cancelled, JobStatus.Interrupted }
-            .Select(status => new ProcessingJob { JobId = Guid.NewGuid(), Status = status })
-            .ToList();
-        _processor.Setup(p => p.GetAllJobs()).Returns(new[] { running, queued, finishedMeanwhile }.Concat(finished).ToList());
-
-        var filesLeftWhenCancelled = new Dictionary<Guid, int>();
-        _processor.Setup(p => p.CancelJob(It.IsAny<Guid>()))
-            .Returns((Guid jobId) =>
+        var filesLeftWhenCancelled = new List<int>();
+        _jobRegistry.Setup(j => j.CancelActiveJobs())
+            .Returns(() =>
             {
                 using var check = db.Factory.CreateDbContext();
-                filesLeftWhenCancelled.Add(jobId, check.ComicFiles.Count());
-                return jobId != finishedMeanwhile.JobId;
+                filesLeftWhenCancelled.Add(check.ComicFiles.Count());
+                return 1;
             });
 
         var result = await CreateController(dbFactory: db.Factory).ResetDatabase();
 
         Assert.True(OkJson(result).GetProperty("success").GetBoolean());
-        // Every queued or running job was cancelled while its files were still in the database.
-        Assert.Equal(
-            new Dictionary<Guid, int> { [running.JobId] = 1, [queued.JobId] = 1, [finishedMeanwhile.JobId] = 1 },
-            filesLeftWhenCancelled);
-        _processor.Verify(p => p.CancelJob(It.IsAny<Guid>()), Times.Exactly(3));
+        // The jobs were cancelled while their files were still in the database.
+        Assert.Equal(new[] { 1 }, filesLeftWhenCancelled);
         await using var after = await db.Factory.CreateDbContextAsync();
         Assert.Equal(0, await after.ComicFiles.CountAsync());
     }

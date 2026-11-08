@@ -22,6 +22,7 @@ internal static class TestFolderCombineService
     public static FolderCombineService Create(
         IFileStoreService fileStore,
         IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         IProcessingHistoryService historyService,
         ISeriesLibraryService seriesLibrary,
         IOptionsMonitor<AppSettings> settings,
@@ -34,6 +35,7 @@ internal static class TestFolderCombineService
         new(
             fileStore,
             processor,
+            jobRegistry,
             historyService,
             seriesLibrary,
             metadataCache ?? Mock.Of<ISeriesMetadataCacheService>(),

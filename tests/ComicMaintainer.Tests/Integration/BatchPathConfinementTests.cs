@@ -164,11 +164,11 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
         {
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var jobId = (json.RootElement.TryGetProperty("job_id", out var id) ? id : json.RootElement.GetProperty("jobId")).GetGuid();
-            var processor = _factory.Services.GetRequiredService<IComicProcessorService>();
+            var jobRegistry = _factory.Services.GetRequiredService<IBatchJobRegistry>();
             var deadline = DateTime.UtcNow.AddSeconds(30);
             while (true)
             {
-                var job = processor.GetJob(jobId);
+                var job = jobRegistry.GetJob(jobId);
                 if (job is { Status: not (JobStatus.Queued or JobStatus.Running) })
                 {
                     return job;

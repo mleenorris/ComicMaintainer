@@ -25,6 +25,7 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<ISeriesNameResolver> _resolver = new();
     private readonly Mock<ISeriesMetadataCacheService> _cache = new();
     private readonly AppSettings _settings = new();
@@ -33,6 +34,7 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
 
     public MetadataAuditJobHandlerCoverageTests()
     {
+        _jobRegistry.SetupWaitForAnyJobHonoursCancellation();
         // By default the resolver has no opinion, so files are only flagged when a test says so.
         _resolver
             .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
@@ -59,6 +61,7 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
     private MetadataAuditJobHandler CreateHandler(bool withResolver = true, bool withCache = false) => new(
         _fileStore.Object,
         _processor.Object,
+        _jobRegistry.Object,
         _dbFactory,
         new TestOptionsMonitor<AppSettings>(_settings),
         Mock.Of<ILogger<MetadataAuditJobHandler>>(),
@@ -557,8 +560,8 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => queued = paths.ToList())
             .ReturnsAsync(normalizeJobId);
-        _processor.Setup(p => p.GetJob(normalizeJobId))
-            .Returns(new ProcessingJob { JobId = normalizeJobId, Status = finalStatus, ProcessedFiles = 1, FailedFiles = 1 });
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(normalizeJobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessingJob { JobId = normalizeJobId, Status = finalStatus, ProcessedFiles = 1, FailedFiles = 1 });
 
         // Option names are matched case-insensitively.
         var summary = await CreateHandler().ExecuteAsync("""{"AUTOCORRECT":true}""", CancellationToken.None);
@@ -568,7 +571,7 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
             summary);
         Assert.Equal(new[] { mismatch, chapterless }, queued);
         Assert.Equal(4, (await ReadFindingsAsync()).Count);
-        _processor.Verify(p => p.GetJob(normalizeJobId), Times.Once);
+        _jobRegistry.Verify(p => p.WaitForCompletionAsync(normalizeJobId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -582,7 +585,7 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
         var normalizeJobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(normalizeJobId);
-        _processor.Setup(p => p.GetJob(normalizeJobId)).Returns(default(ProcessingJob?));
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(normalizeJobId, It.IsAny<CancellationToken>())).ReturnsAsync(default(ProcessingJob?));
 
         var summary = await CreateHandler().ExecuteAsync(AutoCorrectOn, CancellationToken.None);
 
@@ -601,19 +604,19 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
         using var cts = new CancellationTokenSource();
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(normalizeJobId);
-        _processor.Setup(p => p.GetJob(normalizeJobId))
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(normalizeJobId, It.IsAny<CancellationToken>()))
             .Callback(() => cts.Cancel())
-            .Returns(new ProcessingJob { JobId = normalizeJobId, Status = JobStatus.Running });
+            .ThrowsAsync(new OperationCanceledException());
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => CreateHandler().ExecuteAsync(AutoCorrectOn, cts.Token));
 
         Assert.Equal(path, Assert.Single(await ReadFindingsAsync()).FilePath);
-        _processor.Verify(p => p.GetJob(normalizeJobId), Times.Once);
+        _jobRegistry.Verify(p => p.WaitForCompletionAsync(normalizeJobId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task ExecuteAsync_CancelledWhileQueueingAutoCorrect_ThrowsWithoutPolling()
+    public async Task ExecuteAsync_CancelledWhileQueueingAutoCorrect_Throws()
     {
         const string path = "/library/A/c001.cbz";
         SetupTrackedFiles(path);
@@ -625,8 +628,6 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => CreateHandler().ExecuteAsync(AutoCorrectOn, cts.Token));
-
-        _processor.Verify(p => p.GetJob(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]

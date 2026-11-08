@@ -13,6 +13,7 @@ namespace ComicMaintainer.Tests.Controllers;
 public class JobsControllerTests
 {
     private readonly Mock<IComicProcessorService> _mockProcessor;
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<ILogger<JobsController>> _mockLogger;
     private readonly JobsController _controller;
@@ -24,7 +25,7 @@ public class JobsControllerTests
         _mockLogger = new Mock<ILogger<JobsController>>();
         // The files these tests delete ("/path/...") live in the library.
         var settings = new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = "/path" });
-        _controller = new JobsController(_mockProcessor.Object, _mockFileStore.Object, _mockLogger.Object, settings);
+        _controller = new JobsController(_mockProcessor.Object, _jobRegistry.Object, _mockFileStore.Object, _mockLogger.Object, settings);
     }
 
     // Helper method to extract job response from OkObjectResult without reflection
@@ -46,7 +47,7 @@ public class JobsControllerTests
             TotalFiles = 5,
             ProcessedFiles = 2
         };
-        _mockProcessor.Setup(p => p.GetJob(jobId)).Returns(job);
+        _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(job);
 
         // Act
         var result = _controller.GetJob(jobId);
@@ -79,7 +80,7 @@ public class JobsControllerTests
                 ["/library/Old"] = "Source folder kept. It still holds files that are not disposable. Remaining: b.cbz."
             }
         };
-        _mockProcessor.Setup(p => p.GetJob(jobId)).Returns(job);
+        _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(job);
 
         var result = _controller.GetJob(jobId);
 
@@ -109,7 +110,7 @@ public class JobsControllerTests
             FailedFiles = 1,
             Errors = new Dictionary<string, string> { ["/library/a.cbz"] = "Failed" }
         };
-        _mockProcessor.Setup(p => p.GetJob(jobId)).Returns(job);
+        _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(job);
 
         var result = _controller.GetJob(jobId);
 
@@ -122,7 +123,7 @@ public class JobsControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor.Setup(p => p.GetJob(jobId)).Returns(default(ProcessingJob?));
+        _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(default(ProcessingJob?));
 
         // Act
         var result = _controller.GetJob(jobId);
@@ -136,7 +137,7 @@ public class JobsControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor.Setup(p => p.GetJob(jobId)).Throws(new InvalidOperationException("Test error"));
+        _jobRegistry.Setup(p => p.GetJob(jobId)).Throws(new InvalidOperationException("Test error"));
 
         // Act
         var result = _controller.GetJob(jobId);
@@ -150,8 +151,8 @@ public class JobsControllerTests
     public void GetActiveJob_WhenNoActiveJob_ReturnsInactive()
     {
         // Arrange
-        _mockProcessor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
-        _mockProcessor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob>());
+        _jobRegistry.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJobSummary?));
+        _jobRegistry.Setup(p => p.GetJobSummaries()).Returns(new List<ProcessingJobSummary>());
 
         // Act
         var result = _controller.GetActiveJob();
@@ -173,8 +174,8 @@ public class JobsControllerTests
             FailedFiles = 1
         };
 
-        _mockProcessor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
-        _mockProcessor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob> { interrupted });
+        _jobRegistry.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJobSummary?));
+        _jobRegistry.Setup(p => p.GetJobSummaries()).Returns(new List<ProcessingJobSummary> { interrupted.ToSummary() });
 
         var result = _controller.GetActiveJob();
 
@@ -194,7 +195,7 @@ public class JobsControllerTests
             Status = JobStatus.Running,
             TotalFiles = 10
         };
-        _mockProcessor.Setup(p => p.GetActiveJob()).Returns(job);
+        _jobRegistry.Setup(p => p.GetActiveJob()).Returns(job.ToSummary());
 
         // Act
         var result = _controller.GetActiveJob();
@@ -301,7 +302,7 @@ public class JobsControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor.Setup(p => p.CancelJob(jobId)).Returns(true);
+        _jobRegistry.Setup(p => p.CancelJob(jobId)).Returns(true);
 
         // Act
         var result = _controller.CancelJob(jobId);
@@ -448,7 +449,7 @@ public class JobsControllerTests
             new() { JobId = Guid.NewGuid(), Status = JobStatus.Completed, TotalFiles = 5, ProcessedFiles = 5 },
             new() { JobId = Guid.NewGuid(), Status = JobStatus.Running, TotalFiles = 10, ProcessedFiles = 3 }
         };
-        _mockProcessor.Setup(p => p.GetAllJobs()).Returns(jobs);
+        _jobRegistry.Setup(p => p.GetJobSummaries()).Returns(jobs.ConvertAll(j => j.ToSummary()));
 
         // Act
         var result = _controller.ListJobs();
@@ -465,7 +466,7 @@ public class JobsControllerTests
     public void ListJobs_WhenNoJobs_ReturnsEmptyList()
     {
         // Arrange
-        _mockProcessor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob>());
+        _jobRegistry.Setup(p => p.GetJobSummaries()).Returns(new List<ProcessingJobSummary>());
 
         // Act
         var result = _controller.ListJobs();
@@ -481,7 +482,7 @@ public class JobsControllerTests
     public void ListJobs_WhenExceptionThrown_ReturnsInternalServerError()
     {
         // Arrange
-        _mockProcessor.Setup(p => p.GetAllJobs()).Throws(new InvalidOperationException("Test error"));
+        _jobRegistry.Setup(p => p.GetJobSummaries()).Throws(new InvalidOperationException("Test error"));
 
         // Act
         var result = _controller.ListJobs();
@@ -496,14 +497,14 @@ public class JobsControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor.Setup(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _jobRegistry.Setup(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         // Act
         var result = await _controller.DeleteJob(jobId, CancellationToken.None);
 
         // Assert
         Assert.IsType<NoContentResult>(result);
-        _mockProcessor.Verify(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>()), Times.Once);
+        _jobRegistry.Verify(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -511,7 +512,7 @@ public class JobsControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor.Setup(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _jobRegistry.Setup(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         // Act
         var result = await _controller.DeleteJob(jobId, CancellationToken.None);
@@ -525,7 +526,7 @@ public class JobsControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor
+        _jobRegistry
             .Setup(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 

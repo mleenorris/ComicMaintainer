@@ -96,6 +96,23 @@ public class JobStateStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SaveAsync_StoresTheFileListOnlyWhenTheRecordIsCreated()
+    {
+        var job = NewJob();
+        var originalFiles = new List<string>(job.Files);
+        await _store.SaveAsync(job);
+
+        // A progress write carries the job's current counters; its list is not stored again.
+        job.Files = new List<string> { "/lib/replaced.cbz" };
+        job.ProcessedFiles = 2;
+        await _store.SaveAsync(job);
+
+        var stored = Assert.Single(await _store.GetAllAsync());
+        Assert.Equal(originalFiles, stored.Files);
+        Assert.Equal(2, stored.ProcessedFiles);
+    }
+
+    [Fact]
     public async Task MarkInterruptedAsync_ConvertsOnlyNonTerminalJobs()
     {
         var running = NewJob(JobStatus.Running);

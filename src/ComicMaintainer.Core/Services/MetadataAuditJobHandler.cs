@@ -19,12 +19,9 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
 {
     public const string Key = "metadata-audit";
 
-    // Poll the spawned normalize batch job at this cadence while waiting for completion
-    // during an autoCorrect run, mirroring FileNamingAuditJobHandler's pattern.
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
-
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly ISeriesMetadataCacheService? _seriesCache;
     private readonly ISeriesNameResolver? _seriesNameResolver;
@@ -34,6 +31,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
     public MetadataAuditJobHandler(
         IFileStoreService fileStore,
         IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IOptionsMonitor<AppSettings> appSettings,
         ILogger<MetadataAuditJobHandler> logger,
@@ -42,6 +40,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
     {
         _fileStore = fileStore;
         _processor = processor;
+        _jobRegistry = jobRegistry;
         _dbContextFactory = dbContextFactory;
         _appSettings = appSettings;
         _logger = logger;
@@ -174,24 +173,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
                 _logger.LogInformation("Metadata audit auto-correct: queueing {Count} file(s) for normalization", toFix.Count);
                 var jobId = await _processor.NormalizeFilesAsync(toFix, forceReprocess: true, cancellationToken);
 
-                ProcessingJob? job = null;
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    job = _processor.GetJob(jobId);
-                    if (job is null)
-                    {
-                        // Job record was evicted before we observed completion; treat as success
-                        // since the normalize pipeline only persists state on success.
-                        break;
-                    }
-                    if (job.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled)
-                    {
-                        break;
-                    }
-                    await Task.Delay(PollInterval, cancellationToken);
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
+                var job = await _jobRegistry.WaitForCompletionAsync(jobId, cancellationToken);
 
                 correctedSummary = job is null
                     ? $" Auto-correct queued {toFix.Count} file(s); job record no longer available."

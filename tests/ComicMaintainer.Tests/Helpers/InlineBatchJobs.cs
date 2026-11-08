@@ -20,7 +20,7 @@ internal sealed class RecordingBatchJobReport : IBatchJobReport
 }
 
 /// <summary>
-/// Makes a mocked <see cref="IComicProcessorService"/> run custom batch jobs
+/// Makes a mocked <see cref="IBatchJobRegistry"/> run custom batch jobs
 /// inline: every item operation, then the post-loop hook, before the call
 /// returns, so a test sees a job's effects as soon as the code under test
 /// returns.
@@ -31,11 +31,11 @@ internal static class InlineBatchJobs
     /// Sets up both <c>RunCustomBatchJobAsync</c> overloads and returns the
     /// report that post-loop hooks taking one write to.
     /// </summary>
-    public static RecordingBatchJobReport RunCustomBatchJobsInline(this Mock<IComicProcessorService> processor)
+    public static RecordingBatchJobReport RunCustomBatchJobsInline(this Mock<IBatchJobRegistry> jobRegistry)
     {
         var report = new RecordingBatchJobReport();
 
-        processor
+        jobRegistry
             .Setup(p => p.RunCustomBatchJobAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),
@@ -56,7 +56,7 @@ internal static class InlineBatchJobs
                 return Guid.NewGuid();
             });
 
-        processor
+        jobRegistry
             .Setup(p => p.RunCustomBatchJobAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),

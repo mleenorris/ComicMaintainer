@@ -44,6 +44,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     private readonly ConcurrentQueue<ProcessingHistoryEntry> _historyEntries = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<string>> _jobSignals = new();
     private readonly List<ComicProcessorService> _services = new();
+    private readonly Dictionary<ComicProcessorService, BatchJobRegistry> _jobRegistries = new();
 
     public ComicProcessorServiceCoverageTests()
     {
@@ -2191,6 +2192,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         IFileStoreService? fileStore = null)
     {
         var settings = new TestOptionsMonitor<AppSettings>(_settings);
+        var jobRegistry = new BatchJobRegistry(settings, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: _broadcaster.Object, metrics: metrics);
 
         // Series resolution goes through the real SeriesNameResolver, logging to the same
         // logger, so its warnings can be asserted alongside the processor's.
@@ -2203,9 +2205,11 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
             externalSeriesMetadata: external,
             seriesMetadataCache: cache,
             seriesNameResolver: resolver ?? new SeriesNameResolver(settings, _logger, cache, external),
+            jobRegistry: jobRegistry,
             comicEmail: email,
             metrics: metrics);
         _services.Add(service);
+        _jobRegistries[service] = jobRegistry;
         return service;
     }
 
@@ -2213,17 +2217,20 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Action? beforeFallbackRename = null,
         int linkError = 0)
     {
+        var jobRegistry = new BatchJobRegistry(new TestOptionsMonitor<AppSettings>(_settings), NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: _broadcaster.Object);
         var service = new UnsupportedRenameAt2ComicProcessorService(
             _settings,
             _logger,
             _fileStore.Object,
             _history.Object,
-            _broadcaster.Object)
+            _broadcaster.Object,
+            jobRegistry)
         {
             BeforeFallbackRename = beforeFallbackRename,
             LinkError = linkError
         };
         _services.Add(service);
+        _jobRegistries[service] = jobRegistry;
         return service;
     }
 
@@ -2244,7 +2251,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     {
         var jobId = await start(service);
         await JobSignal(jobId).Task.WaitAsync(TimeSpan.FromSeconds(30));
-        return service.GetJob(jobId)!;
+        return _jobRegistries[service].GetJob(jobId)!;
     }
 
     private string WriteCbz(string relativePath, string? comicInfoXml) =>
@@ -2531,8 +2538,9 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
             ILogger<ComicProcessorService> logger,
             IFileStoreService fileStore,
             IProcessingHistoryService history,
-            IEventBroadcaster eventBroadcaster)
-            : base(new TestOptionsMonitor<AppSettings>(settings), logger, fileStore, history, eventBroadcaster)
+            IEventBroadcaster eventBroadcaster,
+            IBatchJobRegistry jobRegistry)
+            : base(new TestOptionsMonitor<AppSettings>(settings), logger, fileStore, history, eventBroadcaster, jobRegistry: jobRegistry)
         {
         }
 

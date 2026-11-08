@@ -19,17 +19,20 @@ public class JobsController : ControllerBase
     public const string OutsideAllowedDirectoryError = "One or more file paths are outside the allowed directory";
 
     private readonly IComicProcessorService _processor;
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly IFileStoreService _fileStore;
     private readonly ILogger<JobsController> _logger;
     private readonly IOptionsMonitor<AppSettings> _settings;
 
     public JobsController(
         IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         IFileStoreService fileStore,
         ILogger<JobsController> logger,
         IOptionsMonitor<AppSettings> settings)
     {
         _processor = processor;
+        _jobRegistry = jobRegistry;
         _fileStore = fileStore;
         _logger = logger;
         _settings = settings;
@@ -40,7 +43,7 @@ public class JobsController : ControllerBase
     {
         try
         {
-            var job = _processor.GetJob(jobId);
+            var job = _jobRegistry.GetJob(jobId);
             if (job == null)
                 return NotFound();
             
@@ -100,14 +103,10 @@ public class JobsController : ControllerBase
     {
         try
         {
-            var job = _processor.GetActiveJob();
-            if (job == null)
-            {
-                // After restart, in-flight jobs are reconciled to Interrupted and are no longer
-                // "active", but the UI still needs one last status to explain why work stopped.
-                job = (_processor.GetAllJobs() ?? Enumerable.Empty<ProcessingJob>())
-                    .FirstOrDefault(j => j.Status == JobStatus.Interrupted);
-            }
+            // After restart, in-flight jobs are reconciled to Interrupted and are no longer
+            // "active", but the UI still needs one last status to explain why work stopped.
+            var job = _jobRegistry.GetActiveJob()
+                ?? _jobRegistry.GetJobSummaries().FirstOrDefault(j => j.Status == JobStatus.Interrupted);
 
             if (job == null)
                 return Ok(new { active = false });
@@ -133,7 +132,7 @@ public class JobsController : ControllerBase
         }
     }
 
-    private string DetermineJobTitle(ProcessingJob job)
+    private static string DetermineJobTitle(ProcessingJobSummary job)
     {
         // Prefer the recorded operation, which survives a restart; fall back to the older
         // status-only wording for jobs persisted before OperationName was tracked.
@@ -550,7 +549,7 @@ public class JobsController : ControllerBase
     {
         try
         {
-            var jobs = _processor.GetAllJobs();
+            var jobs = _jobRegistry.GetJobSummaries();
             var jobList = jobs.Select(j => new
             {
                 job_id = j.JobId.ToString(),
@@ -578,7 +577,7 @@ public class JobsController : ControllerBase
         try
         {
             _logger.LogInformation("Delete requested for job {JobId}", jobId);
-            var deleted = await _processor.DeleteJobAsync(jobId, cancellationToken);
+            var deleted = await _jobRegistry.DeleteJobAsync(jobId, cancellationToken);
             if (!deleted)
                 return NotFound();
             
@@ -597,7 +596,7 @@ public class JobsController : ControllerBase
         try
         {
             _logger.LogInformation("Cancel requested for job {JobId}", jobId);
-            var cancelled = _processor.CancelJob(jobId);
+            var cancelled = _jobRegistry.CancelJob(jobId);
             
             return cancelled
                 ? Ok(new { success = true })

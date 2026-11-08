@@ -13,6 +13,7 @@ namespace ComicMaintainer.Tests.Controllers;
 public class JobsControllerCoverageTests
 {
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly JobsController _controller;
 
@@ -20,7 +21,7 @@ public class JobsControllerCoverageTests
     {
         var settings = new AppSettings { WatchedDirectory = "/c", DuplicateDirectory = "/duplicates" };
         _controller = new JobsController(
-            _processor.Object, _fileStore.Object, NullLogger<JobsController>.Instance, new TestOptionsMonitor<AppSettings>(settings));
+            _processor.Object, _jobRegistry.Object, _fileStore.Object, NullLogger<JobsController>.Instance, new TestOptionsMonitor<AppSettings>(settings));
     }
 
     private static List<ComicFile> Files(params string[] paths) =>
@@ -69,7 +70,7 @@ public class JobsControllerCoverageTests
             StartTime = start,
             Errors = new Dictionary<string, string> { ["/c/b.cbz"] = "corrupt archive" }
         };
-        _processor.Setup(p => p.GetJob(jobId)).Returns(job);
+        _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(job);
 
         var json = OkJson(_controller.GetJob(jobId));
 
@@ -124,7 +125,7 @@ public class JobsControllerCoverageTests
             FailedFiles = 1,
             CurrentFile = "/c/x.cbz"
         };
-        _processor.Setup(p => p.GetActiveJob()).Returns(job);
+        _jobRegistry.Setup(p => p.GetActiveJob()).Returns(job.ToSummary());
 
         var json = OkJson(_controller.GetActiveJob());
 
@@ -135,28 +136,17 @@ public class JobsControllerCoverageTests
         Assert.Equal(processed, json["processed_items"]!.Value<int>());
         Assert.Equal(1, json["failed_items"]!.Value<int>());
         Assert.Equal("/c/x.cbz", json["current_file"]!.ToString());
-        _processor.Verify(p => p.GetAllJobs(), Times.Never);
-    }
-
-    [Fact]
-    public void GetActiveJob_NullJobHistory_ReportsInactive()
-    {
-        _processor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
-        _processor.Setup(p => p.GetAllJobs()).Returns(default(IEnumerable<ProcessingJob>)!);
-
-        var json = OkJson(_controller.GetActiveJob());
-
-        Assert.False(json["active"]!.Value<bool>());
+        _jobRegistry.Verify(p => p.GetJobSummaries(), Times.Never);
     }
 
     [Fact]
     public void GetActiveJob_OnlyFinishedJobsInHistory_ReportsInactive()
     {
-        _processor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
-        _processor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob>
+        _jobRegistry.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJobSummary?));
+        _jobRegistry.Setup(p => p.GetJobSummaries()).Returns(new List<ProcessingJobSummary>
         {
-            new() { JobId = Guid.NewGuid(), Status = JobStatus.Completed },
-            new() { JobId = Guid.NewGuid(), Status = JobStatus.Cancelled }
+            new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Completed }.ToSummary(),
+            new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Cancelled }.ToSummary()
         });
 
         var json = OkJson(_controller.GetActiveJob());
@@ -167,7 +157,7 @@ public class JobsControllerCoverageTests
     [Fact]
     public void GetActiveJob_WhenProcessorThrows_Returns500()
     {
-        _processor.Setup(p => p.GetActiveJob()).Throws(new InvalidOperationException("boom"));
+        _jobRegistry.Setup(p => p.GetActiveJob()).Throws(new InvalidOperationException("boom"));
 
         var result = _controller.GetActiveJob();
 
@@ -570,7 +560,7 @@ public class JobsControllerCoverageTests
             var link = Path.Join(outside, "a.cbz");
             File.CreateSymbolicLink(link, comic);
             var controller = new JobsController(
-                _processor.Object, _fileStore.Object, NullLogger<JobsController>.Instance,
+                _processor.Object, _jobRegistry.Object, _fileStore.Object, NullLogger<JobsController>.Instance,
                 new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = library }));
 
             var result = await controller.DeleteSelected(
@@ -617,7 +607,7 @@ public class JobsControllerCoverageTests
     public void CancelJob_UnknownOrFinishedJob_ReturnsNotFound()
     {
         var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.CancelJob(jobId)).Returns(false);
+        _jobRegistry.Setup(p => p.CancelJob(jobId)).Returns(false);
 
         var result = _controller.CancelJob(jobId);
 
@@ -625,14 +615,14 @@ public class JobsControllerCoverageTests
         var json = JObject.FromObject(notFound.Value!);
         Assert.False(json["success"]!.Value<bool>());
         Assert.Equal("Job not found or already completed", json["error"]!.ToString());
-        _processor.Verify(p => p.CancelJob(jobId), Times.Once);
+        _jobRegistry.Verify(p => p.CancelJob(jobId), Times.Once);
     }
 
     [Fact]
     public void CancelJob_WhenProcessorThrows_Returns500()
     {
         var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.CancelJob(jobId)).Throws(new InvalidOperationException("boom"));
+        _jobRegistry.Setup(p => p.CancelJob(jobId)).Throws(new InvalidOperationException("boom"));
 
         var result = _controller.CancelJob(jobId);
 

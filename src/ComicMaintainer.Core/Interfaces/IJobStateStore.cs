@@ -15,7 +15,8 @@ namespace ComicMaintainer.Core.Interfaces;
 public interface IJobStateStore
 {
     /// <summary>
-    /// Inserts or updates the durable record for <paramref name="job"/>.
+    /// Inserts or updates the durable record for <paramref name="job"/>. A job's file list is
+    /// fixed at creation, so it is stored when the record is inserted and not updated after.
     /// </summary>
     Task SaveAsync(ProcessingJob job, CancellationToken cancellationToken = default);
 

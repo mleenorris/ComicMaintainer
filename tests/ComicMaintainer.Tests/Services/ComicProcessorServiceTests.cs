@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
@@ -20,6 +21,7 @@ public class ComicProcessorServiceTests : IDisposable
     private readonly AppSettings _settings;
     private readonly string _testDirectory;
     private readonly ComicProcessorService _service;
+    private BatchJobRegistry _jobs;
 
     public ComicProcessorServiceTests()
     {
@@ -43,12 +45,14 @@ public class ComicProcessorServiceTests : IDisposable
         
         _mockOptions.Setup(o => o.CurrentValue).Returns(_settings);
         
+        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance);
         _service = new ComicProcessorService(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
-            externalSeriesMetadata: _mockExternalSeriesMetadata.Object);
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            jobRegistry: _jobs);
     }
 
     [Fact]
@@ -476,7 +480,7 @@ public class ComicProcessorServiceTests : IDisposable
         var jobId = Guid.NewGuid();
 
         // Act
-        var job = _service.GetJob(jobId);
+        var job = _jobs.GetJob(jobId);
 
         // Assert
         Assert.Null(job);
@@ -487,12 +491,14 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
+        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
         var serviceWithBroadcaster = new ComicProcessorService(
-            _mockOptions.Object, 
-            _mockLogger.Object, 
+            _mockOptions.Object,
+            _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
-            mockEventBroadcaster.Object);
+            mockEventBroadcaster.Object,
+            jobRegistry: _jobs);
 
         var file1 = CreateTestComicArchive("Test Series", "1");
         var files = new List<string> { file1 };
@@ -534,12 +540,14 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
+        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
         var service = new ComicProcessorService(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
-            mockEventBroadcaster.Object);
+            mockEventBroadcaster.Object,
+            jobRegistry: _jobs);
 
         var fileA = Path.Join(_testDirectory, "delete-a.cbz");
         var fileB = Path.Join(_testDirectory, "delete-b.cbz");
@@ -588,19 +596,21 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
+        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
         var service = new ComicProcessorService(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
-            mockEventBroadcaster.Object);
+            mockEventBroadcaster.Object,
+            jobRegistry: _jobs);
 
         var seen = new System.Collections.Concurrent.ConcurrentBag<string>();
         var postLoopRan = 0;
         var loopCompletedBeforePostHook = false;
 
         // Act
-        var jobId = await service.RunCustomBatchJobAsync(
+        var jobId = await _jobs.RunCustomBatchJobAsync(
             operationName: "TestCustomBatch",
             trackedItems: new[] { "a", "b", "c" },
             itemOperation: (item, _) =>
@@ -634,15 +644,17 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task RunCustomBatchJobAsync_PostLoopReport_AddsTheProblemToTheJobWithoutChangingItsCounts()
     {
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
+        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
         var service = new ComicProcessorService(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
-            mockEventBroadcaster.Object);
+            mockEventBroadcaster.Object,
+            jobRegistry: _jobs);
         var folder = Path.Join(Path.GetTempPath(), "Berserk (Digital)") + Path.DirectorySeparatorChar;
 
-        var jobId = await service.RunCustomBatchJobAsync(
+        var jobId = await _jobs.RunCustomBatchJobAsync(
             operationName: "TestCustomBatch",
             trackedItems: new[] { "a", "b" },
             itemOperation: (_, _) => Task.FromResult(true),
@@ -671,13 +683,13 @@ public class ComicProcessorServiceTests : IDisposable
         return await WaitForJobCompletionAsync(_service, jobId, timeoutMs);
     }
 
-    private static async Task<ProcessingJob?> WaitForJobCompletionAsync(ComicProcessorService service, Guid jobId, int timeoutMs = DefaultJobTimeoutMs)
+    private async Task<ProcessingJob?> WaitForJobCompletionAsync(ComicProcessorService service, Guid jobId, int timeoutMs = DefaultJobTimeoutMs)
     {
         using var cts = new CancellationTokenSource(timeoutMs);
         
         while (!cts.Token.IsCancellationRequested)
         {
-            var job = service.GetJob(jobId);
+            var job = _jobs.GetJob(jobId);
             if (job != null && job.Status != JobStatus.Running && job.Status != JobStatus.Queued)
             {
                 return job;
@@ -694,7 +706,7 @@ public class ComicProcessorServiceTests : IDisposable
             }
         }
         
-        return service.GetJob(jobId); // Return whatever state we're in after timeout
+        return _jobs.GetJob(jobId); // Return whatever state we're in after timeout
     }
 
     private string CreateTestComicArchive(string series, string issue, int? year = null, string? directory = null)
@@ -1076,22 +1088,29 @@ public class ComicProcessorServiceTests : IDisposable
     [Fact]
     public async Task CancelJob_RunningJob_CancelsSuccessfully()
     {
-        // Arrange - Create multiple files to give us time to cancel
-        var files = Enumerable.Range(1, 50)
+        // Arrange - the first file's series lookup holds the job until it is cancelled
+        var files = Enumerable.Range(1, 3)
             .Select(i => CreateTestComicArchive($"Test Comic {i}", i.ToString()))
             .ToList();
-        
+        var lookupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _mockExternalSeriesMetadata
+            .Setup(s => s.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>(async (_, token) =>
+            {
+                lookupStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return null;
+            });
+
         _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
         // Act
         var jobId = await _service.ProcessFilesAsync(files);
-        
-        // Give the job a brief moment to start processing
-        await Task.Delay(50);
+        await lookupStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
         
         // Cancel the job
-        var cancelled = _service.CancelJob(jobId);
+        var cancelled = _jobs.CancelJob(jobId);
         
         // Wait for job to finish
         var job = await WaitForJobCompletionAsync(jobId);
@@ -1099,12 +1118,8 @@ public class ComicProcessorServiceTests : IDisposable
         // Assert
         Assert.True(cancelled);
         Assert.NotNull(job);
-        // Job may be completed or cancelled depending on timing, but cancellation should have been attempted
-        Assert.True(job.Status == JobStatus.Cancelled || job.Status == JobStatus.Completed);
-        if (job.Status == JobStatus.Cancelled)
-        {
-            Assert.True(job.ProcessedFiles < files.Count, $"Cancelled job should not have processed all files. Processed: {job.ProcessedFiles}/{files.Count}");
-        }
+        Assert.Equal(JobStatus.Cancelled, job.Status);
+        Assert.True(job.ProcessedFiles < files.Count, $"Cancelled job should not have processed all files. Processed: {job.ProcessedFiles}/{files.Count}");
     }
 
     [Fact]
@@ -1755,7 +1770,8 @@ public class ComicProcessorServiceTests : IDisposable
             _mockFileStore.Object,
             _mockHistoryService.Object,
             externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
-            seriesMetadataCache: mockSeriesMetadataCache.Object);
+            seriesMetadataCache: mockSeriesMetadataCache.Object,
+            jobRegistry: _jobs);
 
         // Act
         var jobId = await service.RenameFilesAsync(new[] { filePath });

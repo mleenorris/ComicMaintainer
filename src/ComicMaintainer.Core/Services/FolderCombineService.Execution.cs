@@ -37,7 +37,7 @@ public sealed partial class FolderCombineService
         var preMoveSeries = await GetPreMoveSeriesNamesAsync(moves.Select(m => m.SourcePath), cancellationToken);
         var run = new CombineRun(this, plan, moves, preMoveSeries);
 
-        var jobId = await _processor.RunCustomBatchJobAsync(
+        var jobId = await _jobRegistry.RunCustomBatchJobAsync(
             operationName: CombineJobOperationName,
             trackedItems: run.TrackedItems,
             itemOperation: run.MoveAsync,

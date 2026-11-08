@@ -56,6 +56,7 @@ public class MetadataAuditJobHandlerTests
         var handler = new MetadataAuditJobHandler(
             fileStore.Object,
             processor.Object,
+            Mock.Of<IBatchJobRegistry>(),
             factory,
             new TestOptionsMonitor<AppSettings>(new AppSettings()),
             new Mock<ILogger<MetadataAuditJobHandler>>().Object,
@@ -105,6 +106,7 @@ public class MetadataAuditJobHandlerTests
         var handler = new MetadataAuditJobHandler(
             fileStore.Object,
             processor.Object,
+            Mock.Of<IBatchJobRegistry>(),
             factory,
             new TestOptionsMonitor<AppSettings>(new AppSettings()),
             new Mock<ILogger<MetadataAuditJobHandler>>().Object,

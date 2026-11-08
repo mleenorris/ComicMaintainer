@@ -35,7 +35,7 @@ public sealed class FilesControllerBrowseTests
             _seriesLibrary.Object,
             NullLogger<FilesController>.Instance,
             _settings.Object,
-            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, _history.Object, _seriesLibrary.Object, _settings.Object));
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, Mock.Of<IBatchJobRegistry>(), _history.Object, _seriesLibrary.Object, _settings.Object));
     }
 
     private static object? Prop(object? value, string name) => value?.GetType().GetProperty(name)?.GetValue(value);

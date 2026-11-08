@@ -31,16 +31,50 @@ public class JobStateStore : IJobStateStore
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var entity = await db.ProcessingJobs
-            .FirstOrDefaultAsync(e => e.JobId == job.JobId, cancellationToken);
+        var status = job.Status.ToString();
+        var operationName = Truncate(job.OperationName, 128);
+        var errorsJson = JsonSerializer.Serialize(job.Errors, SerializerOptions);
+        var currentFile = TruncateOrNull(job.CurrentFile, 2048);
+        var updatedAt = DateTime.UtcNow;
 
-        if (entity == null)
+        // A job's file list is fixed when the job is created and can run to megabytes, so it is
+        // stored once, with the row, and a progress write neither reads nor rewrites it.
+        var updated = await db.ProcessingJobs
+            .Where(e => e.JobId == job.JobId)
+            .ExecuteUpdateAsync(
+                row => row
+                    .SetProperty(e => e.Status, status)
+                    .SetProperty(e => e.OperationName, operationName)
+                    .SetProperty(e => e.ErrorsJson, errorsJson)
+                    .SetProperty(e => e.TotalFiles, job.TotalFiles)
+                    .SetProperty(e => e.ProcessedFiles, job.ProcessedFiles)
+                    .SetProperty(e => e.FailedFiles, job.FailedFiles)
+                    .SetProperty(e => e.StartTime, job.StartTime)
+                    .SetProperty(e => e.EndTime, job.EndTime)
+                    .SetProperty(e => e.CurrentFile, currentFile)
+                    .SetProperty(e => e.UpdatedAt, updatedAt),
+                cancellationToken);
+
+        if (updated > 0)
         {
-            entity = new ProcessingJobEntity { JobId = job.JobId };
-            db.ProcessingJobs.Add(entity);
+            return;
         }
 
-        Apply(job, entity);
+        db.ProcessingJobs.Add(new ProcessingJobEntity
+        {
+            JobId = job.JobId,
+            Status = status,
+            OperationName = operationName,
+            FilesJson = JsonSerializer.Serialize(job.Files, SerializerOptions),
+            ErrorsJson = errorsJson,
+            TotalFiles = job.TotalFiles,
+            ProcessedFiles = job.ProcessedFiles,
+            FailedFiles = job.FailedFiles,
+            StartTime = job.StartTime,
+            EndTime = job.EndTime,
+            CurrentFile = currentFile,
+            UpdatedAt = updatedAt
+        });
 
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -146,21 +180,6 @@ public class JobStateStore : IJobStateStore
 
         _logger.LogInformation("Pruned {Count} completed job record(s) older than {Cutoff:o}", stale.Count, cutoff);
         return stale.Count;
-    }
-
-    private static void Apply(ProcessingJob job, ProcessingJobEntity entity)
-    {
-        entity.Status = job.Status.ToString();
-        entity.OperationName = Truncate(job.OperationName, 128);
-        entity.FilesJson = JsonSerializer.Serialize(job.Files, SerializerOptions);
-        entity.ErrorsJson = JsonSerializer.Serialize(job.Errors, SerializerOptions);
-        entity.TotalFiles = job.TotalFiles;
-        entity.ProcessedFiles = job.ProcessedFiles;
-        entity.FailedFiles = job.FailedFiles;
-        entity.StartTime = job.StartTime;
-        entity.EndTime = job.EndTime;
-        entity.CurrentFile = TruncateOrNull(job.CurrentFile, 2048);
-        entity.UpdatedAt = DateTime.UtcNow;
     }
 
     private ProcessingJob ToJob(ProcessingJobEntity entity)

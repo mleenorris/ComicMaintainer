@@ -25,6 +25,7 @@ public sealed class FolderCombineServiceTests : IDisposable
     private readonly string _library;
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<IProcessingHistoryService> _history = new();
     private readonly Mock<ISeriesLibraryService> _seriesLibrary = new();
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
@@ -54,7 +55,7 @@ public sealed class FolderCombineServiceTests : IDisposable
         _processor
             .Setup(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Guid.NewGuid());
-        _jobReport = _processor.RunCustomBatchJobsInline();
+        _jobReport = _jobRegistry.RunCustomBatchJobsInline();
     }
 
     public void Dispose()
@@ -73,6 +74,7 @@ public sealed class FolderCombineServiceTests : IDisposable
         TestFolderCombineService.Create(
             _fileStore.Object,
             _processor.Object,
+            _jobRegistry.Object,
             _history.Object,
             _seriesLibrary.Object,
             _settings.Object,
@@ -187,7 +189,7 @@ public sealed class FolderCombineServiceTests : IDisposable
         Write(source, "ComicInfo.xml");
         var squatter = Path.Join(destination, "Berserk 002.cbz");
         var moveResults = new List<bool>();
-        _processor
+        _jobRegistry
             .Setup(p => p.RunCustomBatchJobAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),
@@ -351,7 +353,7 @@ public sealed class FolderCombineServiceTests : IDisposable
         Assert.True(File.Exists(cleanComic.FilePath));
         Assert.True(File.Exists(pdf));
         Assert.True(File.Exists(Path.Join(clean, "ComicInfo.xml")));
-        _processor.Verify(p => p.RunCustomBatchJobAsync(
+        _jobRegistry.Verify(p => p.RunCustomBatchJobAsync(
             It.IsAny<string>(),
             It.IsAny<IEnumerable<string>>(),
             It.IsAny<Func<string, CancellationToken, Task<bool>>>(),

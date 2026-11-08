@@ -123,6 +123,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<bool>("IsProcessed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsProcessingPending")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsRead")
                         .HasColumnType("INTEGER");
 
@@ -362,6 +365,28 @@ namespace ComicMaintainer.Core.Migrations
                     b.HasIndex("LastReadDate");
 
                     b.ToTable("FileReadStatuses");
+                });
+
+            modelBuilder.Entity("ComicMaintainer.Core.Data.LibraryScanEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Directory")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Directory")
+                        .IsUnique();
+
+                    b.ToTable("LibraryScans");
                 });
 
             modelBuilder.Entity("ComicMaintainer.Core.Data.ProcessingHistoryEntity", b =>

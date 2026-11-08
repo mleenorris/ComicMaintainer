@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32.SafeHandles;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using SharpCompress.Archives;
@@ -14,19 +15,6 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class ComicProcessorService
 {
-    private async Task<bool> RenameFileAsync(string filePath, CancellationToken cancellationToken)
-    {
-        await _processingSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            return await RenameFileCoreAsync(filePath, false, cancellationToken);
-        }
-        finally
-        {
-            _processingSemaphore.Release();
-        }
-    }
-
     private async Task<bool> RenameFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
     {
         try
@@ -40,23 +28,42 @@ public partial class ComicProcessorService
                 return true;
             }
 
+            // As in ProcessFileCoreAsync, the file is read and moved through its validated
+            // physical path, so a linked folder cannot redirect the rename outside the library,
+            // while the caller's path stays the key for the file store and history.
+            if (!TryResolveAllowedPath(filePath, out var resolvedPath))
+            {
+                _logger.LogWarning("RenameFileAsync: File is outside the allowed directories: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                await LogHistoryAsync(filePath, "Rename", false, "File is outside the allowed directories", cancellationToken);
+                return false;
+            }
+
             _logger.LogDebug("RenameFileAsync: Checking if file exists and is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
-            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+            if (!File.Exists(resolvedPath) || !IsComicArchive(resolvedPath))
             {
                 _logger.LogWarning("RenameFileAsync: File not found or not a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await LogHistoryAsync(filePath, "Rename", false, "File not found or not a comic archive", cancellationToken);
                 return false;
             }
 
+            if (new FileInfo(filePath).LinkTarget is not null)
+            {
+                // Renaming through the link would rename the file it points to.
+                _logger.LogWarning("RenameFileAsync: File symlinks are not renamed: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                await LogHistoryAsync(filePath, "Rename", false, "File symlinks are not processed", cancellationToken);
+                return false;
+            }
+
             _logger.LogDebug("RenameFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            
+
             // Extract metadata from the archive
-            var metadata = await GetMetadataAsync(filePath, cancellationToken);
-            
+            var metadata = await GetMetadataAtResolvedPath(resolvedPath, filePath);
+
             if (metadata != null)
             {
-                _logger.LogDebug("RenameFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}", 
+                _logger.LogDebug("RenameFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}",
                     LoggingHelper.SanitizeForLog(metadata.Series),
                     LoggingHelper.SanitizeForLog(metadata.Issue));
             }
@@ -64,7 +71,7 @@ public partial class ComicProcessorService
             {
                 _logger.LogDebug("RenameFileAsync: No metadata extracted from file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             }
-            
+
             // Rename file based on template if metadata is available
             if (metadata != null && !string.IsNullOrEmpty(metadata.Series))
             {
@@ -73,7 +80,8 @@ public partial class ComicProcessorService
                 // token, recover that chapter number into the metadata so the
                 // rename preserves it not only in the filename but also in
                 // ComicInfo.xml.
-                filePath = await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
+                var preservedPath = await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
+                FollowMovedFile(preservedPath, ref filePath, ref resolvedPath);
 
                 // Resolve the normalized series name before generating the new
                 // filename so a standalone rename produces the exact same target
@@ -96,37 +104,43 @@ public partial class ComicProcessorService
                 }
 
                 _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var newFilePath = GenerateFileName(metadata, filePath);
-                if (newFilePath == null)
+                var newResolvedPath = GenerateFileName(metadata, resolvedPath);
+                if (newResolvedPath == null)
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, FilenameGenerationFailedMessage, cancellationToken);
                     return false;
                 }
 
-                _logger.LogDebug("RenameFileAsync: Generated filename: {NewFilePath} (Original: {OriginalFilePath})", 
-                    LoggingHelper.SanitizePathForLog(newFilePath), LoggingHelper.SanitizePathForLog(filePath));
-                
-                if (newFilePath == filePath)
+                _logger.LogDebug("RenameFileAsync: Generated filename: {NewFilePath} (Original: {OriginalFilePath})",
+                    LoggingHelper.SanitizePathForLog(newResolvedPath), LoggingHelper.SanitizePathForLog(filePath));
+
+                if (newResolvedPath == resolvedPath)
                 {
                     _logger.LogInformation("RenameFileAsync: File already has correct name: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken);
+                    await ClearDuplicateFlagAsync(filePath, cancellationToken);
                     var filename = Path.GetFileName(filePath);
                     await LogHistoryWithChangesAsync(filePath, "Rename", true, "File already correctly named",
                         filename, filename, metadata, metadata, cancellationToken);
                     return true;
                 }
-                
+
+                if (TargetFileExists(newResolvedPath, resolvedPath))
+                {
+                    _logger.LogInformation("RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newResolvedPath));
+                    await MarkDuplicateAsync(filePath, cancellationToken);
+                    return false;
+                }
+
+                string newFilePath;
+                bool wasNormalized;
                 try
                 {
                     _logger.LogInformation(
                         "Renaming file from {OldPath} to {NewPath}",
                         LoggingHelper.SanitizePathForLog(filePath),
-                        LoggingHelper.SanitizePathForLog(newFilePath));
-                    
-                    // Capture before/after filenames for history
-                    var beforeFilename = Path.GetFileName(filePath);
-                    var afterFilename = Path.GetFileName(newFilePath);
+                        LoggingHelper.SanitizePathForLog(newResolvedPath));
 
                     // Capture the old path's normalized state *before* the move so it can be
                     // re-asserted on the new path afterwards. UpdateFilePathAsync normally
@@ -137,54 +151,46 @@ public partial class ComicProcessorService
                     // keeps the watcher stub's default IsNormalized=false, so a
                     // normalize-then-rename sequence would leave the file "unprocessed" until
                     // it is normalized again. Re-stamping the captured state closes that gap.
-                    var wasNormalized = await _fileStore.IsFileNormalizedAsync(filePath, cancellationToken);
+                    wasNormalized = await _fileStore.IsFileNormalizedAsync(filePath, cancellationToken);
 
-                    // A cancelled job leaves the file where it is rather than moving it.
+                    // A cancelled job leaves the file where it is rather than moving it. This is
+                    // the last point the job's cancellation is observed for this file: once it
+                    // has moved, its bookkeeping must finish (see RecordRenameAsync).
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    // File.Move will throw IOException if target exists, which we catch and handle
-                    // This avoids race condition from check-then-act pattern
-                    File.Move(filePath, newFilePath);
-                    
-                    // Atomically remap the file-store row from the old path to the new path,
-                    // preserving all processing state (IsRenamed/IsNormalized/SeriesMetadataVersion/
-                    // IsDuplicate/IsRead/...) and avoiding the race with FileWatcherService's
-                    // OnFileRenamed handler, which also calls UpdateFilePathAsync. Using
-                    // RemoveFileAsync+AddFileAsync here previously left the old path tracked
-                    // when the watcher's update interleaved with the processor's removal —
-                    // the file then only disappeared from the file list on the next full
-                    // library scan (reconcile-deletions pass). This matches the pattern
-                    // already used by ProcessFileCoreAsync.
-                    await _fileStore.UpdateFilePathAsync(filePath, newFilePath, cancellationToken);
-                    await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
-
-                    // Re-assert the captured normalized state on the new path so it survives
-                    // even if the watcher removed the old row before UpdateFilePathAsync ran.
-                    if (wasNormalized)
+                    using var renameDirectoryHandle = OpenRenameDirectory(resolvedPath);
+                    if (!TryResolveAllowedPath(resolvedPath, out var currentPath) || currentPath != resolvedPath)
                     {
-                        await _fileStore.MarkFileNormalizedAsync(newFilePath, true, cancellationToken);
+                        // A folder on the validated path was replaced by a link meanwhile.
+                        _logger.LogWarning("RenameFileAsync: File path changed during processing, not renaming: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                        await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                        await LogHistoryAsync(filePath, "Rename", false, "File path changed during processing", cancellationToken);
+                        return false;
                     }
-                    
-                    _logger.LogInformation("File renamed successfully: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
-                    await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null, 
-                        beforeFilename, afterFilename, metadata, metadata, cancellationToken);
-                    return true;
+
+                    // The move never replaces an existing file: it throws instead, which is
+                    // handled below, so a target created since the check above is not lost.
+                    var movedPath = RenameOnDisk(renameDirectoryHandle, resolvedPath, newResolvedPath);
+                    newFilePath = GetAllowedLogicalPath(movedPath);
                 }
-                catch (IOException ex) when (TargetFileExists(newFilePath, filePath))
+                catch (IOException ex) when (TargetFileExists(newResolvedPath, resolvedPath))
                 {
-                    // Target file already exists - treat as duplicate
-                    _logger.LogInformation(ex, "RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
-                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                    await _fileStore.MarkFileDuplicateAsync(filePath, true, cancellationToken);
-                    await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
+                    // The target appeared between the check and the move - treat as duplicate
+                    _logger.LogInformation(ex, "RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newResolvedPath));
+                    await MarkDuplicateAsync(filePath, cancellationToken);
                     return false;
                 }
+
+                // The file has moved: record it without observing the job's cancellation.
+                await RecordRenameAsync(filePath, newFilePath, wasNormalized, metadata);
+                _logger.LogInformation("File renamed successfully: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
+                return true;
             }
             else
             {
                 _logger.LogWarning("RenameFileAsync: No metadata or series information found for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information found", cancellationToken);
+                await LogHistoryAsync(filePath, "Rename", false, NoSeriesMessage(filePath, "No metadata or series information found"), cancellationToken);
                 return false;
             }
         }
@@ -200,6 +206,157 @@ public partial class ComicProcessorService
             await LogHistoryAsync(filePath, "Rename", false, ex.Message, cancellationToken);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Records that the file at <paramref name="oldPath"/> was just renamed on disk to
+    /// <paramref name="newPath"/>: moves its file-store row (with every user's read state),
+    /// marks it renamed, re-asserts its normalized state and logs the rename.
+    /// <para>
+    /// This runs without the job's cancellation token. The file has already moved, so stopping
+    /// half-way would leave the row pointing at a path that no longer exists and the moved file
+    /// untracked, losing its read state and processing flags, whatever the cancellation asked for.
+    /// </para>
+    /// </summary>
+    private async Task RecordRenameAsync(string oldPath, string newPath, bool normalized, ComicMetadata metadata)
+    {
+        var bookkeeping = CancellationToken.None;
+
+        // Move the database record to the new path, preserving all processing state, so the
+        // FileSystemWatcher's rename event sees the entry as already tracked and does not
+        // re-queue it for processing.
+        await _fileStore.UpdateFilePathAsync(oldPath, newPath, bookkeeping);
+        await _fileStore.MarkFileRenamedAsync(newPath, true, bookkeeping);
+
+        // Re-assert the normalized state on the new path so the move can't drop it if the
+        // watcher removed the old row before UpdateFilePathAsync migrated it (Delete+Create
+        // race), which would otherwise leave the file showing as unprocessed.
+        if (normalized)
+        {
+            await _fileStore.MarkFileNormalizedAsync(newPath, true, bookkeeping);
+        }
+
+        // The file now holds its target name, so it is no longer a duplicate of another file.
+        await ClearDuplicateFlagAsync(newPath, bookkeeping);
+
+        await LogHistoryWithChangesAsync(newPath, "Rename", true, null,
+            Path.GetFileName(oldPath), Path.GetFileName(newPath), metadata, metadata, bookkeeping);
+    }
+
+    /// <summary>
+    /// Flags a file whose target name belongs to another file as a duplicate.
+    /// </summary>
+    private async Task MarkDuplicateAsync(string filePath, CancellationToken cancellationToken)
+    {
+        await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+        await _fileStore.MarkFileDuplicateAsync(filePath, true, cancellationToken);
+        await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
+    }
+
+    /// <summary>
+    /// Clears the duplicate flag of a file that holds its target name. A file is flagged when
+    /// its target name is taken; once it holds that name it is not a duplicate any more, and
+    /// keeping the flag would let "Delete All Duplicates" delete it.
+    /// </summary>
+    private async Task ClearDuplicateFlagAsync(string filePath, CancellationToken cancellationToken)
+    {
+        var tracked = await _fileStore.GetFileAsync(filePath, cancellationToken);
+        if (tracked?.IsDuplicate == true)
+        {
+            await _fileStore.MarkFileDuplicateAsync(filePath, false, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Renames <paramref name="sourcePath"/> to <paramref name="targetPath"/> in the directory
+    /// opened as <paramref name="directoryHandle"/>, never replacing another file, and returns
+    /// the physical path of the renamed file.
+    /// <para>
+    /// On a file system that ignores case (Windows, macOS, most network shares and Docker
+    /// Desktop bind mounts) a target that differs from the source only in case names the source
+    /// itself, and a move that refuses to replace an existing file refuses to move a file onto
+    /// itself. Such a rename goes through a unique temporary name instead: first to it, then
+    /// from it to the target.
+    /// </para>
+    /// </summary>
+    private string RenameOnDisk(SafeFileHandle? directoryHandle, string sourcePath, string targetPath)
+    {
+        if (!IsCaseOnlyRename(sourcePath, targetPath) || !File.Exists(targetPath))
+        {
+            return MoveFileInRenameDirectory(directoryHandle, sourcePath, targetPath);
+        }
+
+        // ".tmp_" names are ignored by the watcher and the library scans, so the intermediate
+        // step is never tracked as a file of its own.
+        var intermediatePath = Path.Join(
+            Path.GetDirectoryName(sourcePath),
+            $".tmp_rename_{Guid.NewGuid():N}{Path.GetExtension(sourcePath)}");
+        var intermediate = MoveFileInRenameDirectory(directoryHandle, sourcePath, intermediatePath);
+        try
+        {
+            return MoveFileInRenameDirectory(directoryHandle, intermediate, targetPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Give the file its original name back rather than leave it under the hidden one.
+            try
+            {
+                MoveFileInRenameDirectory(directoryHandle, intermediate, sourcePath);
+            }
+            catch (Exception restoreEx) when (restoreEx is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogError(restoreEx,
+                    "Case-only rename of {SourcePath} failed and the file could not be given its name back; it is at {IntermediatePath}",
+                    LoggingHelper.SanitizePathForLog(sourcePath),
+                    LoggingHelper.SanitizePathForLog(intermediate));
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="targetPath"/> only changes the case of <paramref name="sourcePath"/>.
+    /// </summary>
+    private static bool IsCaseOnlyRename(string sourcePath, string targetPath) =>
+        !string.Equals(sourcePath, targetPath, StringComparison.Ordinal)
+        && string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when <paramref name="targetPath"/>, which exists, is <paramref name="sourcePath"/>
+    /// itself under another case of its name, as on a file system that ignores case. The
+    /// directory listing decides it: it shows every entry under its stored name, so a directory
+    /// that keeps case apart and holds both files lists both names, while one that ignores case
+    /// can only hold the one file. (Distinct names, or another directory, are never the same file.)
+    /// </summary>
+    internal static bool IsSameFileUnderAnotherCase(string sourcePath, string targetPath, IEnumerable<string> directoryEntryNames)
+    {
+        if (!string.Equals(Path.GetDirectoryName(sourcePath), Path.GetDirectoryName(targetPath), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var sourceName = Path.GetFileName(sourcePath);
+        var targetName = Path.GetFileName(targetPath);
+        if (!string.Equals(sourceName, targetName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(sourceName, targetName, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var listsSource = false;
+        var listsTarget = false;
+        foreach (var name in directoryEntryNames)
+        {
+            listsSource |= string.Equals(name, sourceName, StringComparison.Ordinal);
+            listsTarget |= string.Equals(name, targetName, StringComparison.Ordinal);
+        }
+
+        return !(listsSource && listsTarget);
     }
 
     private const string FilenameGenerationFailedMessage = "Failed to generate new filename";
@@ -371,15 +528,44 @@ public partial class ComicProcessorService
         return integerFormatted;
     }
 
+    /// <summary>
+    /// True when renaming <paramref name="sourcePath"/> to <paramref name="targetPath"/> would
+    /// collide with another file: one with the target's name or, so a library behaves the same
+    /// whether or not its file system ignores case, one whose name differs from it only in case.
+    /// The source itself never counts. In particular a target that only changes the source's
+    /// case "exists" on a file system that ignores case because it names the source, and
+    /// treating that as a collision flagged the only copy of the file as a duplicate.
+    /// </summary>
     private bool TargetFileExists(string targetPath, string? sourcePath = null)
     {
-        if (File.Exists(targetPath))
-        {
-            return true;
-        }
-
         var directory = Path.GetDirectoryName(targetPath);
         var targetFileName = Path.GetFileName(targetPath);
+
+        if (File.Exists(targetPath))
+        {
+            if (sourcePath is null || !IsCaseOnlyRename(sourcePath, targetPath))
+            {
+                return true;
+            }
+
+            try
+            {
+                return !IsSameFileUnderAnotherCase(
+                    sourcePath,
+                    targetPath,
+                    Directory.EnumerateFiles(directory!).Select(Path.GetFileName).OfType<string>());
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Without a listing the target cannot be told apart from the source. Don't flag
+                // the file: the move itself never replaces another file, so a real collision
+                // still fails the rename rather than losing a file.
+                _logger.LogDebug(ex, "Unable to enumerate directory while checking a case-only rename: {TargetPath}",
+                    LoggingHelper.SanitizePathForLog(targetPath));
+                return false;
+            }
+        }
+
         if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(targetFileName) || !Directory.Exists(directory))
         {
             return false;

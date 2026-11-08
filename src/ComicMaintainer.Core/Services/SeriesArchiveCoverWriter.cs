@@ -54,15 +54,20 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesArchiveCoverWriter> _logger;
+    private readonly IFileOperationLock _fileLock;
 
     public SeriesArchiveCoverWriter(
         IServiceScopeFactory scopeFactory,
         IOptionsMonitor<AppSettings> settings,
-        ILogger<SeriesArchiveCoverWriter> logger)
+        ILogger<SeriesArchiveCoverWriter> logger,
+        IFileOperationLock? fileLock = null)
     {
         _scopeFactory = scopeFactory;
         _settings = settings;
         _logger = logger;
+        // Shared with the file processor through DI, so embedding a cover never rewrites an
+        // archive that is being normalized, renamed or edited at the same time.
+        _fileLock = fileLock ?? new FileOperationLock();
     }
 
     public async Task WriteAsync(
@@ -123,12 +128,25 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
 
         try
         {
-            RewriteArchive(
-                archivePath,
-                coverEntryName,
-                coverBytes,
-                onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
-                onAfterReplace: () => SuppressWatcherProcessing(archivePath));
+            using (await _fileLock.AcquireAsync(archivePath, cancellationToken))
+            {
+                // The archive may have been renamed or deleted while the lock was awaited.
+                if (!File.Exists(archivePath))
+                {
+                    return;
+                }
+
+                RewriteArchive(
+                    archivePath,
+                    coverEntryName,
+                    coverBytes,
+                    onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
+                    onAfterReplace: () => SuppressWatcherProcessing(archivePath));
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -160,14 +178,26 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
 
         try
         {
-            // Passing no cover bytes removes any managed cover.* entry without
-            // adding a replacement.
-            RewriteArchive(
-                archivePath,
-                coverEntryName: null,
-                coverBytes: null,
-                onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
-                onAfterReplace: () => SuppressWatcherProcessing(archivePath));
+            using (await _fileLock.AcquireAsync(archivePath, cancellationToken))
+            {
+                if (!File.Exists(archivePath))
+                {
+                    return;
+                }
+
+                // Passing no cover bytes removes any managed cover.* entry without
+                // adding a replacement.
+                RewriteArchive(
+                    archivePath,
+                    coverEntryName: null,
+                    coverBytes: null,
+                    onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
+                    onAfterReplace: () => SuppressWatcherProcessing(archivePath));
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

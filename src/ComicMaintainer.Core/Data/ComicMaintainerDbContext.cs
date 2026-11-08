@@ -35,6 +35,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<ComicEmailDeliveryEntity> ComicEmailDeliveries { get; set; } = null!;
     public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
     public DbSet<RevokedTokenEntity> RevokedTokens { get; set; } = null!;
+    public DbSet<LibraryScanEntity> LibraryScans { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -341,7 +342,32 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             // Supports the rolling "issues created in the last 24 hours" cap.
             entity.HasIndex(e => e.IssueCreatedAt);
         });
+
+        // Configure LibraryScanEntity
+        modelBuilder.Entity<LibraryScanEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Directory).IsRequired().HasMaxLength(2048);
+            entity.HasIndex(e => e.Directory).IsUnique();
+        });
     }
+}
+
+/// <summary>
+/// The watched directory the file watcher last scanned completely, every comic under it added
+/// to the store. A file the store does not track under a directory scanned this way arrived
+/// after that scan, so the watcher's catch-up at its next start processes it; under any other
+/// directory it may belong to a collection the application has not seen yet, which the
+/// catch-up only adds. The store keeps one row, replaced by each newly scanned directory.
+/// </summary>
+public class LibraryScanEntity
+{
+    public int Id { get; set; }
+
+    /// <summary>The scanned directory, a full path without a trailing separator.</summary>
+    public string Directory { get; set; } = string.Empty;
+
+    public DateTime CompletedAt { get; set; }
 }
 
 /// <summary>
@@ -380,6 +406,15 @@ public class ComicFileEntity
     public DateTime? LastDbEditAt { get; set; }
     public DateTime? LastWriteAt { get; set; }
     public string MetadataSource { get; set; } = "Scanned";
+
+    /// <summary>
+    /// Set while the file watcher has queued this file for automatic processing that has not
+    /// run yet (the file is still settling, or waits for a free worker). A queued file used to
+    /// be held only in memory, so a restart or a watcher stop in the meantime left it
+    /// unprocessed for good; at its next start the watcher queues every file with this flag
+    /// set again. Cleared once the watcher has processed the file or decided it needs nothing.
+    /// </summary>
+    public bool IsProcessingPending { get; set; }
 }
 
 /// <summary>

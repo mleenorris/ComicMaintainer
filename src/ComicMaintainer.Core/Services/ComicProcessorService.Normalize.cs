@@ -14,19 +14,6 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class ComicProcessorService
 {
-    private async Task<bool> NormalizeFileAsync(string filePath, CancellationToken cancellationToken)
-    {
-        await _processingSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            return await NormalizeFileCoreAsync(filePath, false, cancellationToken);
-        }
-        finally
-        {
-            _processingSemaphore.Release();
-        }
-    }
-
     private async Task<bool> NormalizeFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken) =>
         (await NormalizeFileWithResultAsync(filePath, forceReprocess, cancellationToken)).Succeeded;
 

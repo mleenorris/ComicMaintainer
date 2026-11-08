@@ -45,6 +45,7 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly IComicEmailService? _comicEmail;
     private readonly ComicMaintainerMetrics? _metrics;
     private readonly SemaphoreSlim _processingSemaphore;
+    private readonly IFileOperationLock _fileLock;
     private readonly int _maxWorkers;
     private bool _disposed;
 
@@ -69,7 +70,8 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         IJobStateStore? jobStateStore = null,
         IComicEmailService? comicEmail = null,
         ComicMaintainerMetrics? metrics = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        IFileOperationLock? fileLock = null)
     {
         _metrics = metrics;
         _settingsMonitor = settings;
@@ -90,6 +92,9 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         _comicEmail = comicEmail;
         _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
+        // DI shares one lock with every other component that rewrites archives; an instance
+        // built by hand (as tests do) still serializes its own operations on a file.
+        _fileLock = fileLock ?? new FileOperationLock();
     }
 
     protected virtual void Dispose(bool disposing)

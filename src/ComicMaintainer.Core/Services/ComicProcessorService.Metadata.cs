@@ -182,40 +182,30 @@ public partial class ComicProcessorService
         return result.Succeeded;
     }
 
-    public async Task<MetadataWriteResult> ApplyMetadataEditAsync(
+    public Task<MetadataWriteResult> ApplyMetadataEditAsync(
         string filePath,
         ComicMetadata metadata,
         ComicMetadataFieldFlags fields,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(metadata);
-        await _processingSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            return await UpdateMetadataCoreAsync(filePath, metadata, fields, cancellationToken, userEdit: true);
-        }
-        finally
-        {
-            _processingSemaphore.Release();
-        }
+        return RunExclusiveAsync(
+            filePath,
+            token => UpdateMetadataCoreAsync(filePath, metadata, fields, token, userEdit: true),
+            cancellationToken);
     }
 
-    public async Task<MetadataWriteResult> WriteMetadataAsync(
+    public Task<MetadataWriteResult> WriteMetadataAsync(
         string filePath,
         ComicMetadata metadata,
         ComicMetadataFieldFlags fields,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(metadata);
-        await _processingSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            return await UpdateMetadataCoreAsync(filePath, metadata, fields, cancellationToken);
-        }
-        finally
-        {
-            _processingSemaphore.Release();
-        }
+        return RunExclusiveAsync(
+            filePath,
+            token => UpdateMetadataCoreAsync(filePath, metadata, fields, token),
+            cancellationToken);
     }
 
     /// <summary>
@@ -413,18 +403,8 @@ public partial class ComicProcessorService
         }
     }
 
-    public async Task<MetadataWriteResult> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default)
-    {
-        await _processingSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            return await RemoveMetadataCoreAsync(filePath, cancellationToken);
-        }
-        finally
-        {
-            _processingSemaphore.Release();
-        }
-    }
+    public Task<MetadataWriteResult> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default) =>
+        RunExclusiveAsync(filePath, token => RemoveMetadataCoreAsync(filePath, token), cancellationToken);
 
     private async Task<MetadataWriteResult> RemoveMetadataCoreAsync(string filePath, CancellationToken cancellationToken)
     {

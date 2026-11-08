@@ -58,6 +58,39 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     private readonly object _statusLock = new();
 
     /// <summary>
+    /// The latest queued store update for a directory change (guarded by
+    /// <see cref="_directoryWorkLock"/>); each runs after the previous one, see
+    /// <see cref="QueueDirectoryWork"/>.
+    /// </summary>
+    private Task _directoryWork = Task.CompletedTask;
+    private readonly object _directoryWorkLock = new();
+
+    /// <summary>
+    /// The latest queued scan of the watched directory (guarded by <see cref="_lock"/>). Each
+    /// runs after the previous one, see <see cref="QueueScan"/>, so a later scan cannot take the
+    /// files an earlier one has yet to add for new arrivals.
+    /// </summary>
+    private Task _latestScan = Task.CompletedTask;
+
+    /// <summary>
+    /// Ends the scans queued so far (guarded by <see cref="_lock"/>). StopAsync and Dispose
+    /// cancel it; the scans of a later start get a new one.
+    /// </summary>
+    private CancellationTokenSource _scanCts = new();
+
+    /// <summary>
+    /// 1 while a recovery rescan is queued and has not started. It will see everything lost so
+    /// far, so further errors in a burst need no rescan of their own.
+    /// </summary>
+    private int _recoveryRescanQueued;
+
+    /// <summary>
+    /// The directory this process has scanned completely, which spares recovery rescans from
+    /// depending on the durable record (see <see cref="WasScannedBeforeAsync"/>).
+    /// </summary>
+    private volatile string? _scannedDirectory;
+
+    /// <summary>
     /// Pending per-file processing requests, keyed by full path. A burst of file-system events for
     /// the same path coalesces into a single delayed run: each new event cancels the previously
     /// scheduled debounce and re-arms it, so we only act once the file has stopped changing and we
@@ -185,10 +218,12 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         CancelAllPending();
 
         CancellationTokenSource? restart;
+        CancellationTokenSource scans;
         lock (_lock)
         {
             restart = _restartCts;
             _restartCts = null;
+            scans = _scanCts;
 
             if (_watcher != null)
             {
@@ -206,12 +241,15 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         }
 
         CancelRestart(restart);
+        scans.Cancel();
     }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         bool shouldInitialize = false;
-        bool watchedDirectoryExists = Directory.Exists(_settings.WatchedDirectory);
+        bool started = false;
+        var watchedDirectory = _settings.WatchedDirectory;
+        bool watchedDirectoryExists = Directory.Exists(watchedDirectory);
 
         lock (_lock)
         {
@@ -223,7 +261,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
             if (!watchedDirectoryExists)
             {
-                _logger.LogError(LoggingHelper.WithWatcherPrefix("Watched directory does not exist: {Directory}"), _settings.WatchedDirectory);
+                _logger.LogError(LoggingHelper.WithWatcherPrefix("Watched directory does not exist: {Directory}"), watchedDirectory);
             }
             else if (_watcher != null && _watcher.EnableRaisingEvents)
             {
@@ -237,7 +275,8 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                         "Automatic processing is disabled (both rename and normalize are off); the watcher will still monitor for new files and keep the file list up to date without renaming or normalizing them."));
                 }
 
-                StartWatcherLocked(_settings.WatchedDirectory);
+                StartWatcherLocked(watchedDirectory);
+                started = true;
 
                 // Broadcast watcher status change (only when the watcher actually started this
                 // call to avoid spurious status events on repeated StartAsync calls).
@@ -260,9 +299,48 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         {
             await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
 
-            // Perform initial scan of existing files so the in-memory store reflects what's on
-            // disk. Only runs once per process (gated by _initialized).
-            _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
+            // Catch up with what changed while the application was not running: the in-memory
+            // store is brought in line with the disk, and the files that arrived meanwhile or
+            // were still queued when it stopped are queued for processing.
+            _ = QueueScan(token => ScanExistingFilesAsync(watchedDirectory, token), cancellationToken);
+        }
+        else if (started)
+        {
+            // The watcher was stopped, or rebound to another directory, after the store was
+            // initialized: catch up with what it did not see while it was not watching.
+            _ = QueueScan(token => ScanExistingFilesAsync(watchedDirectory, token));
+        }
+    }
+
+    /// <summary>
+    /// Runs a scan of the watched directory after the ones queued before it, until it finishes
+    /// or the watcher is stopped or disposed. The stale-row cleanup is held off from now, before
+    /// the caller returns, until the scan has followed the files moved while it was not
+    /// watching (see <see cref="IFileStoreService.SuspendStaleCleanup"/>).
+    /// </summary>
+    private Task QueueScan(Func<CancellationToken, Task> scan, CancellationToken cancellationToken = default)
+    {
+        var cleanupHold = _fileStore.SuspendStaleCleanup();
+
+        lock (_lock)
+        {
+            var previous = _latestScan;
+            var linked = CancellationTokenSource.CreateLinkedTokenSource(_scanCts.Token, cancellationToken);
+            _latestScan = Task.Run(async () =>
+            {
+                try
+                {
+                    await previous.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                    await scan(linked.Token);
+                }
+                finally
+                {
+                    linked.Dispose();
+                    cleanupHold?.Dispose();
+                }
+            }, CancellationToken.None);
+
+            return _latestScan;
         }
     }
 
@@ -318,56 +396,376 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     }
     
     /// <summary>
-    /// Scans the watched directory for existing comic files and adds them to the file store
-    /// Only scans for new files not already in the database
+    /// Catches up with the changes made to <paramref name="directory"/> while the watcher was not
+    /// watching it (the application was down, or the watcher stopped or watched another
+    /// directory), which no file-system event will report. See
+    /// <see cref="ReconcileWithDiskAsync"/>.
     /// </summary>
-    private async Task ScanExistingFilesAsync(CancellationToken cancellationToken)
+    private async Task ScanExistingFilesAsync(string directory, CancellationToken cancellationToken)
     {
         try
         {
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Starting incremental scan of directory: {Directory}"), _settings.WatchedDirectory);
-            
-            var comicFiles = Directory.EnumerateFiles(_settings.WatchedDirectory, "*.*", SearchOption.AllDirectories)
-                .Where(IsComicFile)
-                .ToList();
-            
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Found {Count} comic files on filesystem"), comicFiles.Count);
-            
-            // Snapshot the tracked paths once instead of one FileExistsAsync
-            // call per file. Ordinal matches the store's own key comparison.
-            var trackedPaths = new HashSet<string>(
-                (await _fileStore.GetAllFilesAsync(cancellationToken) ?? Enumerable.Empty<ComicFile>())
-                    .Select(f => f.FilePath)
-                    .Where(p => !string.IsNullOrWhiteSpace(p)),
-                StringComparer.Ordinal);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Starting incremental scan of directory: {Directory}"), directory);
 
-            var newFileCount = 0;
-            foreach (var file in comicFiles)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                    break;
-                    
-                try
-                {
-                    // Only add if not already in the store
-                    if (!trackedPaths.Contains(file))
-                    {
-                        await _fileStore.AddFileAsync(file, cancellationToken);
-                        newFileCount++;
-                    }
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error adding file during incremental scan: {File}"), file);
-                }
-            }
-            
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Incremental scan completed. Added {Count} new files"), newFileCount);
+            var added = await ReconcileWithDiskAsync(
+                directory,
+                count => _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Found {Count} comic files on filesystem"), count),
+                (ex, file) => _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error adding file during incremental scan: {File}"), file),
+                cancellationToken);
+
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Incremental scan completed. Added {Count} new files"), added);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Incremental scan cancelled: {Directory}"), directory);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error during incremental directory scan"));
         }
+    }
+
+    /// <summary>
+    /// Brings the store in line with what is under <paramref name="directory"/>, and returns how
+    /// many comic files it added.
+    /// <para>
+    /// Comic files the store does not track are added, unless they are tracked files moved or
+    /// respelled meanwhile (see <see cref="TrackedFileMatcher"/>), whose rows follow them. Files
+    /// that arrived are queued for processing like files the live watcher sees arrive, as are
+    /// the files that were still queued when the watcher stopped
+    /// (<see cref="IFileStoreService.GetProcessingPendingFilesAsync"/>). Tracked files are
+    /// otherwise left alone: one that is processed stays so, and one left unprocessed (it failed,
+    /// or processing was off when it arrived) is not retried.
+    /// </para>
+    /// <para>
+    /// An untracked file counts as an arrival only given durable evidence that it was not there
+    /// before: the directory has been scanned to the end before
+    /// (<see cref="IFileStoreService.IsLibraryScannedAsync"/>), so a first scan that was
+    /// interrupted, or a watched directory that was widened, adds an existing collection without
+    /// rewriting and renaming all of it. The same goes for a directory where none of the tracked
+    /// files are left: its contents are a different collection, typically another volume
+    /// mounted there, however many rows the old one left behind.
+    /// </para>
+    /// </summary>
+    private async Task<int> ReconcileWithDiskAsync(
+        string directory,
+        Action<int> reportFound,
+        Action<Exception, string> reportAddFailure,
+        CancellationToken cancellationToken)
+    {
+        var comicFiles = Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories)
+            .Where(IsComicFile)
+            .ToList();
+        reportFound(comicFiles.Count);
+
+        // Snapshot the tracked files once instead of one FileExistsAsync call per file.
+        var matcher = new TrackedFileMatcher(await SnapshotTrackedFilesAsync(cancellationToken), comicFiles, directory);
+
+        var knownFiles = 0;
+        var movedFiles = new List<(string OldPath, string NewPath)>();
+        var added = new List<string>();
+        foreach (var file in comicFiles)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            try
+            {
+                switch (matcher.Find(file, out var oldPath))
+                {
+                    case TrackedFileMatch.Tracked:
+                        knownFiles++;
+                        break;
+                    case TrackedFileMatch.Moved:
+                        knownFiles++;
+                        movedFiles.Add((oldPath!, file));
+                        break;
+                    default:
+                        await _fileStore.AddFileAsync(file, cancellationToken);
+                        added.Add(file);
+                        break;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                reportAddFailure(ex, file);
+            }
+        }
+
+        // Before anything below looks at paths: a pending file's row may be among these.
+        await FollowMovedFilesAsync(movedFiles, cancellationToken);
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return added.Count;
+        }
+
+        var libraryReplaced = matcher.TrackedUnderDirectory > 0 && knownFiles == 0;
+        IReadOnlyList<string> arrived = !libraryReplaced && await WasScannedBeforeAsync(directory, cancellationToken) ? added : [];
+        if (arrived.Count == 0 && added.Count > 0)
+        {
+            _logger.LogInformation(
+                LoggingHelper.WithWatcherPrefix(libraryReplaced
+                    ? "None of the files tracked under {Directory} were found there, so its {Count} files were added as a different collection without processing them; process them from the file list when you want them renamed and normalized"
+                    : "{Directory} has not been scanned completely before, so its {Count} existing files were added without processing them; process them from the file list when you want them renamed and normalized"),
+                directory, added.Count);
+        }
+
+        if (comicFiles.Count == 0 && matcher.TrackedUnderDirectory > 0)
+        {
+            // The library is missing rather than empty (an unmounted volume, say): the files
+            // found when it comes back are not arrivals.
+            _scannedDirectory = null;
+            await _fileStore.ForgetLibraryScanAsync(cancellationToken);
+        }
+        else
+        {
+            _scannedDirectory = directory;
+            await _fileStore.RecordLibraryScannedAsync(directory, cancellationToken);
+        }
+
+        await QueueMissedProcessingAsync(directory, arrived, cancellationToken);
+        return added.Count;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="directory"/> has been scanned to the end before: by this process,
+    /// or, for the first scan since the application started, by an earlier one.
+    /// </summary>
+    private async Task<bool> WasScannedBeforeAsync(string directory, CancellationToken cancellationToken) =>
+        (_scannedDirectory is { } scanned && LibraryPathValidator.IsSameOrUnder(directory, scanned))
+        || await _fileStore.IsLibraryScannedAsync(directory, cancellationToken);
+
+    /// <summary>
+    /// The files the store tracks, read once for a whole scan.
+    /// </summary>
+    private async Task<IReadOnlyList<ComicFile>> SnapshotTrackedFilesAsync(CancellationToken cancellationToken) =>
+        (await _fileStore.GetAllFilesAsync(cancellationToken) ?? Enumerable.Empty<ComicFile>())
+            .Where(f => !string.IsNullOrWhiteSpace(f.FilePath))
+            .ToList();
+
+    /// <summary>
+    /// Moves the rows of tracked files that were moved while no event reported it to their new
+    /// paths, with their processing state, user metadata edits and every user's read state.
+    /// </summary>
+    private async Task FollowMovedFilesAsync(IReadOnlyList<(string OldPath, string NewPath)> movedFiles, CancellationToken cancellationToken)
+    {
+        for (var i = 0; i < movedFiles.Count; i++)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var (oldPath, newPath) = movedFiles[i];
+            try
+            {
+                // One file list update for the lot, not one per file.
+                await _fileStore.UpdateFilePathAsync(oldPath, newPath, cancellationToken, broadcastUpdate: i == movedFiles.Count - 1);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error moving tracked file: {OldPath} -> {NewPath}"), oldPath, newPath);
+            }
+        }
+
+        if (movedFiles.Count > 0)
+        {
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Followed {Count} tracked file(s) moved while their move was not seen"), movedFiles.Count);
+        }
+    }
+
+    /// <summary>
+    /// Queues the files that <paramref name="arrived"/> under <paramref name="directory"/>, and
+    /// the files there that were still queued for processing when the watcher last stopped. The
+    /// usual checks then skip a file that turns out to be processed or that the current
+    /// settings do not process.
+    /// </summary>
+    private async Task QueueMissedProcessingAsync(string directory, IReadOnlyCollection<string> arrived, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string> pending;
+        try
+        {
+            pending = await _fileStore.GetProcessingPendingFilesAsync(cancellationToken) ?? [];
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error reading the files still queued for processing"));
+            pending = [];
+        }
+
+        foreach (var file in arrived)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            ScheduleProcessing(file);
+        }
+
+        var queuedPending = 0;
+        var arrivedPaths = new HashSet<string>(arrived, StringComparer.Ordinal);
+        foreach (var file in pending)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (arrivedPaths.Contains(file) || !LibraryPathValidator.IsSameOrUnder(file, directory))
+            {
+                continue;
+            }
+
+            if (File.Exists(file))
+            {
+                // Already recorded as pending.
+                ScheduleProcessing(file, recordPending: false);
+                queuedPending++;
+            }
+            else
+            {
+                await RecordPendingAsync(file, false);
+            }
+        }
+
+        if (arrived.Count > 0 || queuedPending > 0)
+        {
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                "Queued {Arrived} file(s) that arrived and {Pending} file(s) that were still queued while the watcher was not running: {Directory}"),
+                arrived.Count, queuedPending, directory);
+        }
+    }
+
+    /// <summary>What <see cref="TrackedFileMatcher.Find"/> found out about a file on disk.</summary>
+    private enum TrackedFileMatch
+    {
+        /// <summary>The store tracks the file under this very path.</summary>
+        Tracked,
+
+        /// <summary>The store tracks the file under another path; its row has to follow.</summary>
+        Moved,
+
+        /// <summary>The store does not know the file.</summary>
+        Untracked,
+    }
+
+    /// <summary>
+    /// Pairs comic files found on disk with the store's rows. A path the store does not track
+    /// may still be a known file: on a case-insensitive file system, one whose path changed case
+    /// while no event reported it (the old spelling keeps naming the file, so the row would
+    /// never look stale and the file would end up with two rows), or a tracked file moved
+    /// (typically with its series folder), which keeps its row and with it its processing
+    /// state, user metadata edits and read state instead of coming back as a new, unprocessed
+    /// file. A moved pair must have the same file name, size and last-write time, and be the
+    /// only candidate; anything less certain is left as a new file.
+    /// </summary>
+    private sealed class TrackedFileMatcher
+    {
+        private readonly HashSet<string> _exactPaths = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _pathsIgnoringSpelling = new(StringComparer.FromComparison(LibraryPathValidator.PathComparison));
+        private readonly Dictionary<(string Name, long Size, long ModifiedSeconds), List<string>> _missing = new();
+
+        public TrackedFileMatcher(IEnumerable<ComicFile> trackedFiles, IEnumerable<string> filesOnDisk, string directory)
+        {
+            var onDisk = new HashSet<string>(filesOnDisk, StringComparer.FromComparison(LibraryPathValidator.PathComparison));
+            foreach (var file in trackedFiles)
+            {
+                _exactPaths.Add(file.FilePath);
+                _pathsIgnoringSpelling.TryAdd(file.FilePath, file.FilePath);
+
+                if (!LibraryPathValidator.IsSameOrUnder(file.FilePath, directory))
+                {
+                    continue;
+                }
+
+                TrackedUnderDirectory++;
+                if (onDisk.Contains(file.FilePath))
+                {
+                    continue;
+                }
+
+                var key = (Path.GetFileName(file.FilePath), file.FileSize, ToSeconds(file.LastModified));
+                if (!_missing.TryGetValue(key, out var paths))
+                {
+                    _missing[key] = paths = new List<string>(1);
+                }
+
+                paths.Add(file.FilePath);
+            }
+        }
+
+        /// <summary>How many tracked files are under the directory, on disk or not.</summary>
+        public int TrackedUnderDirectory { get; }
+
+        /// <summary>
+        /// Classifies the file at <paramref name="path"/>. For <see cref="TrackedFileMatch.Moved"/>,
+        /// <paramref name="oldPath"/> is the path of its row, which is then no longer offered
+        /// for another file.
+        /// </summary>
+        public TrackedFileMatch Find(string path, out string? oldPath)
+        {
+            oldPath = null;
+            if (_exactPaths.Contains(path))
+            {
+                return TrackedFileMatch.Tracked;
+            }
+
+            if (_pathsIgnoringSpelling.Remove(path, out var respelled))
+            {
+                oldPath = respelled;
+                return TrackedFileMatch.Moved;
+            }
+
+            return TryTakeMissing(path, out oldPath) ? TrackedFileMatch.Moved : TrackedFileMatch.Untracked;
+        }
+
+        private bool TryTakeMissing(string path, out string? oldPath)
+        {
+            oldPath = null;
+            if (_missing.Count == 0)
+            {
+                return false;
+            }
+
+            FileInfo info;
+            try
+            {
+                info = new FileInfo(path);
+                if (!info.Exists)
+                {
+                    return false;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+
+            var key = (info.Name, info.Length, ToSeconds(info.LastWriteTime));
+            if (!_missing.TryGetValue(key, out var candidates) || candidates.Count != 1)
+            {
+                return false;
+            }
+
+            oldPath = candidates[0];
+            _missing.Remove(key);
+            return true;
+        }
+
+        // Some file systems keep write times to the second (or two), so compare seconds only.
+        private static long ToSeconds(DateTime time) => time.Ticks / TimeSpan.TicksPerSecond;
     }
 
     /// <summary>
@@ -424,10 +822,13 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         CancelAllPending();
 
         CancellationTokenSource? restart;
+        CancellationTokenSource scans;
         lock (_lock)
         {
             restart = _restartCts;
             _restartCts = null;
+            scans = _scanCts;
+            _scanCts = new CancellationTokenSource();
 
             if (_watcher != null)
             {
@@ -442,7 +843,9 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             QueueStatusBroadcast(false);
         }
 
+        // Scans queued from here on belong to the next start and are not affected.
         CancelRestart(restart);
+        scans.Cancel();
         return Task.CompletedTask;
     }
 
@@ -557,6 +960,12 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         else if (IsComicFile(e.FullPath))
         {
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File created: {Path}"), e.FullPath);
+
+            // Debounce and process (coalesces with any other pending events for this path). The
+            // request is recorded below, once the file has a row to record it on; it is
+            // registered first so that the recording finds it.
+            ScheduleProcessing(e.FullPath, recordPending: false);
+
             _ = Task.Run(async () =>
             {
                 try
@@ -566,13 +975,20 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error adding created file to store: {Path}"), e.FullPath);
+                    return;
                 }
-            });
 
-            // Debounce and process (coalesces with any other pending events for this path).
-            ScheduleProcessing(e.FullPath);
+                await RecordPendingOnceTrackedAsync(e.FullPath);
+            });
         }
     }
+
+    /// <summary>
+    /// Records that a file the watcher has just started tracking waits for processing, unless
+    /// its processing request has already been served (see <see cref="ScheduleProcessing"/>).
+    /// </summary>
+    private Task RecordPendingOnceTrackedAsync(string filePath) =>
+        _pendingProcessing.ContainsKey(filePath) ? RecordPendingAsync(filePath, true) : Task.CompletedTask;
 
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
@@ -610,6 +1026,11 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             // Any work still pending for the old path is now stale.
             CancelPending(e.OldFullPath);
 
+            // Debounce and process the new path. Scheduling consults the (now updated) state only
+            // after the stability delay, so a rename performed by the processor itself is skipped.
+            // The request is recorded below, once the row is at the new path.
+            ScheduleProcessing(e.FullPath, recordPending: false);
+
             _ = Task.Run(async () =>
             {
                 try
@@ -621,13 +1042,50 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error updating renamed file path: {Path}"), e.FullPath);
+                    return;
                 }
-            });
 
-            // Debounce and process the new path. Scheduling consults the (now updated) state only
-            // after the stability delay, so a rename performed by the processor itself is skipped.
-            ScheduleProcessing(e.FullPath);
+                await RecordPendingOnceTrackedAsync(e.FullPath);
+            });
+            return;
         }
+
+        if (IsComicFile(e.OldFullPath) && !Directory.Exists(e.FullPath))
+        {
+            // A comic renamed to a name that is not a comic ("x.cbz" -> "x.cbz.bak") has left
+            // the library just as if it had been deleted, unless the rename was the first step
+            // of replacing it in place, see ForgetRenamedAwayFile.
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File renamed to a non-comic name: {OldPath} -> {NewPath}"), e.OldFullPath, e.FullPath);
+            ForgetRenamedAwayFile(e.OldFullPath);
+            return;
+        }
+
+        // Anything else may be a directory (typically a series folder) renamed or moved within
+        // the library. The OS reports only the directory itself, not the files under it, so
+        // every tracked file under the old path is moved to the new one, keeping its processing
+        // state, user metadata edits and every user's read state. For a plain non-comic file
+        // nothing is tracked under its path and this changes nothing.
+        var pendingUnderOld = CancelPendingUnder(e.OldFullPath);
+        QueueDirectoryWork(async () =>
+        {
+            var moved = await _fileStore.MoveDirectoryAsync(e.OldFullPath, e.FullPath);
+            if (!Directory.Exists(e.FullPath))
+            {
+                return;
+            }
+
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Directory renamed: {OldPath} -> {NewPath}; moved {Count} tracked file(s)"),
+                e.OldFullPath, e.FullPath, moved);
+
+            // Files that were waiting to settle under the old path are now under the new one.
+            foreach (var path in pendingUnderOld)
+            {
+                ScheduleProcessing(Path.Join(e.FullPath, Path.GetRelativePath(e.OldFullPath, path)));
+            }
+
+            // Comics under the directory that were never tracked are new to the library.
+            await TrackUntrackedFilesAsync(e.FullPath);
+        });
     }
 
     private void OnFileDeleted(object sender, FileSystemEventArgs e)
@@ -637,24 +1095,133 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         {
             return;
         }
-        
+
         _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File deleted: {Path}"), e.FullPath);
 
-        // Drop any pending processing for a file that no longer exists.
+        if (IsComicFile(e.FullPath))
+        {
+            ForgetFile(e.FullPath);
+            return;
+        }
+
+        // The path may have been a directory, deleted or moved out of the library. The OS
+        // reports only the directory itself when it is moved out, so every tracked file under it
+        // is removed here; otherwise those rows would stay behind pointing at missing files.
         CancelPending(e.FullPath);
-        _recentlyProcessed.TryRemove(e.FullPath, out _);
+        CancelPendingUnder(e.FullPath);
+        QueueDirectoryWork(() => _fileStore.RemoveDirectoryAsync(e.FullPath));
+    }
+
+    /// <summary>
+    /// Stops tracking a comic renamed to a non-comic name once the file has settled, unless its
+    /// path holds a file again by then.
+    /// <para>
+    /// Renaming a file aside is how many tools replace it safely: on Windows, File.Replace
+    /// (which the processor and other taggers use to rewrite an archive) renames the original to
+    /// its backup name and then moves the new archive into place, and the second step may be
+    /// reported as a creation rather than a rename. The file never left the library, so its
+    /// row (processing state, user metadata edits and field locks) must stay. The processor's
+    /// own backup name is ignored outright (see <see cref="IsTemporaryFile"/>); this check
+    /// covers every other tool.
+    /// </para>
+    /// </summary>
+    private void ForgetRenamedAwayFile(string filePath)
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, _settings.WatcherFileStabilityDelaySeconds)));
+
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (File.Exists(filePath))
+            {
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                    "File was replaced in place rather than renamed away, keeping it: {Path}"), filePath);
+                return;
+            }
+
+            ForgetFile(filePath);
+        });
+    }
+
+    /// <summary>
+    /// Stops tracking a comic file that no longer exists under its path.
+    /// </summary>
+    private void ForgetFile(string filePath)
+    {
+        // Drop any pending processing for a file that no longer exists.
+        CancelPending(filePath);
+        _recentlyProcessed.TryRemove(filePath, out _);
 
         _ = Task.Run(async () =>
         {
             try
             {
-                await _fileStore.RemoveFileAsync(e.FullPath);
+                await _fileStore.RemoveFileAsync(filePath);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error removing deleted file from store: {Path}"), e.FullPath);
+                _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error removing deleted file from store: {Path}"), filePath);
             }
         });
+    }
+
+    /// <summary>
+    /// Runs a store update for a whole directory after the ones queued before it. Directory
+    /// events must be applied in the order they happened (a folder renamed twice moves its
+    /// files twice), and the OS raises them faster than the store applies them.
+    /// </summary>
+    private void QueueDirectoryWork(Func<Task> work)
+    {
+        lock (_directoryWorkLock)
+        {
+            _directoryWork = _directoryWork
+                .ContinueWith(async _ =>
+                {
+                    try
+                    {
+                        await work();
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
+                    {
+                        _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error updating tracked files for a directory change"));
+                    }
+                }, CancellationToken.None, TaskContinuationOptions.DenyChildAttach, TaskScheduler.Default)
+                .Unwrap();
+        }
+    }
+
+    /// <summary>
+    /// Adds the comic files under <paramref name="directory"/> that the store does not track yet
+    /// and queues them for processing; tracked files are left as they are.
+    /// </summary>
+    private async Task TrackUntrackedFilesAsync(string directory)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories).Where(IsComicFile))
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                if (await _fileStore.FileExistsAsync(file))
+                {
+                    continue;
+                }
+
+                await _fileStore.AddFileAsync(file);
+                ScheduleProcessing(file);
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error tracking new files in directory: {Directory}"), directory);
+        }
     }
 
     /// <summary>
@@ -879,13 +1446,33 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     }
 
     /// <summary>
-    /// Re-enumerates the watched directory and re-queues every comic file for processing. Used to
-    /// recover after a watcher buffer overflow (or other watcher error) where individual file
-    /// events were dropped. Files already in their final state are cheaply skipped by the
-    /// stability/should-process checks inside <see cref="ScheduleProcessing"/>.
+    /// Queues a recovery rescan, see <see cref="RescanForMissedEventsAsync"/>, unless one is
+    /// already waiting for its turn.
     /// </summary>
-    private async Task RecoverFromMissedEventsAsync()
+    private Task RecoverFromMissedEventsAsync()
     {
+        if (_disposed || Interlocked.Exchange(ref _recoveryRescanQueued, 1) == 1)
+        {
+            return Task.CompletedTask;
+        }
+
+        return QueueScan(RescanForMissedEventsAsync);
+    }
+
+    /// <summary>
+    /// Re-enumerates the watched directory to recover after a watcher buffer overflow (or other
+    /// watcher error) where individual file events were dropped, or while a failed watcher was
+    /// being recreated. Comic files the store does not track are files whose arrival was missed:
+    /// they are added and queued for processing, and tracked files that moved keep their rows,
+    /// as for any scan (see <see cref="ReconcileWithDiskAsync"/>). Tracked files whose processing
+    /// was queued already are queued again; others are left alone, so that a watcher error cannot
+    /// set off processing of the files that were deliberately left unprocessed.
+    /// </summary>
+    private async Task RescanForMissedEventsAsync(CancellationToken cancellationToken)
+    {
+        // From here on, an error raised has to queue a rescan of its own.
+        Interlocked.Exchange(ref _recoveryRescanQueued, 0);
+
         if (_disposed)
         {
             return;
@@ -909,34 +1496,21 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
                 "Starting recovery rescan of directory: {Directory}"), directory);
 
-            var comicFiles = Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories)
-                .Where(IsComicFile)
-                .ToList();
-
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
-                "Recovery rescan found {Count} comic files; re-queuing for processing"), comicFiles.Count);
-
-            foreach (var file in comicFiles)
-            {
-                if (_disposed)
-                {
-                    break;
-                }
-
-                try
-                {
-                    await _fileStore.AddFileAsync(file);
-                    ScheduleProcessing(file);
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
-                        "Error re-queuing file during recovery rescan: {File}"), file);
-                }
-            }
+            await ReconcileWithDiskAsync(
+                directory,
+                count => _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                    "Recovery rescan found {Count} comic files; re-queuing for processing"), count),
+                (ex, file) => _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
+                    "Error re-queuing file during recovery rescan: {File}"), file),
+                cancellationToken);
 
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
                 "Recovery rescan completed: {Directory}"), directory);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                "Recovery rescan cancelled: {Directory}"), directory);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -964,8 +1538,15 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// is reset so the bursty stream of file-system events a single operation produces collapses
     /// into one processing run. Self-induced changes (files the watcher just renamed/normalized) and
     /// files already being processed are skipped to eliminate redundant work.
+    /// <para>
+    /// The request is also recorded in the store (<see cref="IFileStoreService.SetProcessingPendingAsync"/>)
+    /// until it runs, so that one still waiting when the watcher stops is queued again at its
+    /// next start (<see cref="ReconcileWithDiskAsync"/>). Pass <paramref name="recordPending"/>
+    /// false when the caller records it itself, after the file's row exists, or when it is
+    /// recorded already.
+    /// </para>
     /// </summary>
-    private void ScheduleProcessing(string filePath)
+    private void ScheduleProcessing(string filePath, bool recordPending = true)
     {
         if (_disposed)
         {
@@ -980,11 +1561,18 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         }
 
         var cts = new CancellationTokenSource();
+        var superseded = false;
 
         // Coalesce: install this request as the pending one for the path, cancelling any earlier
-        // debounce so only the most recent event in a burst survives.
-        _pendingProcessing.AddOrUpdate(filePath, cts, (_, existing) =>
+        // debounce so only the most recent event in a burst survives. (A factory can run more
+        // than once under contention; the last one to run is the one that took effect.)
+        _pendingProcessing.AddOrUpdate(filePath, _ =>
         {
+            superseded = false;
+            return cts;
+        }, (_, existing) =>
+        {
+            superseded = true;
             try
             {
                 existing.Cancel();
@@ -997,9 +1585,17 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             return cts;
         });
 
+        // A request that replaces another is recorded already.
+        recordPending &= !superseded;
+
         var token = cts.Token;
         _ = Task.Run(async () =>
         {
+            if (recordPending)
+            {
+                await RecordPendingAsync(filePath, true);
+            }
+
             try
             {
                 // Debounce window. A newer event for the same path cancels this token and re-arms
@@ -1008,7 +1604,10 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             }
             catch (OperationCanceledException)
             {
-                return; // Superseded by a newer event (or shutdown); that request will run instead.
+                // Superseded by a newer event, which will run instead (and is recorded as
+                // pending), or the watcher stopped, in which case the record stays for its next
+                // start, or the file was deleted or moved away.
+                return;
             }
 
             // Claim the pending slot. If we are no longer the registered request, a newer event has
@@ -1023,12 +1622,18 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             // the debounce so the file is re-evaluated once that run finishes rather than now.
             if (!_inFlight.TryAdd(filePath, 0))
             {
-                ScheduleProcessing(filePath);
+                ScheduleProcessing(filePath, recordPending: false);
                 return;
             }
 
             try
             {
+                // The request is being served now. Clearing the record before processing rather
+                // than after means a file the processor renames does not carry it to its new
+                // path, and a file whose processing brings the application down is not retried
+                // at every start.
+                await RecordPendingAsync(filePath, false);
+
                 var shouldProcess = await ShouldProcessFileAsync(filePath);
                 if (!shouldProcess)
                 {
@@ -1053,6 +1658,23 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     }
 
     /// <summary>
+    /// Records in the store whether <paramref name="filePath"/> waits for automatic processing,
+    /// see <see cref="ScheduleProcessing"/>. Best effort: a failure costs at most a missed
+    /// catch-up after a restart, so it is logged rather than allowed to stop the processing.
+    /// </summary>
+    private async Task RecordPendingAsync(string filePath, bool pending)
+    {
+        try
+        {
+            await _fileStore.SetProcessingPendingAsync(filePath, pending);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, LoggingHelper.WithWatcherPrefix("Error recording whether a file waits for processing: {File}"), filePath);
+        }
+    }
+
+    /// <summary>
     /// Cancels and discards any pending (debounced) processing request for the given path.
     /// </summary>
     private void CancelPending(string filePath)
@@ -1069,6 +1691,24 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 // Best-effort cancellation.
             }
         }
+    }
+
+    /// <summary>
+    /// Cancels the pending processing requests for every path under
+    /// <paramref name="directory"/> and returns those paths.
+    /// </summary>
+    private List<string> CancelPendingUnder(string directory)
+    {
+        var prefix = Path.TrimEndingDirectorySeparator(directory) + Path.DirectorySeparatorChar;
+        var cancelled = _pendingProcessing.Keys
+            .Where(path => path.StartsWith(prefix, LibraryPathValidator.PathComparison))
+            .ToList();
+        foreach (var path in cancelled)
+        {
+            CancelPending(path);
+        }
+
+        return cancelled;
     }
 
     /// <summary>
@@ -1125,24 +1765,39 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     }
 
     /// <summary>
+    /// The suffix the processor appends to an archive's name for the backup it keeps while it
+    /// replaces the archive (see ComicProcessorService.ReplaceFileWithRetryAsync).
+    /// </summary>
+    private const string ArchiveBackupSuffix = ".backup";
+
+    /// <summary>
     /// Check if a file is a temporary file that should be ignored
     /// </summary>
     private static bool IsTemporaryFile(string path)
     {
         var fileName = Path.GetFileName(path);
-        
+
         // Ignore files starting with .tmp_ (common temporary file pattern)
         if (fileName.StartsWith(".tmp_", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
-        
+
         // Ignore files with .tmp extension
         if (path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
-        
+
+        // Ignore the backup the processor keeps while it rewrites an archive ("x.cbz.backup").
+        // On Windows, File.Replace reports moving the archive to it as a rename, which is not
+        // the archive leaving the library.
+        if (fileName.EndsWith(ArchiveBackupSuffix, StringComparison.OrdinalIgnoreCase)
+            && ComicFileExtensions.IsComicArchive(fileName[..^ArchiveBackupSuffix.Length]))
+        {
+            return true;
+        }
+
         return false;
     }
 

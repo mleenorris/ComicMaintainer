@@ -25,9 +25,10 @@ public partial class ComicProcessorService
             filePaths,
             "ProcessFilesAsync",
             "processing",
-            (filePath, token) => ProcessFileCoreAsync(filePath, forceReprocess, token),
+            async (filePath, token) => await ProcessFileCoreAsync(filePath, forceReprocess, token),
             "Processing failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -41,9 +42,10 @@ public partial class ComicProcessorService
             filePaths,
             "RenameFilesAsync",
             "renaming",
-            (filePath, token) => RenameFileCoreAsync(filePath, forceReprocess, token),
+            async (filePath, token) => await RenameFileCoreAsync(filePath, forceReprocess, token),
             "Rename failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -57,9 +59,10 @@ public partial class ComicProcessorService
             filePaths,
             "NormalizeFilesAsync",
             "normalizing",
-            (filePath, token) => NormalizeFileCoreAsync(filePath, forceReprocess, token),
+            async (filePath, token) => await NormalizeFileCoreAsync(filePath, forceReprocess, token),
             "Normalize failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default)
@@ -83,7 +86,8 @@ public partial class ComicProcessorService
             "updating metadata for",
             async (file, token) => (await UpdateMetadataCoreAsync(file, metadata, fields, token, userEdit: true)).Succeeded,
             "Update metadata failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> RemoveMetadataFromFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -118,7 +122,8 @@ public partial class ComicProcessorService
                 return true;
             },
             "Remove metadata failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> DeleteFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -223,7 +228,8 @@ public partial class ComicProcessorService
                 }
             },
             "Delete failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> NormalizeAndRenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -252,7 +258,8 @@ public partial class ComicProcessorService
                 return renamed && normalized.Succeeded;
             },
             "Normalize and rename failed",
-            cancellationToken);
+            cancellationToken,
+            lockEachFile: true);
     }
 
     public Task<Guid> RunCustomBatchJobAsync(
@@ -267,19 +274,31 @@ public partial class ComicProcessorService
             trackedItems,
             operationName,
             operationName.ToLowerInvariant(),
-            itemOperation,
+            async (item, token) => await itemOperation(item, token),
             failureMessage,
             cancellationToken,
-            postLoopAsync);
+            lockEachFile: false,
+            postLoopAsync: postLoopAsync);
+    }
+
+    /// <summary>
+    /// Outcome of one item of a batch job. A failed item is counted in
+    /// <see cref="ProcessingJob.FailedFiles"/> and its <see cref="Error"/> (or the job's generic
+    /// failure message) is recorded in <see cref="ProcessingJob.Errors"/>.
+    /// </summary>
+    private readonly record struct BatchItemResult(bool Success, string? Error = null)
+    {
+        public static implicit operator BatchItemResult(bool success) => new(success);
     }
 
     private Task<Guid> QueueBatchJobAsync(
         IEnumerable<string> filePaths,
         string operationName,
         string actionDescription,
-        Func<string, CancellationToken, Task<bool>> fileOperation,
+        Func<string, CancellationToken, Task<BatchItemResult>> fileOperation,
         string failureMessage,
         CancellationToken cancellationToken,
+        bool lockEachFile,
         Func<CancellationToken, Task>? postLoopAsync = null)
     {
         var jobId = Guid.NewGuid();
@@ -365,7 +384,16 @@ public partial class ComicProcessorService
                                 fileList.Count,
                                 LoggingHelper.SanitizePathForLog(item.file));
 
-                            var success = await fileOperation(item.file, token);
+                            // Built-in file operations run under the file's lock and a shared processing
+                            // slot (see RunExclusiveAsync), so a job never races the watcher, the API or
+                            // another job on the same archive, and concurrent jobs stay within MaxWorkers.
+                            // Custom items are not necessarily files and may call the public, locking
+                            // operations themselves, so they run as they are.
+                            var result = lockEachFile
+                                ? await RunExclusiveAsync(item.file, itemToken => fileOperation(item.file, itemToken), token)
+                                : await fileOperation(item.file, token);
+                            var success = result.Success;
+                            var error = success ? null : result.Error ?? failureMessage;
                             _metrics?.RecordFileProcessed(operationName, success);
 
                             lock (jobSyncLock)
@@ -378,7 +406,7 @@ public partial class ComicProcessorService
                                 else
                                 {
                                     job.FailedFiles++;
-                                    job.Errors[item.file] = failureMessage;
+                                    job.Errors[item.file] = error!;
                                 }
                             }
 
@@ -399,7 +427,7 @@ public partial class ComicProcessorService
                                 await _eventBroadcaster.BroadcastFileProcessedAsync(
                                     Path.GetFileName(item.file),
                                     success,
-                                    success ? null : failureMessage);
+                                    error);
                             }
                         });
 

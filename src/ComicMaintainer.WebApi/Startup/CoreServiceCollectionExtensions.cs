@@ -231,6 +231,8 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<EventBroadcasterService>();
         services.AddSingleton<IEventBroadcaster>(sp => sp.GetRequiredService<EventBroadcasterService>());
         services.AddSingleton<IFileStoreService, FileStoreService>();
+        // One per-file lock for every component that rewrites, renames or deletes archives.
+        services.AddSingleton<IFileOperationLock, FileOperationLock>();
         services.AddSingleton<ISeriesNameResolver, SeriesNameResolver>();
         services.AddSingleton<IJobStateStore, JobStateStore>();
         services.AddSingleton<IComicProcessorService, ComicProcessorService>();

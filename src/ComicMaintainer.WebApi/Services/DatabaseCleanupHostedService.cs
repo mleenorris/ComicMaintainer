@@ -20,6 +20,12 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     private readonly object _timerLock = new();
     private bool _started;
 
+    /// <summary>
+    /// The startup cleanup, when it is waiting for the file watcher and so was not waited for
+    /// by <see cref="StartAsync"/>.
+    /// </summary>
+    private Task? _startupCleanup;
+
     public DatabaseCleanupHostedService(
         IFileStoreService fileStore,
         IOptionsMonitor<AppSettings> appSettings,
@@ -37,9 +43,18 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
         _cancellationTokenSource = new CancellationTokenSource();
         _started = true;
         
-        // Run cleanup on startup
-        await RunCleanupAsync(cancellationToken);
-        
+        // Run cleanup on startup. While the file watcher is catching up with the disk the cleanup
+        // waits for it, which on a large library can take minutes; that must not hold up the
+        // application's start. Running on this service's own token ends it when the service stops.
+        if (_fileStore.IsStaleCleanupSuspended)
+        {
+            _startupCleanup = RunCleanupAsync(_cancellationTokenSource.Token);
+        }
+        else
+        {
+            await RunCleanupAsync(cancellationToken);
+        }
+
         // Schedule periodic cleanup based on configuration and subscribe to changes so the
         // schedule is updated live without restarting the service.
         ConfigureTimer(_appSettings.CurrentValue.DatabaseCleanupIntervalHours);
@@ -124,8 +139,10 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
                 // Already disposed, ignore
             }
         }
-        
-        return Task.CompletedTask;
+
+        // The cancellation above ends a cleanup still waiting; let it finish before Dispose
+        // takes its lock away.
+        return _startupCleanup?.WaitAsync(cancellationToken) ?? Task.CompletedTask;
     }
 
     private async Task RunCleanupAsync(CancellationToken cancellationToken)

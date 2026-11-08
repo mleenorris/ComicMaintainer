@@ -158,6 +158,10 @@ public interface IComicProcessorService
     ///   Per-item operation invoked once per <paramref name="trackedItems"/>
     ///   entry. Returning <c>false</c> increments the job's failure count and
     ///   records <paramref name="failureMessage"/> as the error for that item.
+    ///   It runs without the per-file <see cref="IFileOperationLock"/>: an item
+    ///   that moves, rewrites or deletes an archive itself must hold that file's
+    ///   lock while it does, and must not call a public file operation of this
+    ///   service on the same file meanwhile (the lock is not reentrant).
     /// </param>
     /// <param name="failureMessage">Error string recorded when <paramref name="itemOperation"/> returns false.</param>
     /// <param name="postLoopAsync">

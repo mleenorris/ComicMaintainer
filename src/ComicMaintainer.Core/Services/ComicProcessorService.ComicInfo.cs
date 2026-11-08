@@ -18,8 +18,16 @@ public partial class ComicProcessorService
         return ComicFileExtensions.IsComicArchive(filePath);
     }
 
-    private static string ExtractSeriesFromFilename(string filePath)
+    private string? ExtractSeriesFromFilename(string filePath)
     {
+        // A loose file directly in the watched or duplicates root takes its series from its own
+        // name: the root folder's name is not a series (see SeriesFromPath). Null when the name
+        // holds none, so the file is not renamed after a made-up series.
+        if (IsInLibraryRoot(filePath))
+        {
+            return SeriesFromPath.FromFileName(filePath);
+        }
+
         // Extract series name from the parent folder name instead of filename
         var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
         if (string.IsNullOrEmpty(folderName))

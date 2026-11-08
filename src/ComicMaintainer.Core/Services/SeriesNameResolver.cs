@@ -40,7 +40,8 @@ public class SeriesNameResolver : ISeriesNameResolver
         bool mutateCache = true,
         CancellationToken cancellationToken = default)
     {
-        var folderSeries = ExtractFolderSeries(filePath);
+        var settings = _settings.CurrentValue;
+        var folderSeries = ExtractFolderSeries(filePath, settings.WatchedDirectory, settings.DuplicateDirectory);
         var candidates = new List<string>();
         if (!string.IsNullOrWhiteSpace(folderSeries))
         {
@@ -265,9 +266,17 @@ public class SeriesNameResolver : ISeriesNameResolver
     /// <summary>
     /// Extract the immediate parent directory name as a series candidate,
     /// matching the previous <c>ExtractSeriesFromFilename</c> behaviour.
+    /// Null for a file directly in one of <paramref name="libraryRoots"/>: the
+    /// root folder is not a series folder, so its name ("watched_dir") must not
+    /// become every loose file's series or be looked up at the providers.
     /// </summary>
-    internal static string ExtractFolderSeries(string filePath)
+    internal static string? ExtractFolderSeries(string filePath, params string?[] libraryRoots)
     {
+        if (SeriesFromPath.IsDirectlyInLibraryRoot(filePath, libraryRoots))
+        {
+            return null;
+        }
+
         var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
         if (string.IsNullOrEmpty(folderName))
         {
@@ -437,7 +446,7 @@ public class SeriesNameResolver : ISeriesNameResolver
     /// the resolved series yet, one is created with the folder name as the
     /// sole user alias.
     /// </summary>
-    private async Task EnsureFolderNameIsAliasAsync(string folderSeriesName, string resolvedSeries, CancellationToken cancellationToken)
+    private async Task EnsureFolderNameIsAliasAsync(string? folderSeriesName, string resolvedSeries, CancellationToken cancellationToken)
     {
         if (_cache is null
             || string.IsNullOrWhiteSpace(folderSeriesName)

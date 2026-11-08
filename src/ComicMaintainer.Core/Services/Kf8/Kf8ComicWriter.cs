@@ -164,7 +164,7 @@ internal static class Kf8ComicWriter
             var page = book.Pages[i];
 
             // Anchors only have to be unique in the book. Numbering them in
-            // sequence, as Calibre does, keeps them short for any page count.
+            // sequence keeps them short and cannot overflow at any page count.
             var bodyAid = ToBase32(2 * i);
             var containerAid = ToBase32((2 * i) + 1);
             var head = Encoding.UTF8.GetBytes(BuildDocumentHead(page, bodyAid));

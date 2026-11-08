@@ -390,7 +390,12 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         return bytes;
     }
 
-    /// <summary>A read-only in-memory stream that counts the bytes read from it.</summary>
+    /// <summary>
+    /// A read-only in-memory stream that counts the bytes read from it. Span reads
+    /// need no override: on a type derived from <see cref="MemoryStream"/> they are
+    /// routed through <see cref="Read(byte[], int, int)"/>, so counting them here
+    /// as well would count every byte twice.
+    /// </summary>
     private sealed class ReadCountingStream(byte[] data) : MemoryStream(data, writable: false)
     {
         public long BytesRead { get; private set; }
@@ -398,13 +403,6 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         public override int Read(byte[] buffer, int offset, int count)
         {
             var read = base.Read(buffer, offset, count);
-            BytesRead += read;
-            return read;
-        }
-
-        public override int Read(Span<byte> buffer)
-        {
-            var read = base.Read(buffer);
             BytesRead += read;
             return read;
         }

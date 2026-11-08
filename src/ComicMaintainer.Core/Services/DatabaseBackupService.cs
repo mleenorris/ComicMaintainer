@@ -29,6 +29,23 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
     public const string FileExtension = ".db";
     public const string PendingRestoreSuffix = ".restore-pending";
     private const string SafetyBackupSuffix = "prerestore";
+    private const string PreMigrationSuffix = "premigrate";
+    private const string UnfinishedUpgradeSuffix = ".migration-attempt";
+
+    /// <summary>
+    /// How many backups taken before startup migrations pruning keeps, newest first. They are kept apart from
+    /// <c>DatabaseBackupRetention</c>, so a week of daily backups after an upgrade does not prune the only copy of the
+    /// database that the previous version can still open.
+    /// </summary>
+    public const int PreMigrationBackupsKept = 3;
+
+    /// <summary>
+    /// How long after its last try an unfinished upgrade still counts as the same upgrade. A restart loop retries
+    /// within minutes, so it keeps the one backup however long it lasts. A retry after a longer gap takes a new one,
+    /// because the previous version may have been put back and used in between; versions before 3.0 do not clear the
+    /// record of an unfinished upgrade when they start.
+    /// </summary>
+    public static readonly TimeSpan UnfinishedUpgradeRetryWindow = TimeSpan.FromDays(1);
 
     private static readonly byte[] SqliteHeader = Encoding.ASCII.GetBytes("SQLite format 3\0");
 
@@ -94,6 +111,50 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         }
     }
 
+    public async Task<PreMigrationBackupResult> CreatePreMigrationBackupAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var earlier = FindBackupOfUnfinishedUpgrade();
+            if (earlier is not null)
+            {
+                RecordUnfinishedUpgrade(earlier.Name);
+                return new PreMigrationBackupResult(earlier, FromEarlierAttempt: true);
+            }
+
+            var backup = await CreateBackupCoreAsync(PreMigrationSuffix, cancellationToken);
+            RecordUnfinishedUpgrade(backup.Name);
+            PrunePreMigrationBackups();
+            return new PreMigrationBackupResult(backup, FromEarlierAttempt: false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public void MarkMigrationsApplied()
+    {
+        var record = UnfinishedUpgradePath;
+        try
+        {
+            if (File.Exists(record))
+            {
+                File.Delete(record);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Failed to clear the record of the finished database upgrade; the next upgrade may reuse its backup");
+        }
+    }
+
+    /// <summary>True when <paramref name="name"/> is a backup taken before startup migrations.</summary>
+    public static bool IsPreMigrationBackup(string name) =>
+        IsValidBackupName(name)
+        && Path.GetFileNameWithoutExtension(name).Split('-').Contains(PreMigrationSuffix, StringComparer.Ordinal);
+
     public IReadOnlyList<DatabaseBackupInfo> ListBackups()
     {
         var dir = BackupDirectory;
@@ -143,8 +204,50 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
             return 0;
         }
 
+        var backups = ListBackups();
+        var deleted = DeleteBackups(
+            backups.Where(backup => !IsPreMigrationBackup(backup.Name)).Skip(retention)
+                .Concat(ExpiredPreMigrationBackups(backups)));
+
+        if (deleted > 0)
+        {
+            _logger.LogInformation(
+                "Pruned {Count} database backup(s), keeping the newest {Retention} and the newest {PreMigrationKept} taken before migrations",
+                deleted,
+                retention,
+                PreMigrationBackupsKept);
+        }
+        return deleted;
+    }
+
+    private static IEnumerable<DatabaseBackupInfo> ExpiredPreMigrationBackups(IEnumerable<DatabaseBackupInfo> newestFirst) =>
+        newestFirst.Where(backup => IsPreMigrationBackup(backup.Name)).Skip(PreMigrationBackupsKept);
+
+    /// <summary>
+    /// Bounds the backups taken before migrations when a new one is taken, as <see cref="PruneBackups"/> only runs
+    /// after a scheduled backup, which never happens when scheduled backups are off or startup keeps failing.
+    /// </summary>
+    private void PrunePreMigrationBackups()
+    {
+        if (_settings.CurrentValue.DatabaseBackupRetention < 1)
+        {
+            return;
+        }
+
+        var deleted = DeleteBackups(ExpiredPreMigrationBackups(ListBackups()));
+        if (deleted > 0)
+        {
+            _logger.LogInformation(
+                "Pruned {Count} database backup(s) taken before migrations, keeping the newest {PreMigrationKept}",
+                deleted,
+                PreMigrationBackupsKept);
+        }
+    }
+
+    private int DeleteBackups(IEnumerable<DatabaseBackupInfo> expired)
+    {
         var deleted = 0;
-        foreach (var backup in ListBackups().Skip(retention))
+        foreach (var backup in expired)
         {
             try
             {
@@ -157,11 +260,57 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
             }
         }
 
-        if (deleted > 0)
-        {
-            _logger.LogInformation("Pruned {Count} database backup(s), keeping the newest {Retention}", deleted, retention);
-        }
         return deleted;
+    }
+
+    /// <summary>
+    /// Sidecar that names the backup of an upgrade that has not finished. It is removed once startup's migrations
+    /// have run, so its presence means no version has got past them since that backup was taken.
+    /// </summary>
+    private string UnfinishedUpgradePath => _databasePath + UnfinishedUpgradeSuffix;
+
+    /// <summary>
+    /// The backup an unfinished upgrade began with, or null when no upgrade is unfinished, its last try is too long
+    /// ago to be the same upgrade, or its backup is gone.
+    /// </summary>
+    private DatabaseBackupInfo? FindBackupOfUnfinishedUpgrade()
+    {
+        var record = UnfinishedUpgradePath;
+        try
+        {
+            if (!File.Exists(record)
+                || _timeProvider.GetUtcNow().UtcDateTime - File.GetLastWriteTimeUtc(record) > UnfinishedUpgradeRetryWindow)
+            {
+                return null;
+            }
+
+            var name = File.ReadAllText(record).Trim();
+            var backup = IsPreMigrationBackup(name) ? new FileInfo(Path.Join(BackupDirectory, name)) : null;
+            return backup is { Exists: true } ? ToInfo(backup) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not read the record of an unfinished database upgrade; taking a new backup");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Notes that an upgrade starting from <paramref name="backupName"/> is being tried now. Without the note the
+    /// next start takes another backup, which the startup pruning bounds, so a failure here does not stop the upgrade.
+    /// </summary>
+    private void RecordUnfinishedUpgrade(string backupName)
+    {
+        var record = UnfinishedUpgradePath;
+        try
+        {
+            File.WriteAllText(record, backupName);
+            File.SetLastWriteTimeUtc(record, _timeProvider.GetUtcNow().UtcDateTime);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not record the unfinished database upgrade; if it fails, the next start takes another backup");
+        }
     }
 
     public async Task<DatabaseRestoreResult> StageRestoreAsync(string name, CancellationToken cancellationToken = default)
@@ -303,7 +452,9 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
     /// Swaps a staged restore into place. Must run before anything opens the
     /// database (i.e. before migrations). A staged file that no longer looks like
     /// a SQLite database is set aside as <c>.restore-failed</c> and the current
-    /// database is kept.
+    /// database is kept. When it cannot be read or set aside either, for example
+    /// because another program (such as a virus scanner on Windows) holds it open,
+    /// it stays staged for the next start and the current database is kept.
     /// </summary>
     /// <returns>True when a restore was applied.</returns>
     public static bool ApplyPendingRestore(string databasePath, ILogger logger)
@@ -318,7 +469,18 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         if (!HasSqliteHeader(pending))
         {
             var failed = databasePath + ".restore-failed";
-            File.Move(pending, failed, overwrite: true);
+            try
+            {
+                File.Move(pending, failed, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogError(
+                    ex,
+                    "Staged database restore could not be read as a SQLite database and could not be moved aside, so the current database was kept; it is checked again at the next start");
+                return false;
+            }
+
             logger.LogError("Staged database restore is not a SQLite database; it was moved aside and the current database was kept");
             return false;
         }

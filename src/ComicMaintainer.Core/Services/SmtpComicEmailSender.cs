@@ -38,14 +38,17 @@ public class SmtpComicEmailSender : IComicEmailSender
         ArgumentNullException.ThrowIfNull(message);
 
         var settings = _settings.CurrentValue;
-        if (!IsConfigured)
+        var fromAddress = settings.EmailFromAddress;
+        // The same check as IsConfigured, made on the settings the message is built from: IsConfigured reads them
+        // again, and a settings save in between could clear the from address.
+        if (string.IsNullOrWhiteSpace(settings.SmtpHost) || !EmailAddressUtils.IsValid(fromAddress))
         {
             throw new InvalidOperationException(
                 "Email delivery is not configured. Set the SMTP host and the from address in Settings.");
         }
 
         using var mime = new MimeMessage();
-        mime.From.Add(new MailboxAddress(settings.EmailFromName ?? "ComicMaintainer", settings.EmailFromAddress));
+        mime.From.Add(new MailboxAddress(settings.EmailFromName ?? "ComicMaintainer", fromAddress));
         mime.To.Add(MailboxAddress.Parse(message.ToAddress));
         mime.Subject = message.Subject;
 

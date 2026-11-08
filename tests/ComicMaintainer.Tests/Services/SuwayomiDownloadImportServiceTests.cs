@@ -410,6 +410,16 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
 
     private string PendingMovesPath => Path.Join(_settings.ConfigDirectory, "suwayomi-import-pending.json");
 
+    /// <summary>
+    /// The staging paths recorded in the pending-move journal. The journal is JSON, which escapes the backslashes of a
+    /// Windows path, so it is parsed rather than searched for the path as text.
+    /// </summary>
+    private List<string?> JournaledStagingPaths()
+    {
+        using var journal = System.Text.Json.JsonDocument.Parse(File.ReadAllText(PendingMovesPath));
+        return journal.RootElement.EnumerateArray().Select(move => move.GetProperty("StagingPath").GetString()).ToList();
+    }
+
     private void WritePendingMove(string stagingPath, string sourcePath)
     {
         Directory.CreateDirectory(_settings.ConfigDirectory);
@@ -479,7 +489,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(1, result.Unreadable);
         Assert.False(result.PermissionDenied);
         Assert.True(File.Exists(staging));
-        Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        Assert.Contains(staging, JournaledStagingPaths());
     }
 
     [Fact]
@@ -502,7 +512,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
             Assert.Equal(1, result.Failed);
             Assert.Equal(0, result.Unreadable);
             Assert.True(File.Exists(staging));
-            Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+            Assert.Contains(staging, JournaledStagingPaths());
         }
         finally
         {
@@ -529,7 +539,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
 
             Assert.True(result.PermissionDenied);
             Assert.Equal(1, result.Failed);
-            Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+            Assert.Contains(staging, JournaledStagingPaths());
         }
         finally
         {
@@ -578,7 +588,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(1, result.StillDownloading);
         Assert.Equal(partial, File.ReadAllBytes(source));
         Assert.Equal("complete staged archive", ReadPage(staging));
-        Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        Assert.Contains(staging, JournaledStagingPaths());
         Assert.False(File.Exists(Path.Join(_library, "Solo Leveling", "Chapter 1.cbz")));
     }
 
@@ -629,7 +639,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
             Assert.Equal("original chapter", ReadPage(source));
             Assert.Equal("staged copy", ReadPage(staging));
             Assert.Single(Directory.GetFiles(stagingFolder));
-            Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+            Assert.Contains(staging, JournaledStagingPaths());
             Assert.False(Directory.Exists(Path.Join(_library, "Solo Leveling")));
         }
         finally
@@ -689,7 +699,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(newDownload, File.ReadAllBytes(source));
         var staging = Assert.Single(Directory.GetFiles(destinationFolder, ".tmp_*.suwayomi-import"));
         Assert.Equal("original chapter", ReadPage(staging));
-        Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        Assert.Contains(staging, JournaledStagingPaths());
         Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(source)!, ".tmp_*"));
         foreach (var attempt in Enumerable.Range(1, 1000))
         {

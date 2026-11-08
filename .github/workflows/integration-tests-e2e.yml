@@ -1,11 +1,13 @@
 name: Integration Tests (E2E Container)
 
+# The only image build for a pull request: the amd64 image is built once, started and smoke
+# tested, then scanned for vulnerabilities. Pushes to dotnet run it through the release
+# workflow (version-bump.yml), so a release is published only after this passes.
 on:
   pull_request:
-    branches: [ main, develop, dotnet ]
-  push:
-    branches: [ main, develop, dotnet ]
+    branches: [ dotnet ]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -15,6 +17,10 @@ jobs:
     name: Docker Container Smoke Test
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # Uploads the image scan to the repository's code scanning alerts.
+      security-events: write
 
     steps:
     - uses: actions/checkout@v7
@@ -22,16 +28,20 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
+    # mode=max also caches the SDK restore/build stage. The scope is shared with the amd64
+    # build in docker-publish-dotnet.yml, so publishing reuses the layers it can: the base and
+    # package layers, and the restore and compile ones too when the project files are unchanged.
     - name: Build Docker image
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
       with:
         context: .
         file: ./Dockerfile.dotnet
+        platforms: linux/amd64
         push: false
         load: true
         tags: comicmaintainer:ci
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=comicmaintainer-amd64
+        cache-to: type=gha,scope=comicmaintainer-amd64,mode=max
 
     - name: Run container smoke test
       env:
@@ -55,3 +65,38 @@ jobs:
         name: container-smoke-logs
         path: ./smoke-logs/
         if-no-files-found: ignore
+
+    # Every known vulnerability with a severity of medium or more, for the code scanning
+    # alerts. This step reports; the next one decides.
+    - name: Scan image for vulnerabilities (report)
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        image-ref: comicmaintainer:ci
+        scanners: vuln
+        format: sarif
+        output: trivy-image.sarif
+        severity: CRITICAL,HIGH,MEDIUM
+        # Without this the SARIF report ignores the severity above and lists everything.
+        limit-severities-for-sarif: 'true'
+        exit-code: '0'
+
+    # A pull request from a fork gets a read-only token and cannot upload.
+    - name: Upload image scan to code scanning
+      if: always() && hashFiles('trivy-image.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: trivy-image.sarif
+        category: trivy-image
+
+    # Fails on critical and high vulnerabilities that have a fixed version, in the OS packages
+    # of the image or in the app's libraries. One without a fix cannot be acted on yet, so it
+    # is only reported above.
+    - name: Fail on fixable critical or high vulnerabilities
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        image-ref: comicmaintainer:ci
+        scanners: vuln
+        format: table
+        severity: CRITICAL,HIGH
+        ignore-unfixed: true
+        exit-code: '1'

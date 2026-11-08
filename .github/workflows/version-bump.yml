@@ -1,177 +1,161 @@
-name: Automatic Version Bump
-# docker-publish-dotnet.yml publishes the image when this workflow completes and refers to it by
-# the name above, so rename both together. It builds the commit recorded in the "release-commit"
-# artifact uploaded below, so keep that name in step too.
+name: Release
+# Every push to dotnet is tested, and only a tested commit is released: the version bump, its
+# vX.Y.Z tag and GitHub release, the Docker image and the Windows and Android downloads all wait
+# for the unit, integration, Windows and container tests of the pushed commit. The builds are
+# called as reusable workflows with the release tag, because a tag pushed with GITHUB_TOKEN
+# cannot start the tag-triggered workflows itself.
 
 on:
   push:
-    branches: [ master, dotnet ]
-    # Only run on merge commits, not on version bump commits
-    paths-ignore:
-      - '.github/workflows/version-bump.yml'
+    branches: [ dotnet ]
+
+# One release at a time, in push order. A newer push waits instead of cancelling a running
+# release, and while it waits it replaces any older push still waiting: that push's commits are
+# part of the newer one, which is tested and released instead.
+concurrency:
+  group: release-dotnet
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
+  tests:
+    name: Tests
+    uses: ./.github/workflows/test-dotnet.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    secrets: inherit
+
+  container-tests:
+    name: Container tests
+    uses: ./.github/workflows/integration-tests-e2e.yml
+    permissions:
+      contents: read
+      security-events: write
+
   bump-version:
-    # Skip if commit message contains [skip-version-bump] or is a version bump commit
+    name: Version bump
+    needs: [tests, container-tests]
+    # A commit message containing [skip-version-bump] (and the bump commit itself, which carries
+    # it) is tested and published as :dotnet, but gets no version.
     if: "!contains(github.event.head_commit.message, '[skip-version-bump]') && !contains(github.event.head_commit.message, 'Bump version to')"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
-    
+    outputs:
+      # Empty when nothing was released because dotnet moved past the tested commit.
+      version: ${{ steps.push.outputs.released == 'true' && steps.bump.outputs.new_version || '' }}
+      commit: ${{ steps.push.outputs.commit }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
-      
-      - name: Get current version
-        id: current_version
+
+      # Only the tested commit may be released. If another push landed meanwhile, its own run
+      # (waiting in the concurrency group) tests and releases the newer commit, which includes
+      # this one, so this run releases nothing.
+      - name: Check that the tested commit is still the newest
+        id: tip
         run: |
-          # Extract version from .csproj file
-          if [ -f "src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj" ]; then
-            VERSION=$(grep -oP '(?<=<Version>)[^<]+' src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj | head -1)
-            echo "Current version (dotnet): $VERSION"
-          elif [ -f "src/version.py" ]; then
-            VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from version import __version__; print(__version__)")
-            echo "Current version (python): $VERSION"
+          TIP=$(git ls-remote origin refs/heads/dotnet | cut -f1)
+          if [[ "$TIP" != "$GITHUB_SHA" ]]; then
+            echo "::notice::dotnet has moved past the tested commit ${GITHUB_SHA} to ${TIP}; the run for the newer push releases both."
+            echo "current=false" >> "$GITHUB_OUTPUT"
           else
-            echo "No version file found"
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version
+        id: bump
+        if: steps.tip.outputs.current == 'true'
+        run: |
+          PROJECT=src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+          CURRENT_VERSION=$(grep -m 1 -oP '(?<=<Version>)[^<]+' "$PROJECT")
+          if [[ ! "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::Could not read an X.Y.Z <Version> from $PROJECT"
             exit 1
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-      
-      - name: Bump version
-        id: bump_version
+          NEW_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+          echo "Version: $CURRENT_VERSION -> $NEW_VERSION"
+          sed -i "s|<Version>.*</Version>|<Version>$NEW_VERSION</Version>|" "$PROJECT"
+          sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$NEW_VERSION.0</AssemblyVersion>|" "$PROJECT"
+          sed -i "s|<FileVersion>.*</FileVersion>|<FileVersion>$NEW_VERSION.0</FileVersion>|" "$PROJECT"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      # The bump commit and its tag are pushed together: either both land or neither does. The
+      # push is rejected if dotnet moved after the check above; that is handled like the check.
+      - name: Commit, tag and push
+        id: push
+        if: steps.tip.outputs.current == 'true'
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
         run: |
-          # Parse current version
-          CURRENT_VERSION="${{ steps.current_version.outputs.version }}"
-          
-          # Split version into major.minor.patch
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          
-          # Increment patch version
-          PATCH=$((PATCH + 1))
-          
-          # Create new version
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          echo "New version: $NEW_VERSION"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-      
-      - name: Update version files
-        run: |
-          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
-          
-          # Update .csproj file if it exists (dotnet project)
-          if [ -f "src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj" ]; then
-            sed -i "s|<Version>.*</Version>|<Version>$NEW_VERSION</Version>|" src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
-            sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$NEW_VERSION.0</AssemblyVersion>|" src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
-            sed -i "s|<FileVersion>.*</FileVersion>|<FileVersion>$NEW_VERSION.0</FileVersion>|" src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
-            echo "Updated .csproj file:"
-            grep -A 2 "<Version>" src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
-            git add src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
-          fi
-          
-          # Update version.py if it exists (python project)
-          if [ -f "src/version.py" ]; then
-            sed -i "s/__version__ = \".*\"/__version__ = \"$NEW_VERSION\"/" src/version.py
-            echo "Updated version.py:"
-            cat src/version.py
-            git add src/version.py
-          fi
-      
-      - name: Update CHANGELOG.md
-        run: |
-          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
-          DATE=$(date +%Y-%m-%d)
-          
-          # Find the line number where we should insert the new version
-          LINE_NUM=$(grep -n "^## \[1\.0\.0\]" CHANGELOG.md | cut -d: -f1)
-          
-          if [ -z "$LINE_NUM" ]; then
-            # If version 1.0.0 not found, insert after Unreleased section
-            LINE_NUM=$(grep -n "^## \[Unreleased\]" CHANGELOG.md | tail -1 | cut -d: -f1)
-            # Find the next section after Unreleased
-            NEXT_SECTION=$(awk "NR > $LINE_NUM && /^## \[/ {print NR; exit}" CHANGELOG.md)
-            LINE_NUM=$NEXT_SECTION
-          fi
-          
-          # Create the new entry
-          {
-            head -n $((LINE_NUM - 1)) CHANGELOG.md
-            echo ""
-            echo "## [${NEW_VERSION}] - ${DATE}"
-            echo ""
-            echo "### Changed"
-            echo "- Automatic version bump on merge to master"
-            echo ""
-            tail -n +${LINE_NUM} CHANGELOG.md
-          } > /tmp/CHANGELOG.md.new
-          
-          mv /tmp/CHANGELOG.md.new CHANGELOG.md
-          echo "Updated CHANGELOG.md"
-      
-      - name: Commit version bump
-        run: |
-          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
-          
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
-          git add CHANGELOG.md
+          git add src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
           git commit -m "Bump version to $NEW_VERSION [skip-version-bump]"
-          git push
-      
-      - name: Create Git tag
-        run: |
-          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
-          
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          
           git tag -a "v${NEW_VERSION}" -m "Release version ${NEW_VERSION}"
-          git push origin "v${NEW_VERSION}"
-      
-      # The image is built from the commit recorded here rather than from the tip of the branch,
-      # which is a later commit when another merge lands before this run completes. That commit
-      # still carries this version without being the release, so the release would never get its
-      # version tag. Recorded before the GitHub release is created, so that the tagged release is
-      # published even if that step fails.
-      - name: Record the release commit
-        env:
-          NEW_VERSION: ${{ steps.bump_version.outputs.new_version }}
-        run: |
-          git rev-parse "v${NEW_VERSION}^{commit}" > "$RUNNER_TEMP/release-commit.txt"
-          echo "Release commit: $(< "$RUNNER_TEMP/release-commit.txt")"
-      
-      - name: Upload the release record
-        uses: actions/upload-artifact@v7
-        # Without the record, the image is built from the tip of the branch, which is this release
-        # unless another merge has landed meanwhile. That is no reason to stop the GitHub release.
-        continue-on-error: true
-        with:
-          name: release-commit
-          path: ${{ runner.temp }}/release-commit.txt
-          if-no-files-found: error
-          # As long as the publish it triggers can be re-run, so that a re-run builds the release too.
-          retention-days: 30
-      
+          if ! git push --atomic origin "HEAD:refs/heads/dotnet" "refs/tags/v${NEW_VERSION}"; then
+            TIP=$(git ls-remote origin refs/heads/dotnet | cut -f1)
+            if [[ "$TIP" != "$GITHUB_SHA" ]]; then
+              echo "::notice::dotnet moved to ${TIP} while v${NEW_VERSION} was being made; the run for the newer push releases it."
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Could not push the version bump and the v${NEW_VERSION} tag."
+            exit 1
+          fi
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: steps.push.outputs.released == 'true'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
-          tag_name: v${{ steps.bump_version.outputs.new_version }}
-          release_name: Release v${{ steps.bump_version.outputs.new_version }}
+          tag_name: v${{ steps.bump.outputs.new_version }}
+          name: Release v${{ steps.bump.outputs.new_version }}
+          # The text below, followed by the pull requests merged since the previous release.
+          generate_release_notes: true
           body: |
-            ## What's Changed
-            Automatic release for version ${{ steps.bump_version.outputs.new_version }}
-            
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md) for details.
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/dotnet/CHANGELOG.md) for the notable changes, and the Docker image `iceburn1/comicmaintainer:${{ steps.bump.outputs.new_version }}`.
           draft: false
           prerelease: false
+
+  # Runs whenever the tests passed, also when no version was released (a [skip-version-bump]
+  # push still moves :dotnet). It builds the release commit, or else the tested commit.
+  publish-image:
+    name: Docker image
+    needs: [tests, container-tests, bump-version]
+    if: "!cancelled() && needs.tests.result == 'success' && needs.container-tests.result == 'success' && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped')"
+    uses: ./.github/workflows/docker-publish-dotnet.yml
+    permissions:
+      contents: read
+    with:
+      commit: ${{ needs.bump-version.outputs.commit || github.sha }}
+      release: ${{ needs.bump-version.outputs.commit != '' }}
+    secrets: inherit
+
+  windows-release:
+    name: Windows release
+    needs: bump-version
+    if: needs.bump-version.outputs.version != ''
+    uses: ./.github/workflows/build-windows-release.yml
+    permissions:
+      contents: write
+    with:
+      tag: v${{ needs.bump-version.outputs.version }}
+
+  android-release:
+    name: Android release
+    needs: bump-version
+    if: needs.bump-version.outputs.version != ''
+    uses: ./.github/workflows/build-android-apk.yml
+    permissions:
+      contents: write
+    with:
+      tag: v${{ needs.bump-version.outputs.version }}

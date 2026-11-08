@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -1545,10 +1546,10 @@ public class SeriesLibraryServiceTests
         Assert.NotNull(folders);
         Assert.Equal(2, folders!.Folders.Count);
         // Most populated folder comes first.
-        Assert.Equal("/library/Series", folders.Folders[0].Directory);
+        Assert.Equal(TestPaths.Native("/library/Series"), folders.Folders[0].Directory);
         Assert.Equal(2, folders.Folders[0].FileCount);
         Assert.Equal(300, folders.Folders[0].TotalSize);
-        Assert.Equal("/library/Series Alt", folders.Folders[1].Directory);
+        Assert.Equal(TestPaths.Native("/library/Series Alt"), folders.Folders[1].Directory);
         Assert.Equal(1, folders.Folders[1].FileCount);
     }
 

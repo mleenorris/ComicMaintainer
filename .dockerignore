@@ -1,64 +1,48 @@
-# Git files
-.git
-.gitignore
-.github
+# The image is built from src/ and entrypoint.dotnet.sh (see Dockerfile.dotnet). Everything else is kept out of the
+# build context, so it is not sent to the builder and cannot invalidate the cached layers.
 
-# Documentation
-*.md
-README*
-LICENSE*
+# Local build output. A host build's bin/ and obj/ (including an obj/project.assets.json with host paths) would
+# otherwise be copied over the restore done in the image, and would change the COPY src/ layer on every build.
+**/bin/
+**/obj/
+**/TestResults/
+coverage/
+
+# Not part of the server image
+tests/
+node_modules/
+src/ComicMaintainer.MauiApp/
+scripts/
 docs/
 
-# IDE and editor files
+# Git, CI and editor files
+.git
+.gitignore
+.gitattributes
+.github
+.vs
 .vscode
 .idea
+.config
 *.swp
 *.swo
 *~
 *.code-workspace
+*.user
 
-# Python cache and build artifacts
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# Documentation
+*.md
+LICENSE*
 
-# Logs
+# Local environment and secrets, at any depth: never sent to the builder
+**/.env
+**/.env.*
+**/*.pfx
+**/*.pem
+**/*.key
+
+# Logs, OS files and temporary files
 *.log
-ComicMaintainer.log
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Project runtime files (these are generated at runtime, not needed in image)
-.web_modified
-.processed_files
-.duplicate_files
-.cache_update
-.cache_changes
-.cache_rebuild_lock
-config.json
-
-# Marker file backups and temp files
-*.corrupt.*
+**/.DS_Store
+**/Thumbs.db
 *.tmp

@@ -1,11 +1,15 @@
 name: .NET Tests
 
+# Pull requests run this workflow directly. Pushes to dotnet run it through the release workflow
+# (version-bump.yml), which publishes a release only once these tests have passed for the commit.
 on:
-  push:
-    branches: [ main, develop, dotnet ]
   pull_request:
-    branches: [ main, develop, dotnet ]
+    branches: [ dotnet ]
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -15,6 +19,8 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
+    # A hung test fails the run here instead of holding the runner for the six-hour default.
+    timeout-minutes: 30
     strategy:
       matrix:
         dotnet-version: ['10.0.x']
@@ -32,7 +38,8 @@ jobs:
       run: npm ci
 
     # node:test unit tests for the web UI scripts (node:vm sandboxes and jsdom
-    # page tests), with coverage written to coverage/lcov.info.
+    # page tests), with coverage written to coverage/lcov.info. The coverage
+    # thresholds in package.json fail the step when coverage drops.
     - name: Run JavaScript unit tests with coverage
       run: npm run test:coverage
 
@@ -47,12 +54,16 @@ jobs:
         dotnet restore src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
         dotnet restore tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
 
-    - name: Build (excluding MAUI)
+    # StrictWarnings (src/Directory.Build.props) makes every compiler warning in the shipped
+    # projects an error, so warnings cannot accumulate. The test project is not affected.
+    - name: Build (excluding MAUI, warnings as errors in src)
       run: |
-        dotnet build src/ComicMaintainer.Core/ComicMaintainer.Core.csproj --no-restore --configuration Release
-        dotnet build src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj --no-restore --configuration Release
-        dotnet build tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj --no-restore --configuration Release
+        dotnet build src/ComicMaintainer.Core/ComicMaintainer.Core.csproj --no-restore --configuration Release -p:StrictWarnings=true
+        dotnet build src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj --no-restore --configuration Release -p:StrictWarnings=true
+        dotnet build tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj --no-restore --configuration Release -p:StrictWarnings=true
 
+    # --blame-hang-timeout ends a test that hangs for five minutes and names it in the
+    # uploaded results, instead of waiting for the job timeout.
     - name: Run unit tests (Category!=Integration)
       run: >
         dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
@@ -62,6 +73,8 @@ jobs:
         --settings coverlet.runsettings
         --results-directory ./TestResults
         --logger "trx;LogFileName=unit-tests.trx"
+        --blame-hang-timeout 5m
+        --blame-hang-dump-type mini
 
     - name: Upload unit test results
       if: always()
@@ -71,45 +84,59 @@ jobs:
         path: |
           ./TestResults/**/*.trx
           ./TestResults/**/coverage.cobertura.xml
+          ./TestResults/**/Sequence_*.xml
+          ./TestResults/**/*.dmp
         if-no-files-found: warn
 
+    # Fails the job when overall line coverage drops below the lower threshold, which is what
+    # this job measured on dotnet when the gate was added (97.1%: 44482 of 45792 lines, Release
+    # on Linux): TESTING_POLICY.md does not allow changes that lower coverage. Raise it as
+    # coverage grows. The gate looks only at the overall rate, so the per-package health column
+    # is off: it would mark a package below the threshold as failing on a run that passes.
     - name: Code Coverage Summary
       uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
       with:
         filename: TestResults/**/coverage.cobertura.xml
         badge: true
-        fail_below_min: false
+        fail_below_min: true
         format: markdown
         hide_branch_rate: false
         hide_complexity: true
-        indicators: true
+        indicators: false
         output: both
-        thresholds: '60 80'
+        thresholds: '97 99'
 
     - name: Add Testing Policy Note to Coverage Report
-      if: github.event_name == 'pull_request'
+      if: always() && github.event_name == 'pull_request'
+      env:
+        REPOSITORY: ${{ github.repository }}
       run: |
-        sudo chown "$(id -u):$(id -g)" code-coverage-results.md
-        echo "" >> code-coverage-results.md
-        echo "---" >> code-coverage-results.md
-        echo "" >> code-coverage-results.md
-        echo "### 📋 Testing Requirements" >> code-coverage-results.md
-        echo "" >> code-coverage-results.md
-        echo "All code changes must include appropriate tests. See [TESTING_POLICY.md](../blob/${{ github.head_ref || github.ref_name }}/TESTING_POLICY.md) for details." >> code-coverage-results.md
-        echo "" >> code-coverage-results.md
-        echo "**Minimum Requirements:**" >> code-coverage-results.md
-        echo "- ✅ Unit tests for all new/changed code" >> code-coverage-results.md
-        echo "- ✅ Integration tests for multi-component features" >> code-coverage-results.md
-        echo "- ✅ Target: 80%+ coverage for new code" >> code-coverage-results.md
-        echo "- ✅ No significant coverage decrease" >> code-coverage-results.md
+        sudo chown "$(id -u):$(id -g)" code-coverage-results.md || touch code-coverage-results.md
+        {
+          echo ""
+          echo "---"
+          echo ""
+          echo "### 📋 Testing Requirements"
+          echo ""
+          echo "All code changes must include appropriate tests. See [TESTING_POLICY.md](https://github.com/${REPOSITORY}/blob/dotnet/docs/TESTING_POLICY.md) for details."
+          echo ""
+          echo "**Minimum Requirements:**"
+          echo "- ✅ Unit tests for all new/changed code"
+          echo "- ✅ Integration tests for multi-component features"
+          echo "- ✅ Target: 80%+ coverage for new code"
+          echo "- ✅ No coverage decrease (the coverage gate above fails the check)"
+        } >> code-coverage-results.md
 
+    # A pull request from a fork gets a read-only token, so the comment is best effort.
     - name: Add Coverage PR Comment
       uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3
-      if: github.event_name == 'pull_request'
+      if: always() && github.event_name == 'pull_request'
+      continue-on-error: true
       with:
         recreate: true
         path: code-coverage-results.md
 
+    # A run started by the release workflow for a push to dotnet has the push as its event.
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       if: github.event_name == 'push'
@@ -137,8 +164,47 @@ jobs:
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  # The Windows build is a release download, and Windows differs from Linux in path
+  # handling, file locking and symbolic links, so the whole suite runs there too. The
+  # hosted runner is elevated, so the symbolic-link tests run instead of being skipped.
+  windows-tests:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Build tests (excluding MAUI)
+      run: dotnet build tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj --configuration Release
+
+    - name: Run all tests
+      run: >
+        dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
+        --no-build --configuration Release
+        --results-directory ./TestResults
+        --logger "trx;LogFileName=windows-tests.trx"
+        --blame-hang-timeout 5m
+        --blame-hang-dump-type mini
+
+    - name: Upload Windows test results
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: windows-test-results
+        path: |
+          ./TestResults/**/*.trx
+          ./TestResults/**/Sequence_*.xml
+          ./TestResults/**/*.dmp
+        if-no-files-found: warn
+
   # Deleting files pins the checked directory with platform-specific handles, so the
-  # delete-job tests also run on Windows and macOS, where their own cases apply.
+  # delete-job tests also run on macOS, where their own cases apply.
   file-operation-tests:
     name: File Operation Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -146,7 +212,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [macos-latest]
 
     steps:
     - uses: actions/checkout@v7
@@ -164,6 +230,8 @@ jobs:
         dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
         --no-build --configuration Release --verbosity normal
         --filter "FullyQualifiedName~ComicProcessorServiceJobCoverageTests.DeleteFilesAsync"
+        --blame-hang-timeout 5m
+        --blame-hang-dump-type none
 
   integration-tests:
     name: Integration Tests
@@ -202,6 +270,8 @@ jobs:
         --settings coverlet.runsettings
         --results-directory ./TestResults
         --logger "trx;LogFileName=integration-tests.trx"
+        --blame-hang-timeout 5m
+        --blame-hang-dump-type mini
 
     - name: Upload integration test results
       if: always()
@@ -211,6 +281,8 @@ jobs:
         path: |
           ./TestResults/**/*.trx
           ./TestResults/**/coverage.cobertura.xml
+          ./TestResults/**/Sequence_*.xml
+          ./TestResults/**/*.dmp
         if-no-files-found: warn
 
     - name: Upload integration coverage to Codecov

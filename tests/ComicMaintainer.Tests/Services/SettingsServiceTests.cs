@@ -509,6 +509,10 @@ public class SettingsServiceTests : IDisposable
     [Fact]
     public async Task UpdateSuwayomiSettingsAsync_RejectsADownloadsFolderInsideTheLibrary()
     {
+        // A fully qualified library on every platform: the default /watched_dir has no drive on Windows, so the
+        // folder would be refused as not absolute before the library check is reached.
+        _appSettings.WatchedDirectory = Path.Join(_testConfigDir, "watched_dir");
+
         var exception = await Assert.ThrowsAsync<ArgumentException>(
             () => _service.UpdateSuwayomiSettingsAsync(
                 false, null, null, null, downloadsDirectory: Path.Join(_appSettings.WatchedDirectory, "suwayomi")));

@@ -648,9 +648,9 @@ public sealed class SuwayomiServiceSourceSearchTests
         // The first source takes 9 minutes, so the fifth starts with only one
         // minute of the series' budget left, less than its own 2 minutes.
         var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
-        using var fifthSearched = new ManualResetEventSlim();
+        var fifthSearched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var sources = string.Join(",", Enumerable.Range(1, 5).Select(i => $$"""{"id":"{{i}}","name":"S{{i}}","displayName":"S{{i}}"}"""));
-        var handler = new SuwayomiHandler(request =>
+        var handler = SuwayomiHandler.Async(async request =>
         {
             switch (request.Operation)
             {
@@ -666,16 +666,13 @@ public sealed class SuwayomiServiceSourceSearchTests
                             return Json(SearchResults("[]"));
                         case "5":
                             time.Advance(TimeSpan.FromMinutes(2));
-                            fifthSearched.Set();
+                            fifthSearched.TrySetResult();
                             return Json(SearchResults("""[{"id":5,"title":"Unrelated"}]""", "true"));
                         default:
                             // Keep the other workers busy so the fifth source
                             // can only start once the first one has finished.
-                            if (!fifthSearched.Wait(TimeSpan.FromSeconds(10)))
-                            {
-                                throw new TimeoutException("The fifth source was never searched.");
-                            }
-
+                            // Well within the 60-second request timeout.
+                            await fifthSearched.Task.WaitAsync(TimeSpan.FromSeconds(45));
                             return Json(SearchResults("[]"));
                     }
 
@@ -700,9 +697,9 @@ public sealed class SuwayomiServiceSourceSearchTests
     {
         // The first source only answers once the fifth one has been searched:
         // searching in fixed batches of four would never get to the fifth.
-        using var fifthSearched = new ManualResetEventSlim();
+        var fifthSearched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var sources = string.Join(",", Enumerable.Range(1, 5).Select(i => $$"""{"id":"{{i}}","name":"S{{i}}","displayName":"S{{i}}"}"""));
-        var handler = new SuwayomiHandler(request =>
+        var handler = SuwayomiHandler.Async(async request =>
         {
             switch (request.Operation)
             {
@@ -712,14 +709,15 @@ public sealed class SuwayomiServiceSourceSearchTests
                     return Json(Sources("[" + sources + "]"));
                 case "SearchSource":
                     var source = request.Variables.GetProperty("source").GetString();
-                    if (source == "1" && !fifthSearched.Wait(TimeSpan.FromSeconds(10)))
+                    if (source == "1")
                     {
-                        throw new TimeoutException("The fifth source was not searched while the first was slow.");
+                        // Well within the 60-second request timeout.
+                        await fifthSearched.Task.WaitAsync(TimeSpan.FromSeconds(45));
                     }
 
                     if (source == "5")
                     {
-                        fifthSearched.Set();
+                        fifthSearched.TrySetResult();
                         return Json(SearchResults("""[{"id":8,"title":"Solo Leveling"}]"""));
                     }
 
@@ -1327,10 +1325,20 @@ public sealed class SuwayomiServiceSourceSearchTests
 
     private sealed class SuwayomiHandler : HttpMessageHandler
     {
-        private readonly Func<RecordedRequest, HttpResponseMessage> _respond;
+        private readonly Func<RecordedRequest, Task<HttpResponseMessage>> _respond;
         private readonly List<RecordedRequest> _requests = new();
 
-        public SuwayomiHandler(Func<RecordedRequest, HttpResponseMessage> respond) => _respond = respond;
+        public SuwayomiHandler(Func<RecordedRequest, HttpResponseMessage> respond)
+            => _respond = request => Task.FromResult(respond(request));
+
+        private SuwayomiHandler(Func<RecordedRequest, Task<HttpResponseMessage>> respondAsync) => _respond = respondAsync;
+
+        /// <summary>
+        /// A handler whose responses can wait for other requests without
+        /// blocking a thread-pool thread, which a loaded machine may not have
+        /// to spare.
+        /// </summary>
+        public static SuwayomiHandler Async(Func<RecordedRequest, Task<HttpResponseMessage>> respondAsync) => new(respondAsync);
 
         public IReadOnlyList<RecordedRequest> Requests
         {
@@ -1358,7 +1366,7 @@ public sealed class SuwayomiServiceSourceSearchTests
                 _requests.Add(recorded);
             }
 
-            return _respond(recorded);
+            return await _respond(recorded);
         }
     }
 

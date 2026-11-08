@@ -691,7 +691,13 @@
                     { headers: getAuthHeaders() }
                 );
                 if (!response.ok) {
-                    status.textContent = 'Search failed.';
+                    // A 503 names the providers that could not answer (plain text).
+                    let msg = 'Search failed.';
+                    if (response.status === 503) {
+                        const reason = await response.text().catch(() => '');
+                        if (reason) msg = `Search failed: ${reason}`;
+                    }
+                    status.textContent = msg;
                     return;
                 }
                 const data = await response.json();

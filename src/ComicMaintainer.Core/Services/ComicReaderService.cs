@@ -35,6 +35,20 @@ namespace ComicMaintainer.Core.Services;
 /// </remarks>
 public class ComicReaderService : IComicReaderService, IDisposable
 {
+    /// <summary>
+    /// Version of the rules that turn an archive's entries into its page list:
+    /// which entries count as pages (<see cref="ImageExtensions"/>, directories
+    /// skipped) and the order they are read in (<see cref="NaturalStringComparer"/>).
+    /// </summary>
+    /// <remarks>
+    /// Page N of an unchanged file is only the same image while these rules are
+    /// the same, so the version is part of every page ETag and of the cover
+    /// cache's variant. Bump it whenever the rules change: browsers then refetch
+    /// pages instead of revalidating them against the unchanged file, and cached
+    /// covers are regenerated.
+    /// </remarks>
+    public const int PageListVersion = 1;
+
     /// <summary>Default memory budget for cached page lists: 16 MiB of estimated size.</summary>
     internal const long DefaultPageIndexCacheBytes = 16L * 1024 * 1024;
 

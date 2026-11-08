@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Models;
 using ComicMaintainer.Core.Reader.Services;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
@@ -210,11 +211,14 @@ public class ComicReaderController : ControllerBase
 
     /// <summary>
     /// Builds the strong ETag for one page of one version of an archive: the
-    /// page number and the file's last-write time and length.
+    /// version of the page-list rules (<see cref="ComicReaderService.PageListVersion"/>,
+    /// because which image is page N depends on them as well as on the file),
+    /// the page number and the file's last-write time and length.
     /// </summary>
     [NonAction]
     public static string BuildPageETag(long fileLength, DateTime lastWriteTimeUtc, int page) =>
-        "\"p" + page.ToString(CultureInfo.InvariantCulture)
+        "\"v" + ComicReaderService.PageListVersion.ToString(CultureInfo.InvariantCulture)
+            + "-p" + page.ToString(CultureInfo.InvariantCulture)
             + "-" + lastWriteTimeUtc.Ticks.ToString("x", CultureInfo.InvariantCulture)
             + "-" + fileLength.ToString("x", CultureInfo.InvariantCulture) + "\"";
 

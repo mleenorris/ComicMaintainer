@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.WebApi.Controllers;
 using ImageMagick;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -363,6 +364,36 @@ public class FileCoverCacheServiceTests : IDisposable
     [Fact]
     public void GetValidator_MissingFile_ReturnsNull() =>
         Assert.Null(_service.GetValidator(Path.Join(_testDir, "missing.cbz")));
+
+    // ---- page-list version in the variant ----------------------------------------------
+
+    [Theory]
+    [InlineData("webp-w480-q80")]
+    [InlineData("orig")]
+    public void WithPageListVersion_Version1_KeepsTheVariantCoversWereCachedUnder(string thumbnailVariant) =>
+        Assert.Equal(thumbnailVariant, FileCoverCacheService.WithPageListVersion(thumbnailVariant, 1));
+
+    [Theory]
+    [InlineData("webp-w480-q80", 2, "webp-w480-q80-l2")]
+    [InlineData("orig", 3, "orig-l3")]
+    public void WithPageListVersion_LaterVersions_MakeCachedCoversAndTheirETagsMiss(string thumbnailVariant, int version, string expected)
+    {
+        var variant = FileCoverCacheService.WithPageListVersion(thumbnailVariant, version);
+
+        Assert.Equal(expected, variant);
+        // The token survives into the cover ETag.
+        Assert.Contains("-l" + version, ComicReaderController.BuildCoverETag(new FileCoverValidator(1, DateTimeOffset.UnixEpoch, variant)));
+    }
+
+    [Fact]
+    public void GetValidator_CarriesTheReadersPageListVersion()
+    {
+        var file = CreateFile("a.cbz");
+
+        Assert.Equal(
+            FileCoverCacheService.WithPageListVersion("webp-w480-q80", ComicReaderService.PageListVersion),
+            _service.GetValidator(file)!.Value.Variant);
+    }
 
     // ---- last-access time (LRU pruning hint) ------------------------------------------
 

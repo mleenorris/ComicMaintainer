@@ -209,10 +209,24 @@ public class FileCoverCacheService : IFileCoverCacheService
     }
 
     private static string CurrentVariant(AppSettings settings) =>
-        CoverThumbnailEncoder.BuildVariant(
-            settings.FileCoverThumbnailMaxWidth,
-            settings.FileCoverThumbnailFormat,
-            settings.FileCoverThumbnailQuality);
+        WithPageListVersion(
+            CoverThumbnailEncoder.BuildVariant(
+                settings.FileCoverThumbnailMaxWidth,
+                settings.FileCoverThumbnailFormat,
+                settings.FileCoverThumbnailQuality),
+            ComicReaderService.PageListVersion);
+
+    /// <summary>
+    /// Adds the reader's page-list version to a thumbnail variant token. The
+    /// cover is page 1 of the page list, so when the rules that build that list
+    /// change, cached covers must miss and their ETags must change. Version 1
+    /// adds nothing: every cover cached so far was made under the version-1
+    /// rules, so those entries stay valid.
+    /// </summary>
+    internal static string WithPageListVersion(string thumbnailVariant, int pageListVersion) =>
+        pageListVersion <= 1
+            ? thumbnailVariant
+            : thumbnailVariant + "-l" + pageListVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private async Task<FileCoverCacheEntry?> ExtractAsync(
         string filePath,

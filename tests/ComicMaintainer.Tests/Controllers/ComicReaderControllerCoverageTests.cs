@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Models;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
@@ -410,7 +411,41 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         };
 
         Assert.Equal(tags.Length, tags.Distinct().Count());
-        Assert.All(tags, tag => Assert.Matches("^\"p[0-9]+-[0-9a-f]+-[0-9a-f]+\"$", tag));
+        Assert.All(tags, tag => Assert.Matches("^\"v[0-9]+-p[0-9]+-[0-9a-f]+-[0-9a-f]+\"$", tag));
+    }
+
+    [Fact]
+    public void BuildPageETag_NamesThePageListVersion()
+    {
+        // Which image is page N depends on the reader's page-list rules as well
+        // as on the file, so the tag carries the version of those rules.
+        var when = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal(
+            $"\"v{ComicReaderService.PageListVersion}-p3-{when.Ticks:x}-64\"",
+            ComicReaderController.BuildPageETag(100, when, 3));
+    }
+
+    [Fact]
+    public async Task GetPage_TagFromOtherPageListRules_ServesThePageAgain()
+    {
+        // What a browser holds after an upgrade that changed which entry is
+        // page 2 of an unchanged file: same length and timestamp, other rules.
+        var info = new FileInfo(_file);
+        var current = ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 2);
+        var otherRules = current.Replace(
+            $"\"v{ComicReaderService.PageListVersion}-",
+            $"\"v{ComicReaderService.PageListVersion - 1}-",
+            StringComparison.Ordinal);
+        Assert.NotEqual(current, otherRules);
+        _reader.Setup(r => r.GetPageAsync(_file, 2)).ReturnsAsync((new byte[] { 7 }, "image/jpeg"));
+        var controller = CreateController();
+        controller.Request.Headers.IfNoneMatch = otherRules;
+
+        var result = await controller.GetPage(_file, 2);
+
+        Assert.Equal(new byte[] { 7 }, Assert.IsType<FileContentResult>(result).FileContents);
+        Assert.Equal(current, controller.Response.Headers.ETag.ToString());
     }
 
     [Fact]

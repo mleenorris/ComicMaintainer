@@ -53,6 +53,23 @@ public sealed class ComicReaderServicePageIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task ThePageListRules_AreThoseOfPageListVersion1()
+    {
+        // Page ETags and cached covers assume that page N of an unchanged file is
+        // the same image. If this fails because the page-list rules were changed
+        // on purpose, bump ComicReaderService.PageListVersion and update the
+        // expectations here.
+        Assert.Equal(1, ComicReaderService.PageListVersion);
+        var cbz = WriteCbz("rules.cbz",
+            "Page10.JPG", "page2.jpeg", "page1.png", "a.gif", "b.bmp", "c.webp",
+            "d.avif", "e.jxl", "f.tif", "g.tiff", "h.svg", "ComicInfo.xml", "notes.txt", "sub/", "sub/page3.jpg");
+
+        Assert.Equal(
+            new[] { "a.gif", "b.bmp", "c.webp", "page1.png", "page2.jpeg", "Page10.JPG", "sub/page3.jpg" },
+            await _service.GetPageNamesAsync(cbz));
+    }
+
+    [Fact]
     public async Task CbrPages_AreServedThroughTheCachedListInNaturalOrder()
     {
         var cbr = Path.Join(_dir, "a.cbr");

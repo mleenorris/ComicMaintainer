@@ -1,7 +1,7 @@
 'use strict';
 
 // Loading the series library (js/app/library.js loadSeriesLibrary and the
-// infinite-scroll observer from js/app/file-list.js): requests, rendering,
+// infinite-scroll observer): requests, rendering,
 // paging, reload/abort handling and error states.
 
 const test = require('node:test');

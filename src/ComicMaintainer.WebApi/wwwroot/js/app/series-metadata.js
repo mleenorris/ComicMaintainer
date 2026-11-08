@@ -117,9 +117,6 @@
         }
 
         function getSelectedSeriesTitlesForCoverUpdate() {
-            if (libraryViewMode !== 'series') {
-                return [];
-            }
             // Series detail view: a single series is "selected" simply by being
             // open, so target that series even though the multi-select
             // checkboxes (and `selectedSeries`) only apply to the top-level grid.

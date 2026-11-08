@@ -1,4 +1,4 @@
-        // ComicMaintainer SPA — library view: layout, series/folder loading, filtering, sorting, protected images, series grid and selection.
+        // ComicMaintainer SPA — library view: layout, series loading, filtering, sorting, protected images, series grid and selection.
         //
         // Classic (non-module) script: its top-level declarations are globals
         // shared with the other app scripts and with inline onclick handlers.
@@ -7,25 +7,14 @@
         // depends on a script loaded after it.
 
         // Shared state declared in state.js and reassigned here.
-        /* global seriesTotal: true, folderTotal: true */
+        /* global seriesTotal: true */
 
         async function loadActiveLibraryView({ refresh = false, keepLoaded = false } = {}) {
-            if (libraryViewMode === 'series') {
-                return loadSeriesLibrary({ refresh, keepLoaded });
-            }
-
-            return loadFolders({ refresh });
-        }
-
-        function updateLibraryViewButtons() {
-            document.getElementById('filesViewModeBtn')?.classList.toggle('active', libraryViewMode === 'files');
-            document.getElementById('seriesViewModeBtn')?.classList.toggle('active', libraryViewMode === 'series');
-            updateSeriesLayoutButtons();
+            return loadSeriesLibrary({ refresh, keepLoaded });
         }
 
         // ── Series layout (List / Grid / Compact) ─────────────────────────────
-        // The layout toggle is only meaningful when viewing the series library;
-        // hide it entirely when in Files mode to avoid cluttering the header.
+        // The layout toggle is only meaningful when viewing the series library.
         function isMobilePortrait() {
             try {
                 return window.matchMedia('(max-width: 600px) and (orientation: portrait)').matches;
@@ -46,11 +35,10 @@
             const mobileToolbar = document.getElementById('seriesLayoutToolbarMobile');
             // The layout toggle only applies to the full library grid/list — not
             // the overview page or a single series' page.
-            const inSeriesMode = libraryViewMode === 'series'
-                && (typeof currentView === 'undefined' || currentView === 'library');
-            if (toggle) toggle.hidden = !inSeriesMode;
-            if (mobileToolbar) mobileToolbar.hidden = !inSeriesMode;
-            if (!inSeriesMode) return;
+            const onLibraryPage = typeof currentView === 'undefined' || currentView === 'library';
+            if (toggle) toggle.hidden = !onLibraryPage;
+            if (mobileToolbar) mobileToolbar.hidden = !onLibraryPage;
+            if (!onLibraryPage) return;
             const effective = getEffectiveSeriesLayout();
             document.getElementById('seriesLayoutListBtn')?.classList.toggle('active', effective === 'list');
             document.getElementById('seriesLayoutGridBtn')?.classList.toggle('active', effective === 'grid');
@@ -67,7 +55,7 @@
                 localStorage.setItem('seriesLayout', layout);
             } catch (_e) { /* localStorage may be unavailable */ }
             updateSeriesLayoutButtons();
-            if (libraryViewMode === 'series' && !currentSeriesDetailId) {
+            if (!currentSeriesDetailId) {
                 renderSeriesLibrary();
             }
         }
@@ -78,35 +66,10 @@
             // series detail (files) view; their visibility is governed by the
             // dropdown's expand/collapse state, not by the current view.
             const controlsWrapper = document.querySelector('.controls-wrapper');
-            const pagination = document.getElementById('pagination');
 
             if (controlsWrapper) {
                 controlsWrapper.style.display = '';
             }
-
-            if (libraryViewMode === 'series' && currentSeriesDetailId && pagination) {
-                pagination.style.display = 'none';
-            }
-        }
-
-        async function setLibraryViewMode(mode) {
-            // The Files view has been removed; the library is always shown in
-            // Series mode. Any incoming request is coerced to 'series' so legacy
-            // call sites (preferences with `libraryViewMode === 'files'`, etc.)
-            // still resolve to a valid state.
-            mode = 'series';
-
-            if (libraryViewMode === mode && !(mode === 'series' && currentSeriesDetailId)) {
-                return;
-            }
-
-            libraryViewMode = mode;
-            currentSeriesDetailId = null;
-            currentSeriesDetailTitleKeys = null;
-            updateLibraryViewButtons();
-            updateLibraryViewLayout();
-            await setPreferences({ libraryViewMode: mode });
-            await loadActiveLibraryView({ refresh: true });
         }
 
         function promptForForceReprocess(actionDescription, statusDescription) {
@@ -119,7 +82,6 @@
         // soon as the aborted request settles instead of after a full
         // (possibly slow, on large libraries) response.
         let seriesLoadController = null;
-        let folderLoadController = null;
 
         function isAbortError(error) {
             return !!error && error.name === 'AbortError';
@@ -277,142 +239,43 @@
             }
         }
 
-        async function loadFolders(opts) {
-            let append = false;
-            let refresh = false;
-            if (typeof opts === 'object' && opts !== null) {
-                append = !!opts.append;
-                refresh = !!opts.refresh;
-            } else if (typeof opts === 'boolean') {
-                refresh = opts;
+        // Keeps the infinite-scroll sentinel at the end of the series list and
+        // loads the next page of series when it scrolls into view.
+        function ensureScrollObserver() {
+            if (scrollObserver) {
+                try { scrollObserver.disconnect(); } catch (e) { /* ignore */ }
             }
-
-            if (folderLoading) {
-                // Mirror the series loader: don't drop a fresh (non-append)
-                // reload requested while a load is in flight; re-run it after.
-                if (!append) {
-                    folderReloadPending = true;
-                    if (folderLoadController) {
-                        folderLoadController.abort();
+            const fileList = document.getElementById('fileList');
+            if (!fileList) return;
+            // The sentinel must live INSIDE the scrolling container (`.file-list`)
+            // and be observed against that container as the IO root. Otherwise the
+            // sentinel — sitting at the bottom of the viewport because `.file-list`
+            // has `flex: 1` — would be perpetually within the 400 px rootMargin and
+            // trigger an infinite "load more → re-render → re-observe" loop. That
+            // loop is what made the list flicker and items unclickable on desktop
+            // and could leave the list appearing cut off or never displayed at all
+            // on smaller viewports.
+            let sentinel = document.getElementById('libraryScrollSentinel');
+            if (!sentinel) {
+                sentinel = document.createElement('div');
+                sentinel.id = 'libraryScrollSentinel';
+            }
+            if (sentinel.parentElement !== fileList) {
+                fileList.appendChild(sentinel);
+            } else if (sentinel !== fileList.lastElementChild) {
+                fileList.appendChild(sentinel);
+            }
+            scrollObserver = new IntersectionObserver((entries) => {
+                for (const e of entries) {
+                    if (!e.isIntersecting) continue;
+                    if (!seriesLoading && seriesOffset < seriesTotal) {
+                        loadSeriesLibrary({ append: true });
                     }
                 }
-                return;
-            }
-
-            // For non-append calls, reset the folder summary list (we re-fetch
-            // from offset 0). When the call is an explicit refresh, also clear
-            // per-folder file caches and collapsed state so the user sees fresh
-            // data. Otherwise, preserve cached folder file lists / expanded
-            // state so per-file SSE events don't wipe the user's session.
-            if (!append) {
-                folderList = [];
-                folderOffset = 0;
-                folderTotal = 0;
-                if (refresh) {
-                    folderFiles.clear();
-                    collapsedDirectories.clear();
-                    allFoldersExpanded = false;
-                }
-            }
-
-            folderLoading = true;
-            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-            folderLoadController = controller;
-            try {
-                let url = apiUrl(`/api/files/folders?offset=${folderOffset}&limit=${FOLDER_PAGE_SIZE}`);
-                if (refresh) {
-                    url += '&refresh=true';
-                }
-                if (searchQuery) {
-                    url += `&search=${encodeURIComponent(searchQuery)}`;
-                }
-                if (filterMode !== 'all') {
-                    url += `&filter=${encodeURIComponent(filterMode)}`;
-                }
-                if (sortMode !== 'name') {
-                    url += `&sort=${encodeURIComponent(sortMode)}`;
-                }
-                if (sortDirection !== 'asc') {
-                    url += `&direction=${encodeURIComponent(sortDirection)}`;
-                }
-
-                const response = await fetch(url, {
-                    headers: getAuthHeaders(),
-                    signal: controller ? controller.signal : undefined
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
-                const data = await response.json();
-
-                const newFolders = data.folders || [];
-                folderList = folderList.concat(newFolders);
-                folderOffset += newFolders.length;
-                folderTotal = data.total_folders || 0;
-                totalFiles = folderTotal;
-                unmarkedCount = data.unmarked_count || 0;
-
-                // Newly arrived folders should be collapsed by default, but
-                // preserve the user's explicit state for folders we've already
-                // expanded in this session. The library root (path '') is the
-                // exception: it has no header to expand it by, so it is never
-                // collapsed and its files are always shown.
-                let rootArrived = false;
-                for (const f of newFolders) {
-                    if (f && typeof f.path === 'string') {
-                        if (!f.path) {
-                            rootArrived = true;
-                        } else if (!folderFiles.has(f.path)) {
-                            collapsedDirectories.add(f.path);
-                        }
-                    }
-                }
-
-                // The list has arrived: stop counting as loading before drawing
-                // it, or an empty result would be drawn as "Loading files..."
-                // (finally{} clears the flag only after this render) instead
-                // of its empty state.
-                folderLoading = false;
-                renderFileList();
-                // The root's files are on screen straight away, so fetch them
-                // for the current filter/search even when a list from an
-                // earlier one is cached.
-                if (rootArrived) {
-                    ensureFolderLoaded('', true).catch(() => {});
-                }
-                reloadStaleOpenFolders(newFolders).catch(() => {});
-                updateButtonVisibility();
-                ensureScrollObserver();
-                if (refresh) {
-                    loadLibraryHealth();
-                }
-            } catch (error) {
-                if (!isAbortError(error)) {
-                    showMessage('Failed to load files: ' + error.message, 'error', { reference: error });
-                }
-            } finally {
-                if (folderLoadController === controller) {
-                    folderLoadController = null;
-                }
-                folderLoading = false;
-                if (folderReloadPending) {
-                    folderReloadPending = false;
-                    loadFolders({ refresh: false });
-                }
-            }
+            }, { root: fileList, rootMargin: '400px' });
+            scrollObserver.observe(sentinel);
         }
 
-        // Backward-compatible shim so legacy callers still work.
-        async function loadFiles(_page = 1, refresh = false) {
-            return loadFolders({ refresh });
-        }
-
-        function updatePagination() {
-            // Pagination has been replaced with infinite scroll; this is a no-op
-            // kept so any leftover callers (or browser extensions) don't error.
-        }
-        
         function updateButtonVisibility() {
             // The "… Unmarked" actions have nothing to act on without unmarked
             // files, so they are shown only while there are some.
@@ -426,13 +289,6 @@
             const controlsWrapper = document.querySelector('.controls-wrapper');
             if (controlsWrapper) controlsWrapper.style.display = '';
         }
-        
-        async function changePerPage() {
-            // Per-page selector has been removed in favor of infinite scroll.
-        }
-        
-        function nextPage() { /* deprecated: infinite scroll */ }
-        function previousPage() { /* deprecated: infinite scroll */ }
         
         async function filterFiles() {
             searchQuery = document.getElementById('headerSearchInput').value;
@@ -1068,7 +924,7 @@
         // the whole grid, which would reset the scroll position). Falls back to
         // a full render only when the list hasn't been rendered yet.
         function updateSeriesSelectionUI() {
-            if (!(libraryViewMode === 'series' && !currentSeriesDetailId)) return;
+            if (currentSeriesDetailId) return;
             const boxes = document.querySelectorAll('.series-select-box[data-series-id]');
             if (!boxes.length) return;
             boxes.forEach(box => {

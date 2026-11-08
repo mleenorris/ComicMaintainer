@@ -196,7 +196,6 @@
             } else if (!seriesLoading) {
                 loadActiveLibraryView();
             }
-            updatePagination();
             updateLibraryViewLayout();
         }
 

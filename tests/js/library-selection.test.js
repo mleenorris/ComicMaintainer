@@ -1,7 +1,7 @@
 'use strict';
 
 // Selecting series in the library (js/app/library.js toggleSeriesSelection
-// and friends, plus the shared selection status in js/app/file-list.js):
+// and friends, plus the shared selection status in js/app/selection.js):
 // the select boxes, the selection toolbar, the bulk-action menu state and
 // the asynchronous resolution of each series' files.
 

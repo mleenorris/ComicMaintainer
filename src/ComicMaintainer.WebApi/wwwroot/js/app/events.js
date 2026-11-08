@@ -400,31 +400,24 @@
                 addProgressDetail(data.filename, data.success, data.error);
             }
             
-            // Invalidate just the affected folder cache so the next render/expand
-            // shows fresh state. Aggregate summaries are refreshed via the
-            // debounced file_list_updated handler.
-            if (libraryViewMode !== 'series' && data && data.filename) {
-                invalidateFolderForFile(data.filename);
-            } else if (libraryViewMode === 'series') {
-                // When the user has a series detail view open, just refresh
-                // that series's issue list in-place so a rename/normalize
-                // updates the visible file names without rebuilding the
-                // series library (which would lose scroll position and
-                // could close the detail view if the series fell outside
-                // the freshly-loaded first page).
-                if (currentSeriesDetailId) {
-                    loadSeriesIssues(currentSeriesDetailId, true);
-                }
-                // When viewing the series list (no detail open) we intentionally
-                // do NOT rebuild the whole library on each per-file event. A
-                // background job (e.g. the metadata retag queued after a
-                // series-name change) emits one file_processed event per file,
-                // and reloading the list for every one of them makes the series
-                // list visibly flash/reload after each completion. The set of
-                // series shown doesn't change as individual files are retagged;
-                // any genuine list change (renames/moves) is coalesced into a
-                // single refresh by the debounced file_list_updated handler.
+            // When the user has a series detail view open, just refresh
+            // that series's issue list in-place so a rename/normalize
+            // updates the visible file names without rebuilding the
+            // series library (which would lose scroll position and
+            // could close the detail view if the series fell outside
+            // the freshly-loaded first page).
+            if (currentSeriesDetailId) {
+                loadSeriesIssues(currentSeriesDetailId, true);
             }
+            // When viewing the series list (no detail open) we intentionally
+            // do NOT rebuild the whole library on each per-file event. A
+            // background job (e.g. the metadata retag queued after a
+            // series-name change) emits one file_processed event per file,
+            // and reloading the list for every one of them makes the series
+            // list visibly flash/reload after each completion. The set of
+            // series shown doesn't change as individual files are retagged;
+            // any genuine list change (renames/moves) is coalesced into a
+            // single refresh by the debounced file_list_updated handler.
             scheduleLibraryHealthRefresh();
         }
         
@@ -444,7 +437,7 @@
                 // series's issues so renames/moves update the visible file
                 // list without rebuilding the series library and kicking
                 // the user back to the library screen.
-                if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                if (currentSeriesDetailId) {
                     loadSeriesIssues(currentSeriesDetailId, true);
                 } else {
                     loadActiveLibraryView();
@@ -501,7 +494,7 @@
                         // and could close the detail view).
                         selectedFiles.clear();
                         resetSeriesSelectionState();
-                        if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                        if (currentSeriesDetailId) {
                             await loadSeriesIssues(currentSeriesDetailId, true);
                             scheduleLibraryHealthRefresh();
                         } else {

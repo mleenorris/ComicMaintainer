@@ -9,8 +9,8 @@ const assert = require('node:assert/strict');
 const { bootApp } = require('./support/app');
 
 const FILES = [
-    { name: 'Issue #1.cbz', relative_path: 'Series A/Issue #1.cbz', size: 2048, modified: 1700000000, renamed: true, normalized: true },
-    { name: 'Issue 2.cbz', relative_path: 'Series A/Issue 2.cbz', size: 4096, modified: 1700000100 }
+    { name: 'Issue #1.cbz', relative_path: 'Series A/Issue #1.cbz' },
+    { name: 'Issue 2.cbz', relative_path: 'Series A/Issue 2.cbz' }
 ];
 // getDropdownId(): 'dropdown-' + the path's base64url form.
 const MENU_A = 'dropdown-U2VyaWVzIEEvSXNzdWUgIzEuY2J6';
@@ -21,12 +21,16 @@ async function bootLibrary() {
         hash: '#/library',
         routes: { 'GET /api/files/series': { series: [], total_series: 0 } }
     });
-    // File rows exactly as the file list renders them, inside a transformed
-    // container like the series issue cards that made portaling necessary.
+    // Actions menus like an issue card's, inside a transformed container like
+    // the series issue cards that made portaling necessary.
+    const actionsMenu = file => `<div class="file-actions-dropdown">
+        <button class="dropdown-toggle" onclick="toggleDropdown(event, '${page.run('escapeJs')(file.relative_path)}')">Actions</button>
+        <div class="dropdown-menu" id="${page.run('getDropdownId')(file.relative_path)}"><button class="dropdown-item">Info</button><div class="dropdown-divider"></div></div>
+    </div>`;
     const container = page.document.createElement('div');
     container.id = 'testRows';
     container.style.transform = 'translateY(-2px)';
-    container.insertAdjacentHTML('beforeend', FILES.map(file => page.run('renderFileRow')(file)).join(''));
+    container.insertAdjacentHTML('beforeend', FILES.map(actionsMenu).join(''));
     page.document.body.appendChild(container);
     const rows = [...container.querySelectorAll('.file-actions-dropdown')];
     return { page, rows };

@@ -46,7 +46,7 @@ const APP_SCRIPTS = [
   '/js/app/library.js',
   '/js/app/series.js',
   '/js/app/suwayomi-search.js',
-  '/js/app/file-list.js',
+  '/js/app/selection.js',
   '/js/app/file-actions.js',
   '/js/app/jobs.js',
   '/js/app/settings.js',

@@ -9,13 +9,21 @@
         // Shared state declared in state.js and reassigned here.
         /* global duplicateReviewFiles: true, combineFolderGroups: true */
 
+        // What the page already knows about a file: the views that open the
+        // Info modal list it either among the open series' issues or in the
+        // duplicate review.
+        function findListedFile(filepath) {
+            const issues = seriesIssuesCache.get(currentSeriesDetailId)?.issues;
+            return (Array.isArray(issues) ? issues.find(issue => issue.file_path === filepath) : undefined)
+                || duplicateReviewFiles.find(file => file.relative_path === filepath);
+        }
+
         function showFileInfo(filepath, filename) {
             // Show file information in a modal
             document.getElementById('fileInfoPath').textContent = filepath;
             document.getElementById('fileInfoName').textContent = filename;
-            
-            // Find the file in the loaded files to get size info
-            const file = getAllLoadedFiles().find(f => f.relative_path === filepath);
+
+            const file = findListedFile(filepath);
             const duplicateReview = document.getElementById('fileInfoDuplicateReview');
             const duplicateReviewBtn = document.getElementById('fileInfoDuplicateReviewBtn');
             if (file) {
@@ -32,11 +40,18 @@
                         delete duplicateReviewBtn.dataset.filepath;
                     }
                 }
-            } else if (duplicateReview && duplicateReviewBtn) {
-                duplicateReview.style.display = 'none';
-                delete duplicateReviewBtn.dataset.filepath;
+            } else {
+                // Nothing is known about this file, so show none of the details
+                // left behind by the last file the modal was opened for.
+                for (const id of ['fileInfoSize', 'fileInfoProcessed', 'fileInfoRenamed', 'fileInfoNormalized', 'fileInfoDuplicate']) {
+                    document.getElementById(id).textContent = '';
+                }
+                if (duplicateReview && duplicateReviewBtn) {
+                    duplicateReview.style.display = 'none';
+                    delete duplicateReviewBtn.dataset.filepath;
+                }
             }
-            
+
             document.getElementById('fileInfoModal').classList.add('active');
         }
         

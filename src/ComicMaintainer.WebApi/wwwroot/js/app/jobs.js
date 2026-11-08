@@ -293,8 +293,7 @@
                 // "… Unmarked" actions and the library health. Every loaded
                 // series page is reloaded so series selected beyond the
                 // first page stay selected for reprocessing.
-                if (libraryViewMode === 'series' && currentSeriesDetailId &&
-                    typeof loadSeriesIssues === 'function') {
+                if (currentSeriesDetailId && typeof loadSeriesIssues === 'function') {
                     await loadSeriesIssues(currentSeriesDetailId, true, { immediate: true });
                 }
                 if (typeof loadActiveLibraryView === 'function') {
@@ -1275,7 +1274,7 @@
         // so the read state (and the per-issue Mark Read/Unread toggle) updates
         // without rebuilding the whole series library or losing the detail view.
         async function refreshAfterReadStatusChange() {
-            if (libraryViewMode === 'series' && currentSeriesDetailId) {
+            if (currentSeriesDetailId) {
                 await loadSeriesIssues(currentSeriesDetailId, true, { immediate: true });
             } else {
                 await loadActiveLibraryView({ refresh: true });

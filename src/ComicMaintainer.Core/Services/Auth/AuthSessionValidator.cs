@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models.Auth;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,12 @@ public interface IAuthSessionValidator
     /// changed since the token was issued, and the token was not signed out.
     /// </summary>
     Task<bool> IsSessionValidAsync(string? userId, string? stampFingerprint, string? tokenId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether <paramref name="apiKey"/> is still the API key of the active account <paramref name="userId"/>, for
+    /// requests that outlive their authentication (an event stream). Always asks the database.
+    /// </summary>
+    Task<bool> IsApiKeyValidAsync(string? userId, string? apiKey, CancellationToken cancellationToken = default);
 
     /// <summary>Signs one token out: it is refused from now on, until it would have expired anyway.</summary>
     Task RevokeTokenAsync(string tokenId, string userId, DateTime expiresAtUtc, CancellationToken cancellationToken = default);
@@ -86,6 +93,19 @@ public sealed class AuthSessionValidator : IAuthSessionValidator
     }
 
     /// <inheritdoc />
+    public async Task<bool> IsApiKeyValidAsync(string? userId, string? apiKey, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(apiKey) || apiKey.Length > ApiKeys.MaxLength)
+        {
+            return false;
+        }
+
+        var hash = ApiKeys.Hash(apiKey);
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.Users.AsNoTracking().AnyAsync(u => u.Id == userId && u.ApiKeyHash == hash && u.IsActive, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task RevokeTokenAsync(string tokenId, string userId, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
@@ -96,7 +116,15 @@ public sealed class AuthSessionValidator : IAuthSessionValidator
             if (expiresAtUtc > now && !await db.RevokedTokens.AnyAsync(t => t.TokenId == tokenId, cancellationToken))
             {
                 db.RevokedTokens.Add(new RevokedTokenEntity { TokenId = tokenId, UserId = userId, ExpiresAt = expiresAtUtc, RevokedAt = now });
-                await db.SaveChangesAsync(cancellationToken);
+                try
+                {
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+                catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteErrorCode: 19 }) // UNIQUE constraint
+                {
+                    // Another sign-out of the same token got there between the check and this insert: it is revoked.
+                    _logger.LogDebug("Token {TokenId} was already signed out", tokenId);
+                }
             }
         }
 

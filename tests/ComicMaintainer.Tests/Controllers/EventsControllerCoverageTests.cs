@@ -32,6 +32,56 @@ public class EventsControllerCoverageTests
             new Claim(JwtRegisteredClaimNames.Jti, tokenId),
         ], "StreamToken"));
 
+    private static ClaimsPrincipal ApiKeyUser(string userId = "user-1") =>
+        new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, userId),
+            new Claim("auth_method", ApiKeys.AuthMethod),
+        ], "ApiKey"));
+
+    [Fact]
+    public async Task Stream_OpenedWithAnApiKeyThatHasBeenRevoked_ClosesAtTheNextHeartbeat()
+    {
+        _sessions.Setup(s => s.IsApiKeyValidAsync("user-1", "cm_key", It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var body = new FlushSignallingStream();
+        var httpContext = new DefaultHttpContext { User = ApiKeyUser() };
+        httpContext.Request.Headers[ApiKeys.HeaderName] = " cm_key ";
+        httpContext.Response.Body = body;
+        var controller = new EventsController(_logger.Object, _broadcaster, _sessions.Object)
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
+        };
+
+        await controller.Stream().WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(string.Empty, body.Text);
+        _sessions.Verify(s => s.IsApiKeyValidAsync("user-1", "cm_key", It.IsAny<CancellationToken>()), Times.Once);
+        _sessions.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Stream_OpenedWithAValidApiKey_StaysOpen()
+    {
+        _sessions.Setup(s => s.IsApiKeyValidAsync("user-1", "cm_key", It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        using var disconnect = new CancellationTokenSource();
+        var body = new FlushSignallingStream();
+        var httpContext = new DefaultHttpContext { User = ApiKeyUser(), RequestAborted = disconnect.Token };
+        httpContext.Request.Headers[ApiKeys.HeaderName] = "cm_key";
+        httpContext.Response.Body = body;
+        var controller = new EventsController(_logger.Object, _broadcaster, _sessions.Object)
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
+        };
+
+        var streaming = controller.Stream();
+        await body.FirstFlush.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(EventsController.HeartbeatMessage, body.Text);
+        Assert.False(streaming.IsCompleted);
+        disconnect.Cancel();
+        await streaming.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
     [Fact]
     public async Task Stream_OpenedWithATokenWhoseSessionHasEnded_ClosesAtTheNextHeartbeat()
     {

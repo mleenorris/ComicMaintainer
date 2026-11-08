@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -125,6 +126,96 @@ public sealed class AuthSessionValidatorTests : IAsyncLifetime
         // After a restart (a new validator with an empty cache) the live one is still refused.
         var restarted = new AuthSessionValidator(factory, new MemoryCache(new MemoryCacheOptions()), NullLogger<AuthSessionValidator>.Instance);
         Assert.False(await restarted.IsSessionValidAsync(_user.Id, await CurrentFingerprintAsync(), "live-token"));
+    }
+
+    // Two sign-outs of one token: the other request inserts the row after this one checked that it is not there.
+    [Fact]
+    public async Task ASignOutRacingAnotherOfTheSameTokenIsNotAnError()
+    {
+        var factory = _host.Services.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        string connectionString;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            connectionString = db.Database.GetConnectionString()!;
+        }
+
+        var expires = DateTime.UtcNow.AddHours(1);
+        var racing = new AuthSessionValidator(
+            new InterceptedDbContextFactory(connectionString, new CompetingSignOut(connectionString, "raced-token", _user.Id, expires)),
+            new MemoryCache(new MemoryCacheOptions()),
+            NullLogger<AuthSessionValidator>.Instance);
+
+        await racing.RevokeTokenAsync("raced-token", _user.Id, expires);
+
+        Assert.False(await racing.IsSessionValidAsync(_user.Id, await CurrentFingerprintAsync(), "raced-token"));
+        await using var check = await factory.CreateDbContextAsync();
+        Assert.Equal(["raced-token"], await check.RevokedTokens.Select(t => t.TokenId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task AnApiKeyStaysValidUntilItIsRevokedOrItsAccountIsDisabled()
+    {
+        var apiKey = ApiKeys.Generate();
+        await ChangeUserAsync(async (users, user) =>
+        {
+            user.ApiKeyHash = ApiKeys.Hash(apiKey);
+            await users.UpdateAsync(user);
+        });
+
+        Assert.True(await Validator.IsApiKeyValidAsync(_user.Id, apiKey));
+        Assert.False(await Validator.IsApiKeyValidAsync(_user.Id, ApiKeys.Generate()));
+        Assert.False(await Validator.IsApiKeyValidAsync("another-user", apiKey));
+
+        await ChangeUserAsync(async (users, user) =>
+        {
+            user.IsActive = false;
+            await users.UpdateAsync(user);
+        });
+        Assert.False(await Validator.IsApiKeyValidAsync(_user.Id, apiKey));
+
+        await ChangeUserAsync(async (users, user) =>
+        {
+            user.IsActive = true;
+            user.ApiKeyHash = null;
+            await users.UpdateAsync(user);
+        });
+        Assert.False(await Validator.IsApiKeyValidAsync(_user.Id, apiKey));
+    }
+
+    [Theory]
+    [InlineData(null, "key")]
+    [InlineData("user", null)]
+    [InlineData("user", "")]
+    public async Task AnApiKeyCheckWithoutUserOrKeyIsRefused(string? userId, string? apiKey)
+    {
+        Assert.False(await Validator.IsApiKeyValidAsync(userId == "user" ? _user.Id : userId, apiKey));
+    }
+
+    [Fact]
+    public async Task AnOversizedApiKeyIsRefusedWithoutHashingIt()
+    {
+        Assert.False(await Validator.IsApiKeyValidAsync(_user.Id, new string('k', ApiKeys.MaxLength + 1)));
+    }
+
+    private static DbContextOptions<ComicMaintainerDbContext> OptionsFor(string connectionString, params IInterceptor[] interceptors) =>
+        new DbContextOptionsBuilder<ComicMaintainerDbContext>().UseSqlite(connectionString).AddInterceptors(interceptors).Options;
+
+    private sealed class InterceptedDbContextFactory(string connectionString, IInterceptor interceptor) : IDbContextFactory<ComicMaintainerDbContext>
+    {
+        public ComicMaintainerDbContext CreateDbContext() => new(OptionsFor(connectionString, interceptor));
+    }
+
+    // Inserts the row from another context just before the context under test saves its own.
+    private sealed class CompetingSignOut(string connectionString, string tokenId, string userId, DateTime expires) : SaveChangesInterceptor
+    {
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            await using var other = new ComicMaintainerDbContext(OptionsFor(connectionString));
+            other.RevokedTokens.Add(new RevokedTokenEntity { TokenId = tokenId, UserId = userId, ExpiresAt = expires, RevokedAt = DateTime.UtcNow });
+            await other.SaveChangesAsync(cancellationToken);
+            return result;
+        }
     }
 
     [Fact]

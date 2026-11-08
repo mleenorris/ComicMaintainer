@@ -43,8 +43,9 @@ public class EventsController : ControllerBase
     /// <summary>
     /// The server-sent event stream. Besides the usual schemes it accepts a stream token in the
     /// <c>access_token</c> query parameter (<see cref="StreamTokenAuthentication"/>), because EventSource cannot
-    /// send an Authorization header; no other endpoint accepts a token in its URL. A stream opened with a token
-    /// ends at the first heartbeat after its session does (sign-out, password or role change, disabled account).
+    /// send an Authorization header; no other endpoint accepts a token in its URL. A stream opened with a token or
+    /// an API key ends at the first heartbeat after its session or key does (sign-out, password or role change,
+    /// revoked key, disabled account).
     /// </summary>
     [HttpGet("stream")]
     [Authorize(AuthenticationSchemes = StreamTokenAuthentication.SchemeName)]
@@ -96,9 +97,18 @@ public class EventsController : ControllerBase
     }
 
     // Token-authenticated streams (session or stream token) carry the security-stamp fingerprint and id that
-    // IAuthSessionValidator checks; Authelia streams are vouched for by the proxy when they open and carry neither.
+    // IAuthSessionValidator checks, and API-key streams still have the key in their header; Authelia streams are
+    // vouched for by the proxy when they open and carry none of these.
     private Task<bool> IsSessionStillValidAsync()
     {
+        if (User.FindFirstValue("auth_method") == ApiKeys.AuthMethod)
+        {
+            return _sessions.IsApiKeyValidAsync(
+                User.FindFirstValue(ClaimTypes.NameIdentifier),
+                Request.Headers[ApiKeys.HeaderName].ToString().Trim(),
+                HttpContext.RequestAborted);
+        }
+
         var stamp = User.FindFirstValue(AuthTokens.SecurityStampClaim);
         if (stamp is null)
         {

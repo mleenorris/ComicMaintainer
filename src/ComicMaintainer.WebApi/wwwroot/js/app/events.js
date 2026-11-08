@@ -550,6 +550,7 @@
                 const data = await apiFetch('/api/watcher/status');
                 updateWatcherStatusDisplay(data.running, data.enabled);
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Error fetching initial watcher status:', error);
                 updateWatcherStatusDisplay(null, null);
             }

@@ -111,6 +111,7 @@
                 duplicateReviewIndex = matchedIndex >= 0 ? matchedIndex : 0;
                 renderDuplicateReviewItem();
             } catch (error) {
+                if (error.authHandled) return;
                 if (loadId !== duplicateReviewLoadId) return;
                 console.error('Failed to load duplicates for review:', error);
                 emptyState.style.display = 'block';
@@ -329,6 +330,7 @@
                     mergeNote.textContent = 'Use the global "Combine Folders" tool from the toolbar to merge these folders.';
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to load series folders:', error);
                 clearChildren(list);
                 emptyState.style.display = 'block';
@@ -394,6 +396,7 @@
 
                 renderCombineFolderGroup();
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to load combinable folders:', error);
                 emptyState.style.display = 'block';
                 emptyState.textContent = `Failed to load combinable folders: ${error.message}`;
@@ -691,6 +694,7 @@
                 if (!plan) return;
                 content = renderCombinePreviewContent(plan);
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to build combine preview:', error);
                 content = html`<span class="conflict">Failed to build preview: ${error.message}</span>`;
             } finally {
@@ -716,6 +720,7 @@
             try {
                 plan = await requestCombineFoldersPreview(body);
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to combine folders:', error);
                 showMessage(`Failed to combine folders: ${error.message}`, 'error');
                 combineFolderActionInFlight = false;
@@ -777,6 +782,7 @@
                 if (typeof refreshFiles === 'function') refreshFiles();
                 await openCombineFoldersModal();
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to combine folders:', error);
                 showMessage(`Failed to combine folders: ${error.message}`, 'error');
             } finally {

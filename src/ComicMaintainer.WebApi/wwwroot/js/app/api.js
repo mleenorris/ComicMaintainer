@@ -116,6 +116,10 @@
         // failures on the way out would only be noise.
         let loginRedirectStarted = false;
 
+        function isRedirectingToLogin() {
+            return loginRedirectStarted && !localStorage.getItem('jwt_token');
+        }
+
         // Helper function to redirect to login and clear auth data
         function redirectToLogin() {
             loginRedirectStarted = true;
@@ -371,10 +375,12 @@
                 ...fetchOptions
             } = options;
 
-            const requestHeaders = { ...(auth ? getAuthHeaders() : {}), ...headers };
-            // getAuthHeaders() found an expired token and started the redirect:
-            // sending the request would only earn a 401.
-            if (auth && loginRedirectStarted) throw apiSessionEndedError();
+            const sessionHeaders = auth ? getAuthHeaders() : {};
+            // getAuthHeaders() answers with nothing only when it found an
+            // expired token and started the redirect: sending the request
+            // would just earn a 401.
+            if (auth && Object.keys(sessionHeaders).length === 0) throw apiSessionEndedError();
+            const requestHeaders = { ...sessionHeaders, ...headers };
 
             const request = { method, credentials: 'include', ...fetchOptions, headers: requestHeaders };
             if (body !== undefined && body !== null) {
@@ -409,9 +415,19 @@
                 throw error;
             }
 
-            if (response.status === 204) return {};
             const text = await response.text();
-            return text ? JSON.parse(text) : {};
+            if (!text) return {};
+            try {
+                return JSON.parse(text);
+            } catch {
+                // An endpoint that answers 200 with plain text has nothing more
+                // to say. An HTML page instead of JSON is a proxy's sign-in or
+                // error page, which must not pass for an empty result.
+                if (/html/i.test(response.headers.get('Content-Type') || '')) {
+                    throw apiResponseError(response, errorMessage ?? 'The server sent an unexpected response.');
+                }
+                return {};
+            }
         }
 
         // Helper function to encode filepath for RESTful URL
@@ -464,7 +480,7 @@
         function showMessage(message, type = 'info', options = {}) {
             // On the way to the login page, the requests still in flight fail
             // and their callers report it; the user just needs the login page.
-            if (loginRedirectStarted && type === 'error') {
+            if ((type === 'error' || type === 'warning') && isRedirectingToLogin()) {
                 return document.createElement('div');
             }
             // An open dialog covers #messageContainer, so a dialog that stays

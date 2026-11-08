@@ -242,6 +242,7 @@
                 if (!resp.ok) throw new Error('overview ' + resp.status);
                 data = await resp.json();
             } catch (err) {
+                if (err.authHandled) return;
                 console.error('Failed to load overview', err);
                 renderHtml(container, html`<div class="empty-state"><p>Couldn't load your overview. <button type="button" class="btn btn-small" onclick="renderOverview()">Retry</button></p></div>`);
                 return;

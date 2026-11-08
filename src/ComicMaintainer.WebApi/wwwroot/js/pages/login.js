@@ -3,17 +3,6 @@
         // Classic (non-module) script sharing the page's global scope: the
         // markup's inline on* handlers call its functions.
 
-        // Base path for reverse proxy support
-        const BASE_PATH = '';
-        
-        // Helper function to build URLs with base path
-        function apiUrl(path) {
-            if (!path.startsWith('/')) {
-                path = '/' + path;
-            }
-            return BASE_PATH + path;
-        }
-        
         // Theme management
         function initTheme() {
             const theme = localStorage.getItem('theme') || 'light';
@@ -105,7 +94,7 @@
         // page is on its way to the setup page.
         async function checkSetupRequired() {
             try {
-                const response = await fetch(apiUrl('/api/auth/setup-required'));
+                const response = await apiFetch('/api/auth/setup-required', { auth: false, json: false });
                 const data = await response.json();
                 
                 if (data.setupRequired) {
@@ -123,7 +112,9 @@
         async function checkAuth() {
             try {
                 // First check server auth status (includes Authelia check)
-                const response = await fetch(apiUrl('/api/auth/status'), {
+                const response = await apiFetch('/api/auth/status', {
+                    auth: false,
+                    json: false,
                     credentials: 'include' // Important for Authelia cookies
                 });
                 
@@ -200,7 +191,9 @@
             let redirecting = false;
             
             try {
-                const response = await fetch(apiUrl('/api/auth/login'), {
+                const response = await apiFetch('/api/auth/login', {
+                    auth: false,
+                    json: false,
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'

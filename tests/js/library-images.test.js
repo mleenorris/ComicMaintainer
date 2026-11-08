@@ -462,9 +462,7 @@ test('without IntersectionObserver a cover that failed to load waits for the nex
 test('cover tokens resolve to API paths or the cover endpoint', async () => {
     const page = await bootLibrary();
 
-    assert.equal(page.evaluate("resolveProtectedImageUrl('/api/series-images/x')"), '/api/series-images/x');
-    assert.equal(page.evaluate("resolveProtectedImageUrl('A & B/#1.cbz')"), '/api/comicreader/cover?filePath=A%20%26%20B%2F%231.cbz');
-    assert.equal(page.evaluate("resolveProtectedImageUrl('')"), null);
-    // The legacy page-extraction endpoint for a comic's first page.
-    assert.equal(page.evaluate("getSeriesCoverFallbackUrl('A & B/#1.cbz')"), '/api/comicreader/page?filePath=A%20%26%20B%2F%231.cbz&page=1');
+    assert.equal(page.evaluate("resolveProtectedImagePath('/api/series-images/x')"), '/api/series-images/x');
+    assert.equal(page.evaluate("resolveProtectedImagePath('A & B/#1.cbz')"), '/api/comicreader/cover?filePath=A%20%26%20B%2F%231.cbz');
+    assert.equal(page.evaluate("resolveProtectedImagePath('')"), null);
 });

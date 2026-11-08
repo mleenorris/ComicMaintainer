@@ -93,7 +93,7 @@ test('the External Providers modal shows each provider\'s health', async () => {
     await page.settle();
 
     const [call] = providerCalls(page);
-    assert.equal(call.init.credentials, 'same-origin');
+    assert.equal(call.init.credentials, 'include');
     assert.match(call.headers.authorization, /^Bearer /);
 
     const widget = page.$('#providerHealthWidget');

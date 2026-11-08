@@ -6,17 +6,6 @@
         // Security Note: Ensure this application is deployed with HTTPS in production
         // to protect credentials during transmission.
         
-        // Base path for reverse proxy support
-        const BASE_PATH = '';
-        
-        // Helper function to build URLs with base path
-        function apiUrl(path) {
-            if (!path.startsWith('/')) {
-                path = '/' + path;
-            }
-            return BASE_PATH + path;
-        }
-        
         // Theme management
         function initTheme() {
             const theme = localStorage.getItem('theme') || 'light';
@@ -95,7 +84,7 @@
         // Check if setup is still required
         async function checkSetupRequired() {
             try {
-                const response = await fetch(apiUrl('/api/auth/setup-required'));
+                const response = await apiFetch('/api/auth/setup-required', { auth: false, json: false });
                 const data = await response.json();
                 
                 if (!data.setupRequired) {
@@ -162,7 +151,9 @@
             setupBtnSpinner.classList.remove('hidden');
             
             try {
-                const response = await fetch(apiUrl('/api/auth/setup'), {
+                const response = await apiFetch('/api/auth/setup', {
+                    auth: false,
+                    json: false,
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'

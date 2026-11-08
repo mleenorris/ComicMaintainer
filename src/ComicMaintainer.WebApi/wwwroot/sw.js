@@ -29,7 +29,7 @@ const urlsToCache = [
 ];
 
 // The app's classic scripts, in the order index.html loads them (reader.html
-// loads /js/shared.js too). Keep in sync with the <script> tags in
+// loads /js/shared.js and /js/app/api.js too). Keep in sync with the <script> tags in
 // index.html. They are precached under the same ?v=<version> URL the server
 // injects into the HTML, so the first navigation after an update is served
 // from cache and offline launches have every script. A script that fails to
@@ -82,6 +82,7 @@ const STYLESHEETS = [
 const OFFLINE_READER_ASSETS = [
   '/css/main.css',
   '/js/shared.js',
+  '/js/app/api.js',
   '/js/pages/reader.js',
   '/js/pages/offline.js'
 ];

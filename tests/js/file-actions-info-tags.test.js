@@ -342,7 +342,7 @@ test('Save reports a job the server did not start', async t => {
 
     assert.deepEqual(messageTexts(page, 'error'), [
         'Failed to update metadata: No job ID returned',
-        'Failed to update metadata: Failed to start update metadata job',
+        'Failed to update metadata: boom',
         'Failed to update metadata: Failed to fetch'
     ]);
     assert.ok(!isModalOpen(page, 'progressModal'));
@@ -478,7 +478,7 @@ test('batch update failures are reported and close the progress modal', async t 
     await save();
 
     assert.deepEqual(messageTexts(page, 'error'), [
-        'Failed to start updating metadata: Failed to start update metadata job',
+        'Failed to start updating metadata: No files',
         'Failed to start updating metadata: Failed to fetch'
     ]);
     assert.ok(!isModalOpen(page, 'progressModal'));

@@ -1090,6 +1090,7 @@
                 `);
                 container.dataset.loaded = 'true';
             } catch (err) {
+                if (err.authHandled) return;
                 console.warn('Provider health fetch failed', err);
                 renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>`);
             }

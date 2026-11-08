@@ -64,6 +64,7 @@
                     combineFoldersBtn.disabled = combinableFolders === 0;
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to load library health:', error);
                 if (summary) {
                     summary.textContent = 'Unable to load library health right now.';

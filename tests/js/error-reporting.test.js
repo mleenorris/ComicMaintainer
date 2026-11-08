@@ -171,7 +171,7 @@ function reporting(overrides = {}) {
     const posted = [];
     const sandbox = loadScripts(['js/app/error-reporting.js'], {
         navigator: { onLine: true },
-        fetch: (url, init) => {
+        apiFetch: (url, init) => {
             posted.push({ url, init, body: JSON.parse(init.body) });
             return overrides.fetchResult ? overrides.fetchResult() : Promise.resolve({ ok: true });
         },

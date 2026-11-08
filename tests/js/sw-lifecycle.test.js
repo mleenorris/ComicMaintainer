@@ -113,7 +113,7 @@ test('install fails when the reader document or an asset the offline reader load
         ...[...scriptsOfflineDocumentsLoad(['reader.html', 'offline.html']), ...stylesheetsOfflineDocumentsLink(['reader.html', 'offline.html'])]
             .map(url => new URL(url).pathname)
     ];
-    assert.deepEqual(readerAssets.sort(), ['/css/main.css', '/js/pages/offline.js', '/js/pages/reader.js', '/js/shared.js', '/reader.html']);
+    assert.deepEqual(readerAssets.sort(), ['/css/main.css', '/js/app/api.js', '/js/pages/offline.js', '/js/pages/reader.js', '/js/shared.js', '/reader.html']);
 
     for (const failing of readerAssets) {
         for (const [label, answer] of [['404', reply(404, 'Not found')], ['network error', () => { throw new TypeError('Failed to fetch'); }]]) {

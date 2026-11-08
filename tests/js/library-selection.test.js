@@ -77,7 +77,7 @@ test('a card\'s select box selects the whole series, fetching all its files, wit
     const [call] = issuesCalls(page);
     assert.equal(call.path, '/api/files/series/series-1/issues');
     assert.deepEqual(call.query, { per_page: '-1', filter: 'all' });
-    assert.equal(call.init.credentials, 'same-origin');
+    assert.equal(call.init.credentials, 'include');
     assert.match(call.headers.authorization, /^Bearer /);
 
     answer.resolve(issuesFor(call));

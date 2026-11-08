@@ -250,6 +250,7 @@
                 setupTapZones();
                 setupChromeAutoHide();
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Error initializing reader:', error);
                 showError('Failed to load comic: ' + error.message);
             }
@@ -2270,7 +2271,7 @@
 
             // Reuse the reader's normal auth headers: the worker cannot read
             // the token out of localStorage itself.
-            const headers = { ...getAuthHeaders() };
+            const headers = (!isAutheliaAuthenticated() && token) ? { Authorization: `Bearer ${token}` } : {};
 
             controller.postMessage({
                 type: 'DOWNLOAD_COMIC',

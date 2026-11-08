@@ -654,6 +654,7 @@
                     results.appendChild(card);
                 });
             } catch (err) {
+                if (err.authHandled) return;
                 console.error('searchSeriesImageCandidates failed', err);
                 status.textContent = 'Search failed.';
             }
@@ -682,6 +683,7 @@
                     loadSeriesLibrary(1, true);
                 }
             } catch (err) {
+                if (err.authHandled) return;
                 console.error('applySeriesImageCandidate failed', err);
                 if (status) status.textContent = 'Failed to apply provider image';
                 showMessage('Failed to apply provider image', 'error');
@@ -1067,6 +1069,7 @@
                 }));
                 window.__manageSeriesSearchResults = results;
             } catch (err) {
+                if (err.authHandled) return;
                 console.error('searchExternalSeries failed', err);
                 renderHtml(container, html`<p style="color: var(--text-error);">Search failed.</p>`);
             }

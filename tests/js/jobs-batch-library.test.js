@@ -29,7 +29,7 @@ const LIBRARY_ACTIONS = [
         nothingToDo: 'No files found to process',
         tracked: 'Processing Files...',
         failure: 'Failed to start processing: ',
-        serverFailure: 'Failed to start processing job'
+        serverFailure: 'Database is locked'
     },
     {
         // Not wired to the toolbar (it has the async variant above); the page exposes it as a global.
@@ -43,7 +43,7 @@ const LIBRARY_ACTIONS = [
         nothingToDo: 'No files found to process',
         tracked: 'Processing All Files...',
         failure: 'Failed to start processing: ',
-        serverFailure: 'Failed to start processing job'
+        serverFailure: 'Database is locked'
     },
     {
         name: 'Process Unmarked',
@@ -55,7 +55,7 @@ const LIBRARY_ACTIONS = [
         nothingToDo: 'No unmarked files found to process',
         tracked: 'Processing Unmarked Files...',
         failure: 'Failed to start processing: ',
-        serverFailure: 'Failed to start processing job'
+        serverFailure: 'Database is locked'
     },
     {
         name: 'Rename All',
@@ -68,7 +68,7 @@ const LIBRARY_ACTIONS = [
         nothingToDo: 'No files found to rename',
         tracked: 'Renaming All Files...',
         failure: 'Failed to start renaming: ',
-        serverFailure: 'Failed to start renaming job'
+        serverFailure: 'Database is locked'
     },
     {
         name: 'Rename Unmarked',
@@ -80,7 +80,7 @@ const LIBRARY_ACTIONS = [
         nothingToDo: 'No unmarked files found to rename',
         tracked: 'Renaming Unmarked Files...',
         failure: 'Failed to start renaming: ',
-        serverFailure: 'Failed to start renaming job'
+        serverFailure: 'Database is locked'
     },
     {
         name: 'Normalize All',
@@ -93,7 +93,7 @@ const LIBRARY_ACTIONS = [
         nothingToDo: 'No files found to normalize',
         tracked: 'Normalizing All Files...',
         failure: 'Failed to start normalizing: ',
-        serverFailure: 'Failed to start normalizing job'
+        serverFailure: 'Database is locked'
     },
     {
         name: 'Normalize Unmarked',
@@ -106,7 +106,7 @@ const LIBRARY_ACTIONS = [
         nothingToDo: 'No unmarked files found to normalize',
         tracked: 'Normalizing Unmarked Files...',
         failure: 'Failed to start normalizing: ',
-        serverFailure: 'Failed to start normalizing job'
+        serverFailure: 'Database is locked'
     },
     {
         name: 'Remove Metadata All',
@@ -119,7 +119,7 @@ const LIBRARY_ACTIONS = [
         nothingToDo: 'No files found in library',
         tracked: 'Removing Metadata from All Files...',
         failure: 'Failed to remove metadata: ',
-        serverFailure: 'Failed to start remove metadata job'
+        serverFailure: 'Database is locked'
     }
 ];
 
@@ -296,7 +296,7 @@ test('Remove Metadata All sends JSON with the session cookie and handles empty a
     await page.settle();
     const [start] = h.requests(page, 'POST', '/api/jobs/remove-metadata-all');
     assert.equal(start.headers['content-type'], 'application/json');
-    assert.equal(start.init.credentials, 'same-origin');
+    assert.equal(start.init.credentials, 'include');
     assert.equal(start.body, undefined);
     assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: 'No files found in library' }]);
     assert.equal(h.progressView(page).open, false);
@@ -326,7 +326,7 @@ test('read-only users get no batch menus, and a refused start reports the failur
     // through is refused and reported like any other failed start.
     page.run('processUnmarkedFiles()');
     await page.settle();
-    assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to start processing: Failed to start processing job' }]);
+    assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to start processing: Forbidden' }]);
     assert.equal(h.progressView(page).open, false);
     assert.equal(h.loginRedirects(page), 0);
     assert.deepEqual(page.errors, []);

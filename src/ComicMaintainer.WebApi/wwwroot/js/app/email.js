@@ -471,6 +471,7 @@
                 renderEmailCondensePlan(plan);
                 setEmailSendEnabled(emailSendAvailable && plan.can_email === true);
             } catch (error) {
+                if (error.authHandled) return;
                 if (token !== emailCondensePlanToken) return;
                 renderHtml(panel, html`<div>Could not calculate the condensed books: ${error.message}</div>`);
                 setEmailSendEnabled(false);

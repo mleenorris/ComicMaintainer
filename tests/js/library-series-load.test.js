@@ -102,7 +102,7 @@ test('a server error is reported with the failed request\'s reference', async ()
     });
 
     assert.deepEqual(messages(page).filter(m => m.type === 'error'), [
-        { type: 'error', text: 'Failed to load series: HTTP error! status: 500 (ref: corr-42)' }
+        { type: 'error', text: 'Failed to load series: boom (ref: corr-42)' }
     ]);
     assert.equal(page.$('#fileList .series-card'), null);
 });

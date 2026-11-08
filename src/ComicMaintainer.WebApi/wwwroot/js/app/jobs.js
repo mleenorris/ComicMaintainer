@@ -528,6 +528,7 @@
                     await loadActiveLibraryView({ refresh: true });
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 // Network error or other exception
                 console.error(`[JOB RESUME] Error checking active job ${activeJobId}:`, error);
                 // Don't clear the job on network errors - it might still be running

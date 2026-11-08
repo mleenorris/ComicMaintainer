@@ -146,7 +146,7 @@ test('a load that fails says why and offers Retry', async (t) => {
     const failures = [
         { name: 'a JSON error', answer: respond(500, { error: 'Database is locked' }), reason: 'Database is locked' },
         { name: 'a JSON message', answer: respond(503, { message: 'The server is starting up.' }), reason: 'The server is starting up.' },
-        { name: 'problem details', answer: respond(404, { title: 'Not Found', status: 404 }), reason: 'HTTP error! status: 404' },
+        { name: 'problem details', answer: respond(404, { title: 'Not Found', status: 404 }), reason: 'Not Found' },
         { name: 'a plain-text body', answer: respond(502, 'Bad Gateway'), reason: 'HTTP error! status: 502' },
         { name: 'a network error', answer: () => { throw new TypeError('Failed to fetch'); }, reason: 'Failed to fetch' }
     ];

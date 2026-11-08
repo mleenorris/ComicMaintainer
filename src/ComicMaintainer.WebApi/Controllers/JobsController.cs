@@ -1,9 +1,11 @@
+using System.Text.Json.Serialization;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -17,6 +19,25 @@ public class JobsController : ControllerBase
     /// The error returned when a batch request names a file outside the watched and duplicate directories.
     /// </summary>
     public const string OutsideAllowedDirectoryError = "One or more file paths are outside the allowed directory";
+
+    private const string NoFilesSpecifiedError = "No files specified";
+
+    /// <summary>
+    /// The batch operations, by the first half of their route: <c>POST /api/jobs/{operation}-{scope}</c>.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, BatchOperation> BatchOperations =
+        new Dictionary<string, BatchOperation>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["process"] = new(BatchScope.Any, batch => batch.Processor.ProcessFilesAsync(batch.Files, batch.ForceReprocess)),
+            ["rename"] = new(BatchScope.Any, batch => batch.Processor.RenameFilesAsync(batch.Files, batch.ForceReprocess)),
+            ["normalize"] = new(BatchScope.Any, batch => batch.Processor.NormalizeFilesAsync(batch.Files, batch.ForceReprocess)),
+            ["remove-metadata"] = new(BatchScope.Selected | BatchScope.All, batch => batch.Processor.RemoveMetadataFromFilesAsync(batch.Files)),
+            ["update-metadata"] = new(
+                BatchScope.Selected,
+                batch => batch.Processor.UpdateMetadataAsync(batch.Files, batch.Request.Metadata!, MetadataFields(batch.Request)),
+                ValidateMetadataEdit),
+            ["delete"] = new(BatchScope.Selected, batch => batch.Processor.DeleteFilesAsync(batch.Files)),
+        };
 
     private readonly IComicProcessorService _processor;
     private readonly IBatchJobRegistry _jobRegistry;
@@ -41,95 +62,70 @@ public class JobsController : ControllerBase
     [HttpGet("{jobId}")]
     public ActionResult<object> GetJob(Guid jobId)
     {
-        try
-        {
-            var job = _jobRegistry.GetJob(jobId);
-            if (job == null)
-                return NotFound();
-            
-            // Return in snake_case format expected by frontend
-            // Build a set of successfully processed files (files that were processed but not in error list)
-            var processedFilesList = new List<string>();
-            var fileIndex = 0;
-            foreach (var file in job.Files)
-            {
-                if (fileIndex < job.ProcessedFiles + job.FailedFiles)
-                {
-                    processedFilesList.Add(file);
-                }
-                fileIndex++;
-            }
-            var trackedItems = new HashSet<string>(job.Files, StringComparer.Ordinal);
+        var job = _jobRegistry.GetJob(jobId);
+        if (job == null)
+            return NotFound();
 
-            return Ok(new
-            {
-                job_id = job.JobId.ToString(),
-                status = job.Status.ToString().ToLower(),
-                total_items = job.TotalFiles,
-                processed_items = job.ProcessedFiles,
-                failed_items = job.FailedFiles,
-                current_file = job.CurrentFile,
-                start_time = job.StartTime,
-                end_time = job.EndTime,
-                results = job.Files.Select(f => new
-                {
-                    file = f,
-                    success = processedFilesList.Contains(f) && !job.Errors.ContainsKey(f),
-                    error = job.Errors.GetValueOrDefault(f)
-                }).ToList(),
-                // Problems a job's post-loop hook reported for things that were
-                // not tracked items (IBatchJobReport), e.g. a source folder that
-                // folder combine had to keep. They are not results, so they
-                // never change what the job's item counts or results say.
-                reported_problems = job.Errors
-                    .Where(entry => !trackedItems.Contains(entry.Key))
-                    .Select(entry => new
-                    {
-                        subject = entry.Key,
-                        message = entry.Value
-                    })
-                    .ToList()
-            });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        // Return in snake_case format expected by frontend
+        // Build a set of successfully processed files (files that were processed but not in error list)
+        var processedFiles = job.Files.Take(job.ProcessedFiles + job.FailedFiles).ToHashSet(StringComparer.Ordinal);
+        var trackedItems = new HashSet<string>(job.Files, StringComparer.Ordinal);
+
+        return Ok(new
         {
-            _logger.LogError(ex, "Error getting job {JobId}", jobId);
-            return StatusCode(500, "Error retrieving job");
-        }
+            job_id = job.JobId.ToString(),
+            status = job.Status.ToString().ToLower(),
+            total_items = job.TotalFiles,
+            processed_items = job.ProcessedFiles,
+            failed_items = job.FailedFiles,
+            current_file = job.CurrentFile,
+            start_time = job.StartTime,
+            end_time = job.EndTime,
+            results = job.Files.Select(f => new
+            {
+                file = f,
+                success = processedFiles.Contains(f) && !job.Errors.ContainsKey(f),
+                error = job.Errors.GetValueOrDefault(f)
+            }).ToList(),
+            // Problems a job's post-loop hook reported for things that were
+            // not tracked items (IBatchJobReport), e.g. a source folder that
+            // folder combine had to keep. They are not results, so they
+            // never change what the job's item counts or results say.
+            reported_problems = job.Errors
+                .Where(entry => !trackedItems.Contains(entry.Key))
+                .Select(entry => new
+                {
+                    subject = entry.Key,
+                    message = entry.Value
+                })
+                .ToList()
+        });
     }
 
     [HttpGet("~/api/active-job")]
     public ActionResult<object> GetActiveJob()
     {
-        try
-        {
-            // After restart, in-flight jobs are reconciled to Interrupted and are no longer
-            // "active", but the UI still needs one last status to explain why work stopped.
-            var job = _jobRegistry.GetActiveJob()
-                ?? _jobRegistry.GetJobSummaries().FirstOrDefault(j => j.Status == JobStatus.Interrupted);
+        // After restart, in-flight jobs are reconciled to Interrupted and are no longer
+        // "active", but the UI still needs one last status to explain why work stopped.
+        var job = _jobRegistry.GetActiveJob()
+            ?? _jobRegistry.GetJobSummaries().FirstOrDefault(j => j.Status == JobStatus.Interrupted);
 
-            if (job == null)
-                return Ok(new { active = false });
-            
-            // Return in snake_case format expected by frontend
-            return Ok(new
-            {
-                job_id = job.JobId.ToString(),
-                job_title = DetermineJobTitle(job),
-                status = job.Status.ToString().ToLower(),
-                total_items = job.TotalFiles,
-                processed_items = job.ProcessedFiles,
-                failed_items = job.FailedFiles,
-                current_file = job.CurrentFile,
-                start_time = job.StartTime,
-                end_time = job.EndTime
-            });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        if (job == null)
+            return Ok(new { active = false });
+
+        // Return in snake_case format expected by frontend
+        return Ok(new
         {
-            _logger.LogError(ex, "Error getting active job");
-            return StatusCode(500, "Error retrieving active job");
-        }
+            job_id = job.JobId.ToString(),
+            job_title = DetermineJobTitle(job),
+            status = job.Status.ToString().ToLower(),
+            total_items = job.TotalFiles,
+            processed_items = job.ProcessedFiles,
+            failed_items = job.FailedFiles,
+            current_file = job.CurrentFile,
+            start_time = job.StartTime,
+            end_time = job.EndTime
+        });
     }
 
     private static string DetermineJobTitle(ProcessingJobSummary job)
@@ -152,504 +148,271 @@ public class JobsController : ControllerBase
         };
     }
 
-    [HttpPost("process-all")]
-    public async Task<ActionResult<object>> ProcessAll([FromQuery] bool forceReprocess = false)
+    /// <summary>
+    /// Starts a batch job: one of the <see cref="BatchOperations"/> over the files a scope
+    /// selects. The routes this serves are the operation and scope joined by a hyphen, such as
+    /// <c>POST /api/jobs/process-all</c> or <c>POST /api/jobs/remove-metadata-selected</c>.
+    /// </summary>
+    /// <param name="operation">What to do: process, rename, normalize, remove-metadata, update-metadata or delete.</param>
+    /// <param name="scope">Which files: selected, all or unmarked.</param>
+    /// <param name="request">The selected files and options. Not needed for the all and unmarked scopes.</param>
+    /// <param name="forceReprocess">Reprocess files already marked as done; the body can say the same.</param>
+    /// <param name="cancellationToken">Cancels selecting the files. The job itself outlives the request.</param>
+    [HttpPost("{operation}-{scope}")]
+    public async Task<ActionResult<BatchJobResponse>> StartBatchJob(
+        string operation,
+        string scope,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] BatchJobRequest? request,
+        [FromQuery] bool forceReprocess = false,
+        CancellationToken cancellationToken = default)
     {
-        try
+        if (!BatchOperations.TryGetValue(operation, out var batchOperation)
+            || !TryParseScope(scope, out var batchScope)
+            || !batchOperation.Scopes.HasFlag(batchScope))
         {
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessAll: Starting process all files request"));
-            
-            // Get all files from the file store
-            var allFiles = await _fileStore.GetAllFilesAsync();
-            var filePaths = allFiles.Select(f => f.FilePath).ToList();
-            
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessAll: Retrieved {TotalFiles} files from file store"), filePaths.Count);
-            
-            if (filePaths.Count == 0)
-            {
-                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ProcessAll: No files found to process"));
-                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
-            }
-            
-            // Start the process job
-            var jobId = await _processor.ProcessFilesAsync(filePaths, forceReprocess);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ProcessAll: Process all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessAll: Job created successfully with ID: {JobId}"), jobId);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
+            return NotFound();
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+
+        request ??= new BatchJobRequest();
+
+        var (files, selectionError) = await SelectFilesAsync(batchScope, request, cancellationToken);
+        if (selectionError != null)
         {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("ProcessAll: Error starting process all job"));
-            return StatusCode(500, new { error = "Error starting job" });
+            return BadRequest(new { error = selectionError });
         }
+
+        if (batchOperation.Validate?.Invoke(request) is { } validationError)
+        {
+            return BadRequest(new { error = validationError });
+        }
+
+        if (files.Count == 0)
+        {
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Batch {Operation}-{Scope}: no files to act on"), operation, scope);
+            return Ok(new BatchJobResponse(Guid.Empty.ToString(), 0));
+        }
+
+        var jobId = await batchOperation.Start(new BatchInvocation(_processor, files, request, forceReprocess || request.ForceReprocess));
+
+        _logger.LogInformation(
+            LoggingHelper.WithWebsitePrefix("Batch {Operation}-{Scope}: job {JobId} started for {TotalFiles} file(s)"),
+            operation, scope, jobId, files.Count);
+
+        return Ok(new BatchJobResponse(jobId.ToString(), files.Count));
     }
 
-    [HttpPost("rename-all")]
-    public async Task<ActionResult<object>> RenameAll([FromQuery] bool forceReprocess = false)
+    /// <summary>
+    /// The one selection rule set of every batch operation. The library-wide scopes never
+    /// include files marked as duplicates; files the caller names are taken as named, which is
+    /// how the duplicates view deletes them, but must be in the library.
+    /// </summary>
+    private async Task<(IReadOnlyList<string> Files, string? Error)> SelectFilesAsync(
+        BatchScope scope,
+        BatchJobRequest request,
+        CancellationToken cancellationToken)
     {
-        try
+        switch (scope)
         {
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("RenameAll: Starting rename all files request"));
-            
-            // Get all files from the file store
-            var allFiles = await _fileStore.GetAllFilesAsync();
-            var filePaths = allFiles.Select(f => f.FilePath).ToList();
-            
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("RenameAll: Retrieved {TotalFiles} files from file store"), filePaths.Count);
-            
-            if (filePaths.Count == 0)
-            {
-                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RenameAll: No files found to rename"));
-                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
-            }
-            
-            // Start the rename job
-            var jobId = await _processor.RenameFilesAsync(filePaths, forceReprocess);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RenameAll: Rename all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("RenameAll: Job created successfully with ID: {JobId}"), jobId);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("RenameAll: Error starting rename all job"));
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
+            case BatchScope.All:
+                var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
+                return (allFiles.Where(f => !f.IsDuplicate).Select(f => f.FilePath).ToList(), null);
 
-    [HttpPost("normalize-all")]
-    public async Task<ActionResult<object>> NormalizeAll([FromQuery] bool forceReprocess = false)
-    {
-        try
-        {
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("NormalizeAll: Starting normalize all files request"));
-            
-            // Get all files from the file store
-            var allFiles = await _fileStore.GetAllFilesAsync();
-            var filePaths = allFiles.Select(f => f.FilePath).ToList();
-            
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("NormalizeAll: Retrieved {TotalFiles} files from file store"), filePaths.Count);
-            
-            if (filePaths.Count == 0)
-            {
-                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("NormalizeAll: No files found to normalize"));
-                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
-            }
-            
-            // Start the normalize job
-            var jobId = await _processor.NormalizeFilesAsync(filePaths, forceReprocess);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("NormalizeAll: Normalize all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("NormalizeAll: Job created successfully with ID: {JobId}"), jobId);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("NormalizeAll: Error starting normalize all job"));
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
+            case BatchScope.Unmarked:
+                // The "unprocessed" filter already leaves out duplicates.
+                var unprocessed = await _fileStore.GetFilteredFilesAsync("unprocessed", cancellationToken);
+                return (unprocessed.Select(f => f.FilePath).ToList(), null);
 
-    [HttpPost("process-selected")]
-    public async Task<ActionResult<object>> ProcessSelected([FromBody] ProcessSelectedRequest request)
-    {
-        try
-        {
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: Starting process selected files request"));
-            
-            if (request.Files == null || request.Files.Count == 0)
-            {
-                _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: No files specified in request"));
-                return BadRequest(new { error = "No files specified" });
-            }
-            
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: Processing {SelectedCount} selected files"), request.Files.Count);
-            
-            var jobId = await _processor.ProcessFilesAsync(request.Files, request.ForceReprocess);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ProcessSelected: Process selected files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, request.Files.Count);
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: Job created successfully with ID: {JobId}"), jobId);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("ProcessSelected: Error starting process selected job"));
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
-
-    [HttpPost("process-unmarked")]
-    public async Task<ActionResult<object>> ProcessUnmarked()
-    {
-        try
-        {
-            return await ProcessUnprocessedFilesAsync("Process unmarked files");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error starting process unmarked job");
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
-
-    [HttpPost("rename-unmarked")]
-    public async Task<ActionResult<object>> RenameUnmarked()
-    {
-        try
-        {
-            _logger.LogDebug("RenameUnmarked: Starting rename unmarked files request");
-            
-            // Get all unprocessed files
-            var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
-            var filePaths = files.Select(f => f.FilePath).ToList();
-            
-            _logger.LogDebug("RenameUnmarked: Retrieved {UnprocessedCount} unprocessed files after filtering", filePaths.Count);
-            
-            if (filePaths.Count == 0)
-            {
-                _logger.LogInformation("RenameUnmarked: No unmarked files found to rename");
-                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
-            }
-            
-            // Start the rename job
-            var jobId = await _processor.RenameFilesAsync(filePaths);
-            _logger.LogInformation("RenameUnmarked: Rename unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
-            _logger.LogDebug("RenameUnmarked: Job created successfully with ID: {JobId}", jobId);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "RenameUnmarked: Error starting rename unmarked job");
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
-
-    [HttpPost("normalize-unmarked")]
-    public async Task<ActionResult<object>> NormalizeUnmarked([FromQuery] bool forceReprocess = false)
-    {
-        try
-        {
-            _logger.LogDebug("NormalizeUnmarked: Starting normalize unmarked files request");
-            
-            // Get all unprocessed files
-            var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
-            var filePaths = files.Select(f => f.FilePath).ToList();
-            
-            _logger.LogDebug("NormalizeUnmarked: Retrieved {UnprocessedCount} unprocessed files after filtering", filePaths.Count);
-            
-            if (filePaths.Count == 0)
-            {
-                _logger.LogInformation("NormalizeUnmarked: No unmarked files found to normalize");
-                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
-            }
-            
-            // Start the normalize job
-            var jobId = await _processor.NormalizeFilesAsync(filePaths, forceReprocess);
-            _logger.LogInformation("NormalizeUnmarked: Normalize unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
-            _logger.LogDebug("NormalizeUnmarked: Job created successfully with ID: {JobId}", jobId);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "NormalizeUnmarked: Error starting normalize unmarked job");
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
-
-    [HttpPost("rename-selected")]
-    public async Task<ActionResult<object>> RenameSelected([FromBody] ProcessSelectedRequest request)
-    {
-        try
-        {
-            if (request.Files == null || request.Files.Count == 0)
-            {
-                return BadRequest(new { error = "No files specified" });
-            }
-            
-            var jobId = await _processor.RenameFilesAsync(request.Files, request.ForceReprocess);
-            _logger.LogInformation("Rename selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error starting rename selected job");
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
-
-    [HttpPost("normalize-selected")]
-    public async Task<ActionResult<object>> NormalizeSelected([FromBody] ProcessSelectedRequest request)
-    {
-        try
-        {
-            if (request.Files == null || request.Files.Count == 0)
-            {
-                return BadRequest(new { error = "No files specified" });
-            }
-            
-            var jobId = await _processor.NormalizeFilesAsync(request.Files, request.ForceReprocess);
-            _logger.LogInformation("Normalize selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error starting normalize selected job");
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
-
-    [HttpPost("update-metadata-selected")]
-    public async Task<ActionResult<object>> UpdateMetadataSelected([FromBody] UpdateMetadataSelectedRequest request)
-    {
-        try
-        {
-            if (request.Files == null || request.Files.Count == 0)
-            {
-                return BadRequest(new { error = "No files specified" });
-            }
-
-            if (request.Metadata == null)
-            {
-                return BadRequest(new { error = "No metadata specified" });
-            }
-
-            // Fields lists the tags to apply; a listed field without a value is cleared. Without it,
-            // only the fields that carry a value are applied, so an omitted field is never wiped.
-            ComicMetadataFieldFlags fields;
-            if (request.Fields is null)
-            {
-                fields = ComicMetadataFields.Supplied(request.Metadata);
-            }
-            else if (!ComicMetadataFields.TryParse(request.Fields, out fields, out var unknownField))
-            {
-                return BadRequest(new { error = $"Unknown metadata field: {unknownField}" });
-            }
-
-            if (fields == ComicMetadataFieldFlags.None)
-            {
-                return BadRequest(new { error = "No metadata fields specified" });
-            }
-
-            var jobId = await _processor.UpdateMetadataAsync(request.Files, request.Metadata, fields);
-            _logger.LogInformation("Update metadata for selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error starting update metadata selected job");
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
-
-    [HttpPost("remove-metadata-selected")]
-    public async Task<ActionResult<object>> RemoveMetadataSelected([FromBody] ProcessSelectedRequest request)
-    {
-        try
-        {
-            if (request.Files == null || request.Files.Count == 0)
-            {
-                return BadRequest(new { error = "No files specified" });
-            }
-
-            var jobId = await _processor.RemoveMetadataFromFilesAsync(request.Files);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RemoveMetadataSelected: Remove metadata from selected files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, request.Files.Count);
-
-            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("RemoveMetadataSelected: Error starting remove metadata selected job"));
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
-
-    [HttpPost("remove-metadata-all")]
-    public async Task<ActionResult<object>> RemoveMetadataAll()
-    {
-        try
-        {
-            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("RemoveMetadataAll: Starting remove metadata from all files request"));
-
-            var allFiles = await _fileStore.GetAllFilesAsync();
-            var filePaths = allFiles.Select(f => f.FilePath).ToList();
-
-            if (filePaths.Count == 0)
-            {
-                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RemoveMetadataAll: No files found"));
-                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
-            }
-
-            var jobId = await _processor.RemoveMetadataFromFilesAsync(filePaths);
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RemoveMetadataAll: Remove metadata from all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
-
-            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("RemoveMetadataAll: Error starting remove metadata all job"));
-            return StatusCode(500, new { error = "Error starting job" });
-        }
-    }
-
-    [HttpPost("delete-selected")]
-    public async Task<ActionResult<object>> DeleteSelected([FromBody] ProcessSelectedRequest request)
-    {
-        try
-        {
-            if (request?.Files == null || request.Files.Count == 0)
-            {
-                return BadRequest(new { error = "No files specified" });
-            }
-
-            // Validate every path the delete job would act on (it skips blank entries itself),
-            // with the job's own checks, so a path it would refuse rejects the whole request
-            // before anything is deleted.
-            var settings = _settings.CurrentValue;
-            foreach (var filePath in request.Files)
-            {
-                if (!string.IsNullOrWhiteSpace(filePath) &&
-                    !LibraryPathValidator.TryResolveEntryWithin(filePath, out _, settings.WatchedDirectory, settings.DuplicateDirectory))
+            default:
+                var named = (request.Files ?? new List<string>())
+                    .Where(file => !string.IsNullOrWhiteSpace(file))
+                    .ToList();
+                if (named.Count == 0)
                 {
-                    _logger.LogWarning(
-                        LoggingHelper.WithWebsitePrefix("DeleteSelected: attempt to delete a file outside the allowed directories: {FilePath}"),
-                        LoggingHelper.SanitizePathForLog(filePath));
-                    return BadRequest(new { error = OutsideAllowedDirectoryError });
+                    return (named, NoFilesSpecifiedError);
                 }
-            }
 
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("DeleteSelected: starting delete-selected job for {Count} file(s)"), request.Files.Count);
-
-            var jobId = await _processor.DeleteFilesAsync(request.Files);
-            // Return both snake_case (legacy) and camelCase shapes so existing
-            // and future callers can use a single response contract.
-            return Ok(new
-            {
-                job_id = jobId.ToString(),
-                jobId = jobId.ToString(),
-                total_items = request.Files.Count,
-                totalItems = request.Files.Count
-            });
+                return (named, FindPathOutsideLibrary(named) == null ? null : OutsideAllowedDirectoryError);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+    }
+
+    /// <summary>
+    /// The first of <paramref name="files"/> the batch jobs would refuse to touch, checked with
+    /// their own rule, or null when all are in the library. Rejecting a whole request here
+    /// stops any file of it being acted on.
+    /// </summary>
+    private string? FindPathOutsideLibrary(IEnumerable<string> files)
+    {
+        var settings = _settings.CurrentValue;
+        var outside = files.FirstOrDefault(file =>
+            !LibraryPathValidator.TryResolveEntryWithin(file, out _, settings.WatchedDirectory, settings.DuplicateDirectory));
+
+        if (outside != null)
         {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("DeleteSelected: error starting delete-selected job"));
-            return StatusCode(500, new { error = "Error starting job" });
+            _logger.LogWarning(
+                LoggingHelper.WithWebsitePrefix("Batch request names a file outside the allowed directories: {FilePath}"),
+                LoggingHelper.SanitizePathForLog(outside));
         }
+
+        return outside;
+    }
+
+    private static bool TryParseScope(string scope, out BatchScope parsed)
+    {
+        parsed = scope.ToLowerInvariant() switch
+        {
+            "selected" => BatchScope.Selected,
+            "all" => BatchScope.All,
+            "unmarked" => BatchScope.Unmarked,
+            _ => BatchScope.None
+        };
+        return parsed != BatchScope.None;
+    }
+
+    private static string? ValidateMetadataEdit(BatchJobRequest request)
+    {
+        if (request.Metadata == null)
+        {
+            return "No metadata specified";
+        }
+
+        if (request.Fields is not null && !ComicMetadataFields.TryParse(request.Fields, out _, out var unknownField))
+        {
+            return $"Unknown metadata field: {unknownField}";
+        }
+
+        return MetadataFields(request) == ComicMetadataFieldFlags.None ? "No metadata fields specified" : null;
+    }
+
+    /// <summary>
+    /// Fields lists the tags to apply; a listed field without a value is cleared. Without it,
+    /// only the fields that carry a value are applied, so an omitted field is never wiped.
+    /// </summary>
+    private static ComicMetadataFieldFlags MetadataFields(BatchJobRequest request)
+    {
+        if (request.Fields is null)
+        {
+            return ComicMetadataFields.Supplied(request.Metadata!);
+        }
+
+        return ComicMetadataFields.TryParse(request.Fields, out var fields, out _) ? fields : ComicMetadataFieldFlags.None;
     }
 
     // RESTful endpoint: GET /api/jobs - List all jobs
     [HttpGet]
     public ActionResult<object> ListJobs()
     {
-        try
+        var jobs = _jobRegistry.GetJobSummaries();
+        var jobList = jobs.Select(j => new
         {
-            var jobs = _jobRegistry.GetJobSummaries();
-            var jobList = jobs.Select(j => new
-            {
-                job_id = j.JobId.ToString(),
-                status = j.Status.ToString().ToLower(),
-                total_items = j.TotalFiles,
-                processed_items = j.ProcessedFiles,
-                failed_items = j.FailedFiles,
-                start_time = j.StartTime,
-                end_time = j.EndTime
-            }).ToList();
+            job_id = j.JobId.ToString(),
+            status = j.Status.ToString().ToLower(),
+            total_items = j.TotalFiles,
+            processed_items = j.ProcessedFiles,
+            failed_items = j.FailedFiles,
+            start_time = j.StartTime,
+            end_time = j.EndTime
+        }).ToList();
 
-            return Ok(new { jobs = jobList, count = jobList.Count });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error listing jobs");
-            return StatusCode(500, "Error retrieving jobs");
-        }
+        return Ok(new { jobs = jobList, count = jobList.Count });
     }
 
     // RESTful endpoint: DELETE /api/jobs/{jobId} - Delete a job
     [HttpDelete("{jobId}")]
     public async Task<ActionResult> DeleteJob(Guid jobId, CancellationToken cancellationToken)
     {
-        try
-        {
-            _logger.LogInformation("Delete requested for job {JobId}", jobId);
-            var deleted = await _jobRegistry.DeleteJobAsync(jobId, cancellationToken);
-            if (!deleted)
-                return NotFound();
-            
-            return NoContent();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error deleting job {JobId}", jobId);
-            return StatusCode(500, "Error deleting job");
-        }
+        _logger.LogInformation("Delete requested for job {JobId}", jobId);
+        var deleted = await _jobRegistry.DeleteJobAsync(jobId, cancellationToken);
+        if (!deleted)
+            return NotFound();
+
+        return NoContent();
     }
 
     [HttpPost("{jobId}/cancel")]
     public ActionResult CancelJob(Guid jobId)
     {
-        try
-        {
-            _logger.LogInformation("Cancel requested for job {JobId}", jobId);
-            var cancelled = _jobRegistry.CancelJob(jobId);
-            
-            return cancelled
-                ? Ok(new { success = true })
-                : NotFound(new { success = false, error = "Job not found or already completed" });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error cancelling job {JobId}", jobId);
-            return StatusCode(500, new { success = false, error = "Error cancelling job" });
-        }
+        _logger.LogInformation("Cancel requested for job {JobId}", jobId);
+        var cancelled = _jobRegistry.CancelJob(jobId);
+
+        return cancelled
+            ? Ok(new { success = true })
+            : NotFound(new { success = false, error = "Job not found or already completed" });
     }
 
-    private async Task<ActionResult<object>> ProcessUnprocessedFilesAsync(string logMessage)
+    /// <summary>
+    /// Which files a batch operation can act on.
+    /// </summary>
+    [Flags]
+    private enum BatchScope
     {
-        _logger.LogDebug("ProcessUnprocessedFilesAsync: Starting request - {LogMessage}", logMessage);
-        
-        // Get all unprocessed files
-        var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
-        var filePaths = files.Select(f => f.FilePath).ToList();
-        
-        _logger.LogDebug("ProcessUnprocessedFilesAsync: Retrieved {UnprocessedCount} unprocessed files after filtering", filePaths.Count);
-        
-        if (filePaths.Count == 0)
-        {
-            _logger.LogInformation("ProcessUnprocessedFilesAsync: {LogMessage} - No unprocessed files found", logMessage);
-            return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
-        }
-        
-        // Start the processing job
-        var jobId = await _processor.ProcessFilesAsync(filePaths);
-        _logger.LogInformation("ProcessUnprocessedFilesAsync: {LogMessage} requested, job ID: {JobId}, total files: {TotalFiles}", logMessage, jobId, filePaths.Count);
-        _logger.LogDebug("ProcessUnprocessedFilesAsync: Job created successfully with ID: {JobId}", jobId);
-        
-        return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
+        None = 0,
+
+        /// <summary>The files named in the request.</summary>
+        Selected = 1,
+
+        /// <summary>Every tracked file that is not a duplicate.</summary>
+        All = 2,
+
+        /// <summary>Every tracked file not yet fully processed that is not a duplicate.</summary>
+        Unmarked = 4,
+
+        Any = Selected | All | Unmarked
     }
 
-    public class ProcessSelectedRequest
+    /// <summary>
+    /// A row of <see cref="BatchOperations"/>.
+    /// </summary>
+    /// <param name="Scopes">The scopes the operation is offered for.</param>
+    /// <param name="Start">Queues the job.</param>
+    /// <param name="Validate">Checks operation-specific input; returns the problem, or null.</param>
+    private sealed record BatchOperation(
+        BatchScope Scopes,
+        Func<BatchInvocation, Task<Guid>> Start,
+        Func<BatchJobRequest, string?>? Validate = null);
+
+    private sealed record BatchInvocation(
+        IComicProcessorService Processor,
+        IReadOnlyList<string> Files,
+        BatchJobRequest Request,
+        bool ForceReprocess);
+
+    /// <summary>
+    /// What a batch job is told to act on. The all and unmarked scopes need none of it.
+    /// </summary>
+    public class BatchJobRequest
     {
-        public List<string> Files { get; set; } = new();
+        /// <summary>The files to act on, for the selected scope.</summary>
+        public List<string>? Files { get; set; } = new();
+
+        /// <summary>Reprocess files already marked as done.</summary>
         public bool ForceReprocess { get; set; }
-    }
 
-    public class UpdateMetadataSelectedRequest
-    {
-        public List<string> Files { get; set; } = new();
-        public ComicMetadata Metadata { get; set; } = new();
+        /// <summary>The values to write, for update-metadata.</summary>
+        public ComicMetadata? Metadata { get; set; }
 
         /// <summary>
         /// The fields to apply ("series", "title", "issue", "volume", "publisher", "year",
-        /// "summary", "authors"/"writer", "tags"). A listed field without a value in
-        /// <see cref="Metadata"/> is removed; unlisted fields are kept. When omitted, every field
-        /// that carries a value is applied and nothing is removed.
+        /// "summary", "authors"/"writer", "tags"), for update-metadata. A listed field without
+        /// a value in <see cref="Metadata"/> is removed; unlisted fields are kept. When omitted,
+        /// every field that carries a value is applied and nothing is removed.
         /// </summary>
         public List<string>? Fields { get; set; }
+    }
+
+    /// <summary>
+    /// The response to a request that started, or found nothing to do for, a batch job. It
+    /// carries both snake_case (the web app) and camelCase (the mobile app) names.
+    /// </summary>
+    /// <param name="JobId">The job's id, or an empty GUID when nothing was queued.</param>
+    /// <param name="TotalItems">How many files the job covers.</param>
+    public sealed record BatchJobResponse(
+        [property: JsonPropertyName("job_id")] string JobId,
+        [property: JsonPropertyName("total_items")] int TotalItems)
+    {
+        [JsonPropertyName("jobId")]
+        public string JobIdCamelCase => JobId;
+
+        [JsonPropertyName("totalItems")]
+        public int TotalItemsCamelCase => TotalItems;
     }
 }

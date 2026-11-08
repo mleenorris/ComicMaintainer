@@ -164,7 +164,7 @@ public partial class FilesController
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/scan-unmarked")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    [Obsolete("Use POST /api/files/scan-unmarked instead. This alias is scheduled for removal in v3.0.")]
+    [Obsolete("Use GET /api/files/scan-unmarked instead.")]
     public async Task<ActionResult> ScanUnmarkedLegacy() => await ScanUnmarked();
 
     // RESTful endpoint: POST /api/files/{encodedFilePath}/process
@@ -190,32 +190,6 @@ public partial class FilesController
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
             _logger.LogError(ex, "Error processing file with encoded path {EncodedPath}", sanitizedEncodedPath);
-            return StatusCode(500, "Error processing file");
-        }
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("~/api/process-file")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    [Obsolete("Use POST /api/files/{encodedFilePath}/process instead. This alias is scheduled for removal in v3.0.")]
-    public async Task<ActionResult> ProcessSingleFile([FromQuery] string filePath, [FromQuery] bool forceReprocess = false)
-    {
-        try
-        {
-            // Validate path is within watched directory to prevent path traversal attacks
-            if (!IsPathSafe(filePath))
-            {
-                _logger.LogWarning("Attempt to process file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
-                return BadRequest("File path is outside the allowed directory");
-            }
-
-            var success = await _processor.ProcessFileAsync(filePath, forceReprocess);
-            return success ? Ok() : BadRequest("Failed to process file");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogError(ex, "Error processing file {FilePath}", sanitizedPath);
             return StatusCode(500, "Error processing file");
         }
     }

@@ -695,10 +695,18 @@
             }
         }
         
+        /**
+         * The id of a file's Actions menu. The renderers and toggleDropdown()
+         * both derive it from the file path, so it must be injective: two
+         * files may never share an id, or getElementById() would open (and the
+         * menu items would act on) the first file's menu when the second
+         * file's button is clicked. The path's base64url form is unique per
+         * path and uses only id- and selector-safe characters
+         * ([A-Za-z0-9_-]); squashing every other character to '_' was not
+         * unique ('第1話' and '第1巻', 'Saga 001' and 'Saga_001').
+         */
         function getDropdownId(filepath) {
-            // Generate a consistent dropdown ID from filepath
-            // This must match the ID used in the HTML generation
-            return 'dropdown-' + filepath.replace(/[^a-zA-Z0-9]/g, '_');
+            return 'dropdown-' + encodeFilePathForUrl(String(filepath));
         }
         
         function toggleSelectAll(checked) {

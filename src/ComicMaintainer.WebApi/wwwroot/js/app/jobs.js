@@ -295,7 +295,7 @@
                 // first page stay selected for reprocessing.
                 if (libraryViewMode === 'series' && currentSeriesDetailId &&
                     typeof loadSeriesIssues === 'function') {
-                    await loadSeriesIssues(currentSeriesDetailId, true);
+                    await loadSeriesIssues(currentSeriesDetailId, true, { immediate: true });
                 }
                 if (typeof loadActiveLibraryView === 'function') {
                     await loadActiveLibraryView({ refresh: true, keepLoaded: true });
@@ -1276,7 +1276,7 @@
         // without rebuilding the whole series library or losing the detail view.
         async function refreshAfterReadStatusChange() {
             if (libraryViewMode === 'series' && currentSeriesDetailId) {
-                await loadSeriesIssues(currentSeriesDetailId, true);
+                await loadSeriesIssues(currentSeriesDetailId, true, { immediate: true });
             } else {
                 await loadActiveLibraryView({ refresh: true });
             }

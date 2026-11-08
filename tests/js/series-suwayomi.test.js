@@ -43,7 +43,7 @@ test('a reachable Suwayomi server adds a download action to the missing-issues b
     // The answer is remembered for the rest of the session.
     page.click('#seriesDetailPanel .series-detail-back');
     await page.settle();
-    page.click('#fileList .series-card');
+    page.click('#fileList .series-card-open');
     await page.settle();
     assert.equal(page.window.location.hash, '#/series/saga');
     assert.ok(downloadButton(page));

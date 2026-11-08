@@ -78,6 +78,22 @@
         // don't fire duplicate requests before the first one resolves.
         const markReadInFlight = new Set();
         let pageObserver = null; // Intersection Observer for tracking visible pages
+        // The blob URL behind each webcomic page image that is showing one.
+        // A long webcomic binge would otherwise keep every page it ever showed
+        // alive (blob and decoded bitmap) until the tab is closed; see
+        // trimWebcomicStream() and releaseWebcomicStream().
+        const webcomicPageUrls = new Map();
+        // Pages further than this from the one on screen (in stream order, and
+        // more than WEBCOMIC_RETAIN_VIEWPORTS viewports away) give up their
+        // image for a placeholder of the same height, and are fetched again if
+        // the reader comes back to them. Well beyond the prefetch buffer, so
+        // pages are not dropped and refetched back and forth.
+        const WEBCOMIC_RETAIN_PAGES = 15;
+        const WEBCOMIC_RETAIN_VIEWPORTS = 2;
+        // The webcomic stream's scroll listener (and its scroll-end timer),
+        // kept so a rebuilt stream or a mode switch can remove it.
+        let webcomicScrollHandler = null;
+        let webcomicScrollEndTimer = null;
         let currentVisiblePage = 1; // Track the currently visible page in webcomic mode
         let bufferPages = 5; // Number of pages to prefetch ahead/behind
         let allImagesLoaded = false; // Whether all prefetched images have loaded
@@ -260,6 +276,8 @@
             readingMode = readingMode === 'manga' ? 'webcomic' : 'manga';
             localStorage.setItem('readingMode', readingMode);
             updateModeUI();
+            // Leaving the stream (or about to rebuild it) frees its pages.
+            releaseWebcomicStream();
 
             // Reload content in new mode
             const content = document.getElementById('readerContent');
@@ -313,15 +331,17 @@
                 // The footer only contains the manga slider / nav; hide it
                 // entirely in webcomic mode to avoid an empty bar.
                 footer.style.display = 'none';
-                if (pageInfo) pageInfo.style.display = 'inline';
             } else {
                 if (modeLabel) modeLabel.textContent = 'Manga';
                 content.classList.remove('webcomic-mode');
                 container.classList.remove('reader-mode-webcomic');
                 container.classList.add('reader-mode-manga');
                 footer.style.display = 'flex';
-                if (pageInfo) pageInfo.style.display = 'inline';
             }
+            // On a phone the header drops its non-essential controls. In manga
+            // mode the footer shows the page number, but in webcomic mode
+            // (no footer) the header's page info is the only one.
+            if (pageInfo) pageInfo.classList.toggle('hide-on-mobile', readingMode !== 'webcomic');
         }
 
         function updateDirectionUI() {
@@ -340,11 +360,11 @@
 
         // Load pages in continuous scroll mode with buffering (Kavita-style)
         async function loadWebcomicMode(startPage = 1) {
+            releaseWebcomicStream();
             const content = document.getElementById('readerContent');
             content.innerHTML = '<div class="webcomic-container" id="webcomicContainer"></div>';
             
             const container = document.getElementById('webcomicContainer');
-            loadedPages.clear();
             comicMeta.clear();
             // Register the comic we are starting with so prefetching knows its
             // page bounds.
@@ -361,16 +381,24 @@
             
             // Setup page observer for tracking visible pages
             setupPageObserver();
-            
+
+            // Show the position straight away: the observer only reports a
+            // page other than the one that is already current.
+            updatePageInfoInWebcomicMode();
+
             // Calculate initial prefetch range based on buffer
             const [startIdx, endIdx] = calculatePrefetchIndices(startPage);
             
             console.log('Initial prefetch: pages', startIdx, 'to', endIdx);
             
-            // Load buffered pages instead of all pages
+            // Load the buffered pages (not all pages) in parallel, so resuming
+            // deep into a comic does not wait for each one in turn; each lands
+            // in page order whenever it arrives.
+            const initialLoads = [];
             for (let i = startIdx; i <= endIdx; i++) {
-                await loadWebcomicPage(i, container);
+                initialLoads.push(loadWebcomicPage(i, container));
             }
+            await Promise.all(initialLoads);
             
             // Wait for initial images to load, then scroll to starting page
             await waitForImagesToLoad();
@@ -426,172 +454,302 @@
             });
         }
 
-        // Load a single page in webcomic mode
+        // Fetch page `pageNum` of `filePath` as a blob.
+        async function fetchWebcomicPageBlob(filePath, pageNum) {
+            const response = await fetch(
+                `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
+                buildFetchOptions()
+            );
+            if (!response.ok) {
+                throw new Error('Failed to load page');
+            }
+            return response.blob();
+        }
+
+        function revokeObjectUrlQuietly(url) {
+            try { URL.revokeObjectURL(url); } catch (_e) { /* noop */ }
+        }
+
+        // Show `blob` in a webcomic page image, recording its URL so it can
+        // be released again.
+        function showWebcomicPageBlob(img, blob) {
+            const imageUrl = URL.createObjectURL(blob);
+            webcomicPageUrls.set(img, imageUrl);
+            img.src = imageUrl;
+        }
+
+        // Add an image for page `pageNum` of `filePath` to the stream, in page
+        // order within its comic, and observe it. Returns the image, or null
+        // when the stream it was fetched for has been replaced meanwhile (a
+        // mode switch), in which case nothing is kept.
+        function addWebcomicPageImage(container, blob, filePath, pageNum) {
+            if (!container.isConnected) return null;
+            const img = document.createElement('img');
+            showWebcomicPageBlob(img, blob);
+            img.alt = `Page ${pageNum}`;
+            img.dataset.page = pageNum;
+            img.dataset.comic = filePath;
+            insertWebcomicImage(container, img, filePath, pageNum);
+            // Observe the image for visibility tracking
+            if (pageObserver) {
+                pageObserver.observe(img);
+            }
+            return img;
+        }
+
+        // Load a single page of the comic being opened in webcomic mode
         async function loadWebcomicPage(pageNum, container) {
-            const loadKey = pageLoadedKey(comicFilePath, pageNum);
+            const filePath = comicFilePath;
+            const loadKey = pageLoadedKey(filePath, pageNum);
             if (loadedPages.has(loadKey)) return;
             // Mark as in-flight before awaiting so a concurrent call for the
             // same page can't pass the guard above and append a duplicate image.
             loadedPages.add(loadKey);
-            
+
             try {
-                const isAutheliaAuth = isAutheliaAuthenticated();
-                const fetchOptions = {
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
-                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
-                    fetchOptions
-                );
-
-                if (!response.ok) {
-                    throw new Error('Failed to load page');
-                }
-
-                const blob = await response.blob();
-                const imageUrl = URL.createObjectURL(blob);
-                
-                const img = document.createElement('img');
-                img.src = imageUrl;
-                img.alt = `Page ${pageNum}`;
-                img.dataset.page = pageNum;
-                img.dataset.comic = comicFilePath;
-                container.appendChild(img);
-                
-                // Observe the image for visibility tracking
-                if (pageObserver) {
-                    pageObserver.observe(img);
-                }
+                const blob = await fetchWebcomicPageBlob(filePath, pageNum);
+                addWebcomicPageImage(container, blob, filePath, pageNum);
             } catch (error) {
                 console.error(`Error loading page ${pageNum}:`, error);
                 // Allow a retry since this page was never actually inserted.
                 loadedPages.delete(loadKey);
             }
         }
-        
+
         // Load a single page in webcomic mode (async, non-blocking)
         function loadWebcomicPageAsync(pageNum, container, filePath = comicFilePath) {
             const loadKey = pageLoadedKey(filePath, pageNum);
             if (loadedPages.has(loadKey)) return;
-            
+
             // Mark as being loaded
             loadedPages.add(loadKey);
-            
-            const isAutheliaAuth = isAutheliaAuthenticated();
-            const fetchOptions = {
-                credentials: 'include'
-            };
-            
-            if (!isAutheliaAuth && token) {
-                fetchOptions.headers = {
-                    'Authorization': `Bearer ${token}`
-                };
-            }
-            
-            fetch(
-                `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
-                fetchOptions
-            )
-            .then(response => {
-                if (!response.ok) throw new Error('Failed to load page');
-                return response.blob();
-            })
-            .then(blob => {
-                const imageUrl = URL.createObjectURL(blob);
-                
-                const img = document.createElement('img');
-                img.src = imageUrl;
-                img.alt = `Page ${pageNum}`;
-                img.dataset.page = pageNum;
-                img.dataset.comic = filePath;
-                
-                // Insert in correct position within this comic's pages
-                insertWebcomicImage(container, img, filePath, pageNum);
-                
-                // Observe the image for visibility tracking
-                if (pageObserver) {
-                    pageObserver.observe(img);
-                }
-                
-                console.log('Loaded page', pageNum, 'asynchronously');
-            })
-            .catch(error => {
-                console.error(`Error loading page ${pageNum}:`, error);
-                // Remove from loaded set so we can retry
-                loadedPages.delete(loadKey);
+
+            fetchWebcomicPageBlob(filePath, pageNum)
+                .then(blob => {
+                    if (addWebcomicPageImage(container, blob, filePath, pageNum)) {
+                        console.log('Loaded page', pageNum, 'asynchronously');
+                    }
+                })
+                .catch(error => {
+                    console.error(`Error loading page ${pageNum}:`, error);
+                    // Remove from loaded set so we can retry
+                    loadedPages.delete(loadKey);
+                });
+        }
+
+        // The image of page `pageNum` of `filePath` in the stream if it is a
+        // placeholder (its picture was dropped), otherwise null.
+        function findWebcomicPlaceholder(container, filePath, pageNum) {
+            return Array.from(container.querySelectorAll(`img.webcomic-page-placeholder[data-page="${pageNum}"]`))
+                .find(img => img.dataset.comic === filePath) || null;
+        }
+
+        // Give a page far from the one on screen up for a placeholder: the
+        // same image element at its current height, without a picture, its
+        // blob released. The stream's layout and scroll position stay as they
+        // were.
+        function unloadWebcomicPage(img, height) {
+            const imageUrl = webcomicPageUrls.get(img);
+            if (!imageUrl) return;
+            if (height > 0) img.style.height = `${height}px`;
+            img.classList.add('webcomic-page-placeholder');
+            img.removeAttribute('src');
+            webcomicPageUrls.delete(img);
+            revokeObjectUrlQuietly(imageUrl);
+        }
+
+        // Fetch a placeholder's page again now that the reader is back near it.
+        function reloadWebcomicPage(img, filePath, pageNum) {
+            if (img.dataset.reloading) return;
+            img.dataset.reloading = 'true';
+            fetchWebcomicPageBlob(filePath, pageNum)
+                .then(blob => {
+                    // Taken out of the stream meanwhile: keep nothing.
+                    if (!img.isConnected || !img.classList.contains('webcomic-page-placeholder')) return;
+                    img.addEventListener('load', () => { img.style.height = ''; }, { once: true });
+                    img.classList.remove('webcomic-page-placeholder');
+                    showWebcomicPageBlob(img, blob);
+                })
+                .catch(error => {
+                    console.error(`Error loading page ${pageNum}:`, error);
+                })
+                .finally(() => {
+                    delete img.dataset.reloading;
+                });
+        }
+
+        // Keep the stream bounded as the reader moves through it: issues
+        // more than one behind the one on screen are taken out entirely, and
+        // pages far from the one on screen become placeholders.
+        function trimWebcomicStream() {
+            const content = document.getElementById('readerContent');
+            const container = document.getElementById('webcomicContainer');
+            if (readingMode !== 'webcomic' || !content || !container) return;
+
+            evictIssuesBehind(content, container);
+
+            const images = Array.from(container.querySelectorAll('img[data-page]'));
+            const onScreen = images.findIndex(img =>
+                img.dataset.comic === comicFilePath && parseInt(img.dataset.page) === currentVisiblePage);
+            if (onScreen < 0) return;
+            const viewport = content.getBoundingClientRect();
+            const margin = content.clientHeight * WEBCOMIC_RETAIN_VIEWPORTS;
+            images.forEach((img, index) => {
+                if (Math.abs(index - onScreen) <= WEBCOMIC_RETAIN_PAGES || !webcomicPageUrls.has(img)) return;
+                const rect = img.getBoundingClientRect();
+                if (rect.bottom >= viewport.top - margin && rect.top <= viewport.bottom + margin) return;
+                unloadWebcomicPage(img, rect.height);
             });
         }
 
-        // Update page info display in webcomic mode
+        // Take the issues stitched more than one before the one on screen out
+        // of the stream: their pages (releasing their blobs) and everything
+        // above the transition into the issue just before the one on screen.
+        // The view does not move.
+        function evictIssuesBehind(content, container) {
+            const order = Array.from(stitchedComicPaths);
+            const onScreen = order.indexOf(comicFilePath);
+            if (onScreen < 2) return;
+            const kept = order[onScreen - 1];
+            const marker = Array.from(container.querySelectorAll('.new-comic-start-marker'))
+                .find(element => element.dataset.comicPath === kept);
+            if (!marker) return;
+            const previous = marker.previousElementSibling;
+            const boundary = previous && previous.classList.contains('comic-transition') ? previous : marker;
+            const removed = [];
+            for (let element = container.firstElementChild; element && element !== boundary; element = element.nextElementSibling) {
+                removed.push(element);
+            }
+            if (!removed.length) return;
+
+            const topBefore = boundary.getBoundingClientRect().top;
+            for (const element of removed) {
+                if (element.matches('img[data-page]')) {
+                    loadedPages.delete(pageLoadedKey(element.dataset.comic, parseInt(element.dataset.page)));
+                    removeWebcomicPageImage(element);
+                } else {
+                    element.remove();
+                }
+            }
+            // What was above the view is gone; scroll up by as much so the page
+            // on screen stays put.
+            const shift = boundary.getBoundingClientRect().top - topBefore;
+            if (shift) {
+                content.scrollTop += shift;
+                prevScrollPosition = content.scrollTop;
+            }
+        }
+
+        // Take a page image out of the stream, releasing its blob.
+        function removeWebcomicPageImage(img) {
+            if (pageObserver) pageObserver.unobserve(img);
+            const imageUrl = webcomicPageUrls.get(img);
+            if (imageUrl) {
+                webcomicPageUrls.delete(img);
+                revokeObjectUrlQuietly(imageUrl);
+            }
+            img.remove();
+        }
+
+        // Tear the webcomic stream down (switching mode, or rebuilding it):
+        // remove its scroll listener and observer and release every page blob.
+        function releaseWebcomicStream() {
+            removeWebcomicScrollListener();
+            if (pageObserver) {
+                pageObserver.disconnect();
+                pageObserver = null;
+            }
+            for (const imageUrl of webcomicPageUrls.values()) {
+                revokeObjectUrlQuietly(imageUrl);
+            }
+            webcomicPageUrls.clear();
+            loadedPages.clear();
+        }
+
+        // Update page info display in webcomic mode. The progress bar along
+        // the top stays visible while the controls are hidden, so it is what
+        // shows the position on a phone while reading.
         function updatePageInfoInWebcomicMode() {
+            if (readingMode !== 'webcomic') return;
             const pageInfo = document.getElementById('pageInfo');
-            if (pageInfo && readingMode === 'webcomic') {
+            if (pageInfo) {
                 pageInfo.textContent = `Page ${currentVisiblePage} / ${totalPages}`;
+            }
+            updateProgressBar(currentVisiblePage, totalPages);
+        }
+
+        // The thin bar along the top of the reader: how far into the comic
+        // `page` of `pages` is.
+        function updateProgressBar(page, pages) {
+            const progressBar = document.getElementById('readerProgressBar');
+            if (progressBar && pages > 0) {
+                const pct = Math.min(100, Math.max(0, (page / pages) * 100));
+                progressBar.style.width = pct + '%';
             }
         }
         
-        // Setup scroll listener for webcomic mode with direction tracking
+        // Setup scroll listener for webcomic mode with direction tracking. The
+        // handler is kept at module scope so a rebuilt stream or a mode switch
+        // removes it rather than stacking another one each time.
         function setupWebcomicScrollListener() {
             const content = document.getElementById('readerContent');
-            
-            let scrollTimeout;
-            
-            const handleScroll = () => {
-                const scrollPosition = content.scrollTop;
-                
-                // Determine scroll direction
-                if (scrollPosition > prevScrollPosition) {
-                    scrollDirection = 'forward';
-                } else if (scrollPosition < prevScrollPosition) {
-                    scrollDirection = 'backward';
-                }
-                prevScrollPosition = scrollPosition;
-                
-                // Clear existing timeout
-                if (scrollTimeout) {
-                    clearTimeout(scrollTimeout);
-                }
-                
-                // Set new timeout for scroll end detection
-                scrollTimeout = setTimeout(() => {
-                    handleScrollEnd();
-                }, 150);
-                
-                // Check if should load next comic
-                handleWebcomicScroll();
-            };
-            
-            const handleScrollEnd = () => {
-                // Find closest visible image when scrolling stops
-                if (!isScrolling && allImagesLoaded) {
-                    const images = Array.from(document.querySelectorAll('img[data-page]'));
-                    const closestImage = findClosestVisibleImage(images);
-                    
-                    if (closestImage) {
-                        const pageNum = parseInt(closestImage.dataset.page);
-                        const filePath = closestImage.dataset.comic || comicFilePath;
-                        if (!isNaN(pageNum) && (pageNum !== currentPage || filePath !== comicFilePath)) {
-                            setActiveComic(filePath);
-                            currentPage = pageNum;
-                            currentVisiblePage = pageNum;
-                            updatePageInfoInWebcomicMode();
-                            saveReadingProgress(pageNum);
-                        }
-                    }
-                }
-            };
-            
-            content.removeEventListener('scroll', handleScroll);
-            content.addEventListener('scroll', handleScroll);
+            removeWebcomicScrollListener();
+            webcomicScrollHandler = handleWebcomicStreamScroll;
+            content.addEventListener('scroll', webcomicScrollHandler);
         }
-        
+
+        function removeWebcomicScrollListener() {
+            const content = document.getElementById('readerContent');
+            if (webcomicScrollHandler && content) {
+                content.removeEventListener('scroll', webcomicScrollHandler);
+            }
+            webcomicScrollHandler = null;
+            clearTimeout(webcomicScrollEndTimer);
+            webcomicScrollEndTimer = null;
+        }
+
+        function handleWebcomicStreamScroll() {
+            const content = document.getElementById('readerContent');
+            const scrollPosition = content.scrollTop;
+
+            // Determine scroll direction
+            if (scrollPosition > prevScrollPosition) {
+                scrollDirection = 'forward';
+            } else if (scrollPosition < prevScrollPosition) {
+                scrollDirection = 'backward';
+            }
+            prevScrollPosition = scrollPosition;
+
+            // Detect the end of the scroll once it has been still for a moment.
+            clearTimeout(webcomicScrollEndTimer);
+            webcomicScrollEndTimer = setTimeout(handleWebcomicScrollEnd, 150);
+
+            // Check if should load next comic
+            handleWebcomicScroll();
+        }
+
+        function handleWebcomicScrollEnd() {
+            webcomicScrollEndTimer = null;
+            // Find closest visible image when scrolling stops
+            if (isScrolling || !allImagesLoaded) return;
+            const images = Array.from(document.querySelectorAll('img[data-page]'));
+            const closestImage = findClosestVisibleImage(images);
+
+            if (closestImage) {
+                const pageNum = parseInt(closestImage.dataset.page);
+                const filePath = closestImage.dataset.comic || comicFilePath;
+                if (!isNaN(pageNum) && (pageNum !== currentPage || filePath !== comicFilePath)) {
+                    setActiveComic(filePath);
+                    currentPage = pageNum;
+                    currentVisiblePage = pageNum;
+                    updatePageInfoInWebcomicMode();
+                    saveReadingProgress(pageNum);
+                }
+            }
+            // Once the reader settles, let go of what is far behind or ahead.
+            trimWebcomicStream();
+        }
+
         // Find the closest visible image to the top of the viewport
         function findClosestVisibleImage(images) {
             let closestImage = null;
@@ -702,6 +860,8 @@
             totalPages = meta.totalPages;
             const titleEl = document.getElementById('comicTitle');
             if (titleEl) titleEl.textContent = meta.name;
+            // The offline button is about the comic on screen.
+            refreshOfflineStatus().catch((error) => console.log('Offline status unavailable:', error));
         }
 
         // True when `earlierPath` was stitched into the stream before
@@ -729,6 +889,12 @@
             for (let i = startIdx; i <= endIdx; i++) {
                 if (!loadedPages.has(pageLoadedKey(filePath, i))) {
                     loadWebcomicPageAsync(i, container, filePath);
+                    continue;
+                }
+                // A page given up for a placeholder earlier is wanted again.
+                const placeholder = findWebcomicPlaceholder(container, filePath, i);
+                if (placeholder) {
+                    reloadWebcomicPage(placeholder, filePath, i);
                 }
             }
         }
@@ -803,6 +969,7 @@
             if (isLoadingNext) return false;
 
             isLoadingNext = true;
+            const container = document.getElementById('webcomicContainer');
             try {
                 const tailPath = streamTailPath || comicFilePath;
                 if (!tailPath) return false;
@@ -828,10 +995,14 @@
                     if (stitchedComicPaths.has(nextComicInfo.filePath)) return false;
                 }
 
+                // The lookups above may have outlived the stream they were for.
+                if (!container || !container.isConnected) return false;
                 return await stitchNextComic(tailPath, nextComicInfo.filePath);
             } catch (error) {
                 console.error('Error stitching next comic:', error);
-                showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
+                if (container && container.isConnected) {
+                    showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
+                }
                 return false;
             } finally {
                 isLoadingNext = false;
@@ -850,7 +1021,10 @@
         // here touches the viewport — the content goes in below whatever the
         // reader is looking at, which is exactly what makes the transition
         // seamless.
-        // Returns true when the issue was appended.
+        // Returns true when the issue was appended. A mode switch can replace
+        // the stream during any wait here, and everything this touches
+        // (the tail, the issue list, the end notice) then belongs to the new
+        // stream, so the stitch stops without doing anything further.
         async function stitchNextComic(tailPath, nextPath) {
             const container = document.getElementById('webcomicContainer');
             if (!container || !nextPath || nextPath === tailPath) return false;
@@ -859,6 +1033,7 @@
                 `/api/ComicReader/info?filePath=${encodeURIComponent(nextPath)}`,
                 buildFetchOptions()
             );
+            if (!container.isConnected) return false;
 
             if (!response.ok) {
                 // Leave the stream as it is and surface a retry hint; a later
@@ -868,6 +1043,7 @@
             }
 
             const data = await response.json();
+            if (!container.isConnected) return false;
 
             const tailMeta = comicMeta.get(tailPath);
             const leavingComicName = tailMeta ? tailMeta.name : currentComicName;
@@ -907,12 +1083,12 @@
                 pageLoads.push(loadWebcomicPageForNextComic(i, container, nextPath));
             }
             const loadedImages = await Promise.all(pageLoads);
+            if (!container.isConnected) return false;
             if (loadedImages.some(img => !img)) {
                 const stitchedImages = Array.from(container.querySelectorAll('img[data-page]'))
                     .filter(img => img.dataset.comic === nextPath);
                 for (const img of stitchedImages) {
-                    if (pageObserver) pageObserver.unobserve(img);
-                    img.remove();
+                    removeWebcomicPageImage(img);
                 }
                 for (let i = startIdx; i <= endIdx; i++) {
                     loadedPages.delete(pageLoadedKey(nextPath, i));
@@ -987,6 +1163,9 @@
         // not from the active comic, or the reader would keep re-stitching the
         // issue it already appended.
         async function prefetchNextComic(filePath = streamTailPath || comicFilePath) {
+            const stream = document.getElementById('webcomicContainer');
+            let info = null;
+            let failed = true;
             try {
                 const isAutheliaAuth = isAutheliaAuthenticated();
                 const fetchOptions = {
@@ -1005,20 +1184,19 @@
                 );
 
                 if (response.ok) {
-                    nextComicInfo = await response.json();
-                    nextComicPrefetchFailed = false;
-                } else {
-                    // Drop any previous pointer: keeping a stale one risks
-                    // stitching in an issue that is no longer adjacent to the
-                    // comic currently being read.
-                    nextComicInfo = null;
-                    nextComicPrefetchFailed = true;
+                    info = await response.json();
+                    failed = false;
                 }
             } catch (error) {
                 console.error('Error prefetching next comic:', error);
-                nextComicInfo = null;
-                nextComicPrefetchFailed = true;
             }
+            // An answer that outlived its stream is about that stream's tail.
+            if (stream && !stream.isConnected) return;
+            // A failure drops any previous pointer: keeping a stale one risks
+            // stitching in an issue that is no longer adjacent to the comic
+            // currently being read.
+            nextComicInfo = info;
+            nextComicPrefetchFailed = failed;
         }
 
         // Shows a single status line at the end of the stitched stream, either
@@ -1054,47 +1232,13 @@
             // first page appears) can't slip past the guard above and append a
             // duplicate image for the same page while this fetch is in flight.
             loadedPages.add(loadKey);
-            
+
             try {
-                const isAutheliaAuth = isAutheliaAuthenticated();
-                const fetchOptions = {
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
-                    `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
-                    fetchOptions
-                );
-
-                if (!response.ok) {
-                    throw new Error('Failed to load page');
-                }
-
-                const blob = await response.blob();
-                const imageUrl = URL.createObjectURL(blob);
-                
-                const img = document.createElement('img');
-                img.src = imageUrl;
-                img.alt = `Page ${pageNum}`;
-                img.dataset.page = pageNum; // Local page number within the new comic
-                img.dataset.comic = filePath; // Track which comic this page belongs to
-                // Insert in the correct position within this comic's pages so
-                // parallel (out-of-order) arrivals land in ascending page order
-                // rather than in fetch-completion order.
-                insertWebcomicImage(container, img, filePath, pageNum);
-                
-                // Observe the image for visibility tracking
-                if (pageObserver) {
-                    pageObserver.observe(img);
-                }
-                
-                return img;
+                const blob = await fetchWebcomicPageBlob(filePath, pageNum);
+                // Inserted in page order within this comic, so parallel
+                // (out-of-order) arrivals land in ascending page order rather
+                // than in fetch-completion order.
+                return addWebcomicPageImage(container, blob, filePath, pageNum);
             } catch (error) {
                 console.error(`Error loading page ${pageNum}:`, error);
                 // Release the reservation so the page can be retried later.
@@ -1102,7 +1246,7 @@
                 return null;
             }
         }
-        
+
         // Reverse the meaning of prev/next when reading right-to-left so the
         // arrows / tap-zones / footer buttons feel natural for manga.
         function effectivePrev() {
@@ -1295,11 +1439,7 @@
             if (footerPageInfo) footerPageInfo.textContent = `${currentPage} / ${totalPages}`;
             const slider = document.getElementById('pageSlider');
             if (slider) slider.value = String(currentPage);
-            const progressBar = document.getElementById('readerProgressBar');
-            if (progressBar && totalPages > 0) {
-                const pct = Math.min(100, Math.max(0, (currentPage / totalPages) * 100));
-                progressBar.style.width = pct + '%';
-            }
+            updateProgressBar(currentPage, totalPages);
 
             // In manga mode, keep navigation buttons enabled at boundaries to allow comic navigation
             // In webcomic mode, buttons are hidden anyway by updateModeUI()
@@ -1682,16 +1822,76 @@
             }
         }
 
-        // Auto-hide chrome after a few seconds of inactivity. Any mouse move,
-        // tap, or key press resets the timer and re-shows the chrome.
+        // Keys that read (turn a page, scroll the stream) rather than ask for
+        // the controls.
+        const READING_KEYS = new Set([
+            'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'PageUp', 'PageDown', 'Home', 'End', 'a', 'A', 'd', 'D'
+        ]);
+        // After a tap, browsers also fire emulated mouse events (mousemove
+        // included) for pages that only listen to the mouse. Mouse moves this
+        // soon after a touch are those, not someone reaching for the mouse.
+        const TOUCH_MOUSE_EMULATION_MS = 1000;
+        let touchMouseEmulationTimer = null;
+
+        // True for events on the reading surface (#readerContent: the page,
+        // its tap zones, the webcomic stream). Touching it turns a page,
+        // scrolls, or toggles the controls on purpose (the middle tap zone, a
+        // tap on the stream), so it must not also bring the controls back.
+        function isReadingSurfaceEvent(event) {
+            const content = document.getElementById('readerContent');
+            return Boolean(content && event.target instanceof Node && content.contains(event.target));
+        }
+
+        // True when a key operates a focused control of the header or footer
+        // instead of reading: form fields take every key themselves (the page
+        // slider's arrows; the shortcuts leave them alone) and Space presses a
+        // button. Arrow keys on a button that merely kept focus after a click
+        // still turn pages.
+        function isChromeControlKey(event) {
+            const target = event.target;
+            if (!(target instanceof Element) || !target.closest('#readerHeader, #readerFooter')) return false;
+            return event.key === ' ' || target.matches('input, select, textarea');
+        }
+
+        // Auto-hide chrome after a few seconds of inactivity. Moving the
+        // mouse, touching or clicking anything but the page, a key other than
+        // a reading key, a key operating a control, or focus moving to a
+        // control re-shows it and resets the timer; reading (page turns,
+        // scrolling) leaves it as it is.
         function setupChromeAutoHide() {
             const container = document.getElementById('readerContainer');
-            const reset = () => resetChromeIdleTimer();
-            ['mousemove', 'touchstart', 'pointerdown', 'keydown'].forEach(ev => {
-                document.addEventListener(ev, reset, { passive: true });
+            document.addEventListener('mousemove', () => {
+                if (touchMouseEmulationTimer) return;
+                resetChromeIdleTimer();
+            }, { passive: true });
+            ['touchstart', 'pointerdown'].forEach(type => {
+                document.addEventListener(type, (event) => {
+                    if (type === 'touchstart' || event.pointerType === 'touch' || event.pointerType === 'pen') {
+                        clearTimeout(touchMouseEmulationTimer);
+                        touchMouseEmulationTimer = setTimeout(() => {
+                            touchMouseEmulationTimer = null;
+                        }, TOUCH_MOUSE_EMULATION_MS);
+                    }
+                    if (!isReadingSurfaceEvent(event)) resetChromeIdleTimer();
+                }, { passive: true });
             });
-            container.addEventListener('focusin', reset);
+            document.addEventListener('keydown', (event) => {
+                if (!READING_KEYS.has(event.key) || isChromeControlKey(event)) resetChromeIdleTimer();
+            }, { passive: true });
+            container.addEventListener('focusin', () => resetChromeIdleTimer());
+            const content = document.getElementById('readerContent');
+            if (content) content.addEventListener('click', handleReadingSurfaceClick);
             resetChromeIdleTimer();
+        }
+
+        // Webcomic mode has no tap zones: the whole stream is the page, and a
+        // tap on it (one that did not scroll) toggles the controls the way the
+        // middle tap zone does in manga mode.
+        function handleReadingSurfaceClick(event) {
+            if (readingMode !== 'webcomic') return;
+            const target = event.target;
+            if (target instanceof Element && target.closest('button, a, input, select, textarea, label')) return;
+            toggleChromeHidden();
         }
 
         function resetChromeIdleTimer() {
@@ -2043,9 +2243,26 @@
         // same way with or without a connection. This UI drives that cache:
         // it asks the worker to download every page of the current comic,
         // reports progress, and can delete the download again.
+        //
+        // A comic only counts as saved once the worker finished it. One whose
+        // download was cut off (connection lost, worker stopped by the browser,
+        // app closed) keeps the pages it got and is offered as "Resume N/M"
+        // (pages saved of the total), which fetches only what is missing.
         // ------------------------------------------------------------------
-        let offlineDownloadInProgress = false;
+
+        // How long a running download may go without reporting progress before
+        // the reader asks the worker whether it is still working on it. A
+        // worker the browser stopped mid-download never reports back, and the
+        // button must not stay on "Saving N%" for good.
+        const OFFLINE_DOWNLOAD_STALL_MS = 30000;
+
+        // The download this page is following ({ filePath, percent, stallTimer }),
+        // or null. It is tracked by file path rather than as "the current comic"
+        // because stitched webcomic issues change the current comic mid-download.
+        let offlineDownload = null;
+        // What the worker reported for the current comic.
         let offlineComicSaved = false;
+        let offlinePartialDownload = null;
 
         function offlineButtonElements() {
             return {
@@ -2061,7 +2278,27 @@
             label.textContent = text;
             button.title = title;
             button.setAttribute('aria-label', title);
-            button.disabled = offlineDownloadInProgress;
+            button.disabled = offlineDownload !== null;
+        }
+
+        function renderOfflineButton() {
+            if (offlineDownload) {
+                updateOfflineButton(
+                    offlineDownload.percent === null ? 'Saving…' : `Saving ${offlineDownload.percent}%`,
+                    'Downloading this comic for offline reading'
+                );
+            } else if (offlineComicSaved) {
+                updateOfflineButton('Saved', 'Remove this comic from offline storage');
+            } else if (offlinePartialDownload) {
+                // The label is short because the phone header has little room,
+                // and carries the counts because a phone never shows the title.
+                updateOfflineButton(
+                    `Resume ${offlinePartialDownload.savedPages}/${offlinePartialDownload.pageCount}`,
+                    `Finish saving this comic for offline reading (${offlinePartialDownload.savedPages} of ${offlinePartialDownload.pageCount} pages saved)`
+                );
+            } else {
+                updateOfflineButton('Save offline', 'Save this comic for offline reading');
+            }
         }
 
         function sendServiceWorkerMessage(message) {
@@ -2081,24 +2318,102 @@
             });
         }
 
+        function downloadPercent(completed, total) {
+            return total ? Math.round((completed / total) * 100) : 0;
+        }
+
+        function armOfflineDownloadStallTimer() {
+            if (!offlineDownload) return;
+            clearTimeout(offlineDownload.stallTimer);
+            offlineDownload.stallTimer = setTimeout(checkStalledOfflineDownload, OFFLINE_DOWNLOAD_STALL_MS);
+        }
+
+        // Ask the worker to download (or resume, or join the running download
+        // of) `filePath`, and follow its progress.
+        function followOfflineDownload(controller, filePath, percent = null) {
+            offlineDownload = { filePath, percent, stallTimer: null };
+            renderOfflineButton();
+            armOfflineDownloadStallTimer();
+
+            // Reuse the reader's normal auth headers: the worker cannot read
+            // the token out of localStorage itself.
+            const headers = Object.assign({}, buildFetchOptions().headers || {});
+
+            controller.postMessage({
+                type: 'DOWNLOAD_COMIC',
+                filePath,
+                headers: headers
+            });
+        }
+
+        // Stop following the running download; `partial` is what an
+        // interrupted download left for the current comic, if anything.
+        function endOfflineDownload({ saved = false, partial = null } = {}) {
+            const filePath = offlineDownload.filePath;
+            clearTimeout(offlineDownload.stallTimer);
+            offlineDownload = null;
+            if (filePath === comicFilePath) {
+                offlineComicSaved = saved;
+                offlinePartialDownload = partial;
+                renderOfflineButton();
+            } else {
+                // The reader moved on to another (stitched) comic meanwhile.
+                void refreshOfflineStatus();
+            }
+        }
+
+        // No progress for a while: either the worker is still busy (a slow
+        // page), it finished without the page hearing about it, or it was
+        // stopped and the download is not running any more.
+        async function checkStalledOfflineDownload() {
+            if (!offlineDownload) return;
+            const filePath = offlineDownload.filePath;
+            const response = await sendServiceWorkerMessage({ type: 'LIST_OFFLINE_COMICS' });
+            if (!offlineDownload || offlineDownload.filePath !== filePath) return;
+
+            const comics = (response && response.comics) || [];
+            const incomplete = (response && response.incomplete) || [];
+            if (comics.some((comic) => comic.filePath === filePath)) {
+                endOfflineDownload({ saved: true });
+                showMessage('Available for offline reading', 'success');
+                return;
+            }
+            const partial = incomplete.find((comic) => comic.filePath === filePath);
+            if (partial && partial.active) {
+                offlineDownload.percent = downloadPercent(partial.savedPages, partial.pageCount);
+                renderOfflineButton();
+                armOfflineDownloadStallTimer();
+                return;
+            }
+            endOfflineDownload({ partial: partial || null });
+            showMessage('Offline download was interrupted', 'error');
+        }
+
         async function refreshOfflineStatus() {
             if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
                 return;
             }
+            const filePath = comicFilePath;
             const response = await sendServiceWorkerMessage({ type: 'LIST_OFFLINE_COMICS' });
+            if (filePath !== comicFilePath) return;
             const comics = (response && response.comics) || [];
-            offlineComicSaved = comics.some((comic) => comic.filePath === comicFilePath);
-            if (offlineDownloadInProgress) return;
-            updateOfflineButton(
-                offlineComicSaved ? 'Saved' : 'Save offline',
-                offlineComicSaved
-                    ? 'Remove this comic from offline storage'
-                    : 'Save this comic for offline reading'
-            );
+            const incomplete = (response && response.incomplete) || [];
+            const partial = incomplete.find((comic) => comic.filePath === filePath) || null;
+            offlineComicSaved = comics.some((comic) => comic.filePath === filePath);
+            offlinePartialDownload = partial && !partial.active ? partial : null;
+
+            const controller = navigator.serviceWorker.controller;
+            if (partial && partial.active && !offlineDownload && controller) {
+                // The worker is still downloading this comic (started before
+                // the page was reloaded): follow that download.
+                followOfflineDownload(controller, filePath, downloadPercent(partial.savedPages, partial.pageCount));
+                return;
+            }
+            renderOfflineButton();
         }
 
         async function toggleOfflineDownload() {
-            if (offlineDownloadInProgress) return;
+            if (offlineDownload) return;
 
             const controller = navigator.serviceWorker && navigator.serviceWorker.controller;
             if (!controller) {
@@ -2109,48 +2424,41 @@
             if (offlineComicSaved) {
                 await sendServiceWorkerMessage({ type: 'REMOVE_OFFLINE_COMIC', filePath: comicFilePath });
                 offlineComicSaved = false;
-                updateOfflineButton('Save offline', 'Save this comic for offline reading');
+                offlinePartialDownload = null;
+                renderOfflineButton();
                 showMessage('Removed from offline storage', 'info');
                 return;
             }
 
-            offlineDownloadInProgress = true;
-            updateOfflineButton('Saving…', 'Downloading this comic for offline reading');
-
-            // Reuse the reader's normal auth headers: the worker cannot read
-            // the token out of localStorage itself.
-            const headers = Object.assign({}, buildFetchOptions().headers || {});
-
-            controller.postMessage({
-                type: 'DOWNLOAD_COMIC',
-                filePath: comicFilePath,
-                headers: headers
-            });
+            followOfflineDownload(controller, comicFilePath);
         }
 
         function handleServiceWorkerMessage(event) {
             const data = event.data;
-            if (!data || data.filePath !== comicFilePath) return;
+            if (!data || !offlineDownload || data.filePath !== offlineDownload.filePath) return;
 
             if (data.type === 'OFFLINE_DOWNLOAD_PROGRESS') {
-                const percent = data.total ? Math.round((data.completed / data.total) * 100) : 0;
-                updateOfflineButton(`Saving ${percent}%`, 'Downloading this comic for offline reading');
+                offlineDownload.percent = downloadPercent(data.completed, data.total);
+                renderOfflineButton();
+                armOfflineDownloadStallTimer();
                 return;
             }
 
             if (data.type === 'OFFLINE_DOWNLOAD_COMPLETE') {
-                offlineDownloadInProgress = false;
-                offlineComicSaved = true;
-                updateOfflineButton('Saved', 'Remove this comic from offline storage');
+                endOfflineDownload({ saved: true });
                 showMessage('Available for offline reading', 'success');
                 return;
             }
 
             if (data.type === 'OFFLINE_DOWNLOAD_FAILED') {
-                offlineDownloadInProgress = false;
-                offlineComicSaved = false;
-                updateOfflineButton('Save offline', 'Save this comic for offline reading');
-                showMessage('Offline download failed', 'error');
+                // A dropped connection keeps what was saved so far; anything
+                // else (the server refused the comic, storage ran out) left
+                // nothing behind.
+                const partial = data.resumable
+                    ? { savedPages: data.completed, pageCount: data.total }
+                    : null;
+                endOfflineDownload({ partial });
+                showMessage(partial ? 'Offline download was interrupted' : 'Offline download failed', 'error');
             }
         }
 

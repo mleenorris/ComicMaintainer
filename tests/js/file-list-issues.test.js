@@ -17,6 +17,8 @@ const {
 } = require('./support/library-helpers');
 
 const ISSUES_PATH = '/api/files/series/series-1/issues';
+// The longest a reload of the open series waits after the previous one.
+const SERIES_REFRESH_MAX_COOLDOWN_MS = 10000;
 const filePath = n => `Saga/Saga #${String(n).padStart(3, '0')}.cbz`;
 
 /** SeriesIssueDto, as GET /api/files/series/{id}/issues lists it. */
@@ -314,7 +316,8 @@ test('a reload that finishes after the series page was left still corrects the s
     assert.equal(page.$('#selectInfo').textContent, '1 file selected');
 });
 
-test('a reload with another filter than the list it replaces unselects nothing that filter hides', async () => {
+test('a reload with another filter than the list it replaces unselects nothing that filter hides', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     const server = { unmarked: [1, 2] };
     const save = deferred();
     const page = await bootLibrary({
@@ -347,11 +350,14 @@ test('a reload with another filter than the list it replaces unselects nothing t
     toggleIssue(page, 2);
     server.unmarked = [1];
     fileProcessed(page, filePath(2));
+    // (Right after another reload, this one waits for it to cool down.)
+    t.mock.timers.tick(SERIES_REFRESH_MAX_COOLDOWN_MS);
     await page.settle();
     assert.deepEqual(selected(page), [filePath(4), filePath(5)]);
 });
 
-test('overlapping reloads unselect by the newest list, whichever answer arrives last', async () => {
+test('a reload asked for while one is in flight follows it, and the newer list decides the selection', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     const { page } = await bootSeriesPage();
     toggleIssue(page, 2);
     toggleIssue(page, 5);
@@ -359,20 +365,258 @@ test('overlapping reloads unselect by the newest list, whichever answer arrives 
     page.route(`GET ${ISSUES_PATH}`, () => first.promise);
     fileProcessed(page, filePath(2));
     await page.settle();
+    assert.equal(callsTo(page, ISSUES_PATH).length, 2);
 
-    // Another change reloads the page before the first answer arrives; by
-    // now #5 has been deleted.
+    // Another change asks for a reload before the first answer arrives; by
+    // now #5 has been deleted. No second request goes out beside the first.
     page.route(`GET ${ISSUES_PATH}`, issuesResponse([1, 2, 4].map(n => makeIssue(n))));
     fileProcessed(page, filePath(5));
     await page.settle();
-    assert.equal(callsTo(page, ISSUES_PATH).length, 3);
-    assert.deepEqual(selected(page), [filePath(2)]);
-    assert.equal(page.$('#selectInfo').textContent, '1 file selected');
+    assert.equal(callsTo(page, ISSUES_PATH).length, 2);
 
     // The older answer, taken while #2 was being moved, unselects nothing.
     first.resolve(issuesResponse([1, 4, 5].map(n => makeIssue(n))));
     await page.settle();
+    assert.deepEqual(selected(page), [filePath(2), filePath(5)]);
+    assert.equal(page.$('#selectInfo').textContent, '2 files selected');
+
+    // The newer list, fetched once the first has cooled down, does.
+    t.mock.timers.tick(SERIES_REFRESH_MAX_COOLDOWN_MS);
+    await page.settle();
+    assert.equal(callsTo(page, ISSUES_PATH).length, 3);
     assert.deepEqual(selected(page), [filePath(2)]);
     assert.deepEqual(checkedBoxes(page), [filePath(2)]);
     assert.equal(page.$('#selectInfo').textContent, '1 file selected');
+});
+
+// --- reloads while a job processes files -----------------------------------------
+
+const issueCardElements = page => page.$$('#seriesDetailPanel .series-issue-card');
+const openMenuOf = (page, n) => {
+    page.click(card(page, n).querySelector('.series-issue-actions-toggle'));
+    const menu = page.$('.dropdown-menu.show');
+    assert.ok(menu, `the menu of #${n} opened`);
+    return menu;
+};
+
+test('a burst of processed files reloads the open series at once, then once more for the rest', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    const loads = () => callsTo(page, ISSUES_PATH).length;
+    assert.equal(loads(), 1);
+
+    fileProcessed(page, 'Elsewhere/Other #001.cbz');
+    await page.settle();
+    assert.equal(loads(), 2, 'a single change is not delayed');
+
+    // A batch job reports file after file, mostly from other series.
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    for (let n = 2; n <= 30; n++) fileProcessed(page, `Elsewhere/Other #${String(n).padStart(3, '0')}.cbz`);
+    await page.settle();
+    assert.equal(loads(), 2);
+
+    t.mock.timers.tick(SERIES_REFRESH_MAX_COOLDOWN_MS);
+    await page.settle();
+    assert.equal(loads(), 3);
+    assert.ok(card(page, 6), 'the reload shows what changed during the burst');
+
+    t.mock.timers.tick(SERIES_REFRESH_MAX_COOLDOWN_MS);
+    await page.settle();
+    assert.equal(loads(), 3, 'nothing else was left queued');
+});
+
+test('waiting for a reload asked for during a burst waits for one that started after the call', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    fileProcessed(page, filePath(1));
+    await page.settle();
+
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    let reloaded = false;
+    page.run("loadSeriesIssues('series-1', true)").then(() => { reloaded = true; });
+    await page.settle();
+    assert.equal(reloaded, false);
+
+    t.mock.timers.tick(SERIES_REFRESH_MAX_COOLDOWN_MS);
+    await page.settle();
+    assert.equal(reloaded, true);
+    assert.ok(card(page, 6));
+});
+
+test('the reload after a user\'s action does not wait out the cool-down', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    const loads = () => callsTo(page, ISSUES_PATH).length;
+    fileProcessed(page, 'Elsewhere/Other #001.cbz');
+    await page.settle();
+    assert.equal(loads(), 2);
+
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    let reloaded = false;
+    page.run('refreshAfterReadStatusChange()').then(() => { reloaded = true; });
+    await page.settle();
+
+    assert.equal(reloaded, true);
+    assert.equal(loads(), 3);
+    assert.ok(card(page, 6));
+});
+
+test('a user\'s action during a burst starts the queued reload at once, and everyone waiting gets it', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    const loads = () => callsTo(page, ISSUES_PATH).length;
+    fileProcessed(page, 'Elsewhere/Other #001.cbz');
+    await page.settle();
+    let burstDone = false;
+    page.run("loadSeriesIssues('series-1', true)").then(() => { burstDone = true; });
+    await page.settle();
+    assert.equal(loads(), 2);
+    assert.equal(burstDone, false);
+
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    let actionDone = false;
+    page.run('refreshAfterReadStatusChange()').then(() => { actionDone = true; });
+    await page.settle();
+
+    assert.equal(loads(), 3, 'one reload serves both');
+    assert.equal(actionDone, true);
+    assert.equal(burstDone, true);
+    assert.ok(card(page, 6));
+
+    // The queue is empty and the cool-down of that reload is back in force.
+    fileProcessed(page, 'Elsewhere/Other #002.cbz');
+    await page.settle();
+    assert.equal(loads(), 3);
+    t.mock.timers.tick(SERIES_REFRESH_MAX_COOLDOWN_MS);
+    await page.settle();
+    assert.equal(loads(), 4);
+});
+
+test('a user\'s action while a reload is in flight follows its answer without a cool-down', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    const loads = () => callsTo(page, ISSUES_PATH).length;
+    const first = deferred();
+    page.route(`GET ${ISSUES_PATH}`, () => first.promise);
+    fileProcessed(page, 'Elsewhere/Other #001.cbz');
+    await page.settle();
+    assert.equal(loads(), 2);
+    page.route(`GET ${ISSUES_PATH}`, () => issuesResponse(server.issues));
+
+    let reloaded = false;
+    page.run('refreshAfterReadStatusChange()').then(() => { reloaded = true; });
+    await page.settle();
+    assert.equal(loads(), 2, 'nothing goes out beside the request in flight');
+
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    first.resolve(issuesResponse([1, 2, 4, 5].map(n => makeIssue(n))));
+    await page.settle();
+    t.mock.timers.tick(0);
+    await page.settle();
+
+    assert.equal(loads(), 3);
+    assert.equal(reloaded, true);
+    assert.ok(card(page, 6));
+});
+
+test('the reload that shows a finished job does not wait out the cool-down; later file events do', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    const loads = () => callsTo(page, ISSUES_PATH).length;
+    page.run("hasActiveJob = true; currentJobId = 'job-1';");
+    toggleIssue(page, 2);
+    fileProcessed(page, filePath(1));
+    await page.settle();
+    assert.equal(loads(), 2);
+
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    page.eventSources.at(-1).emit('message', {
+        type: 'job_updated',
+        data: { job_id: 'job-1', status: 'completed', progress: { processed: 1, total: 1, success: 1, errors: 0, percentage: 100 } }
+    });
+    // The job's end is handled half a second on, inside the one-second cool-down.
+    t.mock.timers.tick(500);
+    await page.settle();
+
+    assert.equal(loads(), 3);
+    assert.ok(card(page, 6));
+    assert.deepEqual(checkedBoxes(page), [], 'the finished job\'s selection is cleared on screen');
+
+    fileProcessed(page, filePath(1));
+    await page.settle();
+    assert.equal(loads(), 3, 'bursts are coalesced again');
+});
+
+test('a reload that changes nothing leaves the cards and an open issue menu as they are', async () => {
+    const { page } = await bootSeriesPage();
+    const before = issueCardElements(page);
+    const menu = openMenuOf(page, 4);
+
+    fileProcessed(page, 'Elsewhere/Other #001.cbz');
+    await page.settle();
+
+    assert.equal(callsTo(page, ISSUES_PATH).length, 2);
+    const after = issueCardElements(page);
+    assert.equal(after.length, before.length);
+    assert.ok(after.every((element, index) => element === before[index]), 'no card was rebuilt');
+    assert.ok(menu.classList.contains('show'), 'the menu is still open');
+});
+
+test('a reload that changes one issue replaces only its card, keeping other menus open', async () => {
+    const { page, server } = await bootSeriesPage();
+    const before = issueCardElements(page);
+    const menu = openMenuOf(page, 5);
+
+    server.issues = [makeIssue(1), makeIssue(2, { title: 'Saga #2 (Variant)', read: true }), makeIssue(4), makeIssue(5)];
+    fileProcessed(page, filePath(2));
+    await page.settle();
+
+    const after = issueCardElements(page);
+    assert.deepEqual(after.map((element, index) => element === before[index]), [true, false, true, true, true]);
+    assert.equal(after[1].querySelector('.series-issue-title').textContent, 'Saga #2 (Variant)');
+    assert.ok(after[1].classList.contains('series-issue-card--read'));
+    assert.ok(menu.classList.contains('show'), 'the menu of an unchanged card stays open');
+});
+
+test('a reload that changes the issue with the open menu closes that menu first', async () => {
+    const { page, server } = await bootSeriesPage();
+    const menu = openMenuOf(page, 2);
+    assert.equal(menu.parentElement, page.document.body, 'an open menu is moved to <body>');
+
+    server.issues = [makeIssue(1), makeIssue(2, { read: true }), makeIssue(4), makeIssue(5)];
+    fileProcessed(page, filePath(2));
+    await page.settle();
+
+    assert.equal(page.$('.dropdown-menu.show'), null);
+    assert.equal(page.$$('body > .dropdown-menu').length, 0, 'no menu is left behind in <body>');
+    assert.ok(card(page, 2).classList.contains('series-issue-card--read'));
+});
+
+test('a reload that changes more than the cards renders the panel again', async () => {
+    const { page, server } = await bootSeriesPage();
+    const before = issueCardElements(page);
+
+    server.issues = [1, 2, 3, 4, 5].map(n => makeIssue(n));
+    fileProcessed(page, filePath(3));
+    await page.settle();
+
+    const after = issueCardElements(page);
+    assert.equal(page.$('#seriesDetailPanel .series-issue-card--missing'), null, '#3 is no longer missing');
+    assert.equal(after.length, 5);
+    assert.ok(after.every(element => !before.includes(element)));
+    assert.equal(page.$('#seriesDetailPanel .series-detail-selection-meta').textContent, '5 issues in this series');
+});
+
+test('a selection cleared without a re-render shows on the cards a reload leaves in place', async () => {
+    const { page } = await bootSeriesPage();
+    toggleIssue(page, 2);
+    toggleIssue(page, 4);
+    page.run('selectedFiles.clear()');
+
+    fileProcessed(page, 'Elsewhere/Other #001.cbz');
+    await page.settle();
+
+    assert.deepEqual(checkedBoxes(page), []);
+    assert.deepEqual(selectedCards(page), []);
+    assert.equal(page.$('#selectInfo').textContent, 'No files selected');
 });

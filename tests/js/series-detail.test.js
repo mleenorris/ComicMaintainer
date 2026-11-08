@@ -315,7 +315,7 @@ test('Back returns to the library and re-opening the series reuses the loaded is
     assert.equal(page.$('#seriesDetailPanel'), null);
     assert.equal(page.evaluate('currentSeriesDetailId'), null);
 
-    const card = page.$('#fileList .series-card[aria-label="Open series Saga"]');
+    const card = page.$('#fileList .series-card-open[aria-label="Open series Saga"]');
     assert.ok(card, 'the library grid lists the series');
     page.click(card);
     await page.settle();

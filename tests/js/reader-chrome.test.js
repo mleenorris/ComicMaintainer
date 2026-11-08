@@ -6,11 +6,26 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { openReader, press, toasts } = require('./support/reader-helpers');
+const { openReader, openWebcomicReader, press, toasts, streamImage, FILE } = require('./support/reader-helpers');
 
 const chromeHidden = page => page.$('#readerContainer').classList.contains('chrome-hidden');
 const hintShowing = page => page.$('#chromeHint').classList.contains('show-once');
 const activity = (page, type) => page.document.dispatchEvent(new page.window.Event(type));
+
+/**
+ * A finger tapping `element` the way a phone delivers it: touchstart and a
+ * touch pointerdown, then the mouse events browsers emulate for a tap
+ * (mousemove included) and finally the click.
+ */
+function tap(page, element) {
+    const { window } = page;
+    element.dispatchEvent(new window.Event('touchstart', { bubbles: true }));
+    const pointerdown = new window.Event('pointerdown', { bubbles: true });
+    Object.defineProperty(pointerdown, 'pointerType', { value: 'touch' });
+    element.dispatchEvent(pointerdown);
+    element.dispatchEvent(new window.Event('mousemove', { bubbles: true }));
+    element.click();
+}
 
 /** beforeScripts hook giving jsdom a Fullscreen API; `state.requests` records the elements asked to go fullscreen. */
 function fullscreenApi(state, { refuse = false } = {}) {
@@ -95,15 +110,116 @@ test('tapping the middle of the page toggles the controls', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const page = await openReader();
 
-    page.click('#tapZoneMiddle');
+    tap(page, page.$('#tapZoneMiddle'));
     assert.equal(chromeHidden(page), true);
     // Hidden by hand, they stay hidden.
     t.mock.timers.tick(10000);
     assert.equal(chromeHidden(page), true);
 
-    page.click('#tapZoneMiddle');
+    // From hidden, a tap brings them back (the tap itself does not count as
+    // activity that shows them first and then toggles them away again).
+    tap(page, page.$('#tapZoneMiddle'));
     assert.equal(chromeHidden(page), false);
     t.mock.timers.tick(3000);
+    assert.equal(chromeHidden(page), true);
+
+    // Hidden after idling, a tap brings them back too.
+    tap(page, page.$('#tapZoneMiddle'));
+    assert.equal(chromeHidden(page), false);
+});
+
+test('turning pages, by tapping or with the keys, leaves hidden controls hidden', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = await openReader();
+    const currentPage = () => page.run('currentPage');
+    t.mock.timers.tick(3000);
+    assert.equal(chromeHidden(page), true);
+
+    tap(page, page.$('#tapZoneRight'));
+    await page.waitFor(() => currentPage() === 2);
+    assert.equal(chromeHidden(page), true, 'a tap to turn the page');
+    tap(page, page.$('#tapZoneLeft'));
+    await page.waitFor(() => currentPage() === 1);
+    for (const key of ['ArrowRight', 'ArrowLeft', ' ', 'd', 'a', 'PageDown', 'ArrowDown']) {
+        press(page, key);
+        assert.equal(chromeHidden(page), true, key);
+    }
+    // Pressing anything else is asking for the controls.
+    press(page, 'Tab');
+    assert.equal(chromeHidden(page), false);
+});
+
+test('keys that operate the focused page slider keep the controls up and bring them back', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = await openReader({ series: { [FILE]: 30 } });
+    page.$('#pageSlider').focus();
+    t.mock.timers.tick(2000);
+
+    press(page, 'ArrowRight');
+    t.mock.timers.tick(2000);
+    assert.equal(chromeHidden(page), false, 'the key restarted the countdown');
+    t.mock.timers.tick(1000);
+    assert.equal(chromeHidden(page), true);
+
+    press(page, 'Home');
+    assert.equal(chromeHidden(page), false, 'the key brought the controls back');
+});
+
+test('Space on a focused button brings the controls back, while arrow keys on it still just turn pages', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = await openReader({ series: { [FILE]: 30 } });
+    page.$('#modeToggleBtn').focus();
+    t.mock.timers.tick(3000);
+    assert.equal(chromeHidden(page), true);
+
+    press(page, 'ArrowRight');
+    await page.waitFor(() => page.run('currentPage') === 2);
+    assert.equal(chromeHidden(page), true, 'an arrow key reads, wherever focus was left');
+
+    press(page, ' ');
+    assert.equal(chromeHidden(page), false);
+});
+
+test('touching the controls themselves keeps them up', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = await openReader();
+    t.mock.timers.tick(2000);
+
+    tap(page, page.$('#readerFooter'));
+    t.mock.timers.tick(2000);
+    assert.equal(chromeHidden(page), false, 'the tap restarted the countdown');
+    t.mock.timers.tick(1000);
+    assert.equal(chromeHidden(page), true);
+});
+
+test('in webcomic mode a tap on the stream toggles the controls, and scrolling leaves them alone', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = await openWebcomicReader({ series: { [FILE]: 3 } });
+    const image = streamImage(page, FILE, 1);
+    t.mock.timers.tick(3000);
+    assert.equal(chromeHidden(page), true);
+
+    // A finger scrolling the stream touches it without tapping.
+    image.dispatchEvent(new page.window.Event('touchstart', { bubbles: true }));
+    page.$('#readerContent').dispatchEvent(new page.window.Event('scroll'));
+    assert.equal(chromeHidden(page), true);
+
+    tap(page, image);
+    assert.equal(chromeHidden(page), false);
+    tap(page, image);
+    assert.equal(chromeHidden(page), true);
+});
+
+test('in manga mode a click on the page outside the tap zones does not toggle the controls', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const page = await openReader();
+    // On a phone the footer shows the page number, so the header's is dropped.
+    assert.equal(page.$('#pageInfo').classList.contains('hide-on-mobile'), true);
+
+    page.$('#readerContent').click();
+    assert.equal(chromeHidden(page), false);
+    t.mock.timers.tick(3000);
+    page.$('#readerContent').click();
     assert.equal(chromeHidden(page), true);
 });
 

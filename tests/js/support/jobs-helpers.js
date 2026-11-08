@@ -454,6 +454,7 @@ module.exports = {
     startingProgress,
     menuItem,
     chooseMenuItem,
+    issueCard,
     chooseIssueAction,
     startTrackedJob,
     endTrackedJob,

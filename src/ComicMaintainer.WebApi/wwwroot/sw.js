@@ -8,9 +8,17 @@
 // and that new instance must keep using the same cache, not this default.
 let CACHE_NAME = 'comic-maintainer-v2'; // Default fallback
 const CACHE_PREFIX = 'comic-maintainer-';
+// The shell every release precaches; install fails if any of it cannot be
+// stored. /reader.html is the document that renders comics downloaded for
+// offline reading (offline.html links to it). It must be precached rather than
+// left to the runtime document cache: that copy lives in the versioned cache,
+// which activate deletes on every upgrade, so after an update a saved comic
+// could otherwise not be opened offline until the reader had been visited
+// online again.
 const urlsToCache = [
   '/manifest.json',
   '/offline.html',
+  '/reader.html',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
   '/icons/icon-192x192-maskable.png',
@@ -55,6 +63,25 @@ const APP_SCRIPTS = [
 // the offline.html fallback each load their own script from /js/pages/. They
 // are precached the same way as APP_SCRIPTS.
 const PAGE_SCRIPTS = [
+  '/js/pages/reader.js',
+  '/js/pages/offline.js'
+];
+
+// Stylesheets, linked with the same ?v=<version> as the scripts (index.html
+// and reader.html both use main.css).
+const STYLESHEETS = [
+  '/css/main.css'
+];
+
+// The versioned assets the offline reader cannot work without: what
+// reader.html and offline.html load. Unlike the rest of the app scripts these
+// are required, like urlsToCache. A release that activated without them would
+// leave every downloaded comic unreadable offline, so its install fails
+// instead and the previous release, whose cache still holds them, stays in
+// control until the next update check retries.
+const OFFLINE_READER_ASSETS = [
+  '/css/main.css',
+  '/js/shared.js',
   '/js/pages/reader.js',
   '/js/pages/offline.js'
 ];
@@ -249,35 +276,170 @@ async function matchCachedDocument(url) {
   return cached || null;
 }
 
+// How many pages of one comic are fetched at once while downloading it. A few
+// requests in flight hide the per-request latency that dominates on a slow or
+// distant connection without hogging the bandwidth the reader itself needs.
+const OFFLINE_DOWNLOAD_CONCURRENCY = 3;
+
+// A download the worker could not finish (the browser stops a worker whose
+// event runs for minutes, the app was closed, the connection dropped) keeps
+// the pages it already stored, so saving the comic again resumes where it
+// stopped instead of starting over. Until it finishes it is never reported as
+// saved, and one nobody resumed for this long is assumed abandoned and removed.
+const INCOMPLETE_DOWNLOAD_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Downloads running in this worker, by file path: the pages to report progress
+// to, how far it got and the promise that settles when it ends. A worker that
+// was stopped mid-download starts again with none, which is how an interrupted
+// download is told apart from one that is still running.
+const activeOfflineDownloads = new Map();
+
+function errorText(error) {
+  return String(error && error.message ? error.message : error);
+}
+
+function jsonResponse(value) {
+  return new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+}
+
+async function readCachedJson(cache, key) {
+  try {
+    const response = await cache.match(key);
+    return response ? await response.json() : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function offlineCacheUrls(cache) {
+  return new Set((await cache.keys()).map((request) => request.url));
+}
+
+// The page numbers in 1..totalPages that are not stored for filePath; `urls`
+// is the set of URLs in the offline cache.
+function missingOfflinePages(urls, filePath, totalPages) {
+  const missing = [];
+  for (let page = 1; page <= totalPages; page++) {
+    if (!urls.has(offlineCacheKey(filePath, 'page', page))) {
+      missing.push(page);
+    }
+  }
+  return missing;
+}
+
+// Run `task` for every item, at most `limit` at a time. Stops starting new
+// items after the first failure, but only rejects once the ones already
+// running have settled, so nothing is still being stored when the caller
+// cleans up. Of several failures an interrupted one is the one reported: the
+// caller keeps what was stored then, and a resume meets any real refusal again.
+async function forEachConcurrently(items, limit, task) {
+  let next = 0;
+  let failed = false;
+  const lane = async () => {
+    while (!failed && next < items.length) {
+      const item = items[next++];
+      try {
+        await task(item);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    }
+  };
+  const lanes = [];
+  for (let i = 0; i < Math.min(limit, items.length); i++) {
+    lanes.push(lane());
+  }
+  const results = await Promise.allSettled(lanes);
+  const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+  if (failures.length > 0) {
+    throw failures.find((failure) => failure && failure.interrupted) || failures[0];
+  }
+}
+
 // Download every page of a comic (plus its info payload, which the reader
-// needs before it can render anything) into the offline cache. Progress is
-// reported back to the requesting page so it can show a progress indicator.
-async function downloadComicForOffline(client, options) {
+// needs before it can render anything) into the offline cache, reporting
+// progress to every page that asked for it. Asking again while the comic is
+// downloading joins that download; asking for a comic an earlier attempt left
+// incomplete fetches only the pages it is missing. The comic only counts as
+// saved once its completion record is written, after the last page.
+function downloadComicForOffline(client, options) {
   const filePath = options && options.filePath;
-  const headers = (options && options.headers) || {};
   if (!filePath) {
-    return;
+    return Promise.resolve();
   }
 
+  const canReply = Boolean(client) && typeof client.postMessage === 'function';
+  let download = activeOfflineDownloads.get(filePath);
+  if (!download) {
+    download = { filePath, clients: new Set(), completed: 0, total: 0 };
+    download.promise = runOfflineDownload(download, (options && options.headers) || {})
+      .finally(() => activeOfflineDownloads.delete(filePath));
+    activeOfflineDownloads.set(filePath, download);
+  } else if (canReply && download.total) {
+    // A page joining a running download learns how far it already got.
+    client.postMessage({ filePath, type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: download.completed, total: download.total });
+  }
+  if (canReply) {
+    download.clients.add(client);
+  }
+  return download.promise;
+}
+
+async function runOfflineDownload(download, headers) {
+  const filePath = download.filePath;
   const post = (message) => {
-    if (client && typeof client.postMessage === 'function') {
+    for (const client of download.clients) {
       client.postMessage(Object.assign({ filePath }, message));
     }
   };
 
   const fetchOptions = { credentials: 'include', headers };
-  const cache = await caches.open(OFFLINE_CACHE_NAME);
+  let cache;
 
   const fetchAndStore = async (requestUrl, key) => {
-    const response = await fetch(requestUrl, fetchOptions);
+    let response;
+    let body;
+    try {
+      response = await fetch(requestUrl, fetchOptions);
+      // fetch() resolves once the headers are in, so most of a page's transfer
+      // is still to come. Reading the body here is what makes a connection
+      // lost during it count as one: left to cache.put() it would look like a
+      // storage failure.
+      if (response.ok) {
+        body = await response.blob();
+      }
+    } catch (error) {
+      // The connection went away: what is stored so far is kept for a resume.
+      throw Object.assign(new Error(errorText(error)), { interrupted: true });
+    }
     if (!response.ok) {
       throw new Error(`Request failed with status ${response.status}`);
     }
-    await cache.put(key, response.clone());
-    return response;
+    const complete = new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    });
+    await cache.put(key, complete.clone());
+    return complete;
   };
 
   try {
+    cache = await caches.open(OFFLINE_CACHE_NAME);
+
+    // Until this attempt finishes, whatever is stored for the comic belongs to
+    // an unfinished download; the timestamp lets an abandoned one expire.
+    await cache.delete(offlineCacheKey(filePath, 'complete'));
+    await cache.put(offlineCacheKey(filePath, 'pending'), jsonResponse({ updatedAt: Date.now() }));
+
+    const previousInfo = await readCachedJson(cache, offlineCacheKey(filePath, 'info'));
+    if (previousInfo) {
+      download.total = Number(previousInfo.pageCount) || 0;
+      download.completed = download.total
+        - missingOfflinePages(await offlineCacheUrls(cache), filePath, download.total).length;
+    }
+
     const infoResponse = await fetchAndStore(
       `/api/ComicReader/info?filePath=${encodeURIComponent(filePath)}`,
       offlineCacheKey(filePath, 'info')
@@ -288,15 +450,25 @@ async function downloadComicForOffline(client, options) {
       throw new Error('Comic reports no pages');
     }
 
-    post({ type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: 0, total: totalPages });
+    // Pages kept from an earlier attempt belong to another version of the
+    // file when its page count changed since; they cannot be mixed in.
+    if (previousInfo && Number(previousInfo.pageCount) !== totalPages) {
+      await removeOfflineEntries(cache, filePath, 'page/');
+    }
 
-    for (let page = 1; page <= totalPages; page++) {
+    const missing = missingOfflinePages(await offlineCacheUrls(cache), filePath, totalPages);
+    download.total = totalPages;
+    download.completed = totalPages - missing.length;
+    post({ type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: download.completed, total: totalPages });
+
+    await forEachConcurrently(missing, OFFLINE_DOWNLOAD_CONCURRENCY, async (page) => {
       await fetchAndStore(
         `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${page}`,
         offlineCacheKey(filePath, 'page', page)
       );
-      post({ type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: page, total: totalPages });
-    }
+      download.completed++;
+      post({ type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: download.completed, total: totalPages });
+    });
 
     // The cover is what the offline list renders; failing to get it must not
     // invalidate an otherwise complete download.
@@ -309,18 +481,31 @@ async function downloadComicForOffline(client, options) {
       console.log('Service Worker: Failed to cache cover for offline comic', error);
     }
 
+    await cache.put(offlineCacheKey(filePath, 'complete'), jsonResponse({ pageCount: totalPages }));
+    await cache.delete(offlineCacheKey(filePath, 'pending'));
     post({ type: 'OFFLINE_DOWNLOAD_COMPLETE', total: totalPages, fileName: info.fileName });
   } catch (error) {
-    // A partial download is useless and would masquerade as a complete one, so
-    // roll it back.
+    if (error && error.interrupted && download.completed > 0) {
+      post({
+        type: 'OFFLINE_DOWNLOAD_FAILED',
+        error: errorText(error),
+        resumable: true,
+        completed: download.completed,
+        total: download.total
+      });
+      return;
+    }
+    // Nothing worth resuming (the server refused the comic or a page, or
+    // storage ran out): roll the download back rather than keep a fragment.
     await removeOfflineComic(filePath);
-    post({ type: 'OFFLINE_DOWNLOAD_FAILED', error: String(error && error.message ? error.message : error) });
+    post({ type: 'OFFLINE_DOWNLOAD_FAILED', error: errorText(error) });
   }
 }
 
-async function removeOfflineComic(filePath) {
-  const cache = await caches.open(OFFLINE_CACHE_NAME);
-  const prefix = `${self.location.origin}${OFFLINE_KEY_PREFIX}${encodeURIComponent(filePath)}/`;
+// Delete the offline entries stored for filePath whose kind ('info', 'cover',
+// 'page/N', ...) starts with `kindPrefix`; all of them by default.
+async function removeOfflineEntries(cache, filePath, kindPrefix = '') {
+  const prefix = `${self.location.origin}${OFFLINE_KEY_PREFIX}${encodeURIComponent(filePath)}/${kindPrefix}`;
   const keys = await cache.keys();
   await Promise.all(
     keys
@@ -329,13 +514,21 @@ async function removeOfflineComic(filePath) {
   );
 }
 
-// Summarise the offline cache as one entry per downloaded comic so a client
-// (the reader button, the offline page) can render what is available.
+async function removeOfflineComic(filePath) {
+  await removeOfflineEntries(await caches.open(OFFLINE_CACHE_NAME), filePath);
+}
+
+// Summarise the offline cache for a client (the reader button, the offline
+// page). `comics` lists the comics that finished downloading, with the number
+// of pages saved; `incomplete` lists the ones still downloading (`active`) or
+// left unfinished by an interrupted download, which saving again resumes.
+// Interrupted downloads that cannot or will not be resumed are removed.
 async function listOfflineComics() {
   const cache = await caches.open(OFFLINE_CACHE_NAME);
   const keys = await cache.keys();
+  const urls = new Set(keys.map((request) => request.url));
   const prefix = `${self.location.origin}${OFFLINE_KEY_PREFIX}`;
-  const comics = new Map();
+  const stored = new Map();
 
   for (const request of keys) {
     if (!request.url.startsWith(prefix)) {
@@ -352,14 +545,56 @@ async function listOfflineComics() {
     } catch (error) {
       continue;
     }
-    const entry = comics.get(filePath) || { filePath, pageCount: 0 };
-    if (remainder.slice(separator + 1).startsWith('page/')) {
+    const entry = stored.get(filePath) || { filePath, pageCount: 0, complete: false };
+    const kind = remainder.slice(separator + 1);
+    if (kind.startsWith('page/')) {
       entry.pageCount++;
+    } else if (kind === 'complete') {
+      entry.complete = true;
     }
-    comics.set(filePath, entry);
+    stored.set(filePath, entry);
   }
 
-  return Array.from(comics.values());
+  const comics = [];
+  const incomplete = [];
+  for (const entry of stored.values()) {
+    const { filePath } = entry;
+    const running = activeOfflineDownloads.get(filePath);
+    if (running) {
+      incomplete.push({ filePath, savedPages: running.completed, pageCount: running.total, active: true });
+      continue;
+    }
+
+    if (entry.complete) {
+      comics.push({ filePath, pageCount: entry.pageCount });
+      continue;
+    }
+
+    const info = await readCachedJson(cache, offlineCacheKey(filePath, 'info'));
+    const totalPages = (info && Number(info.pageCount)) || 0;
+    const pending = await readCachedJson(cache, offlineCacheKey(filePath, 'pending'));
+    if (!pending) {
+      // Downloads made before completion was recorded have neither marker.
+      // Those that got every page their info lists are complete: record it,
+      // so they are listed straight away from now on.
+      if (totalPages > 0 && missingOfflinePages(urls, filePath, totalPages).length === 0) {
+        await cache.put(offlineCacheKey(filePath, 'complete'), jsonResponse({ pageCount: totalPages }));
+        comics.push({ filePath, pageCount: entry.pageCount });
+      } else {
+        await removeOfflineEntries(cache, filePath);
+      }
+      continue;
+    }
+
+    const age = Date.now() - (Number(pending.updatedAt) || 0);
+    if (totalPages > 0 && entry.pageCount > 0 && age < INCOMPLETE_DOWNLOAD_MAX_AGE_MS) {
+      incomplete.push({ filePath, savedPages: entry.pageCount, pageCount: totalPages, active: false });
+    } else {
+      await removeOfflineEntries(cache, filePath);
+    }
+  }
+
+  return { comics, incomplete };
 }
 
 function replyToMessage(event, payload) {
@@ -472,20 +707,42 @@ async function offlineFallbackResponse() {
   );
 }
 
-function versionedScriptUrl(script) {
-  return `${script}?v=${APP_VERSION}`;
+function versionedAssetUrl(asset) {
+  return `${asset}?v=${APP_VERSION}`;
 }
 
-// Precache the versioned app and page scripts. Best effort: without a known
-// version the URLs the pages will request cannot be predicted, and a failed
-// script must not abort installation (cache.addAll would reject on any 404).
-function precacheAppScripts(cache) {
+// Every script and stylesheet install precaches under its versioned URL.
+function versionedAssets() {
+  return [...APP_SCRIPTS, ...PAGE_SCRIPTS, ...STYLESHEETS];
+}
+
+// An update that cannot learn its version cannot precache what the pages will
+// request, and activating it would delete the cache of the release in control,
+// the only one holding the offline reader's assets. So its install fails, and
+// the next update check tries again. A first install has nothing to lose and
+// carries on with the default cache.
+function refuseUpdateWithoutVersion() {
+  if (!APP_VERSION && self.registration.active) {
+    throw new Error('Cannot install an update without knowing its version');
+  }
+}
+
+// Precache the versioned scripts and stylesheets. Without a known version (a
+// first install only, see above) the URLs the pages will request cannot be
+// predicted, so nothing is. Otherwise the offline reader's assets must all be
+// stored (the returned promise rejects, failing the install, if one cannot
+// be); any other asset that fails is logged and fetched on demand later
+// instead.
+function precacheVersionedAssets(cache) {
   if (!APP_VERSION) {
     return Promise.resolve();
   }
-  return Promise.all([...APP_SCRIPTS, ...PAGE_SCRIPTS].map((script) =>
-    cache.add(versionedScriptUrl(script)).catch((error) => {
-      console.log('Service Worker: Failed to precache', script, error);
+  return Promise.all(versionedAssets().map((asset) =>
+    cache.add(versionedAssetUrl(asset)).catch((error) => {
+      console.log('Service Worker: Failed to precache', asset, error);
+      if (OFFLINE_READER_ASSETS.includes(asset)) {
+        throw error;
+      }
     })
   ));
 }
@@ -493,8 +750,8 @@ function precacheAppScripts(cache) {
 // The absolute URLs of everything install puts in the versioned cache. A
 // woken-up worker knows them too: recallCacheName restores APP_VERSION.
 function precachedUrls() {
-  const scripts = APP_VERSION ? [...APP_SCRIPTS, ...PAGE_SCRIPTS].map(versionedScriptUrl) : [];
-  return new Set([...urlsToCache, ...scripts].map((path) => new URL(path, self.location.origin).href));
+  const assets = APP_VERSION ? versionedAssets().map(versionedAssetUrl) : [];
+  return new Set([...urlsToCache, ...assets].map((path) => new URL(path, self.location.origin).href));
 }
 
 // Install event - cache essential resources
@@ -510,10 +767,11 @@ self.addEventListener('install', (event) => {
   console.log('Service Worker: Installing...');
   event.waitUntil(
     updateCacheName()
+      .then(refuseUpdateWithoutVersion)
       .then(() => caches.open(CACHE_NAME))
       .then((cache) => {
         console.log('Service Worker: Caching essential files with cache name:', CACHE_NAME);
-        return cache.addAll(urlsToCache).then(() => precacheAppScripts(cache));
+        return cache.addAll(urlsToCache).then(() => precacheVersionedAssets(cache));
       })
       .then(() => recordCacheName(INSTALLED_CACHE_KEY))
   );
@@ -799,9 +1057,10 @@ self.addEventListener('message', (event) => {
 
   if (event.data.type === 'LIST_OFFLINE_COMICS') {
     event.waitUntil(
-      listOfflineComics().then((comics) => replyToMessage(event, {
+      listOfflineComics().then(({ comics, incomplete }) => replyToMessage(event, {
         type: 'OFFLINE_COMICS',
-        comics
+        comics,
+        incomplete
       }))
     );
   }

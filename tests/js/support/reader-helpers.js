@@ -230,13 +230,19 @@ class FakeMessageChannel {
 /**
  * A controlling service worker that records postMessage calls and answers
  * LIST_OFFLINE_COMICS / REMOVE_OFFLINE_COMIC on the transferred port the way
- * sw.js replyToMessage() does (`offline: [filePaths]` are the saved comics;
- * `reply: false` never answers, as a busy or dead worker would).
+ * sw.js replyToMessage() does (`offline: [filePaths]` are the saved comics,
+ * `incomplete` the unfinished downloads; `reply: false` never answers, as a
+ * busy or dead worker would).
  */
-function serviceWorkerController({ offline = [], reply = true } = {}) {
+function serviceWorkerController({ offline = [], incomplete = [], reply = true } = {}) {
     const saved = new Set(offline);
     const controller = {
         messages: [],
+        // Unfinished downloads LIST_OFFLINE_COMICS reports
+        // ({ filePath, savedPages, pageCount, active }); tests may change it.
+        incomplete: [...incomplete],
+        // File paths LIST_OFFLINE_COMICS reports as saved; tests may change it.
+        saved,
         postMessage(message, transfer = []) {
             // postMessage clones its message; a plain copy also compares
             // cleanly against test literals (the page's objects come from
@@ -245,7 +251,11 @@ function serviceWorkerController({ offline = [], reply = true } = {}) {
             const port = transfer[0];
             if (!reply || !port) return;
             if (message.type === 'LIST_OFFLINE_COMICS') {
-                port.postMessage({ type: 'OFFLINE_COMICS', comics: [...saved].map(filePath => ({ filePath, pageCount: 1 })) });
+                port.postMessage({
+                    type: 'OFFLINE_COMICS',
+                    comics: [...saved].map(filePath => ({ filePath, pageCount: 1 })),
+                    incomplete: controller.incomplete
+                });
             } else if (message.type === 'REMOVE_OFFLINE_COMIC') {
                 saved.delete(message.filePath);
                 port.postMessage({ type: 'OFFLINE_COMIC_REMOVED', filePath: message.filePath });

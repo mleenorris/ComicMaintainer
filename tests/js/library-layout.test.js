@@ -36,7 +36,7 @@ test('the layout buttons switch between list, grid and compact and remember the 
     page.click('#seriesLayoutListBtn');
     const rows = page.$$('#fileList .series-list[role="list"] > .series-list-row');
     assert.equal(rows.length, 2);
-    assert.equal(rows[0].getAttribute('aria-label'), 'Open series Series 001');
+    assert.equal(rows[0].querySelector('.series-list-row-open').getAttribute('aria-label'), 'Open series Series 001');
     assert.equal(rows[0].querySelector('.series-list-title').textContent, 'Series 001');
     assert.equal(rows[0].querySelector('.series-list-meta').textContent, '3.0 MB');
     assert.equal(rows[0].querySelector('.series-list-count').getAttribute('aria-label'), '3 issues');

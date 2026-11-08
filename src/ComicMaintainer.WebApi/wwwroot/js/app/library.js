@@ -946,19 +946,24 @@
             `;
         }
 
-        // Render the small selectable checkbox overlay shown on every series
-        // card/row. A <span role="checkbox"> is used (rather than a real
-        // <input>) so it is valid inside the surrounding <button> element; the
-        // click is stopped from bubbling so it toggles selection instead of
-        // opening the series.
+        // Render the small select box shown on every series card/row. It is a
+        // native <button> exposed as a checkbox, so it is focusable and
+        // toggles on Space and Enter without extra key handling. It sits
+        // BESIDE the button that opens the series, never inside it: a
+        // button's descendants are presentational, so a control nested in one
+        // is hidden from assistive technology.
         function renderSeriesSelectBox(series) {
             const checked = selectedSeries.has(series.id);
-            return `<span class="series-select-box${checked ? ' series-select-box--checked' : ''}"
-                role="checkbox" aria-checked="${checked ? 'true' : 'false'}" tabindex="0"
+            return `<button type="button" class="series-select-box${checked ? ' series-select-box--checked' : ''}"
+                role="checkbox" aria-checked="${checked ? 'true' : 'false'}"
                 data-series-id="${escapeHtml(series.id)}"
                 title="Select series" aria-label="Select ${escapeHtml(series.title)}"
-                onclick="event.stopPropagation(); toggleSeriesSelection('${escapeJs(series.id)}', this.getAttribute('aria-checked') !== 'true')"
-                onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault(); event.stopPropagation(); toggleSeriesSelection('${escapeJs(series.id)}', this.getAttribute('aria-checked') !== 'true');}">${checked ? '✓' : ''}</span>`;
+                onclick="toggleSeriesSelection('${escapeJs(series.id)}', this.getAttribute('aria-checked') !== 'true')">${checked ? '✓' : ''}</button>`;
+        }
+
+        // The attributes of the button that opens a series from its card/row.
+        function seriesOpenButtonAttributes(series) {
+            return `type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')"`;
         }
 
         // Fetch every file path belonging to a series (ignoring the active
@@ -1084,24 +1089,29 @@
             syncSeriesSelectionControls();
         }
 
+        // Every layout renders a series as a list item holding two sibling
+        // controls: the select box and a button that opens the series.
+
         // Cover-only cards with title overlaid on the cover (original behaviour).
         function renderSeriesLibraryCompact(items = seriesLibrary) {
             return `
-                <div class="series-grid series-grid--compact">
+                <div class="series-grid series-grid--compact" role="list">
                     ${items.map(series => `
-                        <button class="series-card${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <div class="series-card${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" role="listitem">
                             ${renderSeriesSelectBox(series)}
-                            <div class="series-cover-wrapper">
-                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
-                                <div class="series-cover-overlay"></div>
-                                <span class="series-count-badge">${series.issue_count}</span>
-                                ${renderLookupStatusBadge(series)}
-                                <div class="series-card-body">
-                                    <h3 class="series-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
-                                    <div class="series-meta">${formatFileSize(series.total_size)}</div>
+                            <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
+                                <div class="series-cover-wrapper">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <div class="series-cover-overlay"></div>
+                                    <span class="series-count-badge">${series.issue_count}</span>
+                                    ${renderLookupStatusBadge(series)}
+                                    <div class="series-card-body">
+                                        <h3 class="series-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                        <div class="series-meta">${formatFileSize(series.total_size)}</div>
+                                    </div>
                                 </div>
-                            </div>
-                        </button>
+                            </button>
+                        </div>
                     `).join('')}
                 </div>
             `;
@@ -1111,20 +1121,22 @@
         // allowing it to wrap onto multiple lines so long names remain readable.
         function renderSeriesLibraryGrid(items = seriesLibrary) {
             return `
-                <div class="series-grid series-grid--titled">
+                <div class="series-grid series-grid--titled" role="list">
                     ${items.map(series => `
-                        <button class="series-card series-card--titled${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <div class="series-card series-card--titled${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" role="listitem">
                             ${renderSeriesSelectBox(series)}
-                            <div class="series-cover-wrapper">
-                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
-                                <span class="series-count-badge">${series.issue_count}</span>
-                                ${renderLookupStatusBadge(series)}
-                            </div>
-                            <div class="series-card-body series-card-body--below">
-                                <h3 class="series-title series-title--below" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
-                                <div class="series-meta series-meta--below">${formatFileSize(series.total_size)}</div>
-                            </div>
-                        </button>
+                            <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
+                                <div class="series-cover-wrapper">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <span class="series-count-badge">${series.issue_count}</span>
+                                    ${renderLookupStatusBadge(series)}
+                                </div>
+                                <div class="series-card-body series-card-body--below">
+                                    <h3 class="series-title series-title--below" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                    <div class="series-meta series-meta--below">${formatFileSize(series.total_size)}</div>
+                                </div>
+                            </button>
+                        </div>
                     `).join('')}
                 </div>
             `;
@@ -1137,21 +1149,23 @@
             return `
                 <div class="series-list" role="list">
                     ${items.map(series => `
-                        <button class="series-list-row${selectedSeries.has(series.id) ? ' series-list-row--selected' : ''}" type="button" role="listitem" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <div class="series-list-row${selectedSeries.has(series.id) ? ' series-list-row--selected' : ''}" role="listitem">
                             ${renderSeriesSelectBox(series)}
-                            <div class="series-list-thumb-wrapper">
-                                <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
-                            </div>
-                            <div class="series-list-info">
-                                <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
-                                <div class="series-list-meta">${formatFileSize(series.total_size)}</div>
-                            </div>
-                            <div class="series-list-aside">
-                                ${renderLookupStatusBadge(series)}
-                                <span class="series-list-count" aria-label="${series.issue_count} issues">${series.issue_count}</span>
-                                <span class="series-list-chevron" aria-hidden="true">›</span>
-                            </div>
-                        </button>
+                            <button class="series-list-row-open" ${seriesOpenButtonAttributes(series)}>
+                                <div class="series-list-thumb-wrapper">
+                                    <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                </div>
+                                <div class="series-list-info">
+                                    <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                    <div class="series-list-meta">${formatFileSize(series.total_size)}</div>
+                                </div>
+                                <div class="series-list-aside">
+                                    ${renderLookupStatusBadge(series)}
+                                    <span class="series-list-count" aria-label="${series.issue_count} issues">${series.issue_count}</span>
+                                    <span class="series-list-chevron" aria-hidden="true">›</span>
+                                </div>
+                            </button>
+                        </div>
                     `).join('')}
                 </div>
             `;

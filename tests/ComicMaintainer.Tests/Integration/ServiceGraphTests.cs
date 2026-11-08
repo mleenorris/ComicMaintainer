@@ -24,6 +24,12 @@ public class ServiceGraphTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
+    public void TestHost_RunsInDevelopment_SoTheContainerIsValidatedOnBuild()
+    {
+        Assert.True(_factory.Services.GetRequiredService<IHostEnvironment>().IsDevelopment());
+    }
+
+    [Fact]
     public void ScheduledJobRunner_IsTheHostedServiceThatArmsTheTimers()
     {
         var runner = _factory.Services.GetRequiredService<IScheduledJobRunner>();

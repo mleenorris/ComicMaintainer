@@ -472,8 +472,8 @@ public class ProcessingHistoryEntity
 /// Database entity for per-user file read status and resume position.
 /// </summary>
 /// <remarks>
-/// Read state used to live on <c>ComicFileEntity.IsRead</c> and in a separate global
-/// table, both of which were global: in a multi-user
+/// Read state used to live on <c>ComicFileEntity.IsRead</c> and in a table of its own,
+/// both of which were global: in a multi-user
 /// deployment one user marking an issue read flipped it for everyone, and the global state
 /// could disagree with the per-user <see cref="ReadingProgressEntity"/> shown by the reader.
 /// This entity is now the single source of truth for "has this user read this file", and is

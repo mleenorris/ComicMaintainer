@@ -140,12 +140,14 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         return data;
     }
 
-    public static TheoryData<string, string> UnsafePathCases()
-    {
+    public static TheoryData<string, string> UnsafePathCases() =>
         // A differently-cased directory is only a distinct directory on a case-sensitive file system.
-        var kinds = new[] { "sibling-prefix", "other-case", "file-link", "directory-link" }
-            .Where(kind => kind != "other-case" || OperatingSystem.IsLinux())
-            .ToArray();
+        EndpointsWith(new[] { "sibling-prefix", "other-case" }.Where(kind => kind != "other-case" || OperatingSystem.IsLinux()));
+
+    public static TheoryData<string, string> UnsafeLinkCases() => EndpointsWith(["file-link", "directory-link"]);
+
+    private static TheoryData<string, string> EndpointsWith(IEnumerable<string> kinds)
+    {
         var data = new TheoryData<string, string>();
         foreach (var endpoint in PathEndpoints)
         {
@@ -212,7 +214,15 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
 
     [Theory]
     [MemberData(nameof(UnsafePathCases))]
-    public async Task PathEndpoints_RejectPathsThatOnlyLookInsideTheWatchedDirectory(string endpoint, string kind)
+    public Task PathEndpoints_RejectPathsThatOnlyLookInsideTheWatchedDirectory(string endpoint, string kind) =>
+        AssertRejectedAsync(endpoint, kind);
+
+    [SymbolicLinkTheory]
+    [MemberData(nameof(UnsafeLinkCases))]
+    public Task PathEndpoints_RejectLinksInsideTheWatchedDirectoryThatLeadOutOfIt(string endpoint, string kind) =>
+        AssertRejectedAsync(endpoint, kind);
+
+    private async Task AssertRejectedAsync(string endpoint, string kind)
     {
         var path = CreateUnsafePath(kind);
 
@@ -240,7 +250,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         Assert.True(result is OkResult or OkObjectResult or FileContentResult, $"{endpoint}: {result}");
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public async Task PathEndpoints_ReadALinkedArchiveThroughItsPhysicalPathButKeepTheRequestedPathForRecords()
     {
         // A link that stays inside the watched directory is allowed; archive

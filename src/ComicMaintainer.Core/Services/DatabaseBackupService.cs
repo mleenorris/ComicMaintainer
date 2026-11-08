@@ -336,7 +336,9 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
     /// Swaps a staged restore into place. Must run before anything opens the
     /// database (i.e. before migrations). A staged file that no longer looks like
     /// a SQLite database is set aside as <c>.restore-failed</c> and the current
-    /// database is kept.
+    /// database is kept. When it cannot be read or set aside either, for example
+    /// because another program (such as a virus scanner on Windows) holds it open,
+    /// it stays staged for the next start and the current database is kept.
     /// </summary>
     /// <returns>True when a restore was applied.</returns>
     public static bool ApplyPendingRestore(string databasePath, ILogger logger)
@@ -351,7 +353,18 @@ public sealed partial class DatabaseBackupService : IDatabaseBackupService
         if (!HasSqliteHeader(pending))
         {
             var failed = databasePath + ".restore-failed";
-            File.Move(pending, failed, overwrite: true);
+            try
+            {
+                File.Move(pending, failed, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogError(
+                    ex,
+                    "Staged database restore could not be read as a SQLite database and could not be moved aside, so the current database was kept; it is checked again at the next start");
+                return false;
+            }
+
             logger.LogError("Staged database restore is not a SQLite database; it was moved aside and the current database was kept");
             return false;
         }

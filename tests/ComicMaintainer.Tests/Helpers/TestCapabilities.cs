@@ -4,12 +4,14 @@ namespace ComicMaintainer.Tests.Helpers;
 /// What the machine running the tests can do, each detected once per run. Tests that need a capability use the
 /// attributes below, which skip them with the reason instead of letting them fail, or pass without testing
 /// anything, where the capability is missing. Each capability is detected by trying it, not by the operating
-/// system's name, so a Linux or macOS run, which has them all, never skips.
+/// system's name, so a Linux or macOS run, which has them all, never skips. File locking is the exception: it
+/// behaves differently by platform, so each behaviour has its own test, which runs where that behaviour applies.
 /// </summary>
 internal static class TestCapabilities
 {
     private static readonly Lazy<string?> SymbolicLinkProblem = new(DetectSymbolicLinkProblem);
     private static readonly Lazy<string?> Bash = new(FindBash);
+    private static readonly Lazy<bool> ExclusiveLockBlocksMove = new(DetectExclusiveLockBlocksMove);
 
     /// <summary>
     /// Why this process cannot create symbolic links, or null when it can. Windows lets only elevated processes,
@@ -19,6 +21,37 @@ internal static class TestCapabilities
 
     /// <summary>The bash that runs the container scripts, or null when there is none.</summary>
     public static string? BashPath => Bash.Value;
+
+    /// <summary>
+    /// Whether a file another handle holds open without sharing cannot be moved (Windows), rather than being locked
+    /// only against other opens that ask for a lock (the advisory locks of Linux and macOS).
+    /// </summary>
+    public static bool ExclusiveLockBlocksMoving => ExclusiveLockBlocksMove.Value;
+
+    private static bool DetectExclusiveLockBlocksMove()
+    {
+        var directory = Path.Join(Path.GetTempPath(), "ComicMaintainer.Tests", "lock-probe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(directory);
+            var locked = Path.Join(directory, "locked");
+            File.WriteAllText(locked, "probe");
+            using var handle = new FileStream(locked, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            try
+            {
+                File.Move(locked, Path.Join(directory, "moved"));
+                return false;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return true;
+            }
+        }
+        finally
+        {
+            TestIO.TryDeleteDirectory(directory);
+        }
+    }
 
     private static string? DetectSymbolicLinkProblem()
     {
@@ -91,6 +124,30 @@ internal sealed class SymbolicLinkTheoryAttribute : TheoryAttribute
         if (TestCapabilities.WhyNoSymbolicLinks is { } reason)
         {
             Skip = "Needs symbolic links, but " + reason + ".";
+        }
+    }
+}
+
+/// <summary>How a file that another handle holds open without sharing behaves; see <see cref="TestCapabilities.ExclusiveLockBlocksMoving"/>.</summary>
+internal enum ExclusiveLock
+{
+    /// <summary>The file cannot be read, moved or deleted (Windows).</summary>
+    BlocksMoving,
+
+    /// <summary>The lock is advisory: the file can still be moved (Linux and macOS).</summary>
+    AllowsMoving,
+}
+
+/// <summary>A fact about a file held open without sharing; it runs only where such a lock behaves as it needs.</summary>
+internal sealed class ExclusiveLockFactAttribute : FactAttribute
+{
+    public ExclusiveLockFactAttribute(ExclusiveLock needed)
+    {
+        if (TestCapabilities.ExclusiveLockBlocksMoving != (needed == ExclusiveLock.BlocksMoving))
+        {
+            Skip = needed == ExclusiveLock.BlocksMoving
+                ? "Needs a file held open without sharing to be impossible to move, as on Windows; here the lock is advisory."
+                : "Needs a file held open without sharing to stay movable (advisory locks, as on Linux and macOS); here the lock blocks moving it.";
         }
     }
 }

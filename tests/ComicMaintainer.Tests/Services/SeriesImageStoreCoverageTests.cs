@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using ImageMagick;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -479,7 +480,7 @@ public class SeriesImageStoreCoverageTests : IDisposable
         Directory.CreateDirectory(Path.Join(_cacheDir, fileName));
         await using var stream = new MemoryStream(JpegMagic);
 
-        await Assert.ThrowsAnyAsync<IOException>(() =>
+        await TestIO.AssertFileSystemErrorAsync(() =>
             store.SaveUserImageAsync("series-a", stream, "image/jpeg", previousFile: null));
 
         Assert.False(File.Exists(Path.Join(_cacheDir, fileName + ".tmp")));

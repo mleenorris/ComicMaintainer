@@ -131,7 +131,9 @@ public sealed class LogsControllerCoverageTests : IDisposable
         {
             var error = Assert.IsType<ObjectResult>(result.Result);
             Assert.Equal(500, error.StatusCode);
-            Assert.Contains("/Config", JsonSerializer.SerializeToElement(error.Value).GetProperty("error").GetString());
+            // The error names the folder as the operating system resolved it: /Config, or \Config on the current
+            // drive on Windows.
+            Assert.Contains(Path.GetFullPath("/Config"), JsonSerializer.SerializeToElement(error.Value).GetProperty("error").GetString());
         }
     }
 

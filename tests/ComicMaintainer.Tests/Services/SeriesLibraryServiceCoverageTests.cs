@@ -134,13 +134,13 @@ public class SeriesLibraryServiceCoverageTests
         Assert.Collection(saga.Folders,
             folder =>
             {
-                Assert.Equal("/lib/Saga", folder.Directory);
+                Assert.Equal(TestPaths.Native("/lib/Saga"), folder.Directory);
                 Assert.Equal(2, folder.FileCount);
                 Assert.Equal(30, folder.TotalSize);
             },
             folder =>
             {
-                Assert.Equal("/archive/Saga", folder.Directory);
+                Assert.Equal(TestPaths.Native("/archive/Saga"), folder.Directory);
                 Assert.Equal(1, folder.FileCount);
                 Assert.Equal(5, folder.TotalSize);
             });
@@ -157,13 +157,13 @@ public class SeriesLibraryServiceCoverageTests
 
         var saga = groups.Single(g => g.Id == "saga");
         Assert.Equal("Saga", saga.Title);
-        Assert.Equal(new[] { "/lib/Saga", "/archive/Saga" }, saga.Folders.Select(f => f.Directory));
+        Assert.Equal(new[] { TestPaths.Native("/lib/Saga"), TestPaths.Native("/archive/Saga") }, saga.Folders.Select(f => f.Directory));
         Assert.Equal(new[] { 2, 1 }, saga.Folders.Select(f => f.FileCount));
         Assert.Equal(new long[] { 30, 5 }, saga.Folders.Select(f => f.TotalSize));
 
         var batman = groups.Single(g => g.Id == "batman");
         var batmanFolder = Assert.Single(batman.Folders);
-        Assert.Equal("/lib/Batman", batmanFolder.Directory);
+        Assert.Equal(TestPaths.Native("/lib/Batman"), batmanFolder.Directory);
         Assert.Equal(2, batmanFolder.FileCount);
         Assert.Equal(10, batmanFolder.TotalSize);
 
@@ -213,11 +213,11 @@ public class SeriesLibraryServiceCoverageTests
         var withoutDirectories = await service.GetFoldersForNormalizedKeyAsync("unknown-series");
         var unmatched = await service.GetFoldersForNormalizedKeyAsync("not-a-series");
 
-        Assert.Equal(new[] { "/lib/Saga", "/archive/Saga" }, byImageKey.Select(f => f.Directory));
+        Assert.Equal(new[] { TestPaths.Native("/lib/Saga"), TestPaths.Native("/archive/Saga") }, byImageKey.Select(f => f.Directory));
         Assert.Equal(new[] { 2, 1 }, byImageKey.Select(f => f.FileCount));
         Assert.Equal(byImageKey.Select(f => f.Directory), byPinnedId.Select(f => f.Directory));
         var batman = Assert.Single(byPlainId);
-        Assert.Equal("/lib/Batman", batman.Directory);
+        Assert.Equal(TestPaths.Native("/lib/Batman"), batman.Directory);
         Assert.Equal(2, batman.FileCount);
         Assert.Empty(withoutDirectories);
         Assert.Empty(unmatched);

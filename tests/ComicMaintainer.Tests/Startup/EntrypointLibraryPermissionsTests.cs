@@ -39,7 +39,7 @@ public sealed class EntrypointLibraryPermissionsTests : IDisposable
     {
         var run = RunEntrypoint();
 
-        Assert.Equal(0, run.ExitCode);
+        AssertSucceeded(run);
         var library = new[] { Posix(_library), Posix(_duplicates) };
         Assert.DoesNotContain(run.Calls, call => call.Command is "chown" or "chmod" or "find" && call.Arguments.Any(library.Contains));
         // Only the config directories are handed to PUID, and /app is not: the app user must not rewrite its binaries.
@@ -57,7 +57,7 @@ public sealed class EntrypointLibraryPermissionsTests : IDisposable
     {
         var run = RunEntrypoint(unwritable: _duplicates);
 
-        Assert.Equal(0, run.ExitCode);
+        AssertSucceeded(run);
         var checkedFolders = run.Calls.Where(call => call is { Command: "gosu", Arguments: [_, "sh", ..] }).Select(call => call.Arguments[^1]);
         Assert.Equal([Posix(_library), Posix(_duplicates)], checkedFolders);
         Assert.Contains($"cannot write to {Posix(_duplicates)}", run.Output);
@@ -70,7 +70,7 @@ public sealed class EntrypointLibraryPermissionsTests : IDisposable
     {
         var run = RunEntrypoint(("FIX_LIBRARY_PERMISSIONS", "true"));
 
-        Assert.Equal(0, run.ExitCode);
+        AssertSucceeded(run);
         foreach (var folder in new[] { _library, _duplicates })
         {
             var walk = Assert.Single(run.Calls, call => call is { Command: "find" } && call.Arguments[0] == Posix(folder));
@@ -91,7 +91,7 @@ public sealed class EntrypointLibraryPermissionsTests : IDisposable
     {
         var run = RunEntrypoint(("FIX_LIBRARY_PERMISSIONS", "sometimes"));
 
-        Assert.Equal(0, run.ExitCode);
+        AssertSucceeded(run);
         Assert.Contains("FIX_LIBRARY_PERMISSIONS must be true or false", run.Output);
         Assert.DoesNotContain(run.Calls, call => call.Command == "find" && call.Arguments[0] == Posix(_library));
     }
@@ -103,7 +103,7 @@ public sealed class EntrypointLibraryPermissionsTests : IDisposable
 
         var run = RunEntrypoint(("WATCHED_DIR", Posix(missing)));
 
-        Assert.Equal(0, run.ExitCode);
+        AssertSucceeded(run);
         Assert.Contains(run.Calls, call => call is { Command: "mkdir" } && call.Arguments.SequenceEqual(["-p", "--", Posix(missing)]));
         Assert.Contains(run.Calls, call => call is { Command: "chown" } && call.Arguments.SequenceEqual(["1234:5678", "--", Posix(missing)]));
     }
@@ -123,6 +123,9 @@ public sealed class EntrypointLibraryPermissionsTests : IDisposable
 
     private sealed record Run(int ExitCode, string Output, IReadOnlyList<Call> Calls);
 
+    private static void AssertSucceeded(Run run) =>
+        Assert.True(run.ExitCode == 0, $"The entrypoint exited with {run.ExitCode}:{Environment.NewLine}{run.Output}");
+
     private Run RunEntrypoint(params (string Name, string Value)[] environment) => RunEntrypoint(unwritable: null, environment);
 
     private Run RunEntrypoint(string? unwritable, params (string Name, string Value)[] environment)
@@ -138,8 +141,15 @@ public sealed class EntrypointLibraryPermissionsTests : IDisposable
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        // The stubs go first on PATH from inside bash: Git for Windows' bash puts its own /usr/bin, which has the real
+        // mkdir, chown and find, ahead of the PATH it is started with. Its PATH holds /c/... paths, so the stub folder
+        // is converted with cygpath where there is one.
+        start.ArgumentList.Add("-c");
+        start.ArgumentList.Add(
+            """stubs=$1; shift; if command -v cygpath > /dev/null 2>&1; then stubs=$(cygpath -u "$stubs"); fi; PATH="$stubs:$PATH" exec bash "$@" """);
+        start.ArgumentList.Add("bash");
+        start.ArgumentList.Add(Posix(_stubs));
         start.ArgumentList.Add(Posix(script));
-        start.Environment["PATH"] = _stubs + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
         start.Environment["STUB_LOG"] = Posix(_log);
         start.Environment["UNWRITABLE_DIR"] = unwritable is null ? "" : Posix(unwritable);
         start.Environment["PUID"] = "1234";
@@ -158,7 +168,8 @@ public sealed class EntrypointLibraryPermissionsTests : IDisposable
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        Assert.True(process.WaitForExit(TimeSpan.FromSeconds(60)), "The entrypoint did not finish within a minute.");
+        // Generous: Git for Windows starts processes slowly, and each stub is one. Only a hang should fail here.
+        Assert.True(process.WaitForExit(TimeSpan.FromMinutes(5)), "The entrypoint did not finish within five minutes.");
         process.WaitForExit();
 
         var calls = File.Exists(_log)

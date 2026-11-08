@@ -101,10 +101,10 @@ esac
 # so glob metacharacters in the paths are escaped to match them literally.
 escape_find_glob() {
     local value=$1
-    value=${value//\/\\}
-    value=${value//\*/\*}
-    value=${value//\?/\?}
-    value=${value//\[/\[}
+    value=${value//\\/\\\\}
+    value=${value//\*/\\*}
+    value=${value//\?/\\?}
+    value=${value//\[/\\[}
     printf '%s' "$value"
 }
 SECRET_FILE_EXCLUSIONS=()

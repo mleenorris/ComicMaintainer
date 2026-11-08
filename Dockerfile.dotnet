@@ -56,6 +56,9 @@ ENV DUPLICATE_DIR=/duplicates
 ENV CONFIG_DIR=/Config
 ENV PUID=99
 ENV PGID=100
+# The entrypoint only checks that PUID can write to WATCHED_DIR and DUPLICATE_DIR. Set to true to have it give
+# everything in them to PUID:PGID with owner and group read/write access (u+rwX,g+rwX) at start.
+ENV FIX_LIBRARY_PERMISSIONS=false
 
 # Security note: These default values should be overridden in production
 # Use Docker secrets or environment variables for sensitive data

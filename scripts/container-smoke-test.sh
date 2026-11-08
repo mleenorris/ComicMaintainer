@@ -25,8 +25,9 @@ PROCESSING_TIMEOUT="${PROCESSING_TIMEOUT:-60}"
 WORKDIR="$(mktemp -d)"
 WATCH_DIR="${WORKDIR}/watch"
 DUP_DIR="${WORKDIR}/duplicates"
-# The config folder sits inside the duplicates folder on the host, so the entrypoint's permission change on
-# /duplicates reaches it too and must leave it alone.
+# The host folders belong to the runner's user, not to PUID, so the container is started with FIX_LIBRARY_PERMISSIONS=true,
+# which hands the library to PUID. The config folder sits inside the duplicates folder on the host, so that permission
+# change on /duplicates reaches it too and must leave it alone.
 HOST_CONFIG_DIR="${DUP_DIR}/config"
 APP_CONFIG_DIR="/custom-config"
 mkdir -p "${WATCH_DIR}" "${DUP_DIR}" "${HOST_CONFIG_DIR}"
@@ -79,7 +80,7 @@ docker run --rm \
     "${IMAGE}" \
     -c "chown root:root '${APP_CONFIG_DIR}' && chmod 700 '${APP_CONFIG_DIR}' && touch '${APP_CONFIG_DIR}/.permission-test' && chmod 600 '${APP_CONFIG_DIR}/.permission-test'"
 
-# The admin password is read from a private file in /duplicates, which the entrypoint otherwise opens up to everyone.
+# The admin password is read from a private file in /duplicates, which FIX_LIBRARY_PERMISSIONS must leave private.
 printf '%s\n' 'SmokeTestPassword123!' > "${DUP_DIR}/.admin-password"
 chmod 600 "${DUP_DIR}/.admin-password"
 
@@ -94,6 +95,7 @@ docker run -d \
     -e ADMIN_USERNAME=admin \
     -e ADMIN_EMAIL=admin@smoke.local \
     -e ADMIN_PASSWORD_FILE=/duplicates/.admin-password \
+    -e FIX_LIBRARY_PERMISSIONS=true \
     -e WATCHER_ENABLE_RENAME=true \
     -e WATCHER_ENABLE_NORMALIZE=false \
     -v "${WATCH_DIR}:/watched_dir" \
@@ -132,6 +134,14 @@ secret_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' "${APP_CONF
 [ "${secret_mode}" = "600" ] || fail "Private config file mode changed to ${secret_mode}, expected 600"
 admin_password_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%a' /duplicates/.admin-password)"
 [ "${admin_password_mode}" = "600" ] || fail "ADMIN_PASSWORD_FILE mode changed to ${admin_password_mode}, expected 600"
+
+# FIX_LIBRARY_PERMISSIONS only adds owner and group access (u+rwX,g+rwX): the 755 library folder becomes 775 and is
+# handed to PUID, so the app user can write it and the entrypoint does not warn that it cannot.
+library_owner_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%u:%g %a' /watched_dir)"
+[ "${library_owner_mode}" = "10001:10001 775" ] || fail "/watched_dir is ${library_owner_mode}, expected 10001:10001 775"
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q 'cannot write to'; then
+    fail "The entrypoint warned that the app user cannot write to a library folder"
+fi
 
 # --- Verify the watcher sees / processes the fixture file -----------------
 log "Waiting up to ${PROCESSING_TIMEOUT}s for the watcher to react to the fixture..."

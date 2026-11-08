@@ -28,6 +28,7 @@ public sealed class DocumentedEnvironmentVariablesTests
     {
         ["PUID"] = "entrypoint.dotnet.sh",
         ["PGID"] = "entrypoint.dotnet.sh",
+        ["FIX_LIBRARY_PERMISSIONS"] = "entrypoint.dotnet.sh",
         ["CONFIG_DIR"] = "src/ComicMaintainer.WebApi/Startup/ConfigDirectoryResolver.cs",
         ["JWT_SECRET"] = "src/ComicMaintainer.WebApi/Startup/JwtSecretResolver.cs",
         ["ADMIN_USERNAME"] = "src/ComicMaintainer.WebApi/Startup/WebApplicationExtensions.cs",

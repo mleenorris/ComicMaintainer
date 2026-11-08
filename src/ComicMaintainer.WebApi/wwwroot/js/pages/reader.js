@@ -969,6 +969,7 @@
             if (isLoadingNext) return false;
 
             isLoadingNext = true;
+            const container = document.getElementById('webcomicContainer');
             try {
                 const tailPath = streamTailPath || comicFilePath;
                 if (!tailPath) return false;
@@ -994,10 +995,14 @@
                     if (stitchedComicPaths.has(nextComicInfo.filePath)) return false;
                 }
 
+                // The lookups above may have outlived the stream they were for.
+                if (!container || !container.isConnected) return false;
                 return await stitchNextComic(tailPath, nextComicInfo.filePath);
             } catch (error) {
                 console.error('Error stitching next comic:', error);
-                showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
+                if (container && container.isConnected) {
+                    showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
+                }
                 return false;
             } finally {
                 isLoadingNext = false;
@@ -1016,7 +1021,10 @@
         // here touches the viewport — the content goes in below whatever the
         // reader is looking at, which is exactly what makes the transition
         // seamless.
-        // Returns true when the issue was appended.
+        // Returns true when the issue was appended. A mode switch can replace
+        // the stream during any wait here, and everything this touches
+        // (the tail, the issue list, the end notice) then belongs to the new
+        // stream, so the stitch stops without doing anything further.
         async function stitchNextComic(tailPath, nextPath) {
             const container = document.getElementById('webcomicContainer');
             if (!container || !nextPath || nextPath === tailPath) return false;
@@ -1025,6 +1033,7 @@
                 `/api/ComicReader/info?filePath=${encodeURIComponent(nextPath)}`,
                 buildFetchOptions()
             );
+            if (!container.isConnected) return false;
 
             if (!response.ok) {
                 // Leave the stream as it is and surface a retry hint; a later
@@ -1034,6 +1043,7 @@
             }
 
             const data = await response.json();
+            if (!container.isConnected) return false;
 
             const tailMeta = comicMeta.get(tailPath);
             const leavingComicName = tailMeta ? tailMeta.name : currentComicName;
@@ -1073,6 +1083,7 @@
                 pageLoads.push(loadWebcomicPageForNextComic(i, container, nextPath));
             }
             const loadedImages = await Promise.all(pageLoads);
+            if (!container.isConnected) return false;
             if (loadedImages.some(img => !img)) {
                 const stitchedImages = Array.from(container.querySelectorAll('img[data-page]'))
                     .filter(img => img.dataset.comic === nextPath);
@@ -1152,6 +1163,9 @@
         // not from the active comic, or the reader would keep re-stitching the
         // issue it already appended.
         async function prefetchNextComic(filePath = streamTailPath || comicFilePath) {
+            const stream = document.getElementById('webcomicContainer');
+            let info = null;
+            let failed = true;
             try {
                 const isAutheliaAuth = isAutheliaAuthenticated();
                 const fetchOptions = {
@@ -1170,20 +1184,19 @@
                 );
 
                 if (response.ok) {
-                    nextComicInfo = await response.json();
-                    nextComicPrefetchFailed = false;
-                } else {
-                    // Drop any previous pointer: keeping a stale one risks
-                    // stitching in an issue that is no longer adjacent to the
-                    // comic currently being read.
-                    nextComicInfo = null;
-                    nextComicPrefetchFailed = true;
+                    info = await response.json();
+                    failed = false;
                 }
             } catch (error) {
                 console.error('Error prefetching next comic:', error);
-                nextComicInfo = null;
-                nextComicPrefetchFailed = true;
             }
+            // An answer that outlived its stream is about that stream's tail.
+            if (stream && !stream.isConnected) return;
+            // A failure drops any previous pointer: keeping a stale one risks
+            // stitching in an issue that is no longer adjacent to the comic
+            // currently being read.
+            nextComicInfo = info;
+            nextComicPrefetchFailed = failed;
         }
 
         // Shows a single status line at the end of the stitched stream, either

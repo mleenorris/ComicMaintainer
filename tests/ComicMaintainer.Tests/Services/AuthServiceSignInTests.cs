@@ -161,9 +161,189 @@ public sealed class AuthServiceSignInTests : IAsyncLifetime
         Assert.False(success);
         Assert.Empty(token);
         Assert.Equal(AuthService.PublishedPasswordError, error);
-        Assert.Contains(AuthEntries(), e => e.Level == LogLevel.Error && e.Message.Contains("password was published", StringComparison.Ordinal));
+        var refusal = Assert.Single(AuthEntries(), e => e.Level == LogLevel.Error && e.Message.Contains("password was published", StringComparison.Ordinal));
+        // An operator condition: written to the log, but not filed as a bug report.
+        Assert.Contains(refusal.Message, _host.Logs.ExcludedFromErrorReports);
         // Someone guessing the published password does not get to lock the account out either.
         Assert.Equal(0, (await _host.FindUserAsync("admin"))!.AccessFailedCount);
+    }
+
+    // --- changing the password ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task WrongCurrentPasswordsAtAPasswordChangeLockTheAccountOut()
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            var (changed, error) = await ChangePasswordAsync(user.Id, "Wr0ngGuess" + attempt, NewPassword);
+            Assert.False(changed);
+            Assert.NotEqual(AuthService.AccountLockedOutError, error);
+        }
+
+        Assert.NotNull((await _host.FindUserAsync("reader"))!.LockoutEnd);
+        Assert.Contains(AuthEntries(), e => e.Level == LogLevel.Warning && e.Message == "Failed password change for reader from 203.0.113.7: wrong current password");
+        Assert.Contains(AuthEntries(), e => e.Level == LogLevel.Warning && e.Message.StartsWith("Locked out reader until", StringComparison.Ordinal));
+
+        // Even the right password no longer changes it, and the failure says why: the caller is signed in as this account.
+        var (changedWhileLocked, lockedError) = await ChangePasswordAsync(user.Id, Password, NewPassword);
+        Assert.False(changedWhileLocked);
+        Assert.Equal(AuthService.AccountLockedOutError, lockedError);
+        var (signedIn, _, _) = await SignInAsync("reader", NewPassword);
+        Assert.False(signedIn);
+    }
+
+    [Fact]
+    public async Task ARejectedNewPasswordDoesNotCountAsAWrongGuess()
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+
+        var (changed, _) = await ChangePasswordAsync(user.Id, Password, "short");
+
+        Assert.False(changed);
+        Assert.Equal(0, (await _host.FindUserAsync("reader"))!.AccessFailedCount);
+    }
+
+    [Fact]
+    public async Task ASuccessfulPasswordChangeClearsTheFailedAttempts()
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+        await ChangePasswordAsync(user.Id, "Wr0ngGuess", NewPassword);
+        Assert.Equal(1, (await _host.FindUserAsync("reader"))!.AccessFailedCount);
+
+        var (changed, error) = await ChangePasswordAsync(user.Id, Password, NewPassword);
+
+        Assert.True(changed, error);
+        Assert.Equal(0, (await _host.FindUserAsync("reader"))!.AccessFailedCount);
+    }
+
+    // --- what revokes the API key ----------------------------------------------------------------------------
+
+    [Fact]
+    public async Task AChangedPasswordRevokesTheApiKey()
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+        var apiKey = await CreateApiKeyAsync(user.Id);
+
+        Assert.True((await ChangePasswordAsync(user.Id, Password, NewPassword)).Success);
+
+        Assert.Null(await _host.WithAuthServiceAsync(auth => auth.GetUserByApiKeyAsync(apiKey)));
+        var stored = (await _host.FindUserAsync("reader"))!;
+        Assert.Null(stored.ApiKeyHash);
+        Assert.Null(stored.ApiKeyCreatedAt);
+        Assert.Null(stored.ApiKeyLastUsedAt);
+    }
+
+    [Theory]
+    [InlineData("Wr0ngGuess", NewPassword)]
+    [InlineData(Password, "short")]
+    public async Task AFailedPasswordChangeLeavesTheApiKeyAlone(string currentPassword, string newPassword)
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+        var apiKey = await CreateApiKeyAsync(user.Id);
+
+        Assert.False((await ChangePasswordAsync(user.Id, currentPassword, newPassword)).Success);
+
+        Assert.Equal(user.Id, (await _host.WithAuthServiceAsync(auth => auth.GetUserByApiKeyAsync(apiKey)))?.Id);
+        Assert.NotNull((await _host.FindUserAsync("reader"))!.ApiKeyCreatedAt);
+    }
+
+    [Fact]
+    public async Task SigningOutOfAllSessionsRevokesTheApiKey()
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+        var apiKey = await CreateApiKeyAsync(user.Id);
+        var stamp = (await _host.FindUserAsync("reader"))!.SecurityStamp;
+
+        await _host.WithAuthServiceAsync(async auth =>
+        {
+            await auth.LogoutAsync(user.Id, "token-1", DateTime.UtcNow.AddHours(1), allSessions: true);
+            return true;
+        });
+
+        Assert.Null(await _host.WithAuthServiceAsync(auth => auth.GetUserByApiKeyAsync(apiKey)));
+        var stored = (await _host.FindUserAsync("reader"))!;
+        Assert.Null(stored.ApiKeyHash);
+        Assert.NotEqual(stamp, stored.SecurityStamp);
+    }
+
+    [Fact]
+    public async Task SigningOutOfOneSessionLeavesTheApiKeyAlone()
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+        var apiKey = await CreateApiKeyAsync(user.Id);
+
+        await _host.WithAuthServiceAsync(async auth =>
+        {
+            await auth.LogoutAsync(user.Id, "token-1", DateTime.UtcNow.AddHours(1), allSessions: false);
+            return true;
+        });
+
+        Assert.Equal(user.Id, (await _host.WithAuthServiceAsync(auth => auth.GetUserByApiKeyAsync(apiKey)))?.Id);
+    }
+
+    // --- confirming the password ------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ConfirmingTheRightPasswordSucceedsAndClearsTheFailedAttempts()
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+        await ConfirmPasswordAsync(user.Id, "Wr0ngGuess");
+        Assert.Equal(1, (await _host.FindUserAsync("reader"))!.AccessFailedCount);
+
+        Assert.Equal((true, null), await ConfirmPasswordAsync(user.Id, Password));
+
+        Assert.Equal(0, (await _host.FindUserAsync("reader"))!.AccessFailedCount);
+    }
+
+    [Fact]
+    public async Task WrongPasswordsAtAConfirmationLockTheAccountOut()
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            Assert.Equal((false, AuthService.WrongCurrentPasswordError), await ConfirmPasswordAsync(user.Id, "Wr0ngGuess" + attempt));
+        }
+
+        Assert.Contains(AuthEntries(), e => e.Level == LogLevel.Warning && e.Message == "Failed password confirmation for reader from 203.0.113.7: wrong password");
+        Assert.Equal((false, AuthService.AccountLockedOutError), await ConfirmPasswordAsync(user.Id, Password));
+        Assert.False((await SignInAsync("reader", Password)).Success);
+    }
+
+    // A client that sends no password is not guessing one.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task AConfirmationWithoutAPasswordIsRefusedWithoutCountingAgainstTheAccount(string? password)
+    {
+        var user = await _host.CreateUserAsync("reader", Password);
+
+        Assert.Equal((false, AuthService.WrongCurrentPasswordError), await ConfirmPasswordAsync(user.Id, password));
+
+        Assert.Equal(0, (await _host.FindUserAsync("reader"))!.AccessFailedCount);
+    }
+
+    [Fact]
+    public async Task ConfirmingThePasswordOfAnUnknownAccountFails()
+    {
+        Assert.Equal((false, AuthService.WrongCurrentPasswordError), await ConfirmPasswordAsync("no-such-user", Password));
+    }
+
+    private const string NewPassword = "N3wPassw0rdOk";
+
+    private Task<(bool Success, string? Error)> ChangePasswordAsync(string userId, string currentPassword, string newPassword) =>
+        _host.WithAuthServiceAsync(auth => auth.ChangePasswordAsync(userId, currentPassword, newPassword, "203.0.113.7"));
+
+    private Task<(bool Success, string? Error)> ConfirmPasswordAsync(string userId, string? password) =>
+        _host.WithAuthServiceAsync(auth => auth.ConfirmPasswordAsync(userId, password, "203.0.113.7"));
+
+    private async Task<string> CreateApiKeyAsync(string userId)
+    {
+        var (success, apiKey, error) = await _host.WithAuthServiceAsync(auth => auth.GenerateApiKeyAsync(userId));
+        Assert.True(success, error);
+        return apiKey!;
     }
 
     private Task<(bool Success, string Token, string? Error)> SignInAsync(string username, string password) =>

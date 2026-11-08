@@ -18,6 +18,9 @@ namespace ComicMaintainer.WebApi.Authentication;
 /// </summary>
 public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthenticationOptions>
 {
+    /// <summary>The <c>auth_method</c> claim of a request authenticated by Authelia.</summary>
+    public const string AuthMethod = "authelia";
+
     // Upper case, lower case, digits and non-alphanumerics: every class Identity's
     // password validator can require.
     private static readonly string[] PasswordCharacterClasses =
@@ -119,7 +122,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             new(ClaimTypes.NameIdentifier, user.Id),
             new(ClaimTypes.Name, username),  // Always use the username from Authelia header
             new(ClaimTypes.Email, user.Email ?? email ?? FallbackEmail(username)),
-            new("auth_method", "authelia")
+            new("auth_method", AuthMethod)
         };
 
         // Add role claims

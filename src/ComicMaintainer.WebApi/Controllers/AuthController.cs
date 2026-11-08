@@ -40,6 +40,8 @@ public class AuthController : ControllerBase
         _appSettings = appSettings;
     }
 
+    private bool IsApiKeyRequest => User.FindFirst("auth_method")?.Value == ApiKeys.AuthMethod;
+
     /// <summary>
     /// Signs in with a username and password. Failures all answer 401 with the same error, are logged to the auth
     /// log, and lock the account out after repeated wrong passwords; each client address gets a few attempts per
@@ -100,11 +102,13 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Changes the password. This signs every session of the account out; the response carries a new session
-    /// token (<c>token</c>) for the caller.
+    /// Changes the password. This signs every session of the account out and revokes its API key; the response
+    /// carries a new session token (<c>token</c>) for the caller. The current password is checked like one at
+    /// sign-in: rate limited per client, and wrong guesses lock the account out. An API key cannot change it.
     /// </summary>
     [Authorize]
     [HttpPost("change-password")]
+    [EnableRateLimiting(AuthenticationRateLimit.PolicyName)]
     public async Task<ActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
     {
         var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
@@ -113,8 +117,13 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
-        var (success, error) = await _authService.ChangePasswordAsync(userId, request.CurrentPassword, request.NewPassword);
-        
+        if (IsApiKeyRequest)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Sign in to change the password; an API key cannot change it." });
+        }
+
+        var (success, error) = await _authService.ChangePasswordAsync(userId, request.CurrentPassword, request.NewPassword, _clientAddresses.Describe(HttpContext));
+
         if (!success)
         {
             return BadRequest(new { error });
@@ -128,11 +137,15 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Creates an API key for the caller's account, replacing (and so revoking) its previous one. Send it in the
     /// <c>X-API-Key</c> header; it acts as this account with its current roles. It is shown only in this response.
-    /// A request authenticated with an API key cannot create one, so a leaked key cannot replace itself.
+    /// A key outlives any session, so creating one needs the account's current password (<c>currentPassword</c>): a
+    /// stolen session token alone cannot turn into lasting access. Accounts signed in through Authelia are exempt,
+    /// having no password of their own here. A request authenticated with an API key cannot create one, so a leaked
+    /// key cannot replace itself. A password change or signing out of all sessions revokes the key.
     /// </summary>
     [Authorize]
     [HttpPost("api-key")]
-    public async Task<ActionResult> GenerateApiKey()
+    [EnableRateLimiting(AuthenticationRateLimit.PolicyName)]
+    public async Task<ActionResult> GenerateApiKey([FromBody] CreateApiKeyRequest? request = null)
     {
         var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userId))
@@ -140,9 +153,18 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
-        if (User.FindFirst("auth_method")?.Value == ApiKeys.AuthMethod)
+        if (IsApiKeyRequest)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { error = "Sign in to create an API key; an API key cannot create one." });
+        }
+
+        if (User.FindFirst("auth_method")?.Value != AutheliaAuthenticationHandler.AuthMethod)
+        {
+            var (confirmed, confirmError) = await _authService.ConfirmPasswordAsync(userId, request?.CurrentPassword, _clientAddresses.Describe(HttpContext));
+            if (!confirmed)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = confirmError });
+            }
         }
 
         var (success, apiKey, error) = await _authService.GenerateApiKeyAsync(userId);
@@ -339,7 +361,9 @@ public class AuthController : ControllerBase
 public record LoginRequest(string Username, string Password);
 public record RegisterRequest(string Username, string Password, string Email, string? FullName);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
-/// <param name="SetupToken">The one-time setup code from the server log, or <c>SETUP_TOKEN</c>.</param>
-/// <param name="AllSessions">Sign out every session of the account, not just this one.</param>
+/// <param name="CurrentPassword">The account's password; not needed for an account signed in through Authelia.</param>
+public record CreateApiKeyRequest(string? CurrentPassword = null);
+/// <param name="AllSessions">Sign out every session of the account, not just this one, and revoke its API key.</param>
 public record LogoutRequest(bool AllSessions = false);
+/// <param name="SetupToken">The one-time setup code from the server log, or <c>SETUP_TOKEN</c>.</param>
 public record SetupRequest(string Username, string Password, string? Email, string? SetupToken = null);

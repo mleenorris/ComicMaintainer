@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Services.Auth;
@@ -88,6 +89,10 @@ internal static class WebApplicationExtensions
         {
             return;
         }
+
+        // Everything logged below is about the operator's ADMIN_* settings: they need to see it, but it is not a
+        // defect to file an issue for.
+        using var errorReportExclusion = logger.BeginScope(ErrorReportLogProperties.Exclude("operator configuration: admin account settings"));
 
         var safeUsername = LoggingHelper.SanitizeForLog(adminUsername);
         var existing = await userManager.FindByNameAsync(adminUsername);

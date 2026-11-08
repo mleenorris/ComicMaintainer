@@ -2,11 +2,14 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Services.Auth;
+using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
 using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -199,7 +202,7 @@ public class AuthControllerTests
         SetupAuthenticatedUser("user-id-123");
         var request = new ChangePasswordRequest("OldPassword123!", "NewPassword456!");
         _mockAuthService
-            .Setup(s => s.ChangePasswordAsync("user-id-123", "OldPassword123!", "NewPassword456!"))
+            .Setup(s => s.ChangePasswordAsync("user-id-123", "OldPassword123!", "NewPassword456!", It.IsAny<string?>()))
             .ReturnsAsync((true, null));
 
         // Act
@@ -221,7 +224,7 @@ public class AuthControllerTests
         SetupAuthenticatedUser("user-id-123");
         var request = new ChangePasswordRequest("WrongPassword!", "NewPassword456!");
         _mockAuthService
-            .Setup(s => s.ChangePasswordAsync("user-id-123", "WrongPassword!", "NewPassword456!"))
+            .Setup(s => s.ChangePasswordAsync("user-id-123", "WrongPassword!", "NewPassword456!", It.IsAny<string?>()))
             .ReturnsAsync((false, "Current password is incorrect"));
 
         // Act
@@ -253,11 +256,14 @@ public class AuthControllerTests
         SetupAuthenticatedUser("user-id-123");
         var expectedApiKey = "api-key-12345";
         _mockAuthService
+            .Setup(s => s.ConfirmPasswordAsync("user-id-123", "Corr3ctPassword", It.IsAny<string?>()))
+            .ReturnsAsync((true, null));
+        _mockAuthService
             .Setup(s => s.GenerateApiKeyAsync("user-id-123"))
             .ReturnsAsync((true, expectedApiKey, null));
 
         // Act
-        var result = await _controller.GenerateApiKey();
+        var result = await _controller.GenerateApiKey(new CreateApiKeyRequest("Corr3ctPassword"));
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -287,15 +293,96 @@ public class AuthControllerTests
         // Arrange
         SetupAuthenticatedUser("user-id-123");
         _mockAuthService
+            .Setup(s => s.ConfirmPasswordAsync("user-id-123", "Corr3ctPassword", It.IsAny<string?>()))
+            .ReturnsAsync((true, null));
+        _mockAuthService
             .Setup(s => s.GenerateApiKeyAsync("user-id-123"))
             .ReturnsAsync((false, string.Empty, "Failed to generate API key"));
 
         // Act
-        var result = await _controller.GenerateApiKey();
+        var result = await _controller.GenerateApiKey(new CreateApiKeyRequest("Corr3ctPassword"));
 
         // Assert
         var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
         Assert.NotNull(badRequestResult.Value);
+    }
+
+    [Fact]
+    public async Task GenerateApiKey_WithoutTheCurrentPassword_IsForbiddenAndCreatesNoKey()
+    {
+        SetupAuthenticatedUser("user-id-123");
+        _mockAuthService
+            .Setup(s => s.ConfirmPasswordAsync("user-id-123", null, It.IsAny<string?>()))
+            .ReturnsAsync((false, AuthService.WrongCurrentPasswordError));
+
+        var result = await _controller.GenerateApiKey();
+
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(403, forbidden.StatusCode);
+        _mockAuthService.Verify(s => s.GenerateApiKeyAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    // Accounts signed in through Authelia have a random local password nobody knows.
+    [Fact]
+    public async Task GenerateApiKey_ForAnAutheliaSession_NeedsNoPassword()
+    {
+        SetupUserWithAuthMethod("user-id-123", AutheliaAuthenticationHandler.AuthMethod);
+        _mockAuthService
+            .Setup(s => s.GenerateApiKeyAsync("user-id-123"))
+            .ReturnsAsync((true, "api-key-12345", null));
+
+        var result = await _controller.GenerateApiKey();
+
+        Assert.IsType<OkObjectResult>(result);
+        _mockAuthService.Verify(s => s.ConfirmPasswordAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GenerateApiKey_WithAnApiKey_IsForbiddenWithoutCheckingAPassword()
+    {
+        SetupUserWithAuthMethod("user-id-123", ApiKeys.AuthMethod);
+
+        var result = await _controller.GenerateApiKey(new CreateApiKeyRequest("Corr3ctPassword"));
+
+        Assert.Equal(403, Assert.IsType<ObjectResult>(result).StatusCode);
+        _mockAuthService.Verify(s => s.ConfirmPasswordAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithAnApiKey_IsForbiddenWithoutCheckingThePassword()
+    {
+        SetupUserWithAuthMethod("user-id-123", ApiKeys.AuthMethod);
+
+        var result = await _controller.ChangePassword(new ChangePasswordRequest("OldPassword123!", "NewPassword456!"));
+
+        Assert.Equal(403, Assert.IsType<ObjectResult>(result).StatusCode);
+        _mockAuthService.Verify(s => s.ChangePasswordAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    // These check a password, so they must not offer unlimited guesses to whoever holds a session token.
+    [Theory]
+    [InlineData(nameof(AuthController.ChangePassword))]
+    [InlineData(nameof(AuthController.GenerateApiKey))]
+    public void PasswordCheckingEndpoints_AreRateLimitedPerClient(string action)
+    {
+        var limit = typeof(AuthController).GetMethod(action)!.GetCustomAttributes(typeof(EnableRateLimitingAttribute), false)
+            .Cast<EnableRateLimitingAttribute>()
+            .Single();
+
+        Assert.Equal(AuthenticationRateLimit.PolicyName, limit.PolicyName);
+    }
+
+    private void SetupUserWithAuthMethod(string userId, string authMethod)
+    {
+        var identity = new System.Security.Claims.ClaimsIdentity(
+        [
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, userId),
+            new System.Security.Claims.Claim("auth_method", authMethod),
+        ], "Test");
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(identity) }
+        };
     }
 
     [Fact]

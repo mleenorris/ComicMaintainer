@@ -1,5 +1,6 @@
 using System.Reflection;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Models.Auth;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Identity;
@@ -182,6 +183,7 @@ public sealed class WebApplicationExtensionsTests : IDisposable
         var error = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
         Assert.Contains("published with ComicMaintainer", error.Message);
         Assert.Contains("first-run setup", error.Message);
+        Assert.True(error.ExcludedFromErrorReports, "the operator's configuration is not a bug to report");
     }
 
     [Fact]
@@ -232,6 +234,7 @@ public sealed class WebApplicationExtensionsTests : IDisposable
         Assert.True(await users.CheckPasswordAsync(admin, "Admin123!"));
         var error = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
         Assert.Contains("still has a password that was published", error.Message);
+        Assert.True(error.ExcludedFromErrorReports, "the operator's configuration is not a bug to report");
     }
 
     [Fact]
@@ -303,9 +306,10 @@ public sealed class WebApplicationExtensionsTests : IDisposable
 
     private sealed class CapturingLogger : ILogger
     {
-        private readonly List<(LogLevel Level, string Message)> _entries = [];
+        private readonly List<(LogLevel Level, string Message, bool ExcludedFromErrorReports)> _entries = [];
+        private readonly AsyncLocal<int> _excludeScopes = new();
 
-        public IReadOnlyList<(LogLevel Level, string Message)> Entries
+        public IReadOnlyList<(LogLevel Level, string Message, bool ExcludedFromErrorReports)> Entries
         {
             get
             {
@@ -316,7 +320,17 @@ public sealed class WebApplicationExtensionsTests : IDisposable
             }
         }
 
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+        {
+            if (state is not IReadOnlyDictionary<string, object> properties
+                || !properties.ContainsKey(ErrorReportLogProperties.ExcludeFromErrorReports))
+            {
+                return null;
+            }
+
+            _excludeScopes.Value++;
+            return new ExcludeScope(this);
+        }
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
@@ -324,8 +338,13 @@ public sealed class WebApplicationExtensionsTests : IDisposable
         {
             lock (_entries)
             {
-                _entries.Add((logLevel, formatter(state, exception)));
+                _entries.Add((logLevel, formatter(state, exception), _excludeScopes.Value > 0));
             }
+        }
+
+        private sealed class ExcludeScope(CapturingLogger logger) : IDisposable
+        {
+            public void Dispose() => logger._excludeScopes.Value--;
         }
     }
 

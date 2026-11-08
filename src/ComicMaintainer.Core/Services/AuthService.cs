@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services.Auth;
@@ -30,6 +31,12 @@ public class AuthService : IAuthService
         "This password was published as an example with ComicMaintainer, so it can no longer be used to sign in. " +
         "If this is the administrator created from ADMIN_PASSWORD, set ADMIN_PASSWORD to a password of your own and " +
         "restart ComicMaintainer to replace it.";
+
+    /// <summary>The error when the current password confirming a sensitive action is missing or wrong.</summary>
+    public const string WrongCurrentPasswordError = "The current password is missing or wrong.";
+
+    /// <summary>The error of an action that needs the password while the account is locked out by wrong passwords.</summary>
+    public const string AccountLockedOutError = "Too many wrong passwords. Try again later.";
 
     // A failed sign-in for an account that does not exist or is locked out still checks a password against a hash,
     // with the cost of the app's own hasher, so that the response time does not tell those cases apart.
@@ -81,7 +88,7 @@ public class AuthService : IAuthService
     public async Task<(bool Success, string Token, string? Error)> LoginAsync(string username, string password, string? clientAddress = null)
     {
         var safeUsername = LoggingHelper.SanitizeForLog(username);
-        var client = LoggingHelper.SanitizeForLog(string.IsNullOrEmpty(clientAddress) ? "unknown" : clientAddress);
+        var client = DescribeClient(clientAddress);
 
         var user = string.IsNullOrEmpty(username) ? null : await _userManager.FindByNameAsync(username);
         if (user is null)
@@ -109,10 +116,15 @@ public class AuthService : IAuthService
 
         if (PublishedPasswords.IsPublished(password))
         {
-            _logger.LogError(
-                "Refused the sign-in of {Username} from {ClientAddress}: the account's password was published with " +
-                "ComicMaintainer. Set ADMIN_PASSWORD to a password of your own and restart to replace it.",
-                safeUsername, client);
+            // An operator has to act on this, but it is their configuration, not a defect to report.
+            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("operator configuration: published password")))
+            {
+                _logger.LogError(
+                    "Refused the sign-in of {Username} from {ClientAddress}: the account's password was published with " +
+                    "ComicMaintainer. Set ADMIN_PASSWORD to a password of your own and restart to replace it.",
+                    safeUsername, client);
+            }
+
             return (false, string.Empty, PublishedPasswordError);
         }
 
@@ -151,6 +163,9 @@ public class AuthService : IAuthService
     private static void SpendAPasswordCheck(string? password) =>
         TimingHasher.VerifyHashedPassword(TimingUser, TimingHash.Value, password ?? string.Empty);
 
+    private static string DescribeClient(string? clientAddress) =>
+        LoggingHelper.SanitizeForLog(string.IsNullOrEmpty(clientAddress) ? "unknown" : clientAddress);
+
     public async Task<(bool Success, string? Error)> RegisterAsync(string username, string password, string email, string? fullName = null)
     {
         var user = new ApplicationUser
@@ -173,7 +188,12 @@ public class AuthService : IAuthService
         return (true, null);
     }
 
-    public async Task<(bool Success, string? Error)> ChangePasswordAsync(string userId, string currentPassword, string newPassword)
+    /// <summary>
+    /// Changes the password. A wrong current password counts towards the account's lockout, as it does at sign-in,
+    /// and a locked-out account cannot change its password. A password change is what someone does about a
+    /// compromised account, so it signs out every session and revokes the API key.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> ChangePasswordAsync(string userId, string currentPassword, string newPassword, string? clientAddress = null)
     {
         var user = await _userManager.FindByIdAsync(userId);
         if (user == null)
@@ -181,16 +201,71 @@ public class AuthService : IAuthService
             return (false, "User not found");
         }
 
+        var safeUsername = LoggingHelper.SanitizeForLog(user.UserName);
+        var client = DescribeClient(clientAddress);
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            _logger.LogWarning("Refused a password change of {Username} from {ClientAddress}: the account is locked out", safeUsername, client);
+            return (false, AccountLockedOutError);
+        }
+
+        // The key goes in the same write as the new password, so that a change can never leave it behind.
+        var previousKey = ClearApiKey(user);
         var result = await _userManager.ChangePasswordAsync(user, currentPassword, newPassword);
         if (!result.Succeeded)
         {
+            RestoreApiKey(user, previousKey);
+            if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.PasswordMismatch)))
+            {
+                await RecordFailedAttemptAsync(user, safeUsername, client);
+                _logger.LogWarning("Failed password change for {Username} from {ClientAddress}: wrong current password", safeUsername, client);
+            }
+
             return (false, string.Join(", ", result.Errors.Select(e => e.Description)));
         }
 
+        await _userManager.ResetAccessFailedCountAsync(user);
+
         // Identity changed the security stamp, which ends every session token of the account.
         _sessions.Invalidate(user.Id);
-        _logger.LogInformation("{Username} changed their password; their other sessions are signed out", LoggingHelper.SanitizeForLog(user.UserName));
+        _logger.LogInformation("{Username} changed their password; their other sessions are signed out and their API key is revoked", safeUsername);
 
+        return (true, null);
+    }
+
+    /// <summary>
+    /// Confirms that the caller of a sensitive action, already signed in, knows the account's password, so that a
+    /// stolen session token alone is not enough for it. A wrong password counts towards the account's lockout.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> ConfirmPasswordAsync(string userId, string? password, string? clientAddress = null)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null)
+        {
+            return (false, WrongCurrentPasswordError);
+        }
+
+        var safeUsername = LoggingHelper.SanitizeForLog(user.UserName);
+        var client = DescribeClient(clientAddress);
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            _logger.LogWarning("Refused to confirm the password of {Username} from {ClientAddress}: the account is locked out", safeUsername, client);
+            return (false, AccountLockedOutError);
+        }
+
+        if (string.IsNullOrEmpty(password))
+        {
+            return (false, WrongCurrentPasswordError);
+        }
+
+        if (!await _userManager.CheckPasswordAsync(user, password))
+        {
+            await RecordFailedAttemptAsync(user, safeUsername, client);
+            _logger.LogWarning("Failed password confirmation for {Username} from {ClientAddress}: wrong password", safeUsername, client);
+            return (false, WrongCurrentPasswordError);
+        }
+
+        await _userManager.ResetAccessFailedCountAsync(user);
         return (true, null);
     }
 
@@ -251,9 +326,7 @@ public class AuthService : IAuthService
             return false;
         }
 
-        user.ApiKeyHash = null;
-        user.ApiKeyCreatedAt = null;
-        user.ApiKeyLastUsedAt = null;
+        ClearApiKey(user);
         var result = await _userManager.UpdateAsync(user);
         if (!result.Succeeded)
         {
@@ -263,6 +336,25 @@ public class AuthService : IAuthService
         _logger.LogInformation("{Username} revoked their API key", LoggingHelper.SanitizeForLog(user.UserName));
         return true;
     }
+
+    // Takes the API key off the account (the caller saves it) and returns what it was.
+    private static StoredApiKey ClearApiKey(ApplicationUser user)
+    {
+        var previous = new StoredApiKey(user.ApiKeyHash, user.ApiKeyCreatedAt, user.ApiKeyLastUsedAt);
+        user.ApiKeyHash = null;
+        user.ApiKeyCreatedAt = null;
+        user.ApiKeyLastUsedAt = null;
+        return previous;
+    }
+
+    private static void RestoreApiKey(ApplicationUser user, StoredApiKey key)
+    {
+        user.ApiKeyHash = key.Hash;
+        user.ApiKeyCreatedAt = key.CreatedAt;
+        user.ApiKeyLastUsedAt = key.LastUsedAt;
+    }
+
+    private readonly record struct StoredApiKey(string? Hash, DateTime? CreatedAt, DateTime? LastUsedAt);
 
     /// <inheritdoc />
     public async Task<ApiKeyStatus> GetApiKeyStatusAsync(string userId)
@@ -319,7 +411,8 @@ public class AuthService : IAuthService
 
     /// <summary>
     /// Signs out: revokes the session token <paramref name="tokenId"/> (valid until <paramref name="expiresAtUtc"/>),
-    /// or, with <paramref name="allSessions"/>, every token of the account, by changing its security stamp.
+    /// or, with <paramref name="allSessions"/>, every token of the account, by changing its security stamp, and its
+    /// API key: signing out everywhere is what someone does about a compromised account, and a key must not survive it.
     /// </summary>
     public async Task LogoutAsync(string userId, string? tokenId, DateTime expiresAtUtc, bool allSessions)
     {
@@ -328,9 +421,11 @@ public class AuthService : IAuthService
             var user = await _userManager.FindByIdAsync(userId);
             if (user is not null)
             {
+                // UpdateSecurityStampAsync saves the account, so the key goes in the same write.
+                ClearApiKey(user);
                 await _userManager.UpdateSecurityStampAsync(user);
                 _sessions.Invalidate(userId);
-                _logger.LogInformation("{Username} signed out of every session", LoggingHelper.SanitizeForLog(user.UserName));
+                _logger.LogInformation("{Username} signed out of every session and revoked their API key", LoggingHelper.SanitizeForLog(user.UserName));
             }
 
             return;
@@ -383,7 +478,7 @@ public class AuthService : IAuthService
         string username, string password, string? email, string? setupToken, string? clientAddress = null)
     {
         var safeUsername = LoggingHelper.SanitizeForLog(username);
-        var client = LoggingHelper.SanitizeForLog(string.IsNullOrEmpty(clientAddress) ? "unknown" : clientAddress);
+        var client = DescribeClient(clientAddress);
 
         await SetupLock.WaitAsync();
         try

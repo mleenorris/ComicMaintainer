@@ -179,7 +179,7 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "auth", "change-password"]
 						},
-						"description": "Change the current user's password. This signs every session of the account out; the response carries a new session token (saved to jwt_token)."
+						"description": "Change the current user's password. This signs every session of the account out and revokes its API key; the response carries a new session token (saved to jwt_token). An API key cannot change the password."
 					},
 					"response": []
 				},
@@ -202,7 +202,7 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "auth", "logout"]
 						},
-						"description": "Revoke the session token this request is made with (204). With allSessions: true, every session token of the account is revoked."
+						"description": "Revoke the session token this request is made with (204). With allSessions: true, every session token and the API key of the account are revoked."
 					},
 					"response": []
 				},
@@ -238,13 +238,22 @@
 					],
 					"request": {
 						"method": "POST",
-						"header": [],
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"currentPassword\": \"{{admin_password}}\"\n}"
+						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/api-key",
 							"host": ["{{base_url}}"],
 							"path": ["api", "auth", "api-key"]
 						},
-						"description": "Create an API key for the current user, replacing (and revoking) any previous one. Send it in the X-API-Key header (never in a URL): it acts as this user with their current roles. It is shown only in this response (saved to api_key) and stored as a hash. Must be called with a session token: an API key cannot create one."
+						"description": "Create an API key for the current user, replacing (and revoking) any previous one. Send it in the X-API-Key header (never in a URL): it acts as this user with their current roles. It is shown only in this response (saved to api_key) and stored as a hash. Must be called with a session token and the account's current password (accounts signed in through Authelia need none): an API key cannot create one, and a stolen session token alone cannot either. Changing the password or signing out of all sessions revokes the key."
 					},
 					"response": []
 				},

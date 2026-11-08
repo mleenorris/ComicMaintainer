@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using ComicMaintainer.Core.Models.Auth;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Services.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
@@ -184,9 +185,65 @@ public sealed class ApiKeyAuthenticationIntegrationTests : IClassFixture<Session
         Assert.Equal(HttpStatusCode.BadRequest, (await SendAsync(HttpMethod.Post, "/api/status/clear-selected", apiKey: writerKey, body: new { files = Array.Empty<string>() })).Status);
     }
 
+    // A session token alone must not be enough to mint a credential that outlives the session.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Wr0ngPassword")]
+    public async Task CreatingAKeyNeedsTheCurrentPassword(string? currentPassword)
+    {
+        var (user, session) = await _host.SignInNewUserAsync();
+
+        var (status, body) = await SendAsync(HttpMethod.Post, "/api/auth/api-key", bearer: session, body: currentPassword is null ? null : new { currentPassword });
+
+        Assert.Equal(HttpStatusCode.Forbidden, status);
+        Assert.Equal(AuthService.WrongCurrentPasswordError, body.GetProperty("error").GetString());
+        Assert.Null((await FindUserAsync(user.Id)).ApiKeyHash);
+    }
+
+    [Fact]
+    public async Task ChangingThePasswordRevokesTheKey()
+    {
+        var (_, session) = await _host.SignInNewUserAsync();
+        var apiKey = await CreateApiKeyAsync(session);
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Get, "/api/auth/user", apiKey: apiKey)).Status);
+
+        var (status, _) = await SendAsync(HttpMethod.Post, "/api/auth/change-password", bearer: session, body: new { currentPassword = SessionTokenIntegrationTests.Password, newPassword = "N3wPassw0rdOk" });
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(HttpMethod.Get, "/api/auth/user", apiKey: apiKey)).Status);
+    }
+
+    [Fact]
+    public async Task SigningOutOfAllSessionsRevokesTheKeyButSigningOutOfOneDoesNot()
+    {
+        var (user, firstSession) = await _host.SignInNewUserAsync();
+        var secondSession = await _host.SignInAsync(user.UserName!, SessionTokenIntegrationTests.Password);
+        var apiKey = await CreateApiKeyAsync(firstSession);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(HttpMethod.Post, "/api/auth/logout", bearer: firstSession)).Status);
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Get, "/api/auth/user", apiKey: apiKey)).Status);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(HttpMethod.Post, "/api/auth/logout", bearer: secondSession, body: new { allSessions = true })).Status);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(HttpMethod.Get, "/api/auth/user", apiKey: apiKey)).Status);
+    }
+
+    // A leaked key must not be able to take the account over by changing its password.
+    [Fact]
+    public async Task AKeyCannotChangeThePassword()
+    {
+        var (user, session) = await _host.SignInNewUserAsync();
+        var apiKey = await CreateApiKeyAsync(session);
+
+        var (status, _) = await SendAsync(HttpMethod.Post, "/api/auth/change-password", apiKey: apiKey, body: new { currentPassword = SessionTokenIntegrationTests.Password, newPassword = "N3wPassw0rdOk" });
+
+        Assert.Equal(HttpStatusCode.Forbidden, status);
+        Assert.NotEmpty(await _host.SignInAsync(user.UserName!, SessionTokenIntegrationTests.Password));
+    }
+
     private async Task<string> CreateApiKeyAsync(string session)
     {
-        var (status, body) = await SendAsync(HttpMethod.Post, "/api/auth/api-key", bearer: session);
+        var (status, body) = await SendAsync(HttpMethod.Post, "/api/auth/api-key", bearer: session, body: new { currentPassword = SessionTokenIntegrationTests.Password });
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(ApiKeys.HeaderName, body.GetProperty("header").GetString());
         return body.GetProperty("apiKey").GetString()!;

@@ -8,6 +8,8 @@ using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services.Auth;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -25,7 +27,8 @@ namespace ComicMaintainer.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class SessionTokenIntegrationTests : IClassFixture<SessionTokenIntegrationTests.JwtHost>
 {
-    private const string Password = "Passw0rdOk";
+    /// <summary>The password of the accounts <see cref="JwtHost.SignInNewUserAsync"/> creates.</summary>
+    internal const string Password = "Passw0rdOk";
     private readonly JwtHost _host;
 
     public SessionTokenIntegrationTests(JwtHost host)
@@ -259,9 +262,28 @@ public sealed class SessionTokenIntegrationTests : IClassFixture<SessionTokenInt
                 builder.UseSetting("AppSettings:DuplicateDirectory", duplicates);
                 builder.UseSetting("AppSettings:ConfigDirectory", config);
                 builder.UseSetting("CONFIG_DIR", config);
+                builder.ConfigureServices(services => services.AddSingleton<IStartupFilter, DistinctClientAddressStartupFilter>());
             });
             Client = Factory.CreateClient();
             return Task.CompletedTask;
+        }
+
+        // Each request comes from an address of its own, so that the per-client limit on the endpoints that check
+        // a password (AuthenticationRateLimit) does not get in the way of the many requests these tests make.
+        private sealed class DistinctClientAddressStartupFilter : IStartupFilter
+        {
+            private int _requests;
+
+            public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+            {
+                app.Use((context, nextMiddleware) =>
+                {
+                    var request = Interlocked.Increment(ref _requests);
+                    context.Connection.RemoteIpAddress = new IPAddress([198, 18, (byte)(request >> 8), (byte)request]);
+                    return nextMiddleware();
+                });
+                next(app);
+            };
         }
 
         public async Task DisposeAsync()

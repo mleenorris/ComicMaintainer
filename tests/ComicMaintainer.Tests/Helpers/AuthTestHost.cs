@@ -1,5 +1,6 @@
 using System.Reflection;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
@@ -127,6 +128,8 @@ internal sealed class AuthTestHost : IAsyncDisposable
     public sealed class CapturingLoggerProvider : ILoggerProvider
     {
         private readonly List<(string Category, LogLevel Level, string Message)> _entries = [];
+        private readonly List<string> _excludedFromErrorReports = [];
+        private readonly AsyncLocal<int> _excludeScopes = new();
 
         public IReadOnlyList<(string Category, LogLevel Level, string Message)> Entries
         {
@@ -139,6 +142,18 @@ internal sealed class AuthTestHost : IAsyncDisposable
             }
         }
 
+        /// <summary>The messages logged inside an <see cref="ErrorReportLogProperties.Exclude"/> scope.</summary>
+        public IReadOnlyList<string> ExcludedFromErrorReports
+        {
+            get
+            {
+                lock (_entries)
+                {
+                    return _excludedFromErrorReports.ToList();
+                }
+            }
+        }
+
         public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
 
         public void Dispose()
@@ -147,17 +162,37 @@ internal sealed class AuthTestHost : IAsyncDisposable
 
         private sealed class Logger(CapturingLoggerProvider provider, string category) : ILogger
         {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+            {
+                if (state is not IReadOnlyDictionary<string, object> properties
+                    || !properties.ContainsKey(ErrorReportLogProperties.ExcludeFromErrorReports))
+                {
+                    return null;
+                }
+
+                provider._excludeScopes.Value++;
+                return new ExcludeScope(provider);
+            }
 
             public bool IsEnabled(LogLevel logLevel) => true;
 
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             {
+                var message = formatter(state, exception);
                 lock (provider._entries)
                 {
-                    provider._entries.Add((category, logLevel, formatter(state, exception)));
+                    provider._entries.Add((category, logLevel, message));
+                    if (provider._excludeScopes.Value > 0)
+                    {
+                        provider._excludedFromErrorReports.Add(message);
+                    }
                 }
             }
+        }
+
+        private sealed class ExcludeScope(CapturingLoggerProvider provider) : IDisposable
+        {
+            public void Dispose() => provider._excludeScopes.Value--;
         }
     }
 }

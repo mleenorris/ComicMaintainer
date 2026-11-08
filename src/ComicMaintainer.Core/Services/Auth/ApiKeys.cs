@@ -7,8 +7,9 @@ namespace ComicMaintainer.Core.Services.Auth;
 /// <summary>
 /// API keys: long-lived credentials for scripts and integrations. A key is sent in the <see cref="HeaderName"/>
 /// header, never in a URL, and acts as the account that created it, with that account's current roles, until it
-/// is revoked or replaced or the account is disabled. Each account has at most one key. Only its SHA-256 hash is
-/// stored (<see cref="Hash"/>): the key itself is shown once, when it is created.
+/// is revoked or replaced, the account is disabled, its password is changed or it signs out of all sessions. Each
+/// account has at most one key. Only its SHA-256 hash is stored (<see cref="Hash"/>): the key itself is shown once,
+/// when it is created.
 /// </summary>
 public static class ApiKeys
 {

@@ -1,10 +1,10 @@
 namespace ComicMaintainer.WebApi.Authentication;
 
 /// <summary>
-/// The rate limit of the endpoints that check a password or a setup code (sign-in, registration and first-run setup),
-/// counted per client address on top of the global limit. Together with the account lockout (see
-/// <c>AuthServiceCollectionExtensions</c>) it slows down online guessing: the lockout protects one account, this
-/// limit stops one client from trying many accounts.
+/// The rate limit of the endpoints that check a password or a setup code (sign-in, registration, first-run setup,
+/// changing the password and creating an API key), counted per client address on top of the global limit. Together
+/// with the account lockout (see <c>AuthServiceCollectionExtensions</c>) it slows down online guessing: the lockout
+/// protects one account, this limit stops one client from trying many accounts.
 /// </summary>
 public static class AuthenticationRateLimit
 {

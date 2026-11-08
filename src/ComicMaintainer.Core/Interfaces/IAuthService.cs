@@ -14,8 +14,18 @@ public interface IAuthService
     /// </summary>
     Task<(bool Success, string Token, string? Error)> LoginAsync(string username, string password, string? clientAddress = null);
     Task<(bool Success, string? Error)> RegisterAsync(string username, string password, string email, string? fullName = null);
-    /// <summary>Changes the password; this signs every session of the account out.</summary>
-    Task<(bool Success, string? Error)> ChangePasswordAsync(string userId, string currentPassword, string newPassword);
+    /// <summary>
+    /// Changes the password; this signs every session of the account out and revokes its API key. A wrong current
+    /// password is logged with <paramref name="clientAddress"/> and counts towards the account's lockout.
+    /// </summary>
+    Task<(bool Success, string? Error)> ChangePasswordAsync(string userId, string currentPassword, string newPassword, string? clientAddress = null);
+
+    /// <summary>
+    /// Confirms that the caller of a sensitive action knows the account's password. A wrong password is logged with
+    /// <paramref name="clientAddress"/> and counts towards the account's lockout.
+    /// </summary>
+    Task<(bool Success, string? Error)> ConfirmPasswordAsync(string userId, string? password, string? clientAddress = null);
+
     /// <summary>The active account whose API key is <paramref name="apiKey"/> (see <see cref="ApiKeys"/>), or null.</summary>
     Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey);
 
@@ -38,6 +48,6 @@ public interface IAuthService
     /// <summary>Issues a short-lived, single-use token that only opens the event stream (see <see cref="AuthTokens"/>).</summary>
     Task<(bool Success, string Token, string? Error)> GenerateStreamTokenAsync(string userId);
 
-    /// <summary>Revokes one session token, or with <paramref name="allSessions"/> every token of the account.</summary>
+    /// <summary>Revokes one session token, or with <paramref name="allSessions"/> every token and the API key of the account.</summary>
     Task LogoutAsync(string userId, string? tokenId, DateTime expiresAtUtc, bool allSessions);
 }

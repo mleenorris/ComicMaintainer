@@ -2,6 +2,26 @@
 // Provides basic offline support and caching
 // Version is dynamically injected by the server to force browser updates
 
+// The path the app is served under ('' at the domain root); the server fills it
+// in (see ServiceWorkerController). The lists below are written as paths of the
+// app and passed through withBasePath(); a request's URL is compared with them
+// through appPath().
+const INJECTED_BASE_PATH = '__BASE_PATH__';
+const BASE_PATH = INJECTED_BASE_PATH.startsWith('/') ? INJECTED_BASE_PATH : '';
+
+function withBasePath(path) {
+  return BASE_PATH + path;
+}
+
+// A URL's path within the app: /comics/js/x.js is /js/x.js under the base path
+// /comics, and /comics alone is the app's root.
+function appPath(url) {
+  if (BASE_PATH && (url.pathname === BASE_PATH || url.pathname.startsWith(BASE_PATH + '/'))) {
+    return url.pathname.slice(BASE_PATH.length) || '/';
+  }
+  return url.pathname;
+}
+
 // Cache version will be determined dynamically from the API. Install and
 // activate also record the name (see STATE_CACHE_NAME below): the browser
 // stops an idle worker and evaluates this script afresh for its next event,
@@ -94,7 +114,7 @@ let APP_VERSION = null;
 // Fetch current version from API and set cache name
 async function updateCacheName() {
   try {
-    const response = await fetch('/api/version');
+    const response = await fetch(withBasePath('/api/version'));
     if (response.ok) {
       const data = await response.json();
       APP_VERSION = data.version;
@@ -222,7 +242,7 @@ function offlineKeyForRequest(request, url) {
     return null;
   }
 
-  const pathname = url.pathname.toLowerCase();
+  const pathname = appPath(url).toLowerCase();
   const filePath = url.searchParams.get('filePath') || url.searchParams.get('filepath');
   if (!filePath) {
     return null;
@@ -442,7 +462,7 @@ async function runOfflineDownload(download, headers) {
     }
 
     const infoResponse = await fetchAndStore(
-      `/api/ComicReader/info?filePath=${encodeURIComponent(filePath)}`,
+      withBasePath(`/api/ComicReader/info?filePath=${encodeURIComponent(filePath)}`),
       offlineCacheKey(filePath, 'info')
     );
     const info = await infoResponse.json();
@@ -464,7 +484,7 @@ async function runOfflineDownload(download, headers) {
 
     await forEachConcurrently(missing, OFFLINE_DOWNLOAD_CONCURRENCY, async (page) => {
       await fetchAndStore(
-        `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${page}`,
+        withBasePath(`/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${page}`),
         offlineCacheKey(filePath, 'page', page)
       );
       download.completed++;
@@ -475,7 +495,7 @@ async function runOfflineDownload(download, headers) {
     // invalidate an otherwise complete download.
     try {
       await fetchAndStore(
-        `/api/ComicReader/cover?filePath=${encodeURIComponent(filePath)}`,
+        withBasePath(`/api/ComicReader/cover?filePath=${encodeURIComponent(filePath)}`),
         offlineCacheKey(filePath, 'cover')
       );
     } catch (error) {
@@ -610,7 +630,7 @@ function replyToMessage(event, payload) {
 }
 
 function isCacheableImageRequest(request, url) {
-  const pathname = url.pathname.toLowerCase();
+  const pathname = appPath(url).toLowerCase();
   return request.method === 'GET' &&
     IMAGE_API_PATHS.some((path) => pathname === path);
 }
@@ -697,7 +717,7 @@ async function trimCache(cacheName, maxEntries) {
 // Serve the precached offline page; fall back to a minimal inline document if
 // it is somehow missing from the cache.
 async function offlineFallbackResponse() {
-  const cached = await caches.match('/offline.html');
+  const cached = await caches.match(withBasePath('/offline.html'));
   if (cached) {
     return cached;
   }
@@ -709,7 +729,7 @@ async function offlineFallbackResponse() {
 }
 
 function versionedAssetUrl(asset) {
-  return `${asset}?v=${APP_VERSION}`;
+  return `${withBasePath(asset)}?v=${APP_VERSION}`;
 }
 
 // Every script and stylesheet install precaches under its versioned URL.
@@ -752,7 +772,7 @@ function precacheVersionedAssets(cache) {
 // woken-up worker knows them too: recallCacheName restores APP_VERSION.
 function precachedUrls() {
   const assets = APP_VERSION ? versionedAssets().map(versionedAssetUrl) : [];
-  return new Set([...urlsToCache, ...assets].map((path) => new URL(path, self.location.origin).href));
+  return new Set([...urlsToCache.map(withBasePath), ...assets].map((path) => new URL(path, self.location.origin).href));
 }
 
 // Install event - cache essential resources
@@ -772,7 +792,7 @@ self.addEventListener('install', (event) => {
       .then(() => caches.open(CACHE_NAME))
       .then((cache) => {
         console.log('Service Worker: Caching essential files with cache name:', CACHE_NAME);
-        return cache.addAll(urlsToCache).then(() => precacheVersionedAssets(cache));
+        return cache.addAll(urlsToCache.map(withBasePath)).then(() => precacheVersionedAssets(cache));
       })
       .then(() => recordCacheName(INSTALLED_CACHE_KEY))
   );
@@ -816,10 +836,11 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
   const acceptsHtml = request.headers.get('Accept')?.includes('text/html');
-  const isNavigationRequest = request.mode === 'navigate' || request.destination === 'document' || acceptsHtml || url.pathname === '/';
+  const path = appPath(url);
+  const isNavigationRequest = request.mode === 'navigate' || request.destination === 'document' || acceptsHtml || path === '/';
   
   // Never cache the service worker file itself
-  if (url.pathname === '/sw.js') {
+  if (path === '/sw.js') {
     event.respondWith(fetch(request, { cache: 'no-store' }));
     return;
   }
@@ -832,7 +853,7 @@ self.addEventListener('fetch', (event) => {
   // "Accept: text/html" would otherwise satisfy isNavigationRequest and be
   // handled by the offline-HTML fallback instead of being allowed to fail
   // normally.
-  if (url.pathname.startsWith('/api/') && request.method !== 'GET') {
+  if (path.startsWith('/api/') && request.method !== 'GET') {
     return;
   }
 
@@ -847,8 +868,8 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Always fetch the app shell from the network first so users do not need a hard refresh
-  if (isNavigationRequest || url.pathname.endsWith('.html')) {
-    const isCacheableDocument = request.method === 'GET' && DOCUMENT_CACHE_PATHS.includes(url.pathname);
+  if (isNavigationRequest || path.endsWith('.html')) {
+    const isCacheableDocument = request.method === 'GET' && DOCUMENT_CACHE_PATHS.includes(path);
     event.respondWith(
       fetch(request, { cache: 'no-store' })
         .then((response) => {
@@ -916,7 +937,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Network-first strategy for API calls and dynamic content
-  if (url.pathname.startsWith('/api/')) {
+  if (path.startsWith('/api/')) {
     event.respondWith(
       fetch(request)
         .then((response) => {
@@ -940,7 +961,7 @@ self.addEventListener('fetch', (event) => {
   // Cache-first for static images (icons, fonts); stale-while-revalidate for CSS/JS
   // so that a newer asset is picked up on the next navigation even if a stale
   // entry slipped into the cache under the same URL.
-  const isCssOrJs = url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/');
+  const isCssOrJs = path.startsWith('/css/') || path.startsWith('/js/');
 
   if (isCssOrJs) {
     event.respondWith(
@@ -995,7 +1016,7 @@ self.addEventListener('fetch', (event) => {
           
           // Cache static assets (waitUntil: the worker may otherwise be
           // stopped once the response is delivered, before they are stored)
-          if (url.pathname.startsWith('/icons/')) {
+          if (path.startsWith('/icons/')) {
             event.waitUntil(
               activeCacheName().then((cacheName) => caches.open(cacheName).then((cache) =>
                 cache.put(request, responseToCache)

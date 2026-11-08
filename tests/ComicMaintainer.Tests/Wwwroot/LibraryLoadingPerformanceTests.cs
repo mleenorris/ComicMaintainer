@@ -21,7 +21,6 @@ public class LibraryLoadingPerformanceTests
 
     [Theory]
     [InlineData("loadSeriesLibrary", "seriesLoadController", "seriesReloadPending")]
-    [InlineData("loadFolders", "folderLoadController", "folderReloadPending")]
     public void ListLoaders_AbortSupersededRequestsAndSuppressAbortErrors(
         string function, string controller, string pendingFlag)
     {

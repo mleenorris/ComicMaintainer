@@ -84,12 +84,12 @@
         // Check if setup is still required
         async function checkSetupRequired() {
             try {
-                const response = await apiFetch('/api/auth/setup-required', { auth: false, json: false });
+                const response = await fetch(apiUrl('/api/auth/setup-required'));
                 const data = await response.json();
                 
                 if (!data.setupRequired) {
                     // Setup already completed, redirect to login
-                    window.location.href = '/login.html';
+                    window.location.href = apiUrl('/login.html');
                 }
             } catch (error) {
                 console.error('Error checking setup status:', error);
@@ -151,9 +151,7 @@
             setupBtnSpinner.classList.remove('hidden');
             
             try {
-                const response = await apiFetch('/api/auth/setup', {
-                    auth: false,
-                    json: false,
+                const response = await fetch(apiUrl('/api/auth/setup'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -175,7 +173,7 @@
                     showSuccess('Administrator account created successfully! Redirecting to login...');
                     
                     setTimeout(() => {
-                        window.location.href = '/login.html';
+                        window.location.href = apiUrl('/login.html');
                     }, 1500);
                 } else {
                     showError(data.error || 'Setup failed. Please try again.');

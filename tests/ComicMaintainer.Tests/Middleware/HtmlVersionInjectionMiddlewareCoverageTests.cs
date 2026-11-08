@@ -50,7 +50,8 @@ public class HtmlVersionInjectionMiddlewareCoverageTests : IDisposable
                 return Task.CompletedTask;
             },
             _env.Object,
-            _logger.Object);
+            _logger.Object,
+            Microsoft.Extensions.Options.Options.Create(new ComicMaintainer.Core.Configuration.AppSettings()));
         return (middleware, () => nextCalled);
     }
 

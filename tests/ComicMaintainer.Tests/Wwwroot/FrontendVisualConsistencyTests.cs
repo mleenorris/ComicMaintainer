@@ -194,7 +194,7 @@ public class FrontendVisualConsistencyTests
         // the theme (dark-mode users once landed on a light page). It is a page
         // of index.html now, which themes every page, so jobs.html must only
         // forward old links there rather than render a page of its own.
-        Assert.Contains("window.location.replace('/#/jobs')", html);
+        Assert.Contains("window.location.replace('__BASE_PATH__/#/jobs')", html);
         Assert.DoesNotContain("<style", html);
         Assert.DoesNotContain("stylesheet", html);
         Assert.DoesNotContain("/api/", html);

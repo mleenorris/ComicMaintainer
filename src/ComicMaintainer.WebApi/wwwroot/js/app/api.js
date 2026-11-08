@@ -128,7 +128,7 @@
             localStorage.removeItem('authelia_authenticated');
             localStorage.removeItem('client_cache_session_id');
             clearCachedImages();
-            window.location.href = '/login.html';
+            window.location.href = apiUrl('/login.html');
         }
 
         /**

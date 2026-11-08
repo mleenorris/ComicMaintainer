@@ -1,10 +1,14 @@
 using System.Reflection;
+using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.WebApi.Startup;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Middleware;
 
 /// <summary>
 /// Middleware that serves HTML files (root and *.html under wwwroot) with the
-/// <c>__APP_VERSION__</c> placeholder replaced by the current assembly version.
+/// <c>__APP_VERSION__</c> placeholder replaced by the current assembly version and
+/// <c>__BASE_PATH__</c> by the path the app is served under (see <see cref="AppBasePath"/>).
 ///
 /// This is the critical part of the cache-busting strategy: it guarantees that
 /// the very first request for the HTML shell already contains versioned URLs
@@ -18,17 +22,27 @@ public class HtmlVersionInjectionMiddleware
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<HtmlVersionInjectionMiddleware> _logger;
     private readonly string _version;
+    private readonly string _basePath;
 
     public HtmlVersionInjectionMiddleware(
         RequestDelegate next,
         IWebHostEnvironment env,
-        ILogger<HtmlVersionInjectionMiddleware> logger)
+        ILogger<HtmlVersionInjectionMiddleware> logger,
+        IOptions<AppSettings> appSettings)
     {
         _next = next;
         _env = env;
         _logger = logger;
         _version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
+        _basePath = AppBasePath.Normalize(appSettings.Value.BasePath);
     }
+
+    /// <summary>
+    /// A page with its placeholders filled in. Shared with the SPA fallback route, which serves
+    /// index.html for routes that match no file.
+    /// </summary>
+    public static string InjectPlaceholders(string content, string version, string basePath) =>
+        AppBasePath.Apply(content.Replace("__APP_VERSION__", version, StringComparison.Ordinal), basePath);
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -59,8 +73,7 @@ public class HtmlVersionInjectionMiddleware
 
         if (filePath != null && File.Exists(filePath))
         {
-            var content = await File.ReadAllTextAsync(filePath);
-            content = content.Replace("__APP_VERSION__", _version);
+            var content = InjectPlaceholders(await File.ReadAllTextAsync(filePath), _version, _basePath);
 
             // HTML must never be cached; the cache-busting query strings inside
             // depend on the HTML being re-fetched on every navigation.

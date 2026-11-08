@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.ErrorReporting;
@@ -9,6 +10,7 @@ using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Startup;
 
@@ -223,6 +225,24 @@ internal static class WebApplicationExtensions
 
     public static WebApplication UseComicMaintainerPipeline(this WebApplication app)
     {
+        // BASE_PATH deployments. A reverse proxy either forwards the prefix (/comics/js/x.js) or
+        // strips it (/js/x.js, as docs/swag-configs/comicmaintainer.subfolder.conf does); this
+        // moves a forwarded prefix into PathBase and leaves a stripped request alone, so the rest
+        // of the pipeline sees the same path either way. It must run before UseRouting.
+        var configuredBasePath = app.Services.GetRequiredService<IOptions<AppSettings>>().Value.BasePath;
+        var basePath = AppBasePath.Normalize(configuredBasePath);
+        if (AppBasePath.IsInvalid(configuredBasePath))
+        {
+            app.Logger.LogError(
+                "Ignoring BASE_PATH '{BasePath}': use a path such as /comics, with only letters, digits, '.', '_', '~' and '-' in each segment. Serving the app at the domain root.",
+                LoggingHelper.SanitizeForLog(configuredBasePath));
+        }
+        if (basePath.Length > 0)
+        {
+            app.UsePathBase(basePath);
+            app.Logger.LogInformation("Serving the app under the base path {BasePath}", basePath);
+        }
+
         // Configure the HTTP request pipeline
         //
         // The correlation middleware runs first so that *everything* downstream —
@@ -359,8 +379,10 @@ internal static class WebApplicationExtensions
         // AND the controller never runs, so the browser sees a 404 with the file
         // contents and refuses to register the service worker
         // ("A bad HTTP response code (404) was received when fetching the script").
+        // manifest.json too, because its URLs get the base path filled in there.
         app.UseWhen(
-            ctx => !ctx.Request.Path.Equals("/sw.js", StringComparison.OrdinalIgnoreCase),
+            ctx => !ctx.Request.Path.Equals("/sw.js", StringComparison.OrdinalIgnoreCase) &&
+                   !ctx.Request.Path.Equals("/manifest.json", StringComparison.OrdinalIgnoreCase),
             branch => branch.UseStaticFiles(new StaticFileOptions
         {
             OnPrepareResponse = ctx =>
@@ -429,8 +451,8 @@ internal static class WebApplicationExtensions
 
         // Map default route to serve index.html for non-API routes only
         // This prevents the fallback from catching API requests, ensuring they always return JSON.
-        // Index is served via a custom delegate so that __APP_VERSION__ is substituted
-        // (mirroring HtmlVersionInjectionMiddleware) on SPA routes that don't match a real file.
+        // Index is served via a custom delegate so that its placeholders are substituted
+        // (see HtmlVersionInjectionMiddleware) on SPA routes that don't match a real file.
         app.MapFallback(async context =>
         {
             // Don't serve index.html for sw.js - it's handled by ServiceWorkerController
@@ -460,9 +482,8 @@ internal static class WebApplicationExtensions
                 return;
             }
 
-            var html = await File.ReadAllTextAsync(indexPath);
             var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
-            html = html.Replace("__APP_VERSION__", version);
+            var html = HtmlVersionInjectionMiddleware.InjectPlaceholders(await File.ReadAllTextAsync(indexPath), version, basePath);
 
             context.Response.Headers["Cache-Control"] = "no-store, private";
             context.Response.ContentType = "text/html; charset=utf-8";

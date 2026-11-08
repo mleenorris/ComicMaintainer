@@ -275,7 +275,7 @@
                 // sessionStorage can throw in private modes — ignore.
             }
             // Open comic reader in the same window
-            window.location.href = `/reader.html?file=${encodeURIComponent(filepath)}`;
+            window.location.href = apiUrl(`/reader.html?file=${encodeURIComponent(filepath)}`);
         }
 
         // Re-evaluate sticky-class placement on viewport rotation/resize so

@@ -38,7 +38,7 @@ public class PwaManifestTests : IClassFixture<WebApplicationFactory<Program>>
     {
         var html = WwwrootFiles.Read("index.html");
 
-        Assert.Equal("/manifest.json", ManifestHref(html));
+        Assert.Equal("__BASE_PATH__/manifest.json", ManifestHref(html));
         Assert.DoesNotContain("createObjectURL", html, StringComparison.Ordinal);
         Assert.DoesNotContain("application/manifest+json", html, StringComparison.Ordinal);
     }
@@ -54,7 +54,7 @@ public class PwaManifestTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.Equal("any", root.GetProperty("orientation").GetString());
         foreach (var member in new[] { "id", "start_url", "scope" })
         {
-            Assert.Equal("/", root.GetProperty(member).GetString());
+            Assert.Equal("__BASE_PATH__/", root.GetProperty(member).GetString());
         }
 
         var icons = root.GetProperty("icons").EnumerateArray().ToList();
@@ -63,8 +63,9 @@ public class PwaManifestTests : IClassFixture<WebApplicationFactory<Program>>
         foreach (var icon in icons)
         {
             var src = icon.GetProperty("src").GetString()!;
-            Assert.StartsWith("/", src, StringComparison.Ordinal);
-            Assert.True(File.Exists(Path.Join(WwwrootFiles.WwwRoot, src.TrimStart('/'))), $"Manifest icon {src} is not shipped");
+            Assert.StartsWith("__BASE_PATH__/", src, StringComparison.Ordinal);
+            var file = src["__BASE_PATH__/".Length..];
+            Assert.True(File.Exists(Path.Join(WwwrootFiles.WwwRoot, file)), $"Manifest icon {src} is not shipped");
         }
     }
 

@@ -13,7 +13,7 @@ namespace ComicMaintainer.Tests.Wwwroot;
 public class AppScriptSplitTests
 {
     private static readonly Regex ScriptTag =
-        new("<script\\s+src=\"/(js/[^\"?]+\\.js)\\?v=__APP_VERSION__\"\\s*></script>");
+        new("<script\\s+src=\"__BASE_PATH__/(js/[^\"?]+\\.js)\\?v=__APP_VERSION__\"\\s*></script>");
 
     [Fact]
     public void IndexHtml_LoadsEveryAppScriptInOrder()
@@ -36,8 +36,8 @@ public class AppScriptSplitTests
         // gets its own scope (breaking inline handlers) and defer/async would
         // change when the bootstrap runs relative to DOMContentLoaded.
         var html = WwwrootFiles.Read("index.html");
-        Assert.DoesNotMatch(new Regex("<script[^>]+(type=\"module\"|\\sdefer|\\sasync)[^>]*src=\"/js/"), html);
-        Assert.DoesNotMatch(new Regex("<script[^>]+src=\"/js/[^>]+(type=\"module\"|\\sdefer|\\sasync)"), html);
+        Assert.DoesNotMatch(new Regex("<script[^>]+(type=\"module\"|\\sdefer|\\sasync)[^>]*src=\"__BASE_PATH__/js/"), html);
+        Assert.DoesNotMatch(new Regex("<script[^>]+src=\"__BASE_PATH__/js/[^>]+(type=\"module\"|\\sdefer|\\sasync)"), html);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class AppScriptSplitTests
 
         // The page script runs straight away and looks up the page's markup, so
         // it must come after all of it, at the end of <body>.
-        var tag = $"<script src=\"/{pageScript}?v=__APP_VERSION__\"></script>";
+        var tag = $"<script src=\"__BASE_PATH__/{pageScript}?v=__APP_VERSION__\"></script>";
         Assert.Matches(new Regex(Regex.Escape(tag) + @"\s*</body>\s*</html>\s*$"), html);
         Assert.Equal(pageScript, ScriptTag.Matches(html).Select(m => m.Groups[1].Value).LastOrDefault());
 
@@ -79,8 +79,8 @@ public class AppScriptSplitTests
 
         // A classic script, like the app scripts: the markup's inline on*
         // handlers call its top-level functions.
-        Assert.DoesNotMatch(new Regex("<script[^>]+(type=\"module\"|\\sdefer|\\sasync)[^>]*src=\"/js/"), html);
-        Assert.DoesNotMatch(new Regex("<script[^>]+src=\"/js/[^>]+(type=\"module\"|\\sdefer|\\sasync)"), html);
+        Assert.DoesNotMatch(new Regex("<script[^>]+(type=\"module\"|\\sdefer|\\sasync)[^>]*src=\"__BASE_PATH__/js/"), html);
+        Assert.DoesNotMatch(new Regex("<script[^>]+src=\"__BASE_PATH__/js/[^>]+(type=\"module\"|\\sdefer|\\sasync)"), html);
     }
 
     [Theory]
@@ -109,7 +109,7 @@ public class AppScriptSplitTests
 
         // Precached under the same versioned URL the page requests, and added
         // during install.
-        Assert.Contains("return `${asset}?v=${APP_VERSION}`;", sw);
+        Assert.Contains("return `${withBasePath(asset)}?v=${APP_VERSION}`;", sw);
         Assert.Contains("[...APP_SCRIPTS, ...PAGE_SCRIPTS, ...STYLESHEETS]", sw);
         Assert.Contains("precacheVersionedAssets(cache)", sw);
     }
@@ -172,15 +172,17 @@ public class AppScriptSplitTests
         var reader = WwwrootFiles.Read("reader.html");
         var script = WwwrootFiles.Read(WwwrootFiles.PageScripts["reader.html"]);
 
-        var shared = reader.IndexOf("<script src=\"/js/shared.js?v=__APP_VERSION__\"></script>", StringComparison.Ordinal);
-        var page = reader.IndexOf("<script src=\"/js/pages/reader.js?v=__APP_VERSION__\"></script>", StringComparison.Ordinal);
+        var shared = reader.IndexOf("<script src=\"__BASE_PATH__/js/shared.js?v=__APP_VERSION__\"></script>", StringComparison.Ordinal);
+        var apiScript = reader.IndexOf("<script src=\"__BASE_PATH__/js/app/api.js?v=__APP_VERSION__\"></script>", StringComparison.Ordinal);
+        var page = reader.IndexOf("<script src=\"__BASE_PATH__/js/pages/reader.js?v=__APP_VERSION__\"></script>", StringComparison.Ordinal);
         Assert.True(shared >= 0, "reader.html must load /js/shared.js");
-        Assert.True(page > shared, "/js/shared.js must load before reader.html's page script uses its helpers");
+        Assert.True(apiScript > shared, "/js/app/api.js relies on /js/shared.js");
+        Assert.True(page > apiScript, "/js/app/api.js must load before reader.html's page script makes requests");
 
         // The helpers live in shared.js only; a local copy would shadow it.
         Assert.DoesNotContain("function escapeHtml(", script);
         Assert.DoesNotContain("function isAutheliaAuthenticated(", script);
-        Assert.DoesNotContain("function buildCredentialedFetchOptions(", script);
-        Assert.Contains("return buildCredentialedFetchOptions(extra, token);", script);
+        Assert.DoesNotContain("function apiFetch(", script);
+        Assert.Contains("apiFetch(", script);
     }
 }

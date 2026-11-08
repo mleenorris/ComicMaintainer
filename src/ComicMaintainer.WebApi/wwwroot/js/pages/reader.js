@@ -166,7 +166,7 @@
 
             // Check authentication - allow either JWT token or Authelia authentication
             if (!token && !isAutheliaAuth) {
-                window.location.href = '/login.html';
+                window.location.href = apiUrl('/login.html');
                 return;
             }
 
@@ -343,7 +343,7 @@
             readingDirection = readingDirection === 'ltr' ? 'rtl' : 'ltr';
             try { localStorage.setItem('readingDirection', readingDirection); } catch (_e) { /* noop */ }
             updateDirectionUI();
-            showMessage(`Reading direction: ${readingDirection.toUpperCase()}`, 'info');
+            showReaderMessage(`Reading direction: ${readingDirection.toUpperCase()}`, 'info');
         }
 
         // Load pages in continuous scroll mode with buffering (Kavita-style)
@@ -1476,13 +1476,13 @@
                     nextInfo = await response.json();
                 }
                 if (nextInfo.hasAdjacent && nextInfo.filePath) {
-                    window.location.replace(`/reader.html?file=${encodeURIComponent(nextInfo.filePath)}`);
+                    window.location.replace(apiUrl(`/reader.html?file=${encodeURIComponent(nextInfo.filePath)}`));
                 } else {
-                    showMessage('No more issues in this series', 'info');
+                    showReaderMessage('No more issues in this series', 'info');
                 }
             } catch (error) {
                 console.error('Error navigating to next comic:', error);
-                showMessage('Failed to load next comic', 'error');
+                showReaderMessage('Failed to load next comic', 'error');
             }
         }
 
@@ -1494,13 +1494,13 @@
                 if (!response.ok) throw new Error('Failed to fetch previous comic info');
                 const prevInfo = await response.json();
                 if (prevInfo.hasAdjacent && prevInfo.filePath) {
-                    window.location.replace(`/reader.html?file=${encodeURIComponent(prevInfo.filePath)}#lastpage`);
+                    window.location.replace(apiUrl(`/reader.html?file=${encodeURIComponent(prevInfo.filePath)}#lastpage`));
                 } else {
-                    showMessage('This is the first issue in this series', 'info');
+                    showReaderMessage('This is the first issue in this series', 'info');
                 }
             } catch (error) {
                 console.error('Error navigating to previous comic:', error);
-                showMessage('Failed to load previous comic', 'error');
+                showReaderMessage('Failed to load previous comic', 'error');
             }
         }
 
@@ -1533,7 +1533,7 @@
             // If the referrer is the home page on the same origin, history.back()
             // restores native scroll/state better than any URL navigation.
             if (sameOriginReferrer
-                && (sameOriginReferrer.pathname === '/' || sameOriginReferrer.pathname.endsWith('/index.html'))) {
+                && (sameOriginReferrer.pathname === apiUrl('/') || sameOriginReferrer.pathname.endsWith('/index.html'))) {
                 window.history.back();
                 return;
             }
@@ -1548,7 +1548,7 @@
                 } catch (_e) { /* fall through */ }
             }
 
-            window.location.href = '/';
+            window.location.href = apiUrl('/');
         }
 
         // Fullscreen functionality
@@ -1651,7 +1651,7 @@
             const sendBtn = document.getElementById('emailPromptSendBtn');
             if (!dlg || !select || !sendBtn) return;
             if (!comicFilePath) {
-                showMessage('No comic is open.', 'error');
+                showReaderMessage('No comic is open.', 'error');
                 return;
             }
 
@@ -1668,21 +1668,21 @@
                 const list = Array.isArray(devices.devices) ? devices.devices : [];
                 if (!list.length) {
                     select.replaceChildren(new Option('No devices saved', ''));
-                    showMessage('Add an ereader device from the library menu first.', 'error');
+                    showReaderMessage('Add an ereader device from the library menu first.', 'error');
                     return;
                 }
 
                 select.replaceChildren(...list.map(d => new Option(`${d.name} (${d.emailAddress})`, d.id)));
 
                 if (status && status.configured === false) {
-                    showMessage('Email delivery is not configured. Ask an administrator to set the SMTP settings.', 'error');
+                    showReaderMessage('Email delivery is not configured. Ask an administrator to set the SMTP settings.', 'error');
                     return;
                 }
 
                 sendBtn.disabled = false;
             } catch (error) {
                 select.replaceChildren(new Option('Failed to load devices', ''));
-                showMessage('Failed to load ereader devices: ' + error.message, 'error');
+                showReaderMessage('Failed to load ereader devices: ' + error.message, 'error');
             }
         }
 
@@ -1695,7 +1695,7 @@
             const format = document.getElementById('emailPromptFormat')?.value;
             const sendBtn = document.getElementById('emailPromptSendBtn');
             if (!deviceId) {
-                showMessage('Choose an ereader device.', 'error');
+                showReaderMessage('Choose an ereader device.', 'error');
                 return;
             }
             if (sendBtn) sendBtn.disabled = true;
@@ -1711,9 +1711,9 @@
                 });
                 hideReaderEmailPrompt();
                 const queued = Array.isArray(result.queued) ? result.queued.length : 0;
-                showMessage(queued ? 'Comic queued for delivery.' : 'Nothing was queued.', queued ? 'success' : 'info');
+                showReaderMessage(queued ? 'Comic queued for delivery.' : 'Nothing was queued.', queued ? 'success' : 'info');
             } catch (error) {
-                showMessage('Failed to email comic: ' + error.message, 'error');
+                showReaderMessage('Failed to email comic: ' + error.message, 'error');
             } finally {
                 if (sendBtn) sendBtn.disabled = false;
             }
@@ -1733,7 +1733,7 @@
         }
 
         // Show toast notification
-        function showMessage(message, type = 'info') {
+        function showReaderMessage(message, type = 'info') {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
@@ -2309,7 +2309,7 @@
             const incomplete = (response && response.incomplete) || [];
             if (comics.some((comic) => comic.filePath === filePath)) {
                 endOfflineDownload({ saved: true });
-                showMessage('Available for offline reading', 'success');
+                showReaderMessage('Available for offline reading', 'success');
                 return;
             }
             const partial = incomplete.find((comic) => comic.filePath === filePath);
@@ -2320,7 +2320,7 @@
                 return;
             }
             endOfflineDownload({ partial: partial || null });
-            showMessage('Offline download was interrupted', 'error');
+            showReaderMessage('Offline download was interrupted', 'error');
         }
 
         async function refreshOfflineStatus() {
@@ -2351,7 +2351,7 @@
 
             const controller = navigator.serviceWorker && navigator.serviceWorker.controller;
             if (!controller) {
-                showMessage('Offline downloads are not available in this browser', 'error');
+                showReaderMessage('Offline downloads are not available in this browser', 'error');
                 return;
             }
 
@@ -2360,7 +2360,7 @@
                 offlineComicSaved = false;
                 offlinePartialDownload = null;
                 renderOfflineButton();
-                showMessage('Removed from offline storage', 'info');
+                showReaderMessage('Removed from offline storage', 'info');
                 return;
             }
 
@@ -2380,7 +2380,7 @@
 
             if (data.type === 'OFFLINE_DOWNLOAD_COMPLETE') {
                 endOfflineDownload({ saved: true });
-                showMessage('Available for offline reading', 'success');
+                showReaderMessage('Available for offline reading', 'success');
                 return;
             }
 
@@ -2392,7 +2392,7 @@
                     ? { savedPages: data.completed, pageCount: data.total }
                     : null;
                 endOfflineDownload({ partial });
-                showMessage(partial ? 'Offline download was interrupted' : 'Offline download failed', 'error');
+                showReaderMessage(partial ? 'Offline download was interrupted' : 'Offline download failed', 'error');
             }
         }
 
@@ -2404,7 +2404,7 @@
                     // The reader can be opened directly (deep link, home-screen
                     // shortcut) without ever visiting the library page that
                     // normally registers the worker.
-                    await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+                    await navigator.serviceWorker.register(apiUrl('/sw.js'), { scope: apiUrl('/') });
                     await navigator.serviceWorker.ready;
                 }
                 await refreshOfflineStatus();

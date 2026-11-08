@@ -208,9 +208,9 @@ public class FrontendAppShellTests
 
         // Old links and bookmarks to /jobs.html land on the routed page.
         var stub = Read("jobs.html");
-        Assert.Contains("window.location.replace('/#/jobs')", stub);
-        Assert.Contains("url=/#/jobs", stub);
-        Assert.Contains("<a href=\"/#/jobs\">", stub);
+        Assert.Contains("window.location.replace('__BASE_PATH__/#/jobs')", stub);
+        Assert.Contains("url=__BASE_PATH__/#/jobs", stub);
+        Assert.Contains("<a href=\"__BASE_PATH__/#/jobs\">", stub);
     }
 
     [Fact]

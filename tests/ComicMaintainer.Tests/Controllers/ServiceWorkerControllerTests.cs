@@ -248,4 +248,34 @@ public class ServiceWorkerControllerTests : IDisposable
         Assert.Equal(3600, cacheAttribute.Duration);
         Assert.Equal(ResponseCacheLocation.Any, cacheAttribute.Location);
     }
+
+    [Theory]
+    [InlineData(null, "const BASE = '';")]
+    [InlineData("/comics/", "const BASE = '/comics';")]
+    public void GetServiceWorker_FillsInTheBasePath(string? configured, string expected)
+    {
+        File.WriteAllText(Path.Join(_tempDirectory, "sw.js"), "const BASE = '__BASE_PATH__';");
+        _mockAppSettings.Setup(a => a.CurrentValue).Returns(new AppSettings { BasePath = configured });
+
+        var result = _controller.GetServiceWorker();
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.Contains(expected, content.Content);
+        Assert.DoesNotContain("__BASE_PATH__", content.Content);
+    }
+
+    [Theory]
+    [InlineData(null, "\"start_url\": \"/\"")]
+    [InlineData("/comics/", "\"start_url\": \"/comics/\"")]
+    public void GetManifest_FillsInTheBasePath(string? configured, string expected)
+    {
+        File.WriteAllText(Path.Join(_tempDirectory, "manifest.json"), "{\"start_url\": \"__BASE_PATH__/\"}");
+        _mockAppSettings.Setup(a => a.CurrentValue).Returns(new AppSettings { BasePath = configured });
+
+        var result = _controller.GetManifest();
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.Contains(expected, content.Content);
+        Assert.DoesNotContain("__BASE_PATH__", content.Content);
+    }
 }

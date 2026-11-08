@@ -26,9 +26,14 @@ function escapeHtml(text) {
 }
 
 /**
- * The path the app is served under: '' at the domain root.
+ * The path the app is served under: '' at the domain root, '/comics' in a
+ * subfolder. The server writes it into each page's <html> element (see
+ * HtmlVersionInjectionMiddleware).
  */
-const BASE_PATH = '';
+const BASE_PATH = (() => {
+    const configured = typeof document === 'undefined' ? '' : document.documentElement?.dataset?.basePath;
+    return typeof configured === 'string' && configured.startsWith('/') ? configured : '';
+})();
 
 /**
  * The URL of a path of this app. Every URL the scripts build goes through

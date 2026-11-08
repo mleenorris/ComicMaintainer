@@ -157,14 +157,14 @@ public class OfflineReadingTests
         Assert.Contains("LIST_OFFLINE_COMICS", script);
         Assert.Contains("/reader.html?file=", script);
         // The offline page is shown precisely when the network is gone, so it
-        // must not fetch anything or load external CSS. Its only script is its
-        // own page script, which the service worker precaches with it.
+        // must not fetch anything or load external CSS. Its scripts are the shared
+        // helpers and its own page script, which the service worker precaches with it.
         Assert.DoesNotContain("fetch(", page + script);
         Assert.DoesNotMatch(new Regex(@"<link[^>]+rel=""stylesheet"""), page);
         var scripts = Regex.Matches(page, @"<script\b[^>]*\bsrc=""([^""]+)""")
             .Select(m => m.Groups[1].Value)
             .ToList();
-        Assert.Equal(new[] { "/js/pages/offline.js?v=__APP_VERSION__" }, scripts);
+        Assert.Equal(new[] { "__BASE_PATH__/js/shared.js?v=__APP_VERSION__", "__BASE_PATH__/js/pages/offline.js?v=__APP_VERSION__" }, scripts);
         Assert.Matches(new Regex(@"const PAGE_SCRIPTS = \[[^\]]*'/js/pages/offline\.js'"), ReadAsset("sw.js"));
     }
 }

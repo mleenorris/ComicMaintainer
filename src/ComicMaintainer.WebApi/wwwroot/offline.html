@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-base-path="__BASE_PATH__">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Offline - Comic Maintainer</title>
     <meta name="theme-color" content="#241c17">
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="__BASE_PATH__/icons/favicon-32x32.png">
     <!-- This page is precached by the service worker and shown when a
          navigation request fails because the device (or the server) is
          offline. It must therefore be completely self-contained: no external
@@ -131,7 +131,7 @@
 </head>
 <body>
     <main>
-        <img src="/icons/icon-192x192.png" alt="" width="96" height="96">
+        <img src="__BASE_PATH__/icons/icon-192x192.png" alt="" width="96" height="96">
         <h1>You're offline</h1>
         <p>
             Comic Maintainer needs a connection to your library server. The page you
@@ -144,6 +144,7 @@
             <ul id="downloadsList"></ul>
         </section>
     </main>
-    <script src="/js/pages/offline.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/shared.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/pages/offline.js?v=__APP_VERSION__"></script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.WebApi.Startup;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -50,7 +51,7 @@ public class ServiceWorkerController : ControllerBase
                 return NotFound();
             }
 
-            var swContent = System.IO.File.ReadAllText(swPath);
+            var swContent = AppBasePath.Apply(System.IO.File.ReadAllText(swPath), _appSettings.CurrentValue.BasePath);
             
             // Inject version into service worker content to force browser updates
             // This ensures the browser detects changes to the service worker file
@@ -94,7 +95,7 @@ public class ServiceWorkerController : ControllerBase
     /// <returns>The manifest.json file</returns>
     [HttpGet("manifest.json")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Any, VaryByQueryKeys = new[] { "v" })]
+    [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Any)]
     public IActionResult GetManifest()
     {
         try
@@ -107,7 +108,7 @@ public class ServiceWorkerController : ControllerBase
                 return NotFound();
             }
 
-            var manifestContent = System.IO.File.ReadAllText(manifestPath);
+            var manifestContent = AppBasePath.Apply(System.IO.File.ReadAllText(manifestPath), _appSettings.CurrentValue.BasePath);
             
             // Allow caching for 1 hour, but use version query parameter for cache busting
             Response.Headers["Cache-Control"] = "public, max-age=3600";

@@ -30,7 +30,7 @@
                     .forEach(function (comic) {
                         var item = document.createElement('li');
                         var link = document.createElement('a');
-                        link.href = '/reader.html?file=' + encodeURIComponent(comic.filePath);
+                        link.href = apiUrl('/reader.html?file=' + encodeURIComponent(comic.filePath));
                         var segments = comic.filePath.split(/[\\/]/);
                         link.textContent = segments[segments.length - 1] || comic.filePath;
                         var pages = document.createElement('span');

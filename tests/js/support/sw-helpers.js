@@ -374,6 +374,7 @@ async function extend(lifetime) {
 }
 
 function loadServiceWorker({
+    basePath,
     routes,
     network = createNetwork(routes),
     caches,
@@ -406,7 +407,7 @@ function loadServiceWorker({
             get: async id => clients.find(client => client.id === id)
         },
         registration,
-        location: new URL(`${ORIGIN}/sw.js`),
+        location: new URL(`${ORIGIN}${basePath ?? ''}/sw.js`),
         skipWaiting: async () => {
             worker.skipWaitingCalls++;
         },
@@ -433,7 +434,7 @@ function loadServiceWorker({
         clearTimeout
     });
     context.self = context;
-    runWwwrootScript('sw.js', context);
+    runWwwrootScript('sw.js', context, basePath ? source => source.replaceAll('__BASE_PATH__', basePath) : undefined);
 
     function dispatch(type, init = {}) {
         const lifetime = [];

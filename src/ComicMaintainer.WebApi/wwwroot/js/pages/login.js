@@ -94,12 +94,12 @@
         // page is on its way to the setup page.
         async function checkSetupRequired() {
             try {
-                const response = await apiFetch('/api/auth/setup-required', { auth: false, json: false });
+                const response = await fetch(apiUrl('/api/auth/setup-required'));
                 const data = await response.json();
                 
                 if (data.setupRequired) {
                     // Setup is required, redirect to setup page
-                    window.location.href = '/setup.html';
+                    window.location.href = apiUrl('/setup.html');
                     return true;
                 }
             } catch (error) {
@@ -112,9 +112,7 @@
         async function checkAuth() {
             try {
                 // First check server auth status (includes Authelia check)
-                const response = await apiFetch('/api/auth/status', {
-                    auth: false,
-                    json: false,
+                const response = await fetch(apiUrl('/api/auth/status'), {
                     credentials: 'include' // Important for Authelia cookies
                 });
                 
@@ -127,7 +125,7 @@
                         console.log('[LOGIN] Already authenticated via Authelia as:', authStatus.username);
                         localStorage.setItem('authelia_authenticated', 'true');
                         localStorage.setItem('username', authStatus.username);
-                        window.location.href = '/';
+                        window.location.href = apiUrl('/');
                         return;
                     }
                 }
@@ -147,7 +145,7 @@
                     return;
                 }
                 // Token is valid, redirect to main page
-                window.location.href = '/';
+                window.location.href = apiUrl('/');
             }
         }
         
@@ -191,9 +189,7 @@
             let redirecting = false;
             
             try {
-                const response = await apiFetch('/api/auth/login', {
-                    auth: false,
-                    json: false,
+                const response = await fetch(apiUrl('/api/auth/login'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -215,7 +211,7 @@
                     redirecting = true;
                     
                     setTimeout(() => {
-                        window.location.href = '/';
+                        window.location.href = apiUrl('/');
                     }, 500);
                 } else {
                     showError(data.error || 'Login failed. Please check your credentials.');

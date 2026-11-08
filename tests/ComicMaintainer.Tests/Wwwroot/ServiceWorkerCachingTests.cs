@@ -80,7 +80,7 @@ public class ServiceWorkerCachingTests
         // Mutations must reach the network untouched; serving or synthesising a
         // response for them would make a failed write look like a success.
         Assert.Matches(
-            new Regex(@"url\.pathname\.startsWith\('/api/'\)\s*&&\s*request\.method\s*!==\s*'GET'"),
+            new Regex(@"path\.startsWith\('/api/'\)\s*&&\s*request\.method\s*!==\s*'GET'"),
             contents);
     }
 

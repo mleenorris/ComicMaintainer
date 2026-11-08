@@ -16,15 +16,15 @@ const WWWROOT = path.resolve(__dirname, '..', '..', '..', 'src', 'ComicMaintaine
  * node's test coverage only attributes code to scripts whose URL is one, so a
  * relative name would leave every SPA script out of the coverage report.
  */
-function runWwwrootScript(script, context) {
+function runWwwrootScript(script, context, transform = source => source) {
     const file = path.join(WWWROOT, ...script.split('/'));
-    vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: pathToFileURL(file).href });
+    vm.runInContext(transform(fs.readFileSync(file, 'utf8')), context, { filename: pathToFileURL(file).href });
 }
 
 /** Script paths (relative to wwwroot) an HTML page loads, in order. */
 function htmlScripts(page) {
     const html = fs.readFileSync(path.join(WWWROOT, page), 'utf8');
-    return [...html.matchAll(/<script\s+src="\/(js\/[^"?]+\.js)\?v=__APP_VERSION__"\s*><\/script>/g)]
+    return [...html.matchAll(/<script\s+src="__BASE_PATH__\/(js\/[^"?]+\.js)\?v=__APP_VERSION__"\s*><\/script>/g)]
         .map(match => match[1]);
 }
 

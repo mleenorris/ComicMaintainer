@@ -121,11 +121,6 @@ public interface IFileStoreService
     Task<int> MarkScopeReadAsync(FileReadScope scope, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Save reading progress (current page) for a comic file
-    /// </summary>
-    Task SaveReadingProgressAsync(string filePath, int currentPage, CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Get reading progress (current page) for a comic file
     /// </summary>
     Task<int> GetReadingProgressAsync(string filePath, CancellationToken cancellationToken = default);
@@ -238,12 +233,6 @@ public interface IFileStoreService
     /// read state.
     /// </summary>
     IDisposable SuspendStaleCleanup();
-
-    /// <summary>
-    /// Whether a <see cref="SuspendStaleCleanup"/> lease is active, in which case
-    /// <see cref="CleanupStaleEntriesAsync"/> does not complete before the lease ends.
-    /// </summary>
-    bool IsStaleCleanupSuspended { get; }
 
     /// <summary>
     /// Re-reads the on-disk size and last-write time of each tracked file in

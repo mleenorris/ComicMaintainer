@@ -636,39 +636,6 @@ public class FileStoreServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveReadingProgressAsync_NewProgress_SavesPage()
-    {
-        // Arrange
-        var filePath = Path.Join(_testDirectory, "test.cbz");
-        File.WriteAllText(filePath, "test content");
-        await _service.AddFileAsync(filePath);
-
-        // Act
-        await _service.SaveReadingProgressAsync(filePath, 5);
-
-        // Assert
-        var progress = await _service.GetReadingProgressAsync(filePath);
-        Assert.Equal(5, progress);
-    }
-
-    [Fact]
-    public async Task SaveReadingProgressAsync_UpdateProgress_UpdatesPage()
-    {
-        // Arrange
-        var filePath = Path.Join(_testDirectory, "test.cbz");
-        File.WriteAllText(filePath, "test content");
-        await _service.AddFileAsync(filePath);
-        await _service.SaveReadingProgressAsync(filePath, 5);
-
-        // Act
-        await _service.SaveReadingProgressAsync(filePath, 10);
-
-        // Assert
-        var progress = await _service.GetReadingProgressAsync(filePath);
-        Assert.Equal(10, progress);
-    }
-
-    [Fact]
     public async Task GetReadingProgressAsync_NoProgress_ReturnsOne()
     {
         // Arrange
@@ -936,8 +903,24 @@ public class FileStoreServiceTests : IDisposable
         Assert.False(withUser.IsRead);
     }
 
+    /// <summary>The resume page the reader saved for <paramref name="userId"/>, as ReadingProgressService stores it.</summary>
+    private async Task SetResumePageAsync(string filePath, int page, string userId = "test-user")
+    {
+        var factory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.UserFileReadStatuses.FirstOrDefaultAsync(s => s.UserId == userId && s.FilePath == filePath);
+        if (row is null)
+        {
+            row = new UserFileReadStatusEntity { UserId = userId, FilePath = filePath };
+            db.UserFileReadStatuses.Add(row);
+        }
+
+        row.CurrentPage = page;
+        await db.SaveChangesAsync();
+    }
+
     [Fact]
-    public async Task SaveReadingProgressAsync_ResumePosition_IsPerUser()
+    public async Task GetReadingProgressAsync_ResumePosition_IsPerUser()
     {
         // Arrange
         var filePath = Path.Join(_testDirectory, "test.cbz");
@@ -945,7 +928,7 @@ public class FileStoreServiceTests : IDisposable
         await _service.AddFileAsync(filePath);
 
         // Act
-        await _service.SaveReadingProgressAsync(filePath, 12);
+        await SetResumePageAsync(filePath, 12);
         _userContext.UserId = "other-user";
         var otherUserProgress = await _service.GetReadingProgressAsync(filePath);
 
@@ -966,7 +949,7 @@ public class FileStoreServiceTests : IDisposable
         File.WriteAllText(oldPath, "test content");
         await _service.AddFileAsync(oldPath);
         await _service.MarkFileReadAsync(oldPath, true);
-        await _service.SaveReadingProgressAsync(oldPath, 7);
+        await SetResumePageAsync(oldPath, 7);
 
         // Act - the processor renames the file
         File.Move(oldPath, newPath);
@@ -1019,7 +1002,7 @@ public class FileStoreServiceTests : IDisposable
         var filePath = Path.Join(_testDirectory, "sync-progress.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
-        await _service.SaveReadingProgressAsync(filePath, 5);
+        await SetResumePageAsync(filePath, 5);
 
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         await using (var db = await dbContextFactory.CreateDbContextAsync())

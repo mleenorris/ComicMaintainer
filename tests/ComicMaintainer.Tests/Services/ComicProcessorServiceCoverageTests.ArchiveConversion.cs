@@ -281,7 +281,12 @@ public partial class ComicProcessorServiceCoverageTests
         await fileStore.AddFileAsync(cbr);
         await fileStore.MarkFileNormalizedAsync(cbr, true);
         await fileStore.MarkFileReadAsync(cbr, true);
-        await fileStore.SaveReadingProgressAsync(cbr, 2);
+        await using (var db = await provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>().CreateDbContextAsync())
+        {
+            (await db.UserFileReadStatuses.SingleAsync(s => s.FilePath == cbr)).CurrentPage = 2;
+            await db.SaveChangesAsync();
+        }
+
         var service = CreateService(fileStore: fileStore);
 
         var result = await service.ApplyMetadataEditAsync(cbr, new ComicMetadata { Series = "New" }, ComicMetadataFieldFlags.Series);

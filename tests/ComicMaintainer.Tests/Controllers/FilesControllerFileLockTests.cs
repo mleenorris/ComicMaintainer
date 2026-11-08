@@ -40,28 +40,7 @@ public sealed class FilesControllerFileLockTests : IDisposable
             .Returns((string? title) => title?.Trim().ToLowerInvariant() ?? string.Empty);
 
         // Run the combine job's items and post-loop hook inline, as the job runner would.
-        _processor
-            .Setup(p => p.RunCustomBatchJobAsync(
-                It.IsAny<string>(),
-                It.IsAny<IEnumerable<string>>(),
-                It.IsAny<Func<string, CancellationToken, Task<bool>>>(),
-                It.IsAny<string>(),
-                It.IsAny<Func<CancellationToken, Task>?>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(async (string _, IEnumerable<string> items, Func<string, CancellationToken, Task<bool>> operation, string _, Func<CancellationToken, Task>? postLoop, CancellationToken token) =>
-            {
-                foreach (var item in items)
-                {
-                    await operation(item, token);
-                }
-
-                if (postLoop is not null)
-                {
-                    await postLoop(token);
-                }
-
-                return Guid.NewGuid();
-            });
+        _processor.RunCustomBatchJobsInline();
         _processor
             .Setup(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Guid.NewGuid());
@@ -187,16 +166,27 @@ public sealed class FilesControllerFileLockTests : IDisposable
         restfulEndpoint ? controller.DeleteFileByEncodedPath(Encode(path)) : controller.DeleteFile(path);
 #pragma warning restore CS0618
 
-    private FilesController CreateController() =>
-        new(
+    private FilesController CreateController()
+    {
+        var settings = new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _root });
+        var history = Mock.Of<IProcessingHistoryService>();
+        return new FilesController(
             _fileStore.Object,
             _processor.Object,
-            Mock.Of<IProcessingHistoryService>(),
+            history,
             _seriesLibrary.Object,
             NullLogger<FilesController>.Instance,
-            new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _root }),
-            metadataCache: _metadataCache.Object,
+            settings,
+            TestFolderCombineService.Create(
+                _fileStore.Object,
+                _processor.Object,
+                history,
+                _seriesLibrary.Object,
+                settings,
+                metadataCache: _metadataCache.Object,
+                fileOperationLock: _fileLock),
             fileOperationLock: _fileLock);
+    }
 
     private static string CreateComic(string directory, string fileName)
     {

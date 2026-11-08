@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
@@ -292,7 +293,7 @@ public partial class FilesController
                     var seriesDirs = new HashSet<string>(
                         result.Folders.Select(f => f.Directory),
                         StringComparer.OrdinalIgnoreCase);
-                    var groups = await GetCombinableFolderGroupsCachedAsync(cancellationToken);
+                    var groups = await _folderCombine.GetCombinableFolderGroupsAsync(cancellationToken);
                     var match = groups.FirstOrDefault(g =>
                         g.Folders.Count(f => seriesDirs.Contains(f.Directory)) >= 2);
                     if (match is not null)
@@ -302,10 +303,10 @@ public partial class FilesController
                     }
                     else
                     {
-                        // Synthetic key: BuildCombineFoldersPlanAsync
+                        // Synthetic key: the folder-combine planner
                         // recognises the `series:` prefix and resolves the
                         // plan against the series-library folder set.
-                        combineGroupKey = SeriesGroupKeyPrefix + result.Id;
+                        combineGroupKey = CombinableFolderGroup.SeriesGroupKeyPrefix + result.Id;
                         suggestedDestination = result.Folders
                             .OrderByDescending(f => f.FileCount)
                             .ThenBy(f => f.Directory, StringComparer.OrdinalIgnoreCase)
@@ -347,7 +348,7 @@ public partial class FilesController
 
             try
             {
-                combinableFolders = await GetCombinableFolderCountAsync(HttpContext?.RequestAborted ?? default);
+                combinableFolders = await _folderCombine.GetCombinableFolderCountAsync(HttpContext?.RequestAborted ?? default);
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException)
             {

@@ -278,6 +278,26 @@ public partial class ComicProcessorService
             failureMessage,
             cancellationToken,
             lockEachFile: false,
+            postLoopAsync: postLoopAsync is null ? null : (_, token) => postLoopAsync(token));
+    }
+
+    public Task<Guid> RunCustomBatchJobAsync(
+        string operationName,
+        IEnumerable<string> trackedItems,
+        Func<string, CancellationToken, Task<bool>> itemOperation,
+        string failureMessage,
+        Func<IBatchJobReport, CancellationToken, Task> postLoopAsync,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(postLoopAsync);
+        return QueueBatchJobAsync(
+            trackedItems,
+            operationName,
+            operationName.ToLowerInvariant(),
+            async (item, token) => await itemOperation(item, token),
+            failureMessage,
+            cancellationToken,
+            lockEachFile: false,
             postLoopAsync: postLoopAsync);
     }
 
@@ -291,6 +311,32 @@ public partial class ComicProcessorService
         public static implicit operator BatchItemResult(bool success) => new(success);
     }
 
+    /// <summary>
+    /// The <see cref="IBatchJobReport"/> a post-loop hook writes to: problems
+    /// go into the job's errors, under the job's sync lock like the per-item
+    /// results, and are announced like a failed item.
+    /// </summary>
+    private sealed class BatchJobReport(ComicProcessorService owner, ProcessingJob job, object jobSyncLock) : IBatchJobReport
+    {
+        public async Task ReportProblemAsync(string subject, string message)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(subject);
+            lock (jobSyncLock)
+            {
+                job.Errors[subject] = message;
+            }
+
+            if (owner._eventBroadcaster != null)
+            {
+                var name = Path.GetFileName(subject.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                await owner._eventBroadcaster.BroadcastFileProcessedAsync(
+                    string.IsNullOrEmpty(name) ? subject : name,
+                    false,
+                    message);
+            }
+        }
+    }
+
     private Task<Guid> QueueBatchJobAsync(
         IEnumerable<string> filePaths,
         string operationName,
@@ -299,7 +345,7 @@ public partial class ComicProcessorService
         string failureMessage,
         CancellationToken cancellationToken,
         bool lockEachFile,
-        Func<CancellationToken, Task>? postLoopAsync = null)
+        Func<IBatchJobReport, CancellationToken, Task>? postLoopAsync = null)
     {
         var jobId = Guid.NewGuid();
         var rawList = filePaths?.ToList() ?? new List<string>();
@@ -434,7 +480,7 @@ public partial class ComicProcessorService
                     if (postLoopAsync is not null)
                     {
                         _logger.LogDebug("{OperationName}: Job {JobId} running post-loop hook", operationName, jobId);
-                        await postLoopAsync(jobCts.Token);
+                        await postLoopAsync(new BatchJobReport(this, job, jobSyncLock), jobCts.Token);
                     }
 
                     lock (jobSyncLock)

@@ -3,9 +3,10 @@
 // js/app/file-actions.js: Preview Merge and Combine in the Combine Folders
 // modal. Both post the chosen destination and the group's other folders.
 // Preview (POST /api/files/combine-folders/preview) lists the moves the
-// server plans; Combine (POST /api/files/combine-folders) asks first, then
-// the server moves the files in a background job whose progress the page
-// tracks.
+// server plans and which source folders it then removes or keeps; Combine
+// fetches that preview, asks with the folders it removes and keeps, then
+// (POST /api/files/combine-folders) the server moves the files in a
+// background job whose progress the page tracks.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -61,8 +62,29 @@ const PROBLEM_DETAILS = {
     status: 400
 };
 
+// The source-folder part of a preview response: one folder removed, one kept.
+const CLEANUP = {
+    foldersToRemove: [{
+        directory: '/comics/Saga',
+        disposableFiles: ['ComicInfo.xml', 'cover.jpg'],
+        disposableFileCount: 2
+    }],
+    foldersToKeep: [{
+        directory: '/comics/Saga (Digital)',
+        reason: 'It still holds files that are not disposable.',
+        leftovers: ['Saga v01.pdf', 'Extras/art1.jpg'],
+        leftoverCount: 2
+    }]
+};
+
 function boot({ groups = [SAGA], routes = {}, ...options } = {}) {
-    return bootPage({ hash: '#/library', ...options, routes: { [COMBINABLE]: { groups }, ...routes } });
+    // Combine fetches the preview before it asks; by default it plans no
+    // source-folder changes, so the question names none.
+    return bootPage({
+        hash: '#/library',
+        ...options,
+        routes: { [COMBINABLE]: { groups }, [PREVIEW]: { moves: [] }, ...routes }
+    });
 }
 
 async function openCombineFolders(page) {
@@ -87,11 +109,8 @@ function actions(page) {
 /**
  * Records what Preview Merge renders into the preview panel, as one entry per
  * element: { em | h4 | 'span.conflict': text } or { list: [[class, text]] }.
- *
- * The panel cannot be read once the request settles: previewCombineFolders()
- * then re-renders the group, which hides and empties the panel
- * (file-actions.js:603-606 → 461-462, reported as a suspected bug), so the
- * test observes the rendering as it happens.
+ * Only added elements are recorded: when the request settles the group is
+ * re-rendered, which empties the panel before the result is put back.
  */
 function recordPreviewPanel(page) {
     const rendered = [];
@@ -158,6 +177,74 @@ test('Preview Merge posts the chosen destination and the other folders, then lis
     ]);
     assert.deepEqual(actions(page), { preview: true, combine: true });
     assert.equal(callsTo(page, 'POST', '/api/files/combine-folders').length, 0);
+    // The plan stays on screen once the actions are back.
+    assert.equal(panel.style.display, 'block');
+    assert.match(panel.textContent, /Move plan \(3 files, 1 renamed, 1 skipped\)/);
+});
+
+test('Preview Merge lists the source folders removed after the move and those kept, with what keeps them', async t => {
+    const page = await boot({
+        routes: {
+            [PREVIEW]: {
+                destination: '/comics/Saga (2012)',
+                sources: INTO_2012.sourceDirectories,
+                moves: [move('/comics/Saga/Saga 001.cbz', '/comics/Saga (2012)/Saga 001.cbz')],
+                ...CLEANUP
+            }
+        }
+    });
+    t.after(() => page.close());
+    await openCombineFolders(page);
+    const rendered = recordPreviewPanel(page);
+
+    chooseDestination(page, '/comics/Saga (2012)');
+    page.click('#combineFoldersPreviewBtn');
+    await page.settle();
+
+    assert.deepEqual(rendered, [
+        BUILDING,
+        { h4: 'Move plan (1 file)' },
+        { list: [['', '/comics/Saga/Saga 001.cbz → /comics/Saga (2012)/Saga 001.cbz']] },
+        { h4: 'Folders removed after the move (1)' },
+        { list: [['', '/comics/Saga (also deletes ComicInfo.xml, cover.jpg)']] },
+        { h4: 'Folders kept after the move (1)' },
+        { list: [['conflict', '/comics/Saga (Digital): still holds Saga v01.pdf, Extras/art1.jpg']] }
+    ]);
+    assert.equal(page.$('#combineFoldersPreview').style.display, 'block');
+});
+
+test('a preview that only removes folders says no files move and still lists them', async t => {
+    const page = await boot({ routes: { [PREVIEW]: { moves: [], foldersToRemove: [{ directory: '/comics/Saga (2012)' }] } } });
+    t.after(() => page.close());
+    await openCombineFolders(page);
+    const rendered = recordPreviewPanel(page);
+
+    page.click('#combineFoldersPreviewBtn');
+    await page.settle();
+
+    assert.deepEqual(rendered, [
+        BUILDING,
+        { em: 'No files will be moved.' },
+        { h4: 'Folders removed after the move (1)' },
+        { list: [['', '/comics/Saga (2012)']] }
+    ]);
+});
+
+test('a preview for a destination the user has since changed is not shown', async t => {
+    const answer = deferred();
+    const page = await boot({ routes: { [PREVIEW]: () => answer.promise } });
+    t.after(() => page.close());
+    await openCombineFolders(page);
+
+    page.click('#combineFoldersPreviewBtn');
+    chooseDestination(page, '/comics/Saga (Digital)');
+    answer.resolve({ moves: [move('/comics/Saga (2012)/Saga 003.cbz', '/comics/Saga/Saga 003.cbz')], ...CLEANUP });
+    await page.settle();
+
+    const panel = page.$('#combineFoldersPreview');
+    assert.equal(panel.style.display, 'none');
+    assert.equal(panel.textContent, '');
+    assert.deepEqual(actions(page), { preview: true, combine: true });
 });
 
 test('the actions stay disabled while a preview is pending, even if another folder is picked', async t => {
@@ -280,9 +367,102 @@ test('Combine asks before moving files and does nothing when declined', async t 
     assert.deepEqual(page.dialogs.map(dialog => dialog.message), [
         'Combine 2 folders into:\n/comics/Saga\n\nFiles will be moved on disk. Continue?'
     ]);
+    // The question is asked with the server's plan for the same request.
+    const previews = callsTo(page, 'POST', '/api/files/combine-folders/preview');
+    assert.equal(previews.length, 1);
+    assert.deepEqual(previews[0].body, {
+        groupKey: 'saga',
+        destinationDirectory: '/comics/Saga',
+        sourceDirectories: ['/comics/Saga (2012)', '/comics/Saga (Digital)']
+    });
     assert.deepEqual(callsTo(page, 'POST', '/api/files/combine-folders'), []);
     assert.deepEqual(actions(page), { preview: true, combine: true });
     assert.ok(isModalOpen(page, 'combineFoldersModal'));
+});
+
+test('Combine names the source folders it removes and keeps, and what keeps them, before it asks', async t => {
+    const page = await boot({ routes: { [PREVIEW]: { moves: [], ...CLEANUP } } });
+    t.after(() => page.close());
+    answerConfirms(page, false);
+    await openCombineFolders(page);
+    const rendered = recordPreviewPanel(page);
+
+    page.click('#combineFoldersConfirmBtn');
+    await page.settle();
+
+    assert.deepEqual(page.dialogs.map(dialog => dialog.message), [
+        'Combine 2 folders into:\n/comics/Saga\n\nFiles will be moved on disk.\n\n'
+        + 'These folders will be removed once their files have moved:\n'
+        + '  /comics/Saga (also deletes ComicInfo.xml, cover.jpg)\n\n'
+        + 'These folders will be kept:\n'
+        + '  /comics/Saga (Digital): still holds Saga v01.pdf, Extras/art1.jpg\n\n'
+        + 'Continue?'
+    ]);
+    assert.deepEqual(callsTo(page, 'POST', '/api/files/combine-folders'), []);
+    // Declining leaves the plan on screen.
+    assert.deepEqual(rendered.filter(entry => entry.h4), [
+        { h4: 'Folders removed after the move (1)' },
+        { h4: 'Folders kept after the move (1)' }
+    ]);
+    assert.equal(page.$('#combineFoldersPreview').style.display, 'block');
+    assert.deepEqual(actions(page), { preview: true, combine: true });
+});
+
+test('the Combine question shortens long folder and file lists', async t => {
+    const kept = Array.from({ length: 12 }, (_, i) => ({
+        directory: `/comics/Saga ${i}`,
+        reason: 'It still holds files that are not disposable.',
+        leftovers: ['a.pdf', 'b.pdf', 'c.pdf', 'd.pdf', 'e.pdf', 'f.pdf'],
+        leftoverCount: 40
+    }));
+    kept[1] = { directory: '/comics/Saga 1', reason: 'It is a link; links are never removed.', leftovers: [], leftoverCount: 0 };
+    const page = await boot({ routes: { [PREVIEW]: { moves: [], foldersToKeep: kept } } });
+    t.after(() => page.close());
+    answerConfirms(page, false);
+    await openCombineFolders(page);
+
+    page.click('#combineFoldersConfirmBtn');
+    await page.settle();
+
+    const lines = page.dialogs[0].message.split('\n');
+    const listed = lines.filter(line => line.startsWith('  '));
+    assert.equal(listed.length, 11);
+    assert.equal(listed[0], '  /comics/Saga 0: still holds a.pdf, b.pdf, c.pdf, d.pdf, e.pdf and 35 more');
+    assert.equal(listed[1], '  /comics/Saga 1: It is a link; links are never removed.');
+    assert.equal(listed[10], '  ...and 2 more');
+    assert.equal(lines.at(-1), 'Continue?');
+});
+
+test('Combine does not start when its preview fails, and says why', async t => {
+    const page = await boot({
+        routes: { [PREVIEW]: respond(400, { error: 'Destination directory is not part of this group.' }) }
+    });
+    t.after(() => page.close());
+    const shown = recordMessages(page);
+    await openCombineFolders(page);
+
+    page.click('#combineFoldersConfirmBtn');
+    assert.deepEqual(actions(page), { preview: false, combine: false });
+    await page.settle();
+
+    assert.deepEqual(shown, [{ text: 'Failed to combine folders: Destination directory is not part of this group.', type: 'error' }]);
+    assert.deepEqual(page.dialogs, []);
+    assert.deepEqual(callsTo(page, 'POST', '/api/files/combine-folders'), []);
+    assert.equal(loggedErrors(page, 'Failed to combine folders:').length, 1);
+    assert.deepEqual(actions(page), { preview: true, combine: true });
+});
+
+test('an expired session while Combine fetches its preview goes to the login page without asking', async t => {
+    const page = await boot({ routes: { [PREVIEW]: 401 } });
+    t.after(() => page.close());
+    await openCombineFolders(page);
+
+    page.click('#combineFoldersConfirmBtn');
+    await page.settle();
+
+    assert.ok(page.navigations.some(nav => nav.url.includes('/login.html')));
+    assert.deepEqual(page.dialogs, []);
+    assert.deepEqual(callsTo(page, 'POST', '/api/files/combine-folders'), []);
 });
 
 test('a confirmed Combine moves the files in a background job and shows its progress', async t => {
@@ -299,6 +479,9 @@ test('a confirmed Combine moves the files in a background job and shows its prog
 
     chooseDestination(page, '/comics/Saga (2012)');
     page.click('#combineFoldersConfirmBtn');
+    // The question waits for the preview.
+    assert.deepEqual(page.dialogs, []);
+    await page.settle();
 
     assert.deepEqual(page.dialogs.map(dialog => dialog.message), [
         'Combine 2 folders into:\n/comics/Saga (2012)\n\nFiles will be moved on disk. Continue?'

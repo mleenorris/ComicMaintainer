@@ -563,6 +563,141 @@
             };
         }
 
+        /**
+         * POSTs the combine request to the preview endpoint. Resolves with the
+         * plan ({ moves, foldersToRemove, foldersToKeep, ... }), or null when
+         * the session expired (the page is then on its way to the login page);
+         * rejects with the server's error otherwise.
+         */
+        async function requestCombineFoldersPreview(body) {
+            const response = await fetch(apiUrl('/api/files/combine-folders/preview'), {
+                method: 'POST',
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+            if (handleAuthError(response)) return null;
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || `HTTP error! status: ${response.status}`);
+            }
+            return data;
+        }
+
+        // At most this many folders, and names per folder, are listed in the
+        // Combine confirmation; the preview panel lists everything the server
+        // returned.
+        const COMBINE_CONFIRM_MAX_FOLDERS = 10;
+        const COMBINE_CONFIRM_MAX_NAMES = 5;
+
+        /** "a, b and 3 more": the first `max` of `names`, out of `total`. */
+        function combineFolderNameList(names, total, max) {
+            const shown = names.slice(0, max);
+            const more = Math.max(total || 0, names.length) - shown.length;
+            return more > 0 ? `${shown.join(', ')} and ${more} more` : shown.join(', ');
+        }
+
+        function combineFoldersToRemove(plan) {
+            return Array.isArray(plan && plan.foldersToRemove) ? plan.foldersToRemove : [];
+        }
+
+        function combineFoldersToKeep(plan) {
+            return Array.isArray(plan && plan.foldersToKeep) ? plan.foldersToKeep : [];
+        }
+
+        /** "/comics/Saga (2012) (also deletes ComicInfo.xml, cover.jpg)" */
+        function describeRemovedCombineFolder(folder, maxNames) {
+            const files = Array.isArray(folder.disposableFiles) ? folder.disposableFiles : [];
+            return files.length
+                ? `${folder.directory} (also deletes ${combineFolderNameList(files, folder.disposableFileCount, maxNames)})`
+                : folder.directory;
+        }
+
+        /** "/comics/Saga (Digital): still holds notes.pdf, Extras/art1.jpg", or why it is kept. */
+        function describeKeptCombineFolder(folder, maxNames) {
+            const leftovers = Array.isArray(folder.leftovers) ? folder.leftovers : [];
+            return leftovers.length
+                ? `${folder.directory}: still holds ${combineFolderNameList(leftovers, folder.leftoverCount, maxNames)}`
+                : `${folder.directory}: ${folder.reason || 'It still holds other files.'}`;
+        }
+
+        /**
+         * What the preview panel shows for a plan: the moves, then which
+         * source folders are removed once their files have moved and which
+         * are kept (with what keeps them).
+         */
+        function renderCombinePreviewContent(plan) {
+            const moves = Array.isArray(plan.moves) ? plan.moves : [];
+            const removed = combineFoldersToRemove(plan);
+            const kept = combineFoldersToKeep(plan);
+            const removedItems = removed.map(folder => html`<li>${describeRemovedCombineFolder(folder, Infinity)}</li>`);
+            const keptItems = kept.map(folder => html`<li class="conflict">${describeKeptCombineFolder(folder, Infinity)}</li>`);
+            const cleanup = html`
+                ${removed.length > 0 && html`<h4>Folders removed after the move (${removed.length})</h4><ul>${removedItems}</ul>`}
+                ${kept.length > 0 && html`<h4>Folders kept after the move (${kept.length})</h4><ul>${keptItems}</ul>`}
+            `;
+            if (moves.length === 0) {
+                return html`<em>No files will be moved.</em>${cleanup}`;
+            }
+            const conflicts = moves.filter(m => m.conflict).length;
+            const skipped = moves.filter(m => m.skipped).length;
+            const items = moves.map(m => {
+                const cls = m.skipped ? 'skipped' : (m.conflict ? 'conflict' : '');
+                const note = m.skipped ? ' (skipped)' : (m.conflict ? ' (renamed to avoid conflict)' : '');
+                return html`<li class="${cls}">${m.sourcePath} → ${m.destinationPath}${note}</li>`;
+            });
+            return html`
+                <h4>Move plan (${moves.length} file${moves.length === 1 ? '' : 's'}${conflicts ? `, ${conflicts} renamed` : ''}${skipped ? `, ${skipped} skipped` : ''})</h4>
+                <ul>${items}</ul>
+                ${cleanup}
+            `;
+        }
+
+        /** The Combine confirmation, naming the source folders the combine removes and keeps. */
+        function buildCombineConfirmMessage(sourceCount, destination, plan) {
+            const head = `Combine ${sourceCount} folder${sourceCount === 1 ? '' : 's'} into:\n${destination}\n\nFiles will be moved on disk.`;
+            const section = (title, folders, describe) => {
+                const lines = folders
+                    .slice(0, COMBINE_CONFIRM_MAX_FOLDERS)
+                    .map(folder => `  ${describe(folder, COMBINE_CONFIRM_MAX_NAMES)}`);
+                if (folders.length > COMBINE_CONFIRM_MAX_FOLDERS) {
+                    lines.push(`  ...and ${folders.length - COMBINE_CONFIRM_MAX_FOLDERS} more`);
+                }
+                return [title, ...lines].join('\n');
+            };
+            const sections = [];
+            const removed = combineFoldersToRemove(plan);
+            const kept = combineFoldersToKeep(plan);
+            if (removed.length > 0) {
+                sections.push(section('These folders will be removed once their files have moved:', removed, describeRemovedCombineFolder));
+            }
+            if (kept.length > 0) {
+                sections.push(section('These folders will be kept:', kept, describeKeptCombineFolder));
+            }
+            return sections.length > 0
+                ? `${head}\n\n${sections.join('\n\n')}\n\nContinue?`
+                : `${head} Continue?`;
+        }
+
+        /**
+         * Re-renders the group (which restores the actions but clears the
+         * preview panel), then shows `content` in the panel, unless the user
+         * picked another destination meanwhile and it is stale.
+         */
+        function showCombinePreview(body, content) {
+            renderCombineFolderGroup();
+            const current = buildCombineFoldersRequestBody();
+            if (content && current
+                && current.groupKey === body.groupKey
+                && current.destinationDirectory === body.destinationDirectory) {
+                const previewPanel = document.getElementById('combineFoldersPreview');
+                previewPanel.style.display = 'block';
+                renderHtml(previewPanel, content);
+            }
+        }
+
         async function previewCombineFolders() {
             const body = buildCombineFoldersRequestBody();
             if (!body) return;
@@ -572,42 +707,17 @@
             combineFolderActionInFlight = true;
             document.getElementById('combineFoldersPreviewBtn').disabled = true;
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
+            let content = null;
             try {
-                const response = await fetch(apiUrl('/api/files/combine-folders/preview'), {
-                    method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(body)
-                });
-                if (handleAuthError(response)) return;
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.error || `HTTP error! status: ${response.status}`);
-                }
-                const moves = Array.isArray(data.moves) ? data.moves : [];
-                if (moves.length === 0) {
-                    renderHtml(previewPanel, html`<em>No files will be moved.</em>`);
-                } else {
-                    const conflicts = moves.filter(m => m.conflict).length;
-                    const skipped = moves.filter(m => m.skipped).length;
-                    const items = moves.map(m => {
-                        const cls = m.skipped ? 'skipped' : (m.conflict ? 'conflict' : '');
-                        const note = m.skipped ? ' (skipped)' : (m.conflict ? ' (renamed to avoid conflict)' : '');
-                        return html`<li class="${cls}">${m.sourcePath} → ${m.destinationPath}${note}</li>`;
-                    });
-                    renderHtml(previewPanel, html`
-                        <h4>Move plan (${moves.length} file${moves.length === 1 ? '' : 's'}${conflicts ? `, ${conflicts} renamed` : ''}${skipped ? `, ${skipped} skipped` : ''})</h4>
-                        <ul>${items}</ul>
-                    `);
-                }
+                const plan = await requestCombineFoldersPreview(body);
+                if (!plan) return;
+                content = renderCombinePreviewContent(plan);
             } catch (error) {
                 console.error('Failed to build combine preview:', error);
-                renderHtml(previewPanel, html`<span class="conflict">Failed to build preview: ${error.message}</span>`);
+                content = html`<span class="conflict">Failed to build preview: ${error.message}</span>`;
             } finally {
                 combineFolderActionInFlight = false;
-                renderCombineFolderGroup();
+                showCombinePreview(body, content);
             }
         }
 
@@ -617,8 +727,34 @@
             if (!jobProgress.canStartJob()) return;
             const group = getCurrentCombineFolderGroup();
             const sourceCount = group ? group.folders.length - 1 : 0;
-            const message = `Combine ${sourceCount} folder${sourceCount === 1 ? '' : 's'} into:\n${combineFolderSelectedDestination}\n\nFiles will be moved on disk. Continue?`;
-            if (!confirm(message)) {
+            const destination = combineFolderSelectedDestination;
+            // Ask the server first which source folders the combine removes
+            // and which it keeps (and why), so the confirmation says so before
+            // anything moves.
+            combineFolderActionInFlight = true;
+            document.getElementById('combineFoldersPreviewBtn').disabled = true;
+            document.getElementById('combineFoldersConfirmBtn').disabled = true;
+            let plan;
+            try {
+                plan = await requestCombineFoldersPreview(body);
+            } catch (error) {
+                console.error('Failed to combine folders:', error);
+                showMessage(`Failed to combine folders: ${error.message}`, 'error');
+                combineFolderActionInFlight = false;
+                renderCombineFolderGroup();
+                return;
+            }
+            combineFolderActionInFlight = false;
+            if (!plan) return;
+            // Another job may have started while the preview was on its way;
+            // say so (canStartJob does) and leave the plan on screen.
+            if (!jobProgress.canStartJob()) {
+                showCombinePreview(body, renderCombinePreviewContent(plan));
+                return;
+            }
+            if (!confirm(buildCombineConfirmMessage(sourceCount, destination, plan))) {
+                // Leave the plan on screen, so the user can look at it again.
+                showCombinePreview(body, renderCombinePreviewContent(plan));
                 return;
             }
             // No other job can be started while the server plans the moves;

@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -67,6 +68,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
             _seriesLibrary.Object,
             NullLogger<FilesController>.Instance,
             _settings.Object,
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, _history.Object, _seriesLibrary.Object, _settings.Object),
             eventBroadcaster: broadcaster,
             seriesNameResolver: resolver,
             scheduledJobsHostedService: scheduledJobs);

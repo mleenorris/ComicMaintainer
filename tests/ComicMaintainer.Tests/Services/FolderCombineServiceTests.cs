@@ -243,19 +243,84 @@ public sealed class FolderCombineServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task StartAsync_LooseFilesInTheWatchedFolder_NeverRemovesTheWatchedFolder()
+    public async Task StartAsync_LooseFilesInTheWatchedFolder_NeverRemovesTheWatchedFolderAndDoesNotCallThatAProblem()
     {
         var destination = Dir("Berserk");
         Track(destination, "Berserk 001.cbz", T1);
         Track(_library, "Berserk 002.cbz", T2);
 
-        await CreateService().StartAsync(Combine(destination, _library));
+        var service = CreateService();
+        var preview = await service.PreviewAsync(Combine(destination, _library));
+        await service.StartAsync(Combine(destination, _library));
 
+        // The preview says the watched folder stays, and why.
+        var planned = Assert.Single(preview.Plan!.SourceCleanup);
+        Assert.False(planned.Removable);
+        Assert.True(planned.IsLibraryFolder);
+        Assert.Equal(FolderCombineSourceCleaner.ProtectedFolderReason, planned.KeptReason);
+        // Keeping it is expected, so the job reports no problem and records
+        // no failure for it.
         Assert.True(Directory.Exists(_library));
         Assert.True(File.Exists(Path.Join(destination, "Berserk 002.cbz")));
+        Assert.Empty(_jobReport.Problems);
+        Assert.Empty(HistoryFor(_library));
+    }
+
+    [Fact]
+    public async Task StartAsync_ASourceFolderThatCannotBeChecked_IsKeptAndReportedAndTheRestOfTheCombineStillRuns()
+    {
+        var destination = Dir("Berserk");
+        var unreadable = Dir("Berserk (Digital Edition)");
+        var clean = Dir("Berserk (Scans)");
+        Track(destination, "Berserk 001.cbz", T1);
+        Track(unreadable, "Berserk 002.cbz", T2);
+        Track(clean, "Berserk 003.cbz", T2);
+        // Folders are handled deepest (longest path) first, so the unreadable
+        // folder is the first one whose cleanup fails.
+        var failing = new FailingFirstSectionLock();
+
+        await CreateService(failing).StartAsync(Combine(destination, unreadable, clean));
+
         var problem = Assert.Single(_jobReport.Problems);
-        Assert.Equal(_library, problem.Key);
-        Assert.Contains(FolderCombineSourceCleaner.ProtectedFolderReason, problem.Value);
+        Assert.Equal(unreadable, problem.Key);
+        Assert.Equal(
+            "Source folder kept. " + FolderCombineSourceCleaner.UncheckedReasonPrefix + FailingFirstSectionLock.Message,
+            problem.Value);
+        Assert.True(Directory.Exists(unreadable));
+        Assert.Contains(HistoryFor(unreadable), entry => !entry.Success && entry.ErrorMessage == problem.Value);
+        // The next folder is still removed, and the combined folder is still
+        // normalized and renamed.
+        Assert.False(Directory.Exists(clean));
+        Assert.Equal(2, failing.Sections);
+        _processor.Verify(p => p.NormalizeAndRenameFilesAsync(
+            It.Is<IEnumerable<string>>(paths => paths.Contains(Path.Join(destination, "Berserk 003.cbz"))),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// A library mutation lock whose first locked section fails with an I/O
+    /// error, as the source-folder cleanup inside it would.
+    /// </summary>
+    private sealed class FailingFirstSectionLock : ILibraryMutationLock
+    {
+        public const string Message = "The network path was not found.";
+
+        private readonly LibraryMutationLock _inner = new();
+
+        public int Sections { get; private set; }
+
+        public T Execute<T>(Func<T> action, CancellationToken cancellationToken = default) =>
+            _inner.Execute(action, cancellationToken);
+
+        public void Execute(Action action, CancellationToken cancellationToken = default) =>
+            _inner.Execute(action, cancellationToken);
+
+        public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken cancellationToken = default) =>
+            _inner.ExecuteAsync(token =>
+            {
+                Sections++;
+                return Sections == 1 ? throw new IOException(Message) : action(token);
+            }, cancellationToken);
     }
 
     // --------------------------------------------------------------- preview

@@ -473,7 +473,10 @@ public sealed partial class FolderCombineService
         /// Removes each source folder that is left with nothing but disposable
         /// entries, deepest first, holding the library mutation lock for each
         /// so no import publishes into a folder while it is being removed. A
-        /// kept folder is reported in the job's results with what kept it.
+        /// kept folder is reported in the job's results with what kept it,
+        /// unless it is one of the library's configured folders, which are
+        /// never removed. A folder that cannot be checked is kept and reported
+        /// too, and the remaining folders are still handled.
         /// </summary>
         private async Task<bool> RemoveSourceFoldersAsync(IBatchJobReport report, CancellationToken token)
         {
@@ -482,9 +485,28 @@ public sealed partial class FolderCombineService
             foreach (var sourceDir in DeepestFirst(_plan.SourceDirectories))
             {
                 var existed = Directory.Exists(sourceDir);
-                var cleanup = await _owner._libraryMutationLock.ExecuteAsync(
-                    _ => Task.FromResult(FolderCombineSourceCleaner.Remove(sourceDir, protectedDirectories)),
-                    token);
+                FolderCombineSourceCleanup cleanup;
+                try
+                {
+                    cleanup = await _owner._libraryMutationLock.ExecuteAsync(
+                        _ => Task.FromResult(FolderCombineSourceCleaner.Remove(sourceDir, protectedDirectories)),
+                        token);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _owner._logger.LogWarning(ex, "Could not check source folder {Directory} after folder combine",
+                        LoggingHelper.SanitizePathForLog(sourceDir));
+                    cleanup = FolderCombineSourceCleaner.CouldNotBeChecked(sourceDir, ex);
+                }
+
+                if (cleanup.IsLibraryFolder)
+                {
+                    // Expected, e.g. loose files combined out of the watched
+                    // folder: the folder stays and that is not a problem.
+                    _owner._logger.LogInformation("Kept source folder {Directory} after folder combine: it is a configured library folder",
+                        LoggingHelper.SanitizePathForLog(sourceDir));
+                    continue;
+                }
 
                 if (cleanup.Removable)
                 {

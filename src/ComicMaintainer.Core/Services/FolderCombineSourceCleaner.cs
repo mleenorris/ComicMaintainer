@@ -20,6 +20,10 @@ namespace ComicMaintainer.Core.Services;
 /// <para>Removal deletes the disposable files, then the emptied subfolders and
 /// the folder itself non-recursively, so anything that appears in the meantime
 /// makes the removal fail and the folder is kept. Links are never followed.</para>
+/// <para>Neither <see cref="Assess"/> nor <see cref="Remove"/> throws for a
+/// file-system error: a folder that cannot be checked is kept, with the error
+/// as the reason, so one unreadable folder never stops a preview or the rest
+/// of a combine.</para>
 /// </remarks>
 internal static class FolderCombineSourceCleaner
 {
@@ -51,12 +55,17 @@ internal static class FolderCombineSourceCleaner
         ReturnSpecialDirectories = false
     };
 
+    // FileSystemInfo.Attributes of an entry that no longer exists.
+    private const FileAttributes Vanished = (FileAttributes)(-1);
+
     internal const string ProtectedFolderReason =
-        "It is a configured library folder (the watched, duplicates or Suwayomi folder) or the destination.";
+        "It is one of the library's configured folders (the watched, duplicates or Suwayomi folder), which a combine never removes.";
 
     internal const string LinkReason = "It is a link; links are never removed.";
 
     internal const string LeftoverReason = "It still holds files that are not disposable.";
+
+    internal const string UncheckedReasonPrefix = "It could not be checked: ";
 
     /// <summary>
     /// Whether <paramref name="fileName"/> is disposable at
@@ -84,7 +93,7 @@ internal static class FolderCombineSourceCleaner
     /// <paramref name="departingFiles"/> have been moved out and the folders in
     /// <paramref name="removedDirectories"/> (nested source folders assessed
     /// first) are gone, and whether the folder will then be removed. Changes
-    /// nothing on disk.
+    /// nothing on disk, and lists every leftover.
     /// </summary>
     public static FolderCombineSourceCleanup Assess(
         string directory,
@@ -92,52 +101,66 @@ internal static class FolderCombineSourceCleaner
         IReadOnlySet<string> removedDirectories,
         IReadOnlyCollection<string> protectedDirectories)
     {
-        var cleanup = new FolderCombineSourceCleanup { Directory = directory };
-        if (!Directory.Exists(directory))
+        try
         {
-            // Nothing to remove: reported as removable so the preview does not
-            // claim it will be kept.
-            cleanup.Removable = true;
-            return cleanup;
-        }
+            var folder = new DirectoryInfo(directory);
+            if (!folder.Exists)
+            {
+                // Nothing to remove: reported as removable so the preview does
+                // not claim it will be kept.
+                return Gone(directory);
+            }
 
-        if (GetBlockingReason(directory, protectedDirectories) is { } reason)
+            if (GetBlockingCleanup(folder, directory, protectedDirectories) is { } blocked)
+            {
+                return blocked;
+            }
+
+            var scan = Scan(folder, departingFiles, removedDirectories, protectedDirectories, stopOnceListIsFull: false);
+            return ToCleanup(directory, scan);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            cleanup.KeptReason = reason;
-            return cleanup;
+            return CouldNotBeChecked(directory, ex);
         }
-
-        var scan = Scan(directory, departingFiles, removedDirectories, protectedDirectories);
-        return ToCleanup(directory, scan);
     }
 
     /// <summary>
     /// Removes <paramref name="directory"/> when nothing but disposable
     /// entries is left in it, and says what was deleted or what kept it. Call
     /// it while holding the library mutation lock so no other service moves a
-    /// file into the folder meanwhile.
+    /// file into the folder meanwhile; to keep that short, it stops looking
+    /// once it has found more leftovers than it lists.
     /// </summary>
     public static FolderCombineSourceCleanup Remove(string directory, IReadOnlyCollection<string> protectedDirectories)
     {
-        var cleanup = new FolderCombineSourceCleanup { Directory = directory };
-        if (!Directory.Exists(directory))
+        ScanResult scan;
+        try
         {
-            cleanup.Removable = true;
-            return cleanup;
+            var folder = new DirectoryInfo(directory);
+            if (!folder.Exists)
+            {
+                return Gone(directory);
+            }
+
+            if (GetBlockingCleanup(folder, directory, protectedDirectories) is { } blocked)
+            {
+                return blocked;
+            }
+
+            scan = Scan(
+                folder,
+                new HashSet<string>(PathComparer),
+                new HashSet<string>(PathComparer),
+                protectedDirectories,
+                stopOnceListIsFull: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return CouldNotBeChecked(directory, ex);
         }
 
-        if (GetBlockingReason(directory, protectedDirectories) is { } reason)
-        {
-            cleanup.KeptReason = reason;
-            return cleanup;
-        }
-
-        var scan = Scan(
-            directory,
-            new HashSet<string>(PathComparer),
-            new HashSet<string>(PathComparer),
-            protectedDirectories);
-        cleanup = ToCleanup(directory, scan);
+        var cleanup = ToCleanup(directory, scan);
         if (!cleanup.Removable)
         {
             return cleanup;
@@ -169,6 +192,17 @@ internal static class FolderCombineSourceCleaner
     }
 
     /// <summary>
+    /// The outcome for a folder that could not be checked because of
+    /// <paramref name="error"/>: it is kept, with the error as the reason.
+    /// </summary>
+    public static FolderCombineSourceCleanup CouldNotBeChecked(string directory, Exception error) => new()
+    {
+        Directory = directory,
+        Removable = false,
+        KeptReason = UncheckedReasonPrefix + error.Message
+    };
+
+    /// <summary>
     /// Formats the job-result message for a folder that was kept.
     /// </summary>
     public static string DescribeKeptFolder(FolderCombineSourceCleanup cleanup)
@@ -180,27 +214,47 @@ internal static class FolderCombineSourceCleaner
         }
 
         var listed = string.Join(", ", cleanup.Leftovers);
+        if (cleanup.LeftoversTruncated)
+        {
+            return $"{message} Remaining: {listed} and more.";
+        }
+
         var more = cleanup.LeftoverCount - cleanup.Leftovers.Count;
         return more > 0
             ? $"{message} Remaining: {listed} and {more} more."
             : $"{message} Remaining: {listed}.";
     }
 
-    private static string? GetBlockingReason(string directory, IReadOnlyCollection<string> protectedDirectories)
+    private static FolderCombineSourceCleanup Gone(string directory) => new()
     {
-        if (IsLink(new DirectoryInfo(directory)))
+        Directory = directory,
+        Removable = true
+    };
+
+    /// <summary>
+    /// The outcome when the folder itself must be kept whatever it holds: it
+    /// is a link, or one of the configured library folders. Null otherwise.
+    /// </summary>
+    private static FolderCombineSourceCleanup? GetBlockingCleanup(
+        DirectoryInfo folder,
+        string directory,
+        IReadOnlyCollection<string> protectedDirectories)
+    {
+        // Exists has just read the attributes, so this costs no file-system call.
+        if (IsLink(folder.Attributes))
         {
-            return LinkReason;
+            return new FolderCombineSourceCleanup { Directory = directory, KeptReason = LinkReason };
         }
 
         // A protected folder nested deeper is found by the scan and listed as a
-        // leftover, so only the folder itself is checked here.
+        // leftover, so only the folder itself is checked here. A source folder
+        // is never the combine's destination, so a match is a library folder.
         return protectedDirectories.Any(protectedDirectory => IsSamePath(protectedDirectory, directory))
-            ? ProtectedFolderReason
+            ? new FolderCombineSourceCleanup { Directory = directory, KeptReason = ProtectedFolderReason, IsLibraryFolder = true }
             : null;
     }
 
-    private sealed class ScanResult
+    private sealed class ScanResult(bool stopOnceListIsFull)
     {
         public List<string> DisposableFiles { get; } = new();
 
@@ -209,9 +263,15 @@ internal static class FolderCombineSourceCleaner
 
         public List<string> Leftovers { get; } = new();
 
-        public int LeftoverCount { get; set; }
+        public int LeftoverCount { get; private set; }
 
         public string? KeptReason { get; set; }
+
+        /// <summary>
+        /// True once more leftovers were found than are listed and the scan
+        /// was asked to stop then: the folder is kept either way.
+        /// </summary>
+        public bool Stopped { get; private set; }
 
         public void AddLeftover(string entry)
         {
@@ -220,17 +280,22 @@ internal static class FolderCombineSourceCleaner
             {
                 Leftovers.Add(entry);
             }
+            else if (stopOnceListIsFull)
+            {
+                Stopped = true;
+            }
         }
     }
 
     private static ScanResult Scan(
-        string directory,
+        DirectoryInfo folder,
         IReadOnlySet<string> departingFiles,
         IReadOnlySet<string> removedDirectories,
-        IReadOnlyCollection<string> protectedDirectories)
+        IReadOnlyCollection<string> protectedDirectories,
+        bool stopOnceListIsFull)
     {
-        var result = new ScanResult();
-        ScanDirectory(new DirectoryInfo(directory), directory, depth: 0, departingFiles, removedDirectories, protectedDirectories, result);
+        var result = new ScanResult(stopOnceListIsFull);
+        ScanDirectory(folder, folder.FullName, depth: 0, departingFiles, removedDirectories, protectedDirectories, result);
         return result;
     }
 
@@ -262,7 +327,21 @@ internal static class FolderCombineSourceCleaner
         var clean = true;
         foreach (var entry in entries.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase))
         {
-            if (IsLink(entry))
+            if (result.Stopped)
+            {
+                return false;
+            }
+
+            // Listing the folder read the attributes too (on Windows), so
+            // checking them costs no extra file-system call per entry.
+            var attributes = entry.Attributes;
+            if (attributes == Vanished)
+            {
+                // Gone since the folder was listed, so it keeps nothing.
+                continue;
+            }
+
+            if (IsLink(attributes))
             {
                 result.AddLeftover(Relative(root, entry.FullName));
                 clean = false;
@@ -311,7 +390,7 @@ internal static class FolderCombineSourceCleaner
             }
         }
 
-        return clean;
+        return clean && !result.Stopped;
     }
 
     private static FolderCombineSourceCleanup ToCleanup(string directory, ScanResult scan)
@@ -328,12 +407,19 @@ internal static class FolderCombineSourceCleaner
                 .ToList(),
             DisposableFileCount = scan.DisposableFiles.Count,
             Leftovers = scan.Leftovers,
-            LeftoverCount = scan.LeftoverCount
+            LeftoverCount = scan.LeftoverCount,
+            LeftoversTruncated = scan.Stopped
         };
     }
 
-    private static bool IsLink(FileSystemInfo entry) =>
-        entry.LinkTarget is not null || entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
+    /// <summary>
+    /// Symbolic links and junctions carry the reparse-point attribute (.NET
+    /// sets it for symbolic links on Unix too). Other reparse points, such as
+    /// cloud-file placeholders, count as links as well, which only ever keeps
+    /// a folder.
+    /// </summary>
+    private static bool IsLink(FileAttributes attributes) =>
+        attributes.HasFlag(FileAttributes.ReparsePoint);
 
     /// <summary>
     /// Compares library paths the way <see cref="LibraryPathValidator"/> does:

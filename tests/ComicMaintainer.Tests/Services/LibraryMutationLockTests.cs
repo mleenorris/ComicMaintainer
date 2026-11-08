@@ -28,7 +28,7 @@ public sealed class LibraryMutationLockTests : IDisposable
 
         // The synchronous caller (the Suwayomi importer's side) cannot get in
         // while the asynchronous holder (folder combine's side) is inside.
-        Assert.False(syncCaller.Wait(TimeSpan.FromMilliseconds(200)));
+        await Assert.ThrowsAsync<TimeoutException>(() => syncCaller.WaitAsync(TimeSpan.FromMilliseconds(200)));
         Assert.False(syncRan);
 
         release.TrySetResult();

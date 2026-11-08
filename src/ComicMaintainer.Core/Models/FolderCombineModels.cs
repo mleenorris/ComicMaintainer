@@ -91,6 +91,14 @@ public sealed class FolderCombineSourceCleanup
     /// <summary>Why the folder is kept; null when it is removed.</summary>
     public string? KeptReason { get; set; }
 
+    /// <summary>
+    /// True when the folder is itself one of the library's configured
+    /// folders (the watched, duplicates or Suwayomi folder), which a combine
+    /// never removes. Keeping it is expected, so a combine does not report it
+    /// as a problem.
+    /// </summary>
+    public bool IsLibraryFolder { get; set; }
+
     /// <summary>Disposable files deleted with the folder, relative to it (first <see cref="MaxListedEntries"/>).</summary>
     public List<string> DisposableFiles { get; set; } = new();
 
@@ -103,6 +111,14 @@ public sealed class FolderCombineSourceCleanup
     public List<string> Leftovers { get; set; } = new();
 
     public int LeftoverCount { get; set; }
+
+    /// <summary>
+    /// True when the removal stopped looking once it had found more leftovers
+    /// than it lists (it holds the library mutation lock while it looks), so
+    /// <see cref="LeftoverCount"/> is a lower bound. A preview always counts
+    /// them all.
+    /// </summary>
+    public bool LeftoversTruncated { get; set; }
 }
 
 /// <summary>The planned moves and source-folder cleanup of a folder combine.</summary>

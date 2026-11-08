@@ -91,6 +91,36 @@ public sealed class FolderCombineSourceCleanerTests : IDisposable
         return mklink.HasExited && mklink.ExitCode == 0 && Directory.Exists(link);
     }
 
+    /// <summary>
+    /// A set of paths whose lookups fail with an I/O error, standing in for a
+    /// file-system call that fails while a folder is being checked.
+    /// </summary>
+    private sealed class FailingPathSet : IReadOnlySet<string>
+    {
+        public const string Message = "The device is not ready.";
+
+        private static IOException Fail() => new(Message);
+
+        public int Count => throw Fail();
+        public bool Contains(string item) => throw Fail();
+        public IEnumerator<string> GetEnumerator() => throw Fail();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+        public bool IsProperSubsetOf(IEnumerable<string> other) => throw Fail();
+        public bool IsProperSupersetOf(IEnumerable<string> other) => throw Fail();
+        public bool IsSubsetOf(IEnumerable<string> other) => throw Fail();
+        public bool IsSupersetOf(IEnumerable<string> other) => throw Fail();
+        public bool Overlaps(IEnumerable<string> other) => throw Fail();
+        public bool SetEquals(IEnumerable<string> other) => throw Fail();
+    }
+
+    /// <summary>Protected folders that cannot be listed, failing like <see cref="FailingPathSet"/>.</summary>
+    private sealed class FailingPathCollection : IReadOnlyCollection<string>
+    {
+        public int Count => 1;
+        public IEnumerator<string> GetEnumerator() => throw new IOException(FailingPathSet.Message);
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     // ------------------------------------------------------------------ disposable
 
     [Theory]
@@ -227,6 +257,7 @@ public sealed class FolderCombineSourceCleanerTests : IDisposable
         var cleanup = FolderCombineSourceCleaner.Assess(_library, Nothing, Nothing, Protected());
 
         Assert.False(cleanup.Removable);
+        Assert.True(cleanup.IsLibraryFolder);
         Assert.Equal(FolderCombineSourceCleaner.ProtectedFolderReason, cleanup.KeptReason);
     }
 
@@ -238,6 +269,7 @@ public sealed class FolderCombineSourceCleanerTests : IDisposable
         var cleanup = FolderCombineSourceCleaner.Assess(_source, Nothing, Nothing, Protected(duplicates));
 
         Assert.False(cleanup.Removable);
+        Assert.False(cleanup.IsLibraryFolder);
         Assert.Equal(new[] { "Duplicates" + Path.DirectorySeparatorChar }, cleanup.Leftovers);
     }
 
@@ -248,6 +280,20 @@ public sealed class FolderCombineSourceCleanerTests : IDisposable
 
         Assert.True(cleanup.Removable);
         Assert.Equal(0, cleanup.LeftoverCount);
+    }
+
+    [Fact]
+    public void Assess_AnInputOutputErrorWhileChecking_KeepsTheFolderWithTheErrorInsteadOfThrowing()
+    {
+        // E.g. an entry that cannot be examined: the preview must still list
+        // every other source folder instead of failing.
+        Write("Berserk v01.cbz");
+
+        var cleanup = FolderCombineSourceCleaner.Assess(_source, new FailingPathSet(), Nothing, Protected());
+
+        Assert.False(cleanup.Removable);
+        Assert.False(cleanup.IsLibraryFolder);
+        Assert.Equal(FolderCombineSourceCleaner.UncheckedReasonPrefix + FailingPathSet.Message, cleanup.KeptReason);
     }
 
     // ------------------------------------------------------------------- remove
@@ -297,8 +343,44 @@ public sealed class FolderCombineSourceCleanerTests : IDisposable
         var cleanup = FolderCombineSourceCleaner.Remove(_library, Protected());
 
         Assert.False(cleanup.Removable);
+        Assert.True(cleanup.IsLibraryFolder);
         Assert.Equal(FolderCombineSourceCleaner.ProtectedFolderReason, cleanup.KeptReason);
         Assert.True(Directory.Exists(_library));
+    }
+
+    [Fact]
+    public void Remove_ManyLeftovers_StopsLookingOnceTheListIsFullAndDeletesNothing()
+    {
+        // The removal runs under the library mutation lock, so it does not
+        // walk the rest of a big folder once the folder is known to stay.
+        var comicInfo = Write("ComicInfo.xml");
+        for (var i = 0; i < FolderCombineSourceCleanupLimit + 10; i++)
+        {
+            Write($"page{i:000}.png");
+        }
+
+        var cleanup = FolderCombineSourceCleaner.Remove(_source, Protected());
+
+        Assert.False(cleanup.Removable);
+        Assert.True(cleanup.LeftoversTruncated);
+        Assert.Equal(FolderCombineSourceCleanupLimit, cleanup.Leftovers.Count);
+        Assert.Equal(FolderCombineSourceCleanupLimit + 1, cleanup.LeftoverCount);
+        Assert.EndsWith($"{cleanup.Leftovers[^1]} and more.", FolderCombineSourceCleaner.DescribeKeptFolder(cleanup));
+        Assert.True(File.Exists(comicInfo));
+    }
+
+    [Fact]
+    public void Remove_AnInputOutputErrorWhileChecking_KeepsTheFolderAndDeletesNothing()
+    {
+        var comicInfo = Write("ComicInfo.xml");
+
+        var cleanup = FolderCombineSourceCleaner.Remove(_source, new FailingPathCollection());
+
+        Assert.False(cleanup.Removable);
+        Assert.Equal(FolderCombineSourceCleaner.UncheckedReasonPrefix + FailingPathSet.Message, cleanup.KeptReason);
+        Assert.StartsWith("Source folder kept. It could not be checked: ", FolderCombineSourceCleaner.DescribeKeptFolder(cleanup));
+        Assert.True(File.Exists(comicInfo));
+        Assert.True(Directory.Exists(_source));
     }
 
     [Fact]

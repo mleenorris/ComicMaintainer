@@ -139,8 +139,38 @@ public static class EmailCondenseMode
     /// <summary>A single book containing every selected issue.</summary>
     public const string All = "all";
 
-    /// <summary>Upper bound on the issues that may be condensed into one book.</summary>
+    /// <summary>
+    /// Upper bound on the issues that may be condensed into one book, in
+    /// <see cref="Count"/> mode and <see cref="All"/> mode alike.
+    /// </summary>
     public const int MaxIssuesPerBook = 500;
+
+    /// <summary>
+    /// Largest condensed book that is built, judged by its estimated size. A
+    /// download keeps every page at full quality, so without a ceiling one
+    /// request for a whole long-running series could fill the disk with the
+    /// intermediate and final book; AZW3 also cannot exceed 4 GiB. Larger
+    /// selections must be split by condensing by count.
+    /// </summary>
+    public const long MaxBookBytes = 2L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Refuses to build <paramref name="book"/> when it is over
+    /// <see cref="MaxBookBytes"/>, with a message the user can act on.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The book is too large to build.</exception>
+    public static void EnsureBookCanBeBuilt(CondensedBookDto book)
+    {
+        ArgumentNullException.ThrowIfNull(book);
+
+        if (book.ExceedsBookSizeLimit)
+        {
+            const double Gigabyte = 1024d * 1024d * 1024d;
+            throw new InvalidOperationException(string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"Condensed book \"{book.DisplayName}\" is about {book.EstimatedBytes / Gigabyte:0.#} GB, more than the {MaxBookBytes / Gigabyte:0.#} GB a single book may be. Condense fewer issues per book."));
+        }
+    }
 
     public static bool IsCondensing(string? value) =>
         string.Equals(value, Count, StringComparison.OrdinalIgnoreCase) ||
@@ -172,10 +202,19 @@ public static class EmailCondenseMode
 
     /// <summary>
     /// Validates the issues-per-book value for <paramref name="mode"/>. Only
-    /// <see cref="Count"/> uses it; the other modes ignore it.
+    /// <see cref="Count"/> uses it; <see cref="All"/> puts every issue in one
+    /// book, so it is the selection that must not exceed
+    /// <see cref="MaxIssuesPerBook"/> there.
     /// </summary>
     public static int NormalizeIssuesPerBookOrThrow(string mode, int? issuesPerBook, int totalIssues, string paramName)
     {
+        if (string.Equals(mode, All, StringComparison.Ordinal) && totalIssues > MaxIssuesPerBook)
+        {
+            throw new ArgumentException(
+                $"At most {MaxIssuesPerBook} issues can be condensed into a single book, but {totalIssues} were selected. Condense by count to split them into several books.",
+                paramName);
+        }
+
         if (!string.Equals(mode, Count, StringComparison.Ordinal))
         {
             return Math.Max(1, totalIssues);
@@ -406,11 +445,17 @@ public record EmailDeliveryBulkCancelResult(int Cancelled, int Stopping, int Sen
 /// the converter will still try to recompress it, but heavily condensed books
 /// cannot realistically be shrunk far enough.
 /// </param>
+/// <param name="ExceedsBookSizeLimit">
+/// True when <paramref name="EstimatedBytes"/> is over
+/// <see cref="EmailCondenseMode.MaxBookBytes"/>: the book is too large to be
+/// built at all, so it can be neither emailed nor downloaded.
+/// </param>
 public record CondensedBookDto(
     string DisplayName,
     IReadOnlyList<string> Files,
     long EstimatedBytes,
-    bool ExceedsAttachmentLimit);
+    bool ExceedsAttachmentLimit,
+    bool ExceedsBookSizeLimit = false);
 
 /// <summary>
 /// What condensing a selection would produce, so the user can be warned before

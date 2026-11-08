@@ -114,6 +114,49 @@ public class EmailDeliveryTests
     }
 
     [Fact]
+    public void NormalizeIssuesPerBookOrThrow_AllModeAcceptsASelectionUpToTheMaximum()
+    {
+        Assert.Equal(
+            EmailCondenseMode.MaxIssuesPerBook,
+            EmailCondenseMode.NormalizeIssuesPerBookOrThrow(EmailCondenseMode.All, null, EmailCondenseMode.MaxIssuesPerBook, "issuesPerBook"));
+    }
+
+    [Fact]
+    public void NormalizeIssuesPerBookOrThrow_AllModeRejectsASelectionTooLargeForOneBook()
+    {
+        var ex = Assert.Throws<ArgumentException>(() =>
+            EmailCondenseMode.NormalizeIssuesPerBookOrThrow(EmailCondenseMode.All, null, EmailCondenseMode.MaxIssuesPerBook + 1, "issuesPerBook"));
+
+        Assert.Equal("issuesPerBook", ex.ParamName);
+        Assert.Contains("At most 500 issues can be condensed into a single book, but 501 were selected. Condense by count", ex.Message);
+    }
+
+    [Fact]
+    public void EnsureBookCanBeBuilt_RefusesABookOverTheSizeLimitWithAnActionableMessage()
+    {
+        var book = new CondensedBookDto(
+            "Saga 001-300",
+            new[] { "/a.cbz" },
+            EmailCondenseMode.MaxBookBytes + (512L * 1024 * 1024),
+            ExceedsAttachmentLimit: true,
+            ExceedsBookSizeLimit: true);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => EmailCondenseMode.EnsureBookCanBeBuilt(book));
+
+        Assert.Equal(
+            "Condensed book \"Saga 001-300\" is about 2.5 GB, more than the 2 GB a single book may be. Condense fewer issues per book.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void EnsureBookCanBeBuilt_AcceptsABookWithinTheSizeLimit()
+    {
+        var book = new CondensedBookDto("Saga", new[] { "/a.cbz" }, EmailCondenseMode.MaxBookBytes, ExceedsAttachmentLimit: true);
+
+        EmailCondenseMode.EnsureBookCanBeBuilt(book);
+    }
+
+    [Fact]
     public void CondensePlan_CanEmailOnlyWhenThereAreBooksAndNoneIsOversized()
     {
         var fits = new CondensedBookDto("Book 1", new[] { "/a.cbz" }, 1_000, ExceedsAttachmentLimit: false);

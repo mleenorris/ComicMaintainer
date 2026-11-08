@@ -706,6 +706,30 @@ public class ComicEmailServiceTests : IDisposable
         Assert.True(plan.CanEmail);
         Assert.Equal(0, plan.OversizedBookCount);
         Assert.Equal(3, plan.TotalIssues);
+        Assert.False(plan.Books.Single().ExceedsBookSizeLimit);
+    }
+
+    [Fact]
+    public async Task CondensingEverythingIntoOneBook_IsRefusedForMoreIssuesThanABookCanHold()
+    {
+        var files = Enumerable.Range(1, EmailCondenseMode.MaxIssuesPerBook + 1)
+            .Select(i => CreateComic($"Series - Chapter {i:D4}.cbz", sizeBytes: 16))
+            .ToList();
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
+
+        var planError = await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.PlanCondensedDeliveryAsync(files, EmailCondenseMode.All, null));
+        var downloadError = await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.CreateCondensedBookAsync(files, EmailCondenseMode.All, null, bookIndex: 0));
+        var sendError = await Assert.ThrowsAsync<ArgumentException>(() => _service.QueueCondensedFilesAsync(
+            files, device.Id, EmailCondenseMode.All, null, EmailDeliverySource.Manual, false));
+
+        Assert.All(
+            new[] { planError, downloadError, sendError },
+            ex => Assert.Contains("At most 500 issues can be condensed into a single book, but 501 were selected.", ex.Message));
+        _epub.VerifyNoOtherCalls();
+        _azw3.VerifyNoOtherCalls();
+        Assert.Empty(await _service.GetRecentDeliveriesAsync(10));
     }
 
     [Fact]

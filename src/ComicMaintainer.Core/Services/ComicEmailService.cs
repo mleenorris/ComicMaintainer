@@ -497,7 +497,8 @@ public class ComicEmailService : IComicEmailService
                 await BuildCondensedNameAsync(group, cancellationToken),
                 group,
                 estimated,
-                estimated > maxBytes));
+                estimated > maxBytes,
+                estimated > EmailCondenseMode.MaxBookBytes));
         }
 
         return new CondensePlanDto(mode, issues.Count, perBook, maxBytes, books, skipped);
@@ -534,6 +535,7 @@ public class ComicEmailService : IComicEmailService
         }
 
         var book = plan.Books[bookIndex];
+        EmailCondenseMode.EnsureBookCanBeBuilt(book);
         var workDirectory = Path.Join(GetTempDirectory(), "email-download", Guid.NewGuid().ToString("N"));
 
         // A download has no mail size budget, so the pages keep their original

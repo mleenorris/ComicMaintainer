@@ -133,6 +133,53 @@ public class CondensedBookBuildTrackerTests : IDisposable
     }
 
     [Fact]
+    public async Task StartAsync_RefusesABookTooLargeToBuildWithoutStartingIt()
+    {
+        _email
+            .Setup(e => e.PlanCondensedDeliveryAsync(
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<int?>(),
+                It.IsAny<bool>(),
+                It.IsAny<int?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CondensePlanDto(
+                "all",
+                2,
+                2,
+                25 * 1024 * 1024,
+                new[]
+                {
+                    new CondensedBookDto(
+                        "Series 001-002",
+                        new[] { "/comics/a.cbz", "/comics/b.cbz" },
+                        EmailCondenseMode.MaxBookBytes + 1,
+                        ExceedsAttachmentLimit: true,
+                        ExceedsBookSizeLimit: true)
+                },
+                new Dictionary<string, string>()));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _tracker.StartAsync(Request(), Owner));
+
+        Assert.Contains("Condense fewer issues per book", ex.Message);
+        Assert.Empty(_tracker.List(Owner));
+        _email.Verify(
+            e => e.CreateCondensedBookAsync(
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<int?>(),
+                It.IsAny<int>(),
+                It.IsAny<bool>(),
+                It.IsAny<int?>(),
+                It.IsAny<bool>(),
+                It.IsAny<IProgress<EpubConversionProgress>?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task StartAsync_JoinsAnIdenticalBuildThatIsAlreadyRunning()
     {
         SetupPlan();

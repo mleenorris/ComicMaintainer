@@ -494,7 +494,7 @@ public sealed class EmailControllerTests : IDisposable
             MaxAttachmentBytes: 1000,
             Books: new[]
             {
-                new CondensedBookDto("Saga #1-2", files.Take(2).ToList(), 1500, ExceedsAttachmentLimit: true),
+                new CondensedBookDto("Saga #1-2", files.Take(2).ToList(), 1500, ExceedsAttachmentLimit: true, ExceedsBookSizeLimit: true),
                 new CondensedBookDto("Saga #3", files.Skip(2).ToList(), 400, ExceedsAttachmentLimit: false)
             },
             Skipped: new Dictionary<string, string> { ["/lib/missing.cbz"] = "File not found" });
@@ -516,6 +516,7 @@ public sealed class EmailControllerTests : IDisposable
         Assert.Equal(3, json.GetProperty("total_issues").GetInt32());
         Assert.Equal(2, json.GetProperty("issues_per_book").GetInt32());
         Assert.Equal(1000, json.GetProperty("max_attachment_bytes").GetInt64());
+        Assert.Equal(EmailCondenseMode.MaxBookBytes, json.GetProperty("max_book_bytes").GetInt64());
         Assert.False(json.GetProperty("can_email").GetBoolean());
         Assert.Equal(1, json.GetProperty("oversized_book_count").GetInt32());
         var books = json.GetProperty("books").EnumerateArray().ToList();
@@ -525,6 +526,8 @@ public sealed class EmailControllerTests : IDisposable
         Assert.Equal(1500, books[0].GetProperty("estimated_bytes").GetInt64());
         Assert.True(books[0].GetProperty("exceeds_attachment_limit").GetBoolean());
         Assert.False(books[1].GetProperty("exceeds_attachment_limit").GetBoolean());
+        Assert.True(books[0].GetProperty("exceeds_book_size_limit").GetBoolean());
+        Assert.False(books[1].GetProperty("exceeds_book_size_limit").GetBoolean());
         Assert.Equal("File not found", json.GetProperty("skipped").GetProperty("/lib/missing.cbz").GetString());
         _email.Verify(e => e.PlanCondensedDeliveryAsync(files, "count", 2, false, 8, false, It.IsAny<CancellationToken>()), Times.Once);
         _seriesLibrary.VerifyNoOtherCalls();

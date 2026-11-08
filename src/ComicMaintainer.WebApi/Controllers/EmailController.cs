@@ -328,6 +328,7 @@ public class EmailController : ControllerBase
                 total_issues = plan.TotalIssues,
                 issues_per_book = plan.IssuesPerBook,
                 max_attachment_bytes = plan.MaxAttachmentBytes,
+                max_book_bytes = EmailCondenseMode.MaxBookBytes,
                 can_email = plan.CanEmail,
                 oversized_book_count = plan.OversizedBookCount,
                 books = plan.Books.Select(b => new
@@ -335,7 +336,8 @@ public class EmailController : ControllerBase
                     display_name = b.DisplayName,
                     issue_count = b.Files.Count,
                     estimated_bytes = b.EstimatedBytes,
-                    exceeds_attachment_limit = b.ExceedsAttachmentLimit
+                    exceeds_attachment_limit = b.ExceedsAttachmentLimit,
+                    exceeds_book_size_limit = b.ExceedsBookSizeLimit
                 }),
                 skipped = plan.Skipped
             });

@@ -106,6 +106,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         }
 
         var book = plan.Books[request.BookIndex];
+        EmailCondenseMode.EnsureBookCanBeBuilt(book);
         var signature = BuildSignature(request with { DeliveryFormat = format }, ownerUserId);
 
         BuildEntry entry;

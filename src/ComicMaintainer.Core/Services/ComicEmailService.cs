@@ -388,7 +388,7 @@ public class ComicEmailService : IComicEmailService
 
             var maxBytes = GetMaxAttachmentBytes();
             queued = new List<ComicEmailDeliveryEntity>();
-            foreach (var group in BuildBooks(candidates, preserveIssueOrder, perBook))
+            foreach (var group in BuildBooks(candidates, preserveIssueOrder, perBook, nameof(issuesPerBook)))
             {
                 var displayName = await BuildCondensedNameAsync(group, cancellationToken);
 
@@ -495,7 +495,7 @@ public class ComicEmailService : IComicEmailService
 
         var maxBytes = GetMaxAttachmentBytes();
         var books = new List<CondensedBookDto>();
-        foreach (var group in BuildBooks(issues, preserveIssueOrder, perBook))
+        foreach (var group in BuildBooks(issues, preserveIssueOrder, perBook, nameof(issuesPerBook)))
         {
             var estimated = EstimateCondensedSize(group);
             books.Add(new CondensedBookDto(
@@ -675,15 +675,21 @@ public class ComicEmailService : IComicEmailService
     /// supplied one series in reading order (a send-series request), and that
     /// order is authoritative even when the series spans several folders.
     /// </summary>
+    /// <exception cref="ArgumentException">A book would hold too many issues.</exception>
     private static List<List<string>> BuildBooks(
         IReadOnlyList<string> issues,
         bool preserveIssueOrder,
-        int perBook)
+        int perBook,
+        string paramName)
     {
         var books = new List<List<string>>();
         foreach (var series in GroupBySeries(issues, preserveIssueOrder))
         {
-            books.AddRange(Chunk(series, perBook));
+            foreach (var book in Chunk(series, perBook))
+            {
+                EmailCondenseMode.EnsureBookIssueCountAllowed(book.Count, paramName);
+                books.Add(book);
+            }
         }
 
         return books;

@@ -201,20 +201,31 @@ public static class EmailCondenseMode
     }
 
     /// <summary>
+    /// Refuses a book of more than <see cref="MaxIssuesPerBook"/> issues, with
+    /// a message the user can act on. <see cref="Count"/> mode cannot produce
+    /// one; in <see cref="All"/> mode each series becomes a single book however
+    /// many issues it has, so the limit applies per book and not to the whole
+    /// selection.
+    /// </summary>
+    /// <exception cref="ArgumentException">The book has too many issues.</exception>
+    public static void EnsureBookIssueCountAllowed(int issues, string paramName)
+    {
+        if (issues > MaxIssuesPerBook)
+        {
+            throw new ArgumentException(
+                $"At most {MaxIssuesPerBook} issues can be condensed into a single book, but one of these books would have {issues}. Condense by count to split them into several books.",
+                paramName);
+        }
+    }
+
+    /// <summary>
     /// Validates the issues-per-book value for <paramref name="mode"/>. Only
-    /// <see cref="Count"/> uses it; <see cref="All"/> puts every issue in one
-    /// book, so it is the selection that must not exceed
-    /// <see cref="MaxIssuesPerBook"/> there.
+    /// <see cref="Count"/> uses it; <see cref="All"/> puts every issue of a
+    /// series in one book, which <see cref="EnsureBookIssueCountAllowed"/>
+    /// limits once the books are known.
     /// </summary>
     public static int NormalizeIssuesPerBookOrThrow(string mode, int? issuesPerBook, int totalIssues, string paramName)
     {
-        if (string.Equals(mode, All, StringComparison.Ordinal) && totalIssues > MaxIssuesPerBook)
-        {
-            throw new ArgumentException(
-                $"At most {MaxIssuesPerBook} issues can be condensed into a single book, but {totalIssues} were selected. Condense by count to split them into several books.",
-                paramName);
-        }
-
         if (!string.Equals(mode, Count, StringComparison.Ordinal))
         {
             return Math.Max(1, totalIssues);

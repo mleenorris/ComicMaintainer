@@ -750,10 +750,43 @@ public class ComicEmailServiceTests : IDisposable
 
         Assert.All(
             new[] { planError, downloadError, sendError },
-            ex => Assert.Contains("At most 500 issues can be condensed into a single book, but 501 were selected.", ex.Message));
+            ex => Assert.Contains("At most 500 issues can be condensed into a single book, but one of these books would have 501.", ex.Message));
         _epub.VerifyNoOtherCalls();
         _azw3.VerifyNoOtherCalls();
         Assert.Empty(await _service.GetRecentDeliveriesAsync(TestEmailScopes.Everyone, 10));
+    }
+
+    [Fact]
+    public async Task CondensingEverything_AppliesTheIssueLimitToEachSeriesBookNotTheWholeSelection()
+    {
+        // More issues than one book may hold, but they make three books.
+        var perFolder = (EmailCondenseMode.MaxIssuesPerBook / 2) + 1;
+        var files = new[] { "Alpha", "Beta", "Gamma" }
+            .SelectMany(folder => Enumerable.Range(1, perFolder)
+                .Select(i => CreateComic($"{folder} - Chapter {i:D4}.cbz", sizeBytes: 16, folder: folder)))
+            .ToList();
+        Assert.True(files.Count > EmailCondenseMode.MaxIssuesPerBook);
+
+        var plan = await _service.PlanCondensedDeliveryAsync(TestEmailScopes.Everyone, files, EmailCondenseMode.All, null);
+
+        Assert.Equal(3, plan.Books.Count);
+        Assert.All(plan.Books, book => Assert.Equal(perFolder, book.Files.Count));
+    }
+
+    [Fact]
+    public async Task CondensingEverything_RefusesASeriesTooLongForOneBookWhenOthersFit()
+    {
+        var files = Enumerable.Range(1, 2)
+            .Select(i => CreateComic($"Short - Chapter {i:D4}.cbz", sizeBytes: 16, folder: "Short"))
+            .Concat(Enumerable.Range(1, EmailCondenseMode.MaxIssuesPerBook + 1)
+                .Select(i => CreateComic($"Long - Chapter {i:D4}.cbz", sizeBytes: 16, folder: "Long")))
+            .ToList();
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.PlanCondensedDeliveryAsync(TestEmailScopes.Everyone, files, EmailCondenseMode.All, null));
+
+        Assert.Equal("issuesPerBook", error.ParamName);
+        Assert.Contains("but one of these books would have 501.", error.Message);
     }
 
     [Fact]

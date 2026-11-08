@@ -122,6 +122,38 @@ public sealed class Kf8ComicWriterTests : IDisposable
         Assert.False(File.Exists(path));
     }
 
+    [Fact]
+    public void Write_KeepsPageAnchorsAndTheirSelectorsValidInAVeryLongBook()
+    {
+        // Past both the page where an anchor number used to overflow (2,148)
+        // and the page where the selectors outgrow one 64K record.
+        const int PageCount = 6_000;
+        var path = Path.Join(_workDir, "long-valid.azw3");
+        var pages = Enumerable.Range(1, PageCount)
+            .Select(i => new Kf8Page(4, () => new MemoryStream(new byte[4]), "image/jpeg", 10, 20, "Page"))
+            .ToList();
+
+        Kf8ComicWriter.Write(new Kf8Book("Long", pages), path);
+
+        var book = Azw3Reader.Read(path);
+        var documents = book.RebuildDocuments();
+        Assert.Equal(PageCount, documents.Count);
+
+        var anchors = documents
+            .Select(document => System.Text.RegularExpressions.Regex.Matches(document, "aid=\"([0-9A-V]+)\"")
+                .Select(match => match.Groups[1].Value)
+                .ToList())
+            .ToList();
+        Assert.All(anchors, pageAnchors => Assert.Equal(2, pageAnchors.Count));
+        Assert.Equal(PageCount * 2, anchors.SelectMany(pageAnchors => pageAnchors).Distinct().Count());
+
+        // The reader splits on these: each selector must name its own page's body.
+        Assert.True(book.ChunkCncxRecordCount > 1);
+        Assert.Equal(
+            anchors.Select(pageAnchors => $"P-//*[@aid='{pageAnchors[0]}']"),
+            book.ChunkSelectors);
+    }
+
     [Theory]
     [InlineData(99)]
     [InlineData(101)]

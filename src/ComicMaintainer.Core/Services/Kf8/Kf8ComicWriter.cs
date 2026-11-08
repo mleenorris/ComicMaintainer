@@ -163,8 +163,10 @@ internal static class Kf8ComicWriter
         {
             var page = book.Pages[i];
 
-            var bodyAid = ToBase32(i * 1_000_000);
-            var containerAid = ToBase32((i * 1_000_000) + 1);
+            // Anchors only have to be unique in the book. Numbering them in
+            // sequence, as Calibre does, keeps them short for any page count.
+            var bodyAid = ToBase32(2 * i);
+            var containerAid = ToBase32((2 * i) + 1);
             var head = Encoding.UTF8.GetBytes(BuildDocumentHead(page, bodyAid));
             // Resource numbers are 1-based, and page i is resource i + 1.
             var body = Encoding.UTF8.GetBytes(BuildDocumentBody(page, i + 1, containerAid));
@@ -580,16 +582,20 @@ internal static class Kf8ComicWriter
         => (length + 3) & ~3;
 
     /// <summary>
-    /// Holds the strings an index refers to. Entries point at them by byte
-    /// offset; a comic's selectors never come close to the 64K record limit, so
-    /// a single record is always enough.
+    /// Holds the strings an index refers to. A long book's strings do not fit
+    /// one record, so an entry points at its string by record and byte offset:
+    /// the record number in the high 16 bits and the offset in the low 16.
     /// </summary>
     private sealed class Cncx
     {
+        /// <summary>The room Calibre and kindlegen leave below the 64K a record's offsets can reach.</summary>
+        private const int RecordLimit = 0x10000 - 1024;
+
         private readonly Dictionary<string, int> _offsets = new(StringComparer.Ordinal);
 
         public Cncx(IEnumerable<string> strings)
         {
+            var records = new List<byte[]>();
             using var buffer = new MemoryStream();
             foreach (var value in strings)
             {
@@ -599,14 +605,24 @@ internal static class Kf8ComicWriter
                 }
 
                 var utf8 = Encoding.UTF8.GetBytes(value);
-                _offsets[value] = (int)buffer.Length;
-                buffer.Write(EncodeVariableWidth(utf8.Length));
+                var length = EncodeVariableWidth(utf8.Length);
+                if (buffer.Length + length.Length + utf8.Length > RecordLimit)
+                {
+                    records.Add(AlignBlock(buffer.ToArray()));
+                    buffer.SetLength(0);
+                }
+
+                _offsets[value] = (records.Count << 16) | (int)buffer.Length;
+                buffer.Write(length);
                 buffer.Write(utf8);
             }
 
-            Records = buffer.Length == 0
-                ? Array.Empty<byte[]>()
-                : new[] { AlignBlock(buffer.ToArray()) };
+            if (buffer.Length > 0)
+            {
+                records.Add(AlignBlock(buffer.ToArray()));
+            }
+
+            Records = records;
         }
 
         public IReadOnlyList<byte[]> Records { get; }

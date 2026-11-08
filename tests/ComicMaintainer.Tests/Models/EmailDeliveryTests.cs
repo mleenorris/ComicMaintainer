@@ -114,21 +114,27 @@ public class EmailDeliveryTests
     }
 
     [Fact]
-    public void NormalizeIssuesPerBookOrThrow_AllModeAcceptsASelectionUpToTheMaximum()
+    public void NormalizeIssuesPerBookOrThrow_AllModeLeavesTheLimitToEachBook()
     {
         Assert.Equal(
-            EmailCondenseMode.MaxIssuesPerBook,
-            EmailCondenseMode.NormalizeIssuesPerBookOrThrow(EmailCondenseMode.All, null, EmailCondenseMode.MaxIssuesPerBook, "issuesPerBook"));
+            EmailCondenseMode.MaxIssuesPerBook + 1,
+            EmailCondenseMode.NormalizeIssuesPerBookOrThrow(EmailCondenseMode.All, null, EmailCondenseMode.MaxIssuesPerBook + 1, "issuesPerBook"));
     }
 
     [Fact]
-    public void NormalizeIssuesPerBookOrThrow_AllModeRejectsASelectionTooLargeForOneBook()
+    public void EnsureBookIssueCountAllowed_AcceptsABookUpToTheMaximum()
+    {
+        EmailCondenseMode.EnsureBookIssueCountAllowed(EmailCondenseMode.MaxIssuesPerBook, "issuesPerBook");
+    }
+
+    [Fact]
+    public void EnsureBookIssueCountAllowed_RejectsABookOverTheMaximum()
     {
         var ex = Assert.Throws<ArgumentException>(() =>
-            EmailCondenseMode.NormalizeIssuesPerBookOrThrow(EmailCondenseMode.All, null, EmailCondenseMode.MaxIssuesPerBook + 1, "issuesPerBook"));
+            EmailCondenseMode.EnsureBookIssueCountAllowed(EmailCondenseMode.MaxIssuesPerBook + 1, "issuesPerBook"));
 
         Assert.Equal("issuesPerBook", ex.ParamName);
-        Assert.Contains("At most 500 issues can be condensed into a single book, but 501 were selected. Condense by count", ex.Message);
+        Assert.Contains("At most 500 issues can be condensed into a single book, but one of these books would have 501. Condense by count", ex.Message);
     }
 
     [Fact]

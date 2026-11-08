@@ -315,6 +315,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
 
         Assert.Contains(services, d => d.ServiceType == typeof(IScheduledJobService));
         Assert.Contains(services, d => d.ServiceType == typeof(ScheduledJobsHostedService));
+        Assert.Contains(services, d => d.ServiceType == typeof(IScheduledJobRunner));
         var hostedServiceTypes = services
             .Where(d => d.ServiceType == typeof(IHostedService))
             .Select(d => d.ImplementationType)

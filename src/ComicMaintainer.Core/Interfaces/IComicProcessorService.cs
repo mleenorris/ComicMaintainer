@@ -136,8 +136,8 @@ public interface IComicProcessorService
 
     /// <summary>
     /// Same as the other <c>RunCustomBatchJobAsync</c> overload, but the
-    /// post-loop hook also receives an <see cref="IBatchJobReport"/> to add
-    /// results for things that were not tracked items (for example a source
+    /// post-loop hook also receives an <see cref="IBatchJobReport"/> to report
+    /// problems with things that were not tracked items (for example a source
     /// folder that had to be kept).
     /// </summary>
     Task<Guid> RunCustomBatchJobAsync(

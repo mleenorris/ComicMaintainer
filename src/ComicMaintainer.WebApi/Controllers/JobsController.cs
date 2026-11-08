@@ -73,19 +73,19 @@ public class JobsController : ControllerBase
                     file = f,
                     success = processedFilesList.Contains(f) && !job.Errors.ContainsKey(f),
                     error = job.Errors.GetValueOrDefault(f)
-                })
+                }).ToList(),
                 // Problems a job's post-loop hook reported for things that were
                 // not tracked items (IBatchJobReport), e.g. a source folder that
-                // folder combine had to keep.
-                .Concat(job.Errors
+                // folder combine had to keep. They are not results, so they
+                // never change what the job's item counts or results say.
+                reported_problems = job.Errors
                     .Where(entry => !trackedItems.Contains(entry.Key))
                     .Select(entry => new
                     {
-                        file = entry.Key,
-                        success = false,
-                        error = (string?)entry.Value
-                    }))
-                .ToList()
+                        subject = entry.Key,
+                        message = entry.Value
+                    })
+                    .ToList()
             });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

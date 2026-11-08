@@ -60,7 +60,7 @@ public class JobsControllerTests
     }
 
     [Fact]
-    public void GetJob_ProblemReportedForSomethingOtherThanAnItem_IsListedAfterTheItemsAsUnsuccessful()
+    public void GetJob_ProblemReportedForSomethingOtherThanAnItem_IsListedApartFromTheResults()
     {
         // A folder combine reports a source folder it had to keep through
         // IBatchJobReport; the job's items are the files it moved.
@@ -85,12 +85,36 @@ public class JobsControllerTests
 
         var json = JObject.FromObject(Assert.IsType<OkObjectResult>(result.Result).Value!);
         Assert.Equal(1, json["failed_items"]!.Value<int>());
+        // The results stay one entry per item, so whatever counts them still
+        // counts the job's items.
         var results = json["results"]!.ToObject<List<JObject>>()!;
-        Assert.Equal(new[] { "/library/Old/a.cbz", "/library/Old/b.cbz", "/library/Old" }, results.Select(r => r["file"]!.ToString()));
+        Assert.Equal(new[] { "/library/Old/a.cbz", "/library/Old/b.cbz" }, results.Select(r => r["file"]!.ToString()));
         Assert.True(results[0]["success"]!.Value<bool>());
         Assert.False(results[1]["success"]!.Value<bool>());
-        Assert.False(results[2]["success"]!.Value<bool>());
-        Assert.Equal(job.Errors["/library/Old"], results[2]["error"]!.ToString());
+        var problem = Assert.Single(json["reported_problems"]!.ToObject<List<JObject>>()!);
+        Assert.Equal("/library/Old", problem["subject"]!.ToString());
+        Assert.Equal(job.Errors["/library/Old"], problem["message"]!.ToString());
+    }
+
+    [Fact]
+    public void GetJob_NoProblemsReported_ListsNone()
+    {
+        var jobId = Guid.NewGuid();
+        var job = new ProcessingJob
+        {
+            JobId = jobId,
+            Status = JobStatus.Completed,
+            Files = new List<string> { "/library/a.cbz" },
+            TotalFiles = 1,
+            FailedFiles = 1,
+            Errors = new Dictionary<string, string> { ["/library/a.cbz"] = "Failed" }
+        };
+        _mockProcessor.Setup(p => p.GetJob(jobId)).Returns(job);
+
+        var result = _controller.GetJob(jobId);
+
+        var json = JObject.FromObject(Assert.IsType<OkObjectResult>(result.Result).Value!);
+        Assert.Empty(json["reported_problems"]!);
     }
 
     [Fact]

@@ -67,7 +67,7 @@ public partial class FilesController
     /// Starts a folder combine as a background job and returns its id at once;
     /// progress arrives through the usual job events. Source folders that
     /// still hold anything but disposable files are kept and listed in the
-    /// job's results.
+    /// job status's <c>reported_problems</c>.
     /// </summary>
     [HttpPost("combine-folders")]
     public async Task<ActionResult<object>> CombineFolders(

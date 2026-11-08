@@ -34,7 +34,7 @@ public interface IFolderCombineService
     /// Plans <paramref name="request"/> like <see cref="PreviewAsync"/> and
     /// starts a background job that carries it out. Source folders that still
     /// hold anything other than disposable files when the moves are done are
-    /// kept and reported in the job's results.
+    /// kept and listed in the job's reported problems.
     /// </summary>
     Task<FolderCombineStartResult> StartAsync(FolderCombineRequest? request, CancellationToken cancellationToken = default);
 }

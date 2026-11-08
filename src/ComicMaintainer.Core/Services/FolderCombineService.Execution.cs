@@ -473,7 +473,7 @@ public sealed partial class FolderCombineService
         /// Removes each source folder that is left with nothing but disposable
         /// entries, deepest first, holding the library mutation lock for each
         /// so no import publishes into a folder while it is being removed. A
-        /// kept folder is reported in the job's results with what kept it,
+        /// kept folder is listed in the job's reported problems with what kept it,
         /// unless it is one of the library's configured folders, which are
         /// never removed. A folder that cannot be checked is kept and reported
         /// too, and the remaining folders are still handled.

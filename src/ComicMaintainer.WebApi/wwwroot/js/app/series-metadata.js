@@ -458,6 +458,13 @@
             const status = metadataRefreshJobStatus(job);
             const current = job.currentSeries || job.CurrentSeries || '';
             const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+            // Why the newest failed series failed (e.g. a provider that did not
+            // answer), so an outage is not mistaken for series without a match.
+            const recent = job.recentResults || job.RecentResults || [];
+            const lastFailure = [...recent].reverse().find(r => r && (r.error || r.Error));
+            const lastError = lastFailure
+                ? `${lastFailure.seriesTitle || lastFailure.SeriesTitle || 'Series'}: ${lastFailure.error || lastFailure.Error}`
+                : '';
             renderHtml(toast, html`
                 <div class="metadata-refresh-toast-header">
                     <strong>Refreshing ${label}</strong>
@@ -465,6 +472,7 @@
                 </div>
                 <div class="metadata-refresh-toast-bar"><div class="metadata-refresh-toast-bar-fill" style="width:${pct}%"></div></div>
                 <div class="metadata-refresh-toast-meta">${processed}/${total} · ✓ ${successes} · ✗ ${failures}${current ? html` · now: ${current}` : ''}</div>
+                ${lastError ? html`<div class="metadata-refresh-toast-error" style="color: var(--text-error);">${lastError}</div>` : ''}
             `);
             if (isTerminalJobStatus(status)) {
                 toast.classList.add('metadata-refresh-toast--done');

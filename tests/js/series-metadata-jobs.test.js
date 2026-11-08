@@ -227,6 +227,41 @@ test('Match All Unmatched Series runs alongside another job, each in its own toa
     assert.equal(polls(page), 3, 'the running job keeps being polled');
 });
 
+test('the toast names the newest series whose refresh failed and why', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const outage = 'External metadata providers unavailable: MangaDex did not answer within 15s';
+    const page = await bootSeries({
+        hash: '#/library',
+        routes: {
+            'POST /api/metadata/refresh-all': { jobId: JOB, totalSeries: 4 },
+            [`GET ${jobPath(JOB)}`]: inTurn(
+                {
+                    jobId: JOB, status: 'Running', totalSeries: 4, processedSeries: 1, successes: 0, notFound: 1, failures: 0,
+                    recentResults: [{ seriesTitle: 'Saga', status: 'not_found', error: null }]
+                },
+                {
+                    jobId: JOB, status: 'Completed', totalSeries: 4, processedSeries: 4, successes: 1, notFound: 1, failures: 2,
+                    recentResults: [
+                        { seriesTitle: 'Saga', status: 'not_found', error: null },
+                        { seriesTitle: 'Monstress', status: 'error', error: 'Refresh failed; see the server log' },
+                        { seriesTitle: '<b>Paper Girls</b>', status: 'error', error: outage },
+                        { seriesTitle: 'Descender', status: 'success', error: null }
+                    ]
+                })
+        }
+    });
+    const errorLine = () => page.$(`#mdrToast-${JOB} .metadata-refresh-toast-error`);
+
+    await choose(page, 'Refresh All External Metadata');
+    await advance(t, page);
+    assert.equal(errorLine(), null, 'a series without a match is not an error');
+
+    await advance(t, page);
+    assert.equal(toastState(page).meta, '4/4 · ✓ 1 · ✗ 2');
+    assert.equal(text(errorLine()), `<b>Paper Girls</b>: ${outage}`);
+    assert.equal(errorLine().querySelector('b'), null, 'series titles are shown as text');
+});
+
 test('a job without progress yet shows an empty toast, keeps polling and is tracked only once', async t => {
     t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     const page = await bootSeries({

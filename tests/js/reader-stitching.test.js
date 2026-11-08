@@ -176,6 +176,8 @@ test('a stitched issue whose opening pages fail is taken out again and retried l
     assert.equal(endMessage(page), RETRY);
     assert.deepEqual(streamLayout(page), [...pagesOf(FILE, [1, 2, 3]), 'end']);
     assert.ok([...pageObserver(page).targets].every(img => img.dataset.comic === FILE));
+    // ...releasing their blobs: only the first issue's pages hold one.
+    assert.deepEqual([...page.objectUrls.keys()].sort(), page.$$('#webcomicContainer img[data-page]').map(img => img.src).sort());
     assert.ok(page.consoleMessages.some(m => m.type === 'error' && m.args[0] === 'Error loading page 3:'));
     // The reader still treats the first issue as the end of the stream.
     assert.equal(page.run('streamTailPath'), FILE);
@@ -299,4 +301,63 @@ test('a stale pointer that resolves to no further issue ends the series', async 
     assert.equal(endMessage(page), 'End of series');
     assert.deepEqual(markReadPosts(page), [NEXT_FILE]);
     assert.equal(page.$$('.comic-transition').length, 1);
+});
+
+/**
+ * Lay the stream out top-down (pages 1000px, transitions 200px), every child
+ * reporting its place relative to #readerContent's current scroll position,
+ * so what is above a child moves it when it is taken out.
+ */
+function layOutStream(page) {
+    const container = page.$('#webcomicContainer');
+    const content = page.$('#readerContent');
+    const heightOf = el => (el.matches('img[data-page]') ? 1000 : el.classList.contains('comic-transition') ? 200 : 0);
+    for (const el of container.children) {
+        el.getBoundingClientRect = () => {
+            let top = -content.scrollTop;
+            for (let above = container.firstElementChild; above && above !== el; above = above.nextElementSibling) top += heightOf(above);
+            return { top, bottom: top + heightOf(el), left: 0, right: 0, width: 0, height: heightOf(el) };
+        };
+    }
+}
+
+test('issues more than one behind the one on screen are taken out of the stream, and the view stays put', async () => {
+    const page = await openSeries({ [FILE]: 3, [NEXT_FILE]: 4, [THIRD_FILE]: 2 }, {
+        routes: {
+            'GET /api/ComicReader/adjacent': call => adjacentInfo(
+                call.query.filePath === FILE ? NEXT_FILE : call.query.filePath === NEXT_FILE ? THIRD_FILE : null)
+        }
+    });
+    await scrollAndSettle(page, NEAR_END);
+    await page.waitFor(() => streamImage(page, NEXT_FILE, 4));
+    await scrollAndSettle(page, NEAR_END);
+    await page.waitFor(() => streamImage(page, THIRD_FILE, 2));
+    assert.deepEqual(streamLayout(page), [
+        ...pagesOf(FILE, [1, 2, 3]), 'transition', 'marker',
+        ...pagesOf(NEXT_FILE, [1, 2, 3, 4]), 'transition', 'marker',
+        ...pagesOf(THIRD_FILE, [1, 2])
+    ]);
+    const firstIssueUrls = [1, 2, 3].map(n => streamImage(page, FILE, n).src);
+    assert.ok(firstIssueUrls.every(url => page.objectUrls.has(url)));
+
+    // The reader scrolls on and stops at the top of the third issue (3000px
+    // of the first issue, a transition, the second issue and another
+    // transition above it).
+    layOutStream(page);
+    await scrollAndSettle(page, 7400);
+    await page.waitFor(() => !streamImage(page, FILE, 1));
+
+    // The first issue is gone; the second one, just behind, stays with the
+    // transition into it.
+    assert.deepEqual(streamLayout(page).filter(item => item !== 'end'), [
+        'transition', 'marker', ...pagesOf(NEXT_FILE, [1, 2, 3, 4]), 'transition', 'marker', ...pagesOf(THIRD_FILE, [1, 2])
+    ]);
+    assert.equal(page.run('comicFilePath'), THIRD_FILE);
+    assert.ok(firstIssueUrls.every(url => !page.objectUrls.has(url)), 'its pages released their blobs');
+    assert.equal(page.run(`loadedPages.has(${JSON.stringify(`${FILE}#1`)})`), false);
+    assert.ok(page.run(`stitchedComicPaths.has(${JSON.stringify(FILE)})`), 'it is never stitched in again');
+    // 3000px came out above the view, which scrolled up as much: the third
+    // issue's first page is still at the top.
+    assert.equal(page.$('#readerContent').scrollTop, 4400);
+    assert.equal(streamImage(page, THIRD_FILE, 1).getBoundingClientRect().top, 0);
 });

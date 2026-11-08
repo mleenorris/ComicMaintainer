@@ -7,10 +7,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
+const { deferred } = require('./support/app');
 const {
     FILE, pageImage, openReader, openWebcomicReader, waitWithImages, press, progressPosts,
     adjacentRequests, shownPage, waitForShownPage, streamPages, streamImage, pageObserver, setLayout,
-    contentLayout, scrollContent
+    contentLayout, scrollContent, loadReader, pageRequests
 } = require('./support/reader-helpers');
 
 const range = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
@@ -244,4 +245,139 @@ test('switching modes survives blob URLs that cannot be revoked', async () => {
     await waitWithImages(page, () => page.scrolledIntoView.length > 0);
     assert.equal(page.run('mangaPageCache.size'), 0);
     assert.deepEqual(page.errors, []);
+});
+
+// --- keeping a long stream bounded ---------------------------------------------
+
+const placeholderPages = page => page.$$('#webcomicContainer img.webcomic-page-placeholder').map(img => Number(img.dataset.page));
+const pageFetches = (page, pageNum) => pageRequests(page, FILE).filter(request => request.page === pageNum).length;
+
+/** beforeScripts hook recording the scroll listeners #readerContent has at any time. */
+function trackScrollListeners(listeners) {
+    return window => {
+        const content = window.document.getElementById('readerContent');
+        const add = content.addEventListener.bind(content);
+        const remove = content.removeEventListener.bind(content);
+        content.addEventListener = (type, listener, options) => {
+            if (type === 'scroll') listeners.add(listener);
+            return add(type, listener, options);
+        };
+        content.removeEventListener = (type, listener, options) => {
+            if (type === 'scroll') listeners.delete(listener);
+            return remove(type, listener, options);
+        };
+    };
+}
+
+test('the opening pages are fetched together, not one after another', async () => {
+    const gate = deferred();
+    const page = loadReader({
+        series: { [FILE]: 30 },
+        progress: 8,
+        localStorage: { readingMode: 'webcomic' },
+        beforeScripts: contentLayout(40000),
+        routes: { 'GET /api/ComicReader/page': call => gate.promise.then(() => pageImage(call)) }
+    });
+
+    // Pages 3-13 around the saved page are all asked for before any answers.
+    await page.waitFor(() => pageRequests(page, FILE).length === 11);
+    gate.resolve();
+    await waitWithImages(page, () => page.scrolledIntoView.length > 0);
+    assert.deepEqual(streamPages(page).slice(0, 11), pagesOf(FILE, range(3, 13)));
+});
+
+test('pages far behind the one on screen give up their image for a same-height placeholder, and come back on the way up', async t => {
+    const page = await openWebcomicReader({ series: { [FILE]: 60 }, beforeScripts: contentLayout(60000) });
+    // Reading down: every page coming into view pulls in its neighbours.
+    for (let n = 1; n <= 41; n += 5) {
+        await page.waitFor(() => streamImage(page, FILE, n));
+        pageObserver(page).trigger(true, [streamImage(page, FILE, n)]);
+    }
+    await page.waitFor(() => streamImage(page, FILE, 46));
+    const urlOf = new Map(page.$$('#webcomicContainer img[data-page]').map(img => [Number(img.dataset.page), img.src]));
+    // (The last page is fetched early too, to stitch the next issue on.)
+    assert.deepEqual([...urlOf.keys()], [...range(1, 46), 60]);
+    assert.ok([...urlOf.values()].every(url => page.objectUrls.has(url)));
+
+    // The reader stops with page 40 at the top of the view.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    layOutImages(page, 39000);
+    scrollContent(page, 39000);
+    t.mock.timers.tick(150);
+    assert.equal(page.$('#pageInfo').textContent, 'Page 40 / 60');
+
+    // More than 15 pages and two viewports above: placeholders now.
+    assert.deepEqual(placeholderPages(page), range(1, 24));
+    for (const pageNum of range(1, 24)) {
+        const img = streamImage(page, FILE, pageNum);
+        assert.equal(img.hasAttribute('src'), false, `page ${pageNum}`);
+        assert.equal(img.style.height, '1000px', `page ${pageNum} keeps its height`);
+        assert.equal(page.objectUrls.has(urlOf.get(pageNum)), false, `page ${pageNum} released its blob`);
+    }
+    assert.ok([...range(25, 46), 60].every(pageNum => page.objectUrls.has(urlOf.get(pageNum))));
+    assert.equal(page.objectUrls.size, urlOf.size - 24);
+
+    // Scrolling back up to page 3 fetches it and its neighbours again, into
+    // the same elements.
+    t.mock.timers.reset();
+    pageObserver(page).trigger(true, [streamImage(page, FILE, 3)]);
+    await page.waitFor(() => !placeholderPages(page).includes(3));
+    await page.waitFor(() => placeholderPages(page)[0] === 9);
+    assert.deepEqual(placeholderPages(page), range(9, 24));
+    const reloaded = streamImage(page, FILE, 3);
+    assert.ok(page.objectUrls.has(reloaded.src));
+    assert.equal(pageFetches(page, 3), 2);
+    assert.equal(streamPages(page).filter(key => key === `${FILE}#3`).length, 1);
+    // Once the picture is in, the image takes its own height again.
+    assert.equal(reloaded.style.height, '1000px');
+    reloaded.dispatchEvent(new page.window.Event('load'));
+    assert.equal(reloaded.style.height, '');
+});
+
+test('leaving webcomic mode releases every page of the stream and its scroll listener', async () => {
+    const listeners = new Set();
+    const page = await openWebcomicReader({
+        series: { [FILE]: 30 },
+        progress: 8,
+        beforeScripts: window => {
+            contentLayout(40000)(window);
+            trackScrollListeners(listeners)(window);
+        }
+    });
+    assert.equal(listeners.size, 1);
+    const streamUrls = page.$$('#webcomicContainer img[data-page]').map(img => img.src);
+    assert.ok(streamUrls.length > 0 && streamUrls.every(url => page.objectUrls.has(url)));
+
+    press(page, 'm');
+    await waitForShownPage(page, 'Page 8');
+    assert.ok(streamUrls.every(url => !page.objectUrls.has(url)), 'every page of the stream was released');
+    assert.equal(listeners.size, 0);
+
+    // Going back and forth never stacks listeners.
+    for (let i = 0; i < 3; i++) {
+        press(page, 'm');
+        await waitWithImages(page, () => page.run('readingMode') === 'webcomic' && page.run('allImagesLoaded') && page.$('#webcomicContainer img[data-page]'));
+        assert.equal(listeners.size, 1);
+        press(page, 'm');
+        await waitForShownPage(page, 'Page 8');
+        assert.equal(listeners.size, 0);
+    }
+});
+
+test('a page that arrives after the stream was torn down is not kept', async () => {
+    const gate = deferred();
+    const page = await openWebcomicReader({ series: { [FILE]: 30 }, beforeScripts: contentLayout(40000) });
+    page.route(call => call.path === '/api/ComicReader/page' && call.query.page === '12', call => gate.promise.then(() => pageImage(call)));
+    pageObserver(page).trigger(true, [streamImage(page, FILE, 6)]);
+    await page.waitFor(() => streamImage(page, FILE, 7));
+    pageObserver(page).trigger(true, [streamImage(page, FILE, 7)]);
+    await page.waitFor(() => pageRequests(page, FILE).some(request => request.page === 12));
+
+    press(page, 'm');
+    await waitForShownPage(page, 'Page 7');
+    const live = page.objectUrls.size;
+    gate.resolve();
+    await page.settle();
+    assert.equal(page.objectUrls.size, live, 'no blob URL was made for it');
+    assert.equal(page.$('#webcomicContainer'), null);
 });

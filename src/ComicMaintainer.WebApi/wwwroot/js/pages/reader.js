@@ -78,6 +78,22 @@
         // don't fire duplicate requests before the first one resolves.
         const markReadInFlight = new Set();
         let pageObserver = null; // Intersection Observer for tracking visible pages
+        // The blob URL behind each webcomic page image that is showing one.
+        // A long webcomic binge would otherwise keep every page it ever showed
+        // alive (blob and decoded bitmap) until the tab is closed; see
+        // trimWebcomicStream() and releaseWebcomicStream().
+        const webcomicPageUrls = new Map();
+        // Pages further than this from the one on screen (in stream order, and
+        // more than WEBCOMIC_RETAIN_VIEWPORTS viewports away) give up their
+        // image for a placeholder of the same height, and are fetched again if
+        // the reader comes back to them. Well beyond the prefetch buffer, so
+        // pages are not dropped and refetched back and forth.
+        const WEBCOMIC_RETAIN_PAGES = 15;
+        const WEBCOMIC_RETAIN_VIEWPORTS = 2;
+        // The webcomic stream's scroll listener (and its scroll-end timer),
+        // kept so a rebuilt stream or a mode switch can remove it.
+        let webcomicScrollHandler = null;
+        let webcomicScrollEndTimer = null;
         let currentVisiblePage = 1; // Track the currently visible page in webcomic mode
         let bufferPages = 5; // Number of pages to prefetch ahead/behind
         let allImagesLoaded = false; // Whether all prefetched images have loaded
@@ -260,6 +276,8 @@
             readingMode = readingMode === 'manga' ? 'webcomic' : 'manga';
             localStorage.setItem('readingMode', readingMode);
             updateModeUI();
+            // Leaving the stream (or about to rebuild it) frees its pages.
+            releaseWebcomicStream();
 
             // Reload content in new mode
             const content = document.getElementById('readerContent');
@@ -342,11 +360,11 @@
 
         // Load pages in continuous scroll mode with buffering (Kavita-style)
         async function loadWebcomicMode(startPage = 1) {
+            releaseWebcomicStream();
             const content = document.getElementById('readerContent');
             content.innerHTML = '<div class="webcomic-container" id="webcomicContainer"></div>';
             
             const container = document.getElementById('webcomicContainer');
-            loadedPages.clear();
             comicMeta.clear();
             // Register the comic we are starting with so prefetching knows its
             // page bounds.
@@ -369,10 +387,14 @@
             
             console.log('Initial prefetch: pages', startIdx, 'to', endIdx);
             
-            // Load buffered pages instead of all pages
+            // Load the buffered pages (not all pages) in parallel, so resuming
+            // deep into a comic does not wait for each one in turn; each lands
+            // in page order whenever it arrives.
+            const initialLoads = [];
             for (let i = startIdx; i <= endIdx; i++) {
-                await loadWebcomicPage(i, container);
+                initialLoads.push(loadWebcomicPage(i, container));
             }
+            await Promise.all(initialLoads);
             
             // Wait for initial images to load, then scroll to starting page
             await waitForImagesToLoad();
@@ -428,107 +450,216 @@
             });
         }
 
-        // Load a single page in webcomic mode
+        // Fetch page `pageNum` of `filePath` as a blob.
+        async function fetchWebcomicPageBlob(filePath, pageNum) {
+            const response = await fetch(
+                `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
+                buildFetchOptions()
+            );
+            if (!response.ok) {
+                throw new Error('Failed to load page');
+            }
+            return response.blob();
+        }
+
+        function revokeObjectUrlQuietly(url) {
+            try { URL.revokeObjectURL(url); } catch (_e) { /* noop */ }
+        }
+
+        // Show `blob` in a webcomic page image, recording its URL so it can
+        // be released again.
+        function showWebcomicPageBlob(img, blob) {
+            const imageUrl = URL.createObjectURL(blob);
+            webcomicPageUrls.set(img, imageUrl);
+            img.src = imageUrl;
+        }
+
+        // Add an image for page `pageNum` of `filePath` to the stream, in page
+        // order within its comic, and observe it. Returns the image, or null
+        // when the stream it was fetched for has been replaced meanwhile (a
+        // mode switch), in which case nothing is kept.
+        function addWebcomicPageImage(container, blob, filePath, pageNum) {
+            if (!container.isConnected) return null;
+            const img = document.createElement('img');
+            showWebcomicPageBlob(img, blob);
+            img.alt = `Page ${pageNum}`;
+            img.dataset.page = pageNum;
+            img.dataset.comic = filePath;
+            insertWebcomicImage(container, img, filePath, pageNum);
+            // Observe the image for visibility tracking
+            if (pageObserver) {
+                pageObserver.observe(img);
+            }
+            return img;
+        }
+
+        // Load a single page of the comic being opened in webcomic mode
         async function loadWebcomicPage(pageNum, container) {
-            const loadKey = pageLoadedKey(comicFilePath, pageNum);
+            const filePath = comicFilePath;
+            const loadKey = pageLoadedKey(filePath, pageNum);
             if (loadedPages.has(loadKey)) return;
             // Mark as in-flight before awaiting so a concurrent call for the
             // same page can't pass the guard above and append a duplicate image.
             loadedPages.add(loadKey);
-            
+
             try {
-                const isAutheliaAuth = isAutheliaAuthenticated();
-                const fetchOptions = {
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
-                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
-                    fetchOptions
-                );
-
-                if (!response.ok) {
-                    throw new Error('Failed to load page');
-                }
-
-                const blob = await response.blob();
-                const imageUrl = URL.createObjectURL(blob);
-                
-                const img = document.createElement('img');
-                img.src = imageUrl;
-                img.alt = `Page ${pageNum}`;
-                img.dataset.page = pageNum;
-                img.dataset.comic = comicFilePath;
-                container.appendChild(img);
-                
-                // Observe the image for visibility tracking
-                if (pageObserver) {
-                    pageObserver.observe(img);
-                }
+                const blob = await fetchWebcomicPageBlob(filePath, pageNum);
+                addWebcomicPageImage(container, blob, filePath, pageNum);
             } catch (error) {
                 console.error(`Error loading page ${pageNum}:`, error);
                 // Allow a retry since this page was never actually inserted.
                 loadedPages.delete(loadKey);
             }
         }
-        
+
         // Load a single page in webcomic mode (async, non-blocking)
         function loadWebcomicPageAsync(pageNum, container, filePath = comicFilePath) {
             const loadKey = pageLoadedKey(filePath, pageNum);
             if (loadedPages.has(loadKey)) return;
-            
+
             // Mark as being loaded
             loadedPages.add(loadKey);
-            
-            const isAutheliaAuth = isAutheliaAuthenticated();
-            const fetchOptions = {
-                credentials: 'include'
-            };
-            
-            if (!isAutheliaAuth && token) {
-                fetchOptions.headers = {
-                    'Authorization': `Bearer ${token}`
-                };
-            }
-            
-            fetch(
-                `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
-                fetchOptions
-            )
-            .then(response => {
-                if (!response.ok) throw new Error('Failed to load page');
-                return response.blob();
-            })
-            .then(blob => {
-                const imageUrl = URL.createObjectURL(blob);
-                
-                const img = document.createElement('img');
-                img.src = imageUrl;
-                img.alt = `Page ${pageNum}`;
-                img.dataset.page = pageNum;
-                img.dataset.comic = filePath;
-                
-                // Insert in correct position within this comic's pages
-                insertWebcomicImage(container, img, filePath, pageNum);
-                
-                // Observe the image for visibility tracking
-                if (pageObserver) {
-                    pageObserver.observe(img);
-                }
-                
-                console.log('Loaded page', pageNum, 'asynchronously');
-            })
-            .catch(error => {
-                console.error(`Error loading page ${pageNum}:`, error);
-                // Remove from loaded set so we can retry
-                loadedPages.delete(loadKey);
+
+            fetchWebcomicPageBlob(filePath, pageNum)
+                .then(blob => {
+                    if (addWebcomicPageImage(container, blob, filePath, pageNum)) {
+                        console.log('Loaded page', pageNum, 'asynchronously');
+                    }
+                })
+                .catch(error => {
+                    console.error(`Error loading page ${pageNum}:`, error);
+                    // Remove from loaded set so we can retry
+                    loadedPages.delete(loadKey);
+                });
+        }
+
+        // The image of page `pageNum` of `filePath` in the stream if it is a
+        // placeholder (its picture was dropped), otherwise null.
+        function findWebcomicPlaceholder(container, filePath, pageNum) {
+            return Array.from(container.querySelectorAll(`img.webcomic-page-placeholder[data-page="${pageNum}"]`))
+                .find(img => img.dataset.comic === filePath) || null;
+        }
+
+        // Give a page far from the one on screen up for a placeholder: the
+        // same image element at its current height, without a picture, its
+        // blob released. The stream's layout and scroll position stay as they
+        // were.
+        function unloadWebcomicPage(img, height) {
+            const imageUrl = webcomicPageUrls.get(img);
+            if (!imageUrl) return;
+            if (height > 0) img.style.height = `${height}px`;
+            img.classList.add('webcomic-page-placeholder');
+            img.removeAttribute('src');
+            webcomicPageUrls.delete(img);
+            revokeObjectUrlQuietly(imageUrl);
+        }
+
+        // Fetch a placeholder's page again now that the reader is back near it.
+        function reloadWebcomicPage(img, filePath, pageNum) {
+            if (img.dataset.reloading) return;
+            img.dataset.reloading = 'true';
+            fetchWebcomicPageBlob(filePath, pageNum)
+                .then(blob => {
+                    // Taken out of the stream meanwhile: keep nothing.
+                    if (!img.isConnected || !img.classList.contains('webcomic-page-placeholder')) return;
+                    img.addEventListener('load', () => { img.style.height = ''; }, { once: true });
+                    img.classList.remove('webcomic-page-placeholder');
+                    showWebcomicPageBlob(img, blob);
+                })
+                .catch(error => {
+                    console.error(`Error loading page ${pageNum}:`, error);
+                })
+                .finally(() => {
+                    delete img.dataset.reloading;
+                });
+        }
+
+        // Keep the stream bounded as the reader moves through it: issues
+        // more than one behind the one on screen are taken out entirely, and
+        // pages far from the one on screen become placeholders.
+        function trimWebcomicStream() {
+            const content = document.getElementById('readerContent');
+            const container = document.getElementById('webcomicContainer');
+            if (readingMode !== 'webcomic' || !content || !container) return;
+
+            evictIssuesBehind(content, container);
+
+            const images = Array.from(container.querySelectorAll('img[data-page]'));
+            const onScreen = images.findIndex(img =>
+                img.dataset.comic === comicFilePath && parseInt(img.dataset.page) === currentVisiblePage);
+            if (onScreen < 0) return;
+            const viewport = content.getBoundingClientRect();
+            const margin = content.clientHeight * WEBCOMIC_RETAIN_VIEWPORTS;
+            images.forEach((img, index) => {
+                if (Math.abs(index - onScreen) <= WEBCOMIC_RETAIN_PAGES || !webcomicPageUrls.has(img)) return;
+                const rect = img.getBoundingClientRect();
+                if (rect.bottom >= viewport.top - margin && rect.top <= viewport.bottom + margin) return;
+                unloadWebcomicPage(img, rect.height);
             });
+        }
+
+        // Take the issues stitched more than one before the one on screen out
+        // of the stream: their pages (releasing their blobs) and everything
+        // above the transition into the issue just before the one on screen.
+        // The view does not move.
+        function evictIssuesBehind(content, container) {
+            const order = Array.from(stitchedComicPaths);
+            const onScreen = order.indexOf(comicFilePath);
+            if (onScreen < 2) return;
+            const kept = order[onScreen - 1];
+            const marker = Array.from(container.querySelectorAll('.new-comic-start-marker'))
+                .find(element => element.dataset.comicPath === kept);
+            if (!marker) return;
+            const previous = marker.previousElementSibling;
+            const boundary = previous && previous.classList.contains('comic-transition') ? previous : marker;
+            const removed = [];
+            for (let element = container.firstElementChild; element && element !== boundary; element = element.nextElementSibling) {
+                removed.push(element);
+            }
+            if (!removed.length) return;
+
+            const topBefore = boundary.getBoundingClientRect().top;
+            for (const element of removed) {
+                if (element.matches('img[data-page]')) {
+                    loadedPages.delete(pageLoadedKey(element.dataset.comic, parseInt(element.dataset.page)));
+                    removeWebcomicPageImage(element);
+                } else {
+                    element.remove();
+                }
+            }
+            // What was above the view is gone; scroll up by as much so the page
+            // on screen stays put.
+            const shift = boundary.getBoundingClientRect().top - topBefore;
+            if (shift) {
+                content.scrollTop += shift;
+                prevScrollPosition = content.scrollTop;
+            }
+        }
+
+        // Take a page image out of the stream, releasing its blob.
+        function removeWebcomicPageImage(img) {
+            if (pageObserver) pageObserver.unobserve(img);
+            const imageUrl = webcomicPageUrls.get(img);
+            if (imageUrl) {
+                webcomicPageUrls.delete(img);
+                revokeObjectUrlQuietly(imageUrl);
+            }
+            img.remove();
+        }
+
+        // Tear the webcomic stream down (switching mode, or rebuilding it):
+        // remove its scroll listener and observer and release every page blob.
+        function releaseWebcomicStream() {
+            removeWebcomicScrollListener();
+            if (pageObserver) {
+                pageObserver.disconnect();
+                pageObserver = null;
+            }
+            for (const imageUrl of webcomicPageUrls.values()) {
+                revokeObjectUrlQuietly(imageUrl);
+            }
+            webcomicPageUrls.clear();
+            loadedPages.clear();
         }
 
         // Update page info display in webcomic mode. The progress bar along
@@ -553,61 +684,68 @@
             }
         }
         
-        // Setup scroll listener for webcomic mode with direction tracking
+        // Setup scroll listener for webcomic mode with direction tracking. The
+        // handler is kept at module scope so a rebuilt stream or a mode switch
+        // removes it rather than stacking another one each time.
         function setupWebcomicScrollListener() {
             const content = document.getElementById('readerContent');
-            
-            let scrollTimeout;
-            
-            const handleScroll = () => {
-                const scrollPosition = content.scrollTop;
-                
-                // Determine scroll direction
-                if (scrollPosition > prevScrollPosition) {
-                    scrollDirection = 'forward';
-                } else if (scrollPosition < prevScrollPosition) {
-                    scrollDirection = 'backward';
-                }
-                prevScrollPosition = scrollPosition;
-                
-                // Clear existing timeout
-                if (scrollTimeout) {
-                    clearTimeout(scrollTimeout);
-                }
-                
-                // Set new timeout for scroll end detection
-                scrollTimeout = setTimeout(() => {
-                    handleScrollEnd();
-                }, 150);
-                
-                // Check if should load next comic
-                handleWebcomicScroll();
-            };
-            
-            const handleScrollEnd = () => {
-                // Find closest visible image when scrolling stops
-                if (!isScrolling && allImagesLoaded) {
-                    const images = Array.from(document.querySelectorAll('img[data-page]'));
-                    const closestImage = findClosestVisibleImage(images);
-                    
-                    if (closestImage) {
-                        const pageNum = parseInt(closestImage.dataset.page);
-                        const filePath = closestImage.dataset.comic || comicFilePath;
-                        if (!isNaN(pageNum) && (pageNum !== currentPage || filePath !== comicFilePath)) {
-                            setActiveComic(filePath);
-                            currentPage = pageNum;
-                            currentVisiblePage = pageNum;
-                            updatePageInfoInWebcomicMode();
-                            saveReadingProgress(pageNum);
-                        }
-                    }
-                }
-            };
-            
-            content.removeEventListener('scroll', handleScroll);
-            content.addEventListener('scroll', handleScroll);
+            removeWebcomicScrollListener();
+            webcomicScrollHandler = handleWebcomicStreamScroll;
+            content.addEventListener('scroll', webcomicScrollHandler);
         }
-        
+
+        function removeWebcomicScrollListener() {
+            const content = document.getElementById('readerContent');
+            if (webcomicScrollHandler && content) {
+                content.removeEventListener('scroll', webcomicScrollHandler);
+            }
+            webcomicScrollHandler = null;
+            clearTimeout(webcomicScrollEndTimer);
+            webcomicScrollEndTimer = null;
+        }
+
+        function handleWebcomicStreamScroll() {
+            const content = document.getElementById('readerContent');
+            const scrollPosition = content.scrollTop;
+
+            // Determine scroll direction
+            if (scrollPosition > prevScrollPosition) {
+                scrollDirection = 'forward';
+            } else if (scrollPosition < prevScrollPosition) {
+                scrollDirection = 'backward';
+            }
+            prevScrollPosition = scrollPosition;
+
+            // Detect the end of the scroll once it has been still for a moment.
+            clearTimeout(webcomicScrollEndTimer);
+            webcomicScrollEndTimer = setTimeout(handleWebcomicScrollEnd, 150);
+
+            // Check if should load next comic
+            handleWebcomicScroll();
+        }
+
+        function handleWebcomicScrollEnd() {
+            webcomicScrollEndTimer = null;
+            // Find closest visible image when scrolling stops
+            if (isScrolling || !allImagesLoaded) return;
+            const images = Array.from(document.querySelectorAll('img[data-page]'));
+            const closestImage = findClosestVisibleImage(images);
+
+            if (closestImage) {
+                const pageNum = parseInt(closestImage.dataset.page);
+                const filePath = closestImage.dataset.comic || comicFilePath;
+                if (!isNaN(pageNum) && (pageNum !== currentPage || filePath !== comicFilePath)) {
+                    setActiveComic(filePath);
+                    currentPage = pageNum;
+                    currentVisiblePage = pageNum;
+                    updatePageInfoInWebcomicMode();
+                    saveReadingProgress(pageNum);
+                }
+            }
+            // Once the reader settles, let go of what is far behind or ahead.
+            trimWebcomicStream();
+        }
+
         // Find the closest visible image to the top of the viewport
         function findClosestVisibleImage(images) {
             let closestImage = null;
@@ -747,6 +885,12 @@
             for (let i = startIdx; i <= endIdx; i++) {
                 if (!loadedPages.has(pageLoadedKey(filePath, i))) {
                     loadWebcomicPageAsync(i, container, filePath);
+                    continue;
+                }
+                // A page given up for a placeholder earlier is wanted again.
+                const placeholder = findWebcomicPlaceholder(container, filePath, i);
+                if (placeholder) {
+                    reloadWebcomicPage(placeholder, filePath, i);
                 }
             }
         }
@@ -929,8 +1073,7 @@
                 const stitchedImages = Array.from(container.querySelectorAll('img[data-page]'))
                     .filter(img => img.dataset.comic === nextPath);
                 for (const img of stitchedImages) {
-                    if (pageObserver) pageObserver.unobserve(img);
-                    img.remove();
+                    removeWebcomicPageImage(img);
                 }
                 for (let i = startIdx; i <= endIdx; i++) {
                     loadedPages.delete(pageLoadedKey(nextPath, i));
@@ -1072,47 +1215,13 @@
             // first page appears) can't slip past the guard above and append a
             // duplicate image for the same page while this fetch is in flight.
             loadedPages.add(loadKey);
-            
+
             try {
-                const isAutheliaAuth = isAutheliaAuthenticated();
-                const fetchOptions = {
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
-                    `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
-                    fetchOptions
-                );
-
-                if (!response.ok) {
-                    throw new Error('Failed to load page');
-                }
-
-                const blob = await response.blob();
-                const imageUrl = URL.createObjectURL(blob);
-                
-                const img = document.createElement('img');
-                img.src = imageUrl;
-                img.alt = `Page ${pageNum}`;
-                img.dataset.page = pageNum; // Local page number within the new comic
-                img.dataset.comic = filePath; // Track which comic this page belongs to
-                // Insert in the correct position within this comic's pages so
-                // parallel (out-of-order) arrivals land in ascending page order
-                // rather than in fetch-completion order.
-                insertWebcomicImage(container, img, filePath, pageNum);
-                
-                // Observe the image for visibility tracking
-                if (pageObserver) {
-                    pageObserver.observe(img);
-                }
-                
-                return img;
+                const blob = await fetchWebcomicPageBlob(filePath, pageNum);
+                // Inserted in page order within this comic, so parallel
+                // (out-of-order) arrivals land in ascending page order rather
+                // than in fetch-completion order.
+                return addWebcomicPageImage(container, blob, filePath, pageNum);
             } catch (error) {
                 console.error(`Error loading page ${pageNum}:`, error);
                 // Release the reservation so the page can be retried later.
@@ -1120,7 +1229,7 @@
                 return null;
             }
         }
-        
+
         // Reverse the meaning of prev/next when reading right-to-left so the
         // arrows / tap-zones / footer buttons feel natural for manga.
         function effectivePrev() {

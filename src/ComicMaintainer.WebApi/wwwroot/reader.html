@@ -570,6 +570,13 @@
             display: block;
         }
 
+        /* A page far from the one on screen, its picture released: it keeps
+           its height (set inline) so the stream does not move, and shows
+           nothing (no alt text or broken-image frame) until it is reloaded. */
+        .webcomic-container img.webcomic-page-placeholder {
+            visibility: hidden;
+        }
+
         .loading-indicator {
             padding: 2rem;
             text-align: center;

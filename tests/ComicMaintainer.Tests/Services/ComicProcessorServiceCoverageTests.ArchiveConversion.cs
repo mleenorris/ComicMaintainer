@@ -412,7 +412,7 @@ public partial class ComicProcessorServiceCoverageTests
         cache.Setup(c => c.GetAsync("series", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord { MetadataVersion = 7 });
         var service = CreateService(cache: cache.Object);
-        var cbr = WriteCbr("Series/Series Ch 4.cbr", Xml("Wrong", null, null));
+        var cbr = WriteCbr("Series/Series Ch 4.cbr", Xml(null, null, null));
 
         await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { cbr }));
 
@@ -449,7 +449,7 @@ public partial class ComicProcessorServiceCoverageTests
             NullLogger<FileStoreService>.Instance,
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
         _settings.ConvertRarToCbzOnWrite = false;
-        var cbr = WriteCbr("Series/Series Ch 4.cbr", Xml("Wrong", null, null));
+        var cbr = WriteCbr("Series/Series Ch 4.cbr", Xml(null, null, null));
         var before = await File.ReadAllBytesAsync(cbr);
         await fileStore.AddFileAsync(cbr);
         var service = CreateService(fileStore: fileStore);

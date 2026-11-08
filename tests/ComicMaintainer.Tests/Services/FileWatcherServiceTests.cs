@@ -38,6 +38,28 @@ public class FileWatcherServiceTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Creates a comic the watcher must process and waits until it has been, failing if it never is. A test that
+    /// checks a file was ignored calls this after the ignored file's events: every file waits out the same stability
+    /// delay before it is processed, so by the time this later control has been processed, the ignored file would have
+    /// been processed too had the watcher not ignored it. A fixed wait shorter than the stability delay passed whether
+    /// or not the file was ignored.
+    /// </summary>
+    private async Task WaitForAControlComicToBeProcessedAsync()
+    {
+        // Puts the control's stability delay clearly after the one the ignored file would have started, so thread
+        // scheduling cannot let the control be processed first.
+        await Task.Delay(250);
+        var control = Path.Join(_testDirectory, $"control-{Guid.NewGuid():N}.cbz");
+        File.WriteAllText(control, "fake cbz content");
+
+        await WaitForCallAsync(_mockProcessor, nameof(IComicProcessorService.ProcessFileAsync), control);
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(control, It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce,
+            "The control comic was never processed, so the check that another file was ignored would prove nothing");
+    }
+
     public FileWatcherServiceTests()
     {
         _mockLogger = new Mock<ILogger<FileWatcherService>>();
@@ -409,8 +431,8 @@ public class FileWatcherServiceTests : IDisposable
         // Act - Create a temporary file
         File.WriteAllText(tempFile, "fake cbz content");
         
-        // Wait for file system events
-        await Task.Delay(500);
+        // Wait until a comic created afterwards has been processed: the ignored file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
 
         // Assert - Temporary file should NOT be added to store
         _mockFileStore.Verify(
@@ -440,8 +462,8 @@ public class FileWatcherServiceTests : IDisposable
         // Act - Create a temporary file with .tmp extension
         File.WriteAllText(tempFile, "fake tmp content");
         
-        // Wait for file system events
-        await Task.Delay(500);
+        // Wait until a comic created afterwards has been processed: the ignored file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
 
         // Assert - Temporary file should NOT be added to store or processed
         _mockFileStore.Verify(
@@ -473,8 +495,8 @@ public class FileWatcherServiceTests : IDisposable
         // Act - Modify the temporary file
         File.AppendAllText(tempFile, "updated content");
         
-        // Wait for file system events
-        await Task.Delay(500);
+        // Wait until a comic created afterwards has been processed: the ignored file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
 
         // Assert - Temporary file changes should be ignored
         _mockProcessor.Verify(

@@ -8,10 +8,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
-using SharpCompress.Archives;
-using SharpCompress.Archives.Rar;
 using SystemZipArchive = System.IO.Compression.ZipArchive;
-using ZlibException = SharpCompress.Compressors.Deflate.ZlibException;
 using ImageMagick;
 
 namespace ComicMaintainer.Core.Services;
@@ -31,8 +28,6 @@ namespace ComicMaintainer.Core.Services;
 /// </remarks>
 public class EpubConversionService : IEpubConversionService
 {
-    private static readonly string[] ImageExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp" };
-
     // Upper bound on decoded pixel count. A small (byte-capped) but pathological
     // archive entry could otherwise declare enormous dimensions and exhaust
     // memory/CPU when fully decoded (a "decompression bomb"). 100 megapixels is
@@ -139,12 +134,17 @@ public class EpubConversionService : IEpubConversionService
                 pass: 1,
                 totalPasses: BuildCompressionTiers(options?.MaxSizeBytes).Count);
 
-            using var archive = OpenArchive(comicFilePath);
+            if (!ComicFileExtensions.IsComicArchive(comicFilePath))
+            {
+                throw new NotSupportedException($"Unsupported comic format: {Path.GetExtension(comicFilePath)}");
+            }
 
-            var pages = ArchiveEntryReader.EnumerateEntries(archive, Path.GetFileName(comicFilePath))
-                .Where(e => !e.IsDirectory && IsImageFile(e.Key))
-                .Select(e => e.Key!)
-                .OrderBy(key => key, new NaturalStringComparer())
+            using var archive = ComicArchiveReader.Open(comicFilePath);
+
+            // macOS resource forks are binary stubs that would otherwise be duplicate, unreadable pages.
+            var pages = archive.ListPages()
+                .Select(p => p.Name)
+                .Where(name => !ComicArchiveReader.IsMacResourceForkName(name))
                 .ToList();
 
             if (pages.Count == 0)
@@ -155,7 +155,7 @@ public class EpubConversionService : IEpubConversionService
 
             ApplyCoverEntries(archive, pages, seriesCoverHash, comicFilePath);
 
-            issues.Add(new IssueSource(comicFilePath, pages, ReadComicInfo(archive, Path.GetFileName(comicFilePath))));
+            issues.Add(new IssueSource(comicFilePath, pages, ReadComicInfo(archive)));
         }
 
         return Convert(issues, outputDirectory, options, cancellationToken);
@@ -280,7 +280,7 @@ public class EpubConversionService : IEpubConversionService
     /// opens with so that image is not shown twice in a row.
     /// </summary>
     private void ApplyCoverEntries(
-        IArchive archive,
+        ComicArchiveReader archive,
         List<string> pages,
         byte[]? seriesCoverHash,
         string comicFilePath)
@@ -300,8 +300,8 @@ public class EpubConversionService : IEpubConversionService
                 break;
             }
 
-            var entry = archive.Entries.FirstOrDefault(e =>
-                !e.IsDirectory && string.Equals(e.Key, cover, StringComparison.Ordinal));
+            var entry = archive.EnumerateEntries().FirstOrDefault(e =>
+                !e.IsDirectory && string.Equals(e.Name, cover, StringComparison.Ordinal));
             if (entry is null || !MatchesHash(entry, seriesCoverHash, comicFilePath))
             {
                 continue;
@@ -381,19 +381,19 @@ public class EpubConversionService : IEpubConversionService
     /// An unreadable entry is reported as "not a match" so it stays a page and
     /// fails later, in the page pipeline, with a message naming it.
     /// </summary>
-    private bool MatchesHash(IArchiveEntry entry, byte[] hash, string comicFilePath)
+    private bool MatchesHash(ComicArchiveEntry entry, byte[] hash, string comicFilePath)
     {
         try
         {
-            return SHA256.HashData(ArchiveEntryReader.ReadAllBytes(entry, ArchiveEntryReader.MaxPageBytes))
+            return SHA256.HashData(entry.ReadAllBytes(ArchiveEntryReader.MaxPageBytes))
                 .AsSpan().SequenceEqual(hash);
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or ZlibException or (InvalidOperationException and not ObjectDisposedException))
+        catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or (InvalidOperationException and not ObjectDisposedException))
         {
             _logger.LogDebug(
                 ex,
                 "Could not read '{Entry}' from {FilePath} while looking for an embedded series cover",
-                LoggingHelper.SanitizeForLog(entry.Key ?? string.Empty),
+                LoggingHelper.SanitizeForLog(entry.Name),
                 LoggingHelper.SanitizePathForLog(comicFilePath));
             return false;
         }
@@ -484,12 +484,11 @@ public class EpubConversionService : IEpubConversionService
                 // Reopened per issue (and per compression tier) so only one
                 // source archive is ever held open, however many issues the
                 // condensed book spans.
-                using var archive = OpenArchive(issue.FilePath);
-                var entriesByKey = new Dictionary<string, IArchiveEntry>(StringComparer.Ordinal);
-                foreach (var entry in ArchiveEntryReader.EnumerateEntries(archive, Path.GetFileName(issue.FilePath))
-                             .Where(e => !e.IsDirectory && e.Key is not null))
+                using var archive = ComicArchiveReader.Open(issue.FilePath);
+                var entriesByKey = new Dictionary<string, ComicArchiveEntry>(StringComparer.Ordinal);
+                foreach (var entry in archive.EnumerateEntries().Where(e => !e.IsDirectory))
                 {
-                    entriesByKey.TryAdd(entry.Key!, entry);
+                    entriesByKey.TryAdd(entry.Name, entry);
                 }
 
                 var isFirstPageOfIssue = true;
@@ -513,9 +512,9 @@ public class EpubConversionService : IEpubConversionService
                     byte[] imageBytes;
                     try
                     {
-                        imageBytes = ArchiveEntryReader.ReadAllBytes(page, ArchiveEntryReader.MaxPageBytes);
+                        imageBytes = page.ReadAllBytes(ArchiveEntryReader.MaxPageBytes);
                     }
-                    catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or ZlibException or (InvalidOperationException and not ObjectDisposedException))
+                    catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or (InvalidOperationException and not ObjectDisposedException))
                     {
                         throw new InvalidOperationException(
                             $"Page '{pageKey}' in {Path.GetFileName(issue.FilePath)} could not be read: {ex.Message}",
@@ -639,22 +638,9 @@ public class EpubConversionService : IEpubConversionService
         };
     }
 
-    private static IArchive OpenArchive(string comicFilePath)
+    private ComicInfo? ReadComicInfo(ComicArchiveReader archive)
     {
-        var normalized = ComicFileExtensions.NormalizeExtension(Path.GetExtension(comicFilePath).ToLowerInvariant());
-        return normalized switch
-        {
-            ".cbz" => SharpCompress.Archives.Zip.ZipArchive.OpenArchive(comicFilePath),
-            ".cbr" => RarArchive.OpenArchive(comicFilePath),
-            _ => throw new NotSupportedException($"Unsupported comic format: {normalized}")
-        };
-    }
-
-    private ComicInfo? ReadComicInfo(IArchive archive, string comicFileName)
-    {
-        var entry = ArchiveEntryReader.EnumerateEntries(archive, comicFileName).FirstOrDefault(e =>
-            !e.IsDirectory &&
-            string.Equals(Path.GetFileName(e.Key ?? string.Empty), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase));
+        var entry = archive.FindComicInfoEntry();
 
         if (entry is null)
         {
@@ -663,7 +649,7 @@ public class EpubConversionService : IEpubConversionService
 
         try
         {
-            using var reader = new StringReader(ArchiveEntryReader.ReadText(entry));
+            using var reader = new StringReader(entry.ReadText());
             var serializer = new XmlSerializer(typeof(ComicInfo));
             return serializer.Deserialize(reader) as ComicInfo;
         }
@@ -1219,23 +1205,6 @@ public class EpubConversionService : IEpubConversionService
         // EPUB readers expect UTF-8 without a BOM.
         var bytes = new UTF8Encoding(false).GetBytes(content);
         stream.Write(bytes, 0, bytes.Length);
-    }
-
-    private static bool IsImageFile(string? key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return false;
-        }
-
-        // Skip macOS resource forks that otherwise show up as duplicate pages.
-        if (key.Replace('\\', '/').StartsWith("__MACOSX/", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var extension = Path.GetExtension(key).ToLowerInvariant();
-        return ImageExtensions.Contains(extension);
     }
 
     private static string NormalizeImageExtension(string extension)

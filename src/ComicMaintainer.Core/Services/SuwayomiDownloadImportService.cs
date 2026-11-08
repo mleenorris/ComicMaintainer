@@ -6,7 +6,6 @@ using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using SharpCompress.Archives.Rar;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -278,21 +277,19 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
     /// is still writing does not open.
     /// </summary>
     public static bool IsCompleteArchive(string path)
-        => ProbeArchive(path, Path.GetExtension(path)) == ArchiveState.Complete;
+        => ProbeArchive(path) == ArchiveState.Complete;
 
-    /// <param name="extension">The archive's real extension, which a staged file lacks.</param>
-    private static ArchiveState ProbeArchive(string path, string extension)
+    /// <remarks>
+    /// The format comes from the file's content, so a staged file, which has lost its
+    /// extension, is checked the same way. An archive the read limits refuse counts as
+    /// incomplete: it is left in place and reported as unreadable.
+    /// </remarks>
+    private static ArchiveState ProbeArchive(string path)
     {
         try
         {
-            if (ComicFileExtensions.NormalizeExtension(extension) == ".cbz")
-            {
-                using var zip = ZipFile.OpenRead(path);
-                return zip.Entries.Count > 0 ? ArchiveState.Complete : ArchiveState.Incomplete;
-            }
-
-            using var rar = RarArchive.OpenArchive(path);
-            return rar.Entries.Any() ? ArchiveState.Complete : ArchiveState.Incomplete;
+            using var archive = ComicArchiveReader.Open(path);
+            return archive.EnumerateEntries().Any() ? ArchiveState.Complete : ArchiveState.Incomplete;
         }
         catch (UnauthorizedAccessException)
         {
@@ -337,7 +334,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 continue;
             }
 
-            var state = ProbeArchive(archive, Path.GetExtension(archive));
+            var state = ProbeArchive(archive);
             if (state == ArchiveState.PermissionDenied)
             {
                 // Permissions rarely differ per file, so stop like a refused move.
@@ -594,7 +591,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 var sourceState = GetFilePathState(sourcePath);
                 if (sourceState == FilePathState.Present)
                 {
-                    var sourceArchive = ProbeArchive(sourcePath, extension);
+                    var sourceArchive = ProbeArchive(sourcePath);
                     if (sourceArchive == ArchiveState.PermissionDenied)
                     {
                         return MoveOutcome.PermissionDenied;
@@ -613,7 +610,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                         return ex is UnauthorizedAccessException ? MoveOutcome.PermissionDenied : MoveOutcome.Failed;
                     }
 
-                    var stagedCopyArchive = ProbeArchive(stagingPath, extension);
+                    var stagedCopyArchive = ProbeArchive(stagingPath);
                     if (stagedCopyArchive == ArchiveState.Complete)
                     {
                         return RestoreStagedFile(stagingPath, sourcePath, extension, replaceSource: false) == MoveOutcome.PermissionDenied
@@ -642,7 +639,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                     return sourceState == FilePathState.Missing ? MoveOutcome.Vanished : MoveOutcome.Failed;
                 }
 
-                var stagingArchive = ProbeArchive(stagingPath, extension);
+                var stagingArchive = ProbeArchive(stagingPath);
                 if (stagingArchive != ArchiveState.Complete)
                 {
                     return stagingArchive == ArchiveState.PermissionDenied
@@ -745,7 +742,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
         {
             Directory.CreateDirectory(sourceFolder);
             File.Copy(stagingPath, temporaryPath, overwrite: true);
-            var archiveState = ProbeArchive(temporaryPath, extension);
+            var archiveState = ProbeArchive(temporaryPath);
             if (archiveState != ArchiveState.Complete)
             {
                 return archiveState == ArchiveState.PermissionDenied
@@ -893,7 +890,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
             if (sourceState == FilePathState.Present)
             {
-                var sourceArchive = ProbeArchive(sourcePath!, Path.GetExtension(sourceName));
+                var sourceArchive = ProbeArchive(sourcePath!);
                 if (sourceArchive == ArchiveState.PermissionDenied)
                 {
                     _logger.LogWarning("Permission denied reading Suwayomi download {File}", LoggingHelper.SanitizePathForLog(sourcePath!));
@@ -941,7 +938,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
                 }
             }
 
-            var archiveState = ProbeArchive(stagingPath, Path.GetExtension(sourceName));
+            var archiveState = ProbeArchive(stagingPath);
             if (archiveState == ArchiveState.PermissionDenied)
             {
                 _logger.LogWarning("Permission denied reading staged Suwayomi chapter {File}", LoggingHelper.SanitizePathForLog(stagingPath));

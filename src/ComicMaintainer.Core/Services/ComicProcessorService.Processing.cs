@@ -101,8 +101,9 @@ public partial class ComicProcessorService
             _logger.LogDebug("ProcessFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             
             // Extract metadata from the archive
-            var metadata = await GetMetadataAtResolvedPath(resolvedPath, filePath, cancellationToken);
-            
+            var metadataRead = await ReadMetadataAtResolvedPathAsync(resolvedPath, filePath, cancellationToken);
+            var metadata = metadataRead.Metadata;
+
             if (metadata != null)
             {
                 _logger.LogDebug("ProcessFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}, Title: {Title}", 
@@ -123,6 +124,10 @@ public partial class ComicProcessorService
             string? normalizeError = null;
             string? renameError = null;
             var fileChanged = false;
+
+            // The reason the archive itself failed (refused by the read limits, not a ZIP or
+            // RAR, or unreadable while it was rewritten), which job results and history show.
+            var archiveFailure = metadataRead.FailureReason;
 
             _logger.LogDebug("ProcessFileAsync: Starting normalize phase - WatcherEnableNormalize: {NormalizeEnabled}, Has Metadata: {HasMetadata}",
                 _settings.WatcherEnableNormalize, metadata != null);
@@ -182,8 +187,11 @@ public partial class ComicProcessorService
                     {
                         await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                         _logger.LogWarning("Failed to normalize metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                        await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
-                        normalizeError = "Normalize failed: the metadata could not be written";
+                        archiveFailure ??= normalizeWrite.FailureReason;
+                        await LogHistoryAsync(filePath, "Normalize", false, archiveFailure ?? "Failed to update metadata", cancellationToken);
+                        normalizeError = archiveFailure is null
+                            ? "Normalize failed: the metadata could not be written"
+                            : $"Normalize failed: {archiveFailure}";
                     }
                 }
             }
@@ -197,9 +205,16 @@ public partial class ComicProcessorService
             }
             else
             {
-                // The archive could not be read (GetMetadataAtResolvedPath logged why).
+                // The archive could not be read (ReadMetadataAtResolvedPathAsync logged why).
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
-                normalizeError = "Normalize failed: the archive could not be read";
+                if (archiveFailure is not null)
+                {
+                    await LogHistoryAsync(filePath, "Normalize", false, archiveFailure, cancellationToken);
+                }
+
+                normalizeError = archiveFailure is null
+                    ? "Normalize failed: the archive could not be read"
+                    : $"Normalize failed: {archiveFailure}";
             }
 
             _logger.LogDebug("ProcessFileAsync: Starting rename phase - WatcherEnableRename: {RenameEnabled}, Has Metadata: {HasMetadata}, Has Series: {HasSeries}",
@@ -329,8 +344,10 @@ public partial class ComicProcessorService
                 {
                     _logger.LogDebug("No metadata or series information for rename: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                    await LogHistoryAsync(filePath, "Rename", false, NoSeriesMessage(filePath, "No metadata or series information"), cancellationToken);
-                    renameError = NoSeriesMessage(filePath, "Rename skipped: no metadata or series information");
+                    await LogHistoryAsync(filePath, "Rename", false, metadataRead.FailureReason ?? NoSeriesMessage(filePath, "No metadata or series information"), cancellationToken);
+                    renameError = metadataRead.FailureReason is null
+                        ? NoSeriesMessage(filePath, "Rename skipped: no metadata or series information")
+                        : $"Rename failed: {metadataRead.FailureReason}";
                 }
             }
 
@@ -355,7 +372,7 @@ public partial class ComicProcessorService
             if (fileChanged || !isFullyProcessed)
             {
                 await LogHistoryAsync(filePath, "Process", isFullyProcessed,
-                    isFullyProcessed ? null : "File not fully processed (rename or normalize incomplete)",
+                    isFullyProcessed ? null : archiveFailure ?? "File not fully processed (rename or normalize incomplete)",
                     cancellationToken);
             }
 
@@ -373,8 +390,9 @@ public partial class ComicProcessorService
                 return new(true, filePath);
             }
 
+            // When the archive itself failed that one reason covers both phases.
             var reasons = new[] { normalizeError, renameError }.Where(reason => reason is not null).ToList();
-            return new(false, filePath, reasons.Count > 0 ? string.Join("; ", reasons) : "File not fully processed");
+            return new(false, filePath, archiveFailure ?? (reasons.Count > 0 ? string.Join("; ", reasons) : "File not fully processed"));
         }
         // A cancelled job didn't fail this file: leave it and its stored state as they are.
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

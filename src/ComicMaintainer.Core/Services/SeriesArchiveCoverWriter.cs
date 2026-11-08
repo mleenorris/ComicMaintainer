@@ -4,8 +4,6 @@ using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using SharpCompress.Archives;
-using SharpCompress.Archives.Zip;
 using SharpCompress.Common;
 using SharpCompress.Writers.Zip;
 
@@ -278,10 +276,10 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         Action? onBeforeReplace = null,
         Action? onAfterReplace = null)
     {
-        using var source = ZipArchive.OpenArchive(archivePath);
+        using var source = ComicArchiveReader.Open(archivePath);
 
-        var existingCoverEntries = ArchiveEntryReader.EnumerateEntries(source, Path.GetFileName(archivePath))
-            .Where(e => !e.IsDirectory && IsManagedCoverEntry(e.Key))
+        var existingCoverEntries = source.EnumerateEntries()
+            .Where(e => !e.IsDirectory && IsManagedCoverEntry(e.Name))
             .ToList();
 
         // Idempotency / no-op checks: avoid rewriting (and the file-system
@@ -295,7 +293,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
             }
         }
         else if (existingCoverEntries.Count == 1
-            && string.Equals(existingCoverEntries[0].Key, coverEntryName, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(existingCoverEntries[0].Name, coverEntryName, StringComparison.OrdinalIgnoreCase)
             && EntryBytesEqual(existingCoverEntries[0], coverBytes))
         {
             return;
@@ -310,17 +308,8 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
             {
                 using (var writer = new ZipWriter(destination, new ZipWriterOptions(CompressionType.Deflate) { LeaveStreamOpen = true }))
                 {
-                    // Copy every non-managed-cover entry verbatim.
-                    foreach (var entry in source.Entries.Where(e => !e.IsDirectory))
-                    {
-                        if (IsManagedCoverEntry(entry.Key))
-                        {
-                            continue;
-                        }
-
-                        using var entryStream = entry.OpenEntryStream();
-                        writer.Write(entry.Key ?? "unknown", entryStream, entry.LastModifiedTime ?? DateTime.Now);
-                    }
+                    // Copy every non-managed-cover entry verbatim, under the rewrite limits.
+                    source.CopyFileEntriesTo(writer, name => !IsManagedCoverEntry(name));
 
                     if (coverBytes is not null && !string.IsNullOrEmpty(coverEntryName))
                     {
@@ -404,16 +393,12 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         return false;
     }
 
-    private static bool EntryBytesEqual(IArchiveEntry entry, byte[] expected)
+    private static bool EntryBytesEqual(ComicArchiveEntry entry, byte[] expected)
     {
         try
         {
-            if (entry.Size != expected.Length)
-            {
-                return false;
-            }
-
-            return ArchiveEntryReader.ReadAllBytes(entry, Math.Max(expected.Length, 1)).AsSpan().SequenceEqual(expected);
+            // A larger entry is refused by its declared size, without being read.
+            return entry.ReadAllBytes(Math.Max(expected.Length, 1)).AsSpan().SequenceEqual(expected);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

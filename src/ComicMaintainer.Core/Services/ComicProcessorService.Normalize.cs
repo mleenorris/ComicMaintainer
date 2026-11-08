@@ -17,6 +17,12 @@ public partial class ComicProcessorService
     private async Task<bool> NormalizeFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken) =>
         (await NormalizeFileWithResultAsync(filePath, forceReprocess, cancellationToken)).Succeeded;
 
+    private async Task<BatchItemResult> NormalizeFileItemAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
+    {
+        var result = await NormalizeFileWithResultAsync(filePath, forceReprocess, cancellationToken);
+        return new BatchItemResult(result.Succeeded, result.Error);
+    }
+
     /// <summary>
     /// The outcome of normalizing one file.
     /// </summary>
@@ -29,7 +35,11 @@ public partial class ComicProcessorService
     /// True when the file needs normalizing but is a CBR/RAR/ZIP that is not rewritten because
     /// converting them to CBZ is turned off (see <see cref="DeferUnwritableNormalizeAsync"/>).
     /// </param>
-    private readonly record struct NormalizeFileResult(bool Succeeded, string FilePath, bool ArchiveNotWritable = false);
+    /// <param name="Error">
+    /// Why normalizing failed, when that can be told to users: see
+    /// <see cref="MetadataWriteResult.FailureReason"/>.
+    /// </param>
+    private readonly record struct NormalizeFileResult(bool Succeeded, string FilePath, bool ArchiveNotWritable = false, string? Error = null);
 
     /// <summary>
     /// Normalizes one file and returns whether it succeeded and where the file is afterwards.
@@ -60,14 +70,15 @@ public partial class ComicProcessorService
             _logger.LogDebug("NormalizeFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             
             // Extract metadata from the archive
-            var metadata = await GetMetadataAsync(filePath, cancellationToken);
-            
+            var metadataRead = await ReadMetadataAsync(filePath, cancellationToken);
+            var metadata = metadataRead.Metadata;
+
             if (metadata == null)
             {
                 _logger.LogWarning("NormalizeFileAsync: No metadata found for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
-                await LogHistoryAsync(filePath, "Normalize", false, "No metadata found", cancellationToken);
-                return new(false, filePath);
+                await LogHistoryAsync(filePath, "Normalize", false, metadataRead.FailureReason ?? "No metadata found", cancellationToken);
+                return new(false, filePath, Error: metadataRead.FailureReason);
             }
 
             _logger.LogDebug("NormalizeFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}, Title: {Title}", 
@@ -120,10 +131,10 @@ public partial class ComicProcessorService
             else
             {
                 _logger.LogWarning("NormalizeFileAsync: Failed to normalize file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
+                await LogHistoryAsync(filePath, "Normalize", false, write.FailureReason ?? "Failed to update metadata", cancellationToken);
             }
-            
-            return new(success, filePath);
+
+            return new(success, filePath, Error: write.FailureReason);
         }
         // A cancelled job didn't fail this file: leave it and its stored state as they are.
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

@@ -44,7 +44,11 @@ public enum MetadataWriteOutcome
 /// The file's path after the write: the path that was written, or the new CBZ's path when the
 /// archive was converted.
 /// </param>
-public sealed record MetadataWriteResult(MetadataWriteOutcome Outcome, string FilePath)
+/// <param name="FailureReason">
+/// Why the write failed, when that can be told to users: the read limits refused the archive, or
+/// it is not a readable ZIP or RAR. Null for any other failure and when the write succeeded.
+/// </param>
+public sealed record MetadataWriteResult(MetadataWriteOutcome Outcome, string FilePath, string? FailureReason = null)
 {
     /// <summary>True unless the write failed. A file kept as it is counts as a success.</summary>
     public bool Succeeded => Outcome is not MetadataWriteOutcome.Failed;
@@ -52,5 +56,6 @@ public sealed record MetadataWriteResult(MetadataWriteOutcome Outcome, string Fi
     /// <summary>True when the archive on disk was changed (rewritten or converted).</summary>
     public bool ArchiveChanged => Outcome is MetadataWriteOutcome.Written or MetadataWriteOutcome.ConvertedToCbz;
 
-    public static MetadataWriteResult Failed(string filePath) => new(MetadataWriteOutcome.Failed, filePath);
+    public static MetadataWriteResult Failed(string filePath, string? reason = null) =>
+        new(MetadataWriteOutcome.Failed, filePath, reason);
 }

@@ -26,6 +26,13 @@ public partial class Azw3ConversionService : IAzw3ConversionService
     private static readonly XNamespace DcNamespace = "http://purl.org/dc/elements/1.1/";
     private static readonly XNamespace ContainerNamespace = "urn:oasis:names:tc:opendocument:xmlns:container";
 
+    // The intermediate EPUB is generated here: one image and one page document per page,
+    // plus the package files, and a book is capped by what KF8 can hold.
+    private const int MaxIntermediateBookEntries = (2 * Kf8ComicWriter.MaxRecords) + 16;
+
+    // Its package document lists every page, so it outgrows a ComicInfo.xml on a long book.
+    private const long MaxIntermediateDocumentBytes = 64L * 1024 * 1024;
+
     private readonly IEpubConversionService _epubConverter;
     private readonly ILogger<Azw3ConversionService> _logger;
 
@@ -128,7 +135,7 @@ public partial class Azw3ConversionService : IAzw3ConversionService
     /// </remarks>
     private static void Convert(string epubPath, string writePath, string azw3Path, CancellationToken cancellationToken)
     {
-        using var archive = ZipFile.OpenRead(epubPath);
+        using var archive = ArchiveEntryReader.OpenZip(epubPath, MaxIntermediateBookEntries);
 
         var opfPath = ReadOpfPath(archive);
         var opf = XDocument.Parse(ReadEntryText(archive, opfPath));
@@ -229,14 +236,7 @@ public partial class Azw3ConversionService : IAzw3ConversionService
     }
 
     private static string ReadEntryText(ZipArchive archive, string entryName)
-    {
-        using var stream = OpenEntry(archive, entryName);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        return reader.ReadToEnd();
-    }
-
-    private static Stream OpenEntry(ZipArchive archive, string entryName)
-        => GetEntry(archive, entryName).Open();
+        => ArchiveEntryReader.DecodeText(ArchiveEntryReader.ReadAllBytes(GetEntry(archive, entryName), MaxIntermediateDocumentBytes));
 
     private static ZipArchiveEntry GetEntry(ZipArchive archive, string entryName)
         => archive.GetEntry(entryName)

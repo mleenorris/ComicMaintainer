@@ -79,7 +79,7 @@ public sealed class ComicProcessorServiceProcessingResultTests : IDisposable
         var job = await RunJobAsync(service, await service.ProcessFilesAsync(new[] { corrupt }));
 
         Assert.Equal(1, job.FailedFiles);
-        Assert.Contains("could not be read", job.Errors[corrupt]);
+        Assert.Equal("'Broken - Chapter 0001.cbz' is not a readable ZIP or RAR archive.", job.Errors[corrupt]);
     }
 
     [Fact]

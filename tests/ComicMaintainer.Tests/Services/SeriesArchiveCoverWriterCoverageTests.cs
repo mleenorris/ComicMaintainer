@@ -293,14 +293,17 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         var cbz = Path.Join(_root, "issue1.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
-            // Zeros, so the archive itself stays tiny. Written in small chunks so the fixture
+            // Random, so it stores at about 1:1 like a real page (the rewrite limits refuse a
+            // large entry that compresses too well). Written in small chunks so the fixture
             // doesn't need a LargeEntrySize buffer.
             var entry = zip.CreateEntry("big.bin", CompressionLevel.Fastest);
             entry.LastWriteTime = FixtureTimestamp;
             using var stream = entry.Open();
+            var random = new Random(1);
             var chunk = new byte[81920];
             for (var remaining = LargeEntrySize; remaining > 0; remaining -= chunk.Length)
             {
+                random.NextBytes(chunk);
                 stream.Write(chunk, 0, Math.Min(chunk.Length, remaining));
             }
         }

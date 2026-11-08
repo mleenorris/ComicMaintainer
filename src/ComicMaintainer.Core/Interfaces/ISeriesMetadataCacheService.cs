@@ -7,7 +7,10 @@ namespace ComicMaintainer.Core.Interfaces;
 /// </summary>
 public interface ISeriesMetadataCacheService
 {
-    /// <summary>Normalizes a free-form title into the key used to look up cache entries.</summary>
+    /// <summary>
+    /// Normalizes a free-form title into the key used to look up cache entries:
+    /// the series key of <see cref="Utilities.SeriesKey.Normalize"/>.
+    /// </summary>
     string NormalizeKey(string? title);
 
     /// <summary>Loads every cached record. Used by the library/grouping layer.</summary>

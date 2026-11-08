@@ -188,6 +188,23 @@ public class AppSettings
     public int AniListRequestsPerMinute { get; set; } = 28;
 
     /// <summary>
+    /// Client-side request budget for the ComicVine API. ComicVine allows
+    /// 200 requests per resource per hour (and blocks clients that send
+    /// bursts), so the default of 180/hour leaves headroom. Requests are also
+    /// spaced at least one second apart. Once the hourly budget is spent,
+    /// ComicVine is skipped until it refills instead of queueing lookups.
+    /// </summary>
+    public int ComicVineRequestsPerHour { get; set; } = 180;
+
+    /// <summary>
+    /// Per-attempt timeout, in seconds, for a request to an external metadata
+    /// provider (ComicVine, MangaDex, AniList). A provider that does not answer
+    /// in time counts as failed, so it is skipped for a back-off period instead
+    /// of holding up file processing. Clamped to 1-30 seconds.
+    /// </summary>
+    public int MetadataProviderTimeoutSeconds { get; set; } = 15;
+
+    /// <summary>
     /// When true (the default), external metadata refreshes also try to
     /// download a series cover image from the chosen provider and persist it
     /// under <see cref="SeriesImageCacheDirectory"/>. Set to false to keep

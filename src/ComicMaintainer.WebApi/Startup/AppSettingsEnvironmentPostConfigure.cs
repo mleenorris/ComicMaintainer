@@ -115,6 +115,14 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         if (!string.IsNullOrEmpty(aniListRpm) && int.TryParse(aniListRpm, out var alRpm) && alRpm > 0)
             options.AniListRequestsPerMinute = alRpm;
 
+        var comicVineRph = Environment.GetEnvironmentVariable("COMICVINE_REQUESTS_PER_HOUR");
+        if (!string.IsNullOrEmpty(comicVineRph) && int.TryParse(comicVineRph, out var cvRph) && cvRph > 0)
+            options.ComicVineRequestsPerHour = cvRph;
+
+        var providerTimeout = Environment.GetEnvironmentVariable("METADATA_PROVIDER_TIMEOUT_SECONDS");
+        if (!string.IsNullOrEmpty(providerTimeout) && int.TryParse(providerTimeout, out var providerTimeoutSeconds) && providerTimeoutSeconds > 0)
+            options.MetadataProviderTimeoutSeconds = providerTimeoutSeconds;
+
         var downloadSeriesImages = Environment.GetEnvironmentVariable("DOWNLOAD_EXTERNAL_SERIES_IMAGES");
         if (!string.IsNullOrEmpty(downloadSeriesImages))
             options.DownloadExternalSeriesImages = downloadSeriesImages.Equals("true", StringComparison.OrdinalIgnoreCase);

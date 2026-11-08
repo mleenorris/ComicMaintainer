@@ -707,6 +707,20 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchCandidates_ProvidersUnavailable_Returns503WithTheReason()
+    {
+        _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException(
+                "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s"));
+
+        var result = await CreateController().SearchCandidates("Batman", 10, CancellationToken.None);
+
+        var obj = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
+        Assert.Equal("MangaDex did not answer within 15s", obj.Value);
+    }
+
+    [Fact]
     public async Task SearchCandidates_CallerCancelled_LetsTheCancellationThrough()
     {
         _cts.Cancel();

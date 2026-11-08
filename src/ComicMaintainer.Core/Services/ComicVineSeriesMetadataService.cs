@@ -3,7 +3,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
-using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Caching.Memory;
@@ -12,16 +11,43 @@ using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.Core.Services;
 
-public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
+/// <summary>
+/// External series metadata provider backed by the ComicVine API
+/// (<c>/search</c> for volumes and <c>/volume/4050-{id}</c>). Requires
+/// <see cref="AppSettings.EnableExternalSeriesMetadata"/> and an API key.
+/// </summary>
+/// <remarks>
+/// ComicVine allows 200 requests per resource per hour and blocks clients
+/// that send bursts ("velocity" detection), so requests are spaced at least a
+/// second apart and limited to <see cref="AppSettings.ComicVineRequestsPerHour"/>;
+/// once that budget is spent ComicVine reports itself rate limited (and is
+/// skipped by the composite provider) until the window frees a permit.
+/// Throttling answers (HTTP 420/429) and API error envelopes
+/// (<c>status_code</c> other than 1) are failures, not empty results.
+/// </remarks>
+public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
 {
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(12);
-    private static readonly TimeSpan HealthCacheDuration = TimeSpan.FromSeconds(60);
+    /// <summary>
+    /// The health probe spends a search request from the hourly budget, so its
+    /// result is reused much longer than for the other providers.
+    /// </summary>
+    private static readonly TimeSpan ComicVineHealthCacheDuration = TimeSpan.FromMinutes(15);
 
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IOptionsMonitor<AppSettings> _settings;
-    private readonly IMemoryCache _cache;
-    private readonly ILogger<ComicVineSeriesMetadataService> _logger;
-    private readonly ProviderHealthTracker _health;
+    /// <summary>
+    /// Back-off reported for an API rate-limit envelope (status 107), which
+    /// lasts until ComicVine's hourly window moves on.
+    /// </summary>
+    private static readonly TimeSpan RateLimitEnvelopeBackoff = TimeSpan.FromMinutes(15);
+
+    private const string FieldList = "id,name,aliases,image,deck,description";
+
+    // ComicVine status_code values (https://comicvine.gamespot.com/api/documentation).
+    private const int StatusOk = 1;
+    private const int StatusInvalidApiKey = 100;
+    private const int StatusObjectNotFound = 101;
+    private const int StatusRateLimitExceeded = 107;
+
+    private readonly Lazy<ProviderRateLimiter> _rateLimiter;
 
     public ComicVineSeriesMetadataService(
         IHttpClientFactory httpClientFactory,
@@ -29,72 +55,119 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
         IMemoryCache cache,
         ILogger<ComicVineSeriesMetadataService> logger,
         ComicMaintainerMetrics? metrics = null)
+        : this(httpClientFactory, settings, cache, logger, metrics, rateLimiter: null)
     {
-        _health = new ProviderHealthTracker("ComicVine", metrics);
-        _httpClientFactory = httpClientFactory;
-        _settings = settings;
-        _cache = cache;
-        _logger = logger;
     }
 
-    public string ProviderName => "ComicVine";
-
-    public async Task<ExternalSeriesMetadata?> LookupSeriesAsync(string seriesName, CancellationToken cancellationToken = default)
+    /// <summary>Creates the provider with the given throttle instead of ComicVine's own (tests only).</summary>
+    internal ComicVineSeriesMetadataService(
+        IHttpClientFactory httpClientFactory,
+        IOptionsMonitor<AppSettings> settings,
+        IMemoryCache cache,
+        ILogger<ComicVineSeriesMetadataService> logger,
+        ComicMaintainerMetrics? metrics,
+        ProviderRateLimiter? rateLimiter)
+        : base("ComicVine", httpClientFactory, settings, cache, logger, metrics)
     {
-        if (string.IsNullOrWhiteSpace(seriesName))
-        {
-            return null;
-        }
-
-        var config = _settings.CurrentValue;
-        if (!config.EnableExternalSeriesMetadata || string.IsNullOrWhiteSpace(config.ComicVineApiKey))
-        {
-            return null;
-        }
-
-        var cacheKey = $"comicvine-series:{Normalize(seriesName)}";
-        if (_cache.TryGetValue(cacheKey, out ExternalSeriesMetadata? cached))
-        {
-            return cached;
-        }
-
-        var results = await SearchInternalAsync(config, seriesName, limit: 10, cancellationToken);
-        var result = PickBestMatch(results, seriesName);
-        if (result != null)
-        {
-            _cache.Set(cacheKey, result, CacheDuration);
-        }
-
-        return result;
+        _rateLimiter = new Lazy<ProviderRateLimiter>(
+            () => rateLimiter ?? new ProviderRateLimiter(
+                "ComicVine",
+                permitLimit: 1,
+                window: TimeSpan.FromSeconds(1),
+                segmentsPerWindow: 1,
+                budgetPermitLimit: Math.Max(1, Settings.CurrentValue.ComicVineRequestsPerHour),
+                budgetWindow: TimeSpan.FromHours(1)),
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
-    public async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchSeriesAsync(
-        string query,
-        int limit = 10,
-        CancellationToken cancellationToken = default)
+    private protected override string HttpClientName => nameof(ComicVineSeriesMetadataService);
+
+    private protected override string CacheKeyPrefix => "comicvine-series";
+
+    private protected override ProviderRateLimiter RateLimiter => _rateLimiter.Value;
+
+    private protected override bool CanQuery(AppSettings settings)
+        => settings.EnableExternalSeriesMetadata && !string.IsNullOrWhiteSpace(settings.ComicVineApiKey);
+
+    /// <summary>ComicVine answers HTTP 420 when it throttles a client, as well as the standard 429.</summary>
+    private protected override bool IsRateLimitStatus(HttpStatusCode statusCode)
+        => (int)statusCode == 420 || statusCode == HttpStatusCode.TooManyRequests;
+
+    private protected override HttpRequestMessage CreateSearchRequest(AppSettings settings, string query, int limit)
+        => CreateJsonRequest(BuildSearchUri(settings, query, limit));
+
+    private protected override HttpRequestMessage CreateGetByIdRequest(AppSettings settings, string sourceId)
     {
-        if (string.IsNullOrWhiteSpace(query))
+        var apiKey = Uri.EscapeDataString(settings.ComicVineApiKey ?? string.Empty);
+        var baseUrl = settings.ComicVineBaseUrl.TrimEnd('/');
+        return CreateJsonRequest(
+            $"{baseUrl}/volume/4050-{Uri.EscapeDataString(sourceId)}/?api_key={apiKey}&format=json&field_list={FieldList}");
+    }
+
+    private protected override IReadOnlyList<ExternalSeriesMetadata> ParseSearchResults(JsonElement root)
+    {
+        if (!root.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
         {
             return Array.Empty<ExternalSeriesMetadata>();
         }
 
-        var config = _settings.CurrentValue;
-        if (!config.EnableExternalSeriesMetadata || string.IsNullOrWhiteSpace(config.ComicVineApiKey))
+        var output = new List<ExternalSeriesMetadata>();
+        foreach (var item in results.EnumerateArray())
         {
-            return Array.Empty<ExternalSeriesMetadata>();
+            if (ParseVolume(item) is { } metadata)
+            {
+                output.Add(metadata);
+            }
         }
 
-        return await SearchInternalAsync(config, query, Math.Clamp(limit, 1, 50), cancellationToken);
+        return output;
     }
 
-    public async Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default)
+    /// <summary>A volume detail answer carries the volume as the <c>results</c> object.</summary>
+    private protected override ExternalSeriesMetadata? ParseGetByIdResult(JsonElement root)
+        => root.TryGetProperty("results", out var results) && results.ValueKind == JsonValueKind.Object
+            ? ParseVolume(results)
+            : null;
+
+    /// <summary>
+    /// Reads ComicVine's <c>status_code</c> envelope: anything other than 1
+    /// (OK) is a failure, except 101 (object not found), which a by-id fetch
+    /// answers as no result.
+    /// </summary>
+    private protected override ExternalMetadataUnavailableException? CheckResponseBody(JsonElement root)
     {
-        var config = _settings.CurrentValue;
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("status_code", out var statusProperty)
+            || statusProperty.ValueKind != JsonValueKind.Number
+            || !statusProperty.TryGetInt32(out var status)
+            || status is StatusOk or StatusObjectNotFound)
+        {
+            return null;
+        }
+
+        var error = root.TryGetProperty("error", out var errorProperty) && errorProperty.ValueKind == JsonValueKind.String
+            ? errorProperty.GetString()
+            : null;
+        var message = $"ComicVine answered status {status} ({error ?? "unknown error"})";
+        return status switch
+        {
+            StatusInvalidApiKey => new ExternalMetadataUnavailableException(
+                ProviderName, ExternalMetadataFailureKind.Configuration, $"{message}; check the ComicVine API key"),
+            StatusRateLimitExceeded => new ExternalMetadataUnavailableException(
+                ProviderName, ExternalMetadataFailureKind.RateLimited, message, RateLimitEnvelopeBackoff),
+            _ => new ExternalMetadataUnavailableException(
+                ProviderName, ExternalMetadataFailureKind.InvalidResponse, message),
+        };
+    }
+
+    public override async Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default)
+    {
+        var config = Settings.CurrentValue;
         var enabled = config.EnableExternalSeriesMetadata;
         var configured = enabled && !string.IsNullOrWhiteSpace(config.ComicVineApiKey)
             && !string.IsNullOrWhiteSpace(config.ComicVineBaseUrl);
 
-        var snapshot = _health.Snapshot();
+        var snapshot = Health.Snapshot();
         snapshot.Enabled = enabled;
         snapshot.Configured = configured;
 
@@ -111,156 +184,84 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
             return snapshot;
         }
 
-        const string probeCacheKey = "comicvine-health-probe";
-        if (_cache.TryGetValue(probeCacheKey, out (bool Reachable, string Message)? cached) && cached.HasValue)
-        {
-            snapshot.Reachable = cached.Value.Reachable;
-            snapshot.StatusMessage = cached.Value.Message;
-            return snapshot;
-        }
+        // Use a tiny, well-formed search to verify the endpoint accepts our
+        // credentials without consuming meaningful quota.
+        await ApplyProbeAsync(
+            snapshot,
+            "comicvine-health-probe",
+            () => CreateJsonRequest(BuildSearchUri(config, "ping", limit: 1)),
+            ComicVineHealthCacheDuration,
+            cancellationToken);
 
-        var (reachable, message) = await ProbeReachabilityAsync(config, cancellationToken);
-        snapshot.Reachable = reachable;
-        snapshot.StatusMessage = message;
-        _cache.Set(probeCacheKey, (reachable, message), HealthCacheDuration);
+        if (snapshot.RateLimited)
+        {
+            snapshot.StatusMessage = "Degraded - rate limited";
+        }
         return snapshot;
     }
 
-    private async Task<(bool reachable, string message)> ProbeReachabilityAsync(AppSettings config, CancellationToken cancellationToken)
+    private static HttpRequestMessage CreateJsonRequest(string requestUri)
     {
-        try
-        {
-            // Use a tiny, well-formed search to verify the endpoint accepts our
-            // credentials without consuming meaningful quota.
-            var requestUri = BuildRequestUri(config, "ping", limit: 1);
-            using var httpClient = _httpClientFactory.CreateClient(nameof(ComicVineSeriesMetadataService));
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
-            using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-            if (response.IsSuccessStatusCode)
-            {
-                return (true, "Reachable");
-            }
-            return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // The caller gave up; that says nothing about the provider, so
-            // nothing is cached and the next check probes again.
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            return (false, "Timed out");
-        }
-        catch (HttpRequestException ex)
-        {
-            return (false, $"Network error: {ex.Message}");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            return (false, ex.Message);
-        }
+        var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        return request;
     }
 
-    private async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchInternalAsync(
-        AppSettings config,
-        string seriesName,
-        int limit,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var requestUri = BuildRequestUri(config, seriesName, limit);
-            using var httpClient = _httpClientFactory.CreateClient(nameof(ComicVineSeriesMetadataService));
-            using var response = await httpClient.GetAsync(requestUri, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("ComicVine lookup failed for {SeriesName} with status code {StatusCode}", LoggingHelper.SanitizeForLog(seriesName), response.StatusCode);
-                _health.RecordFailure($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
-                return Array.Empty<ExternalSeriesMetadata>();
-            }
-
-            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var document = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
-            var results = ParseResults(document.RootElement);
-            _health.RecordSuccess();
-            return results;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // The caller gave up: neither "no match" nor a provider failure.
-            throw;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogWarning(ex, "ComicVine lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
-            _health.RecordFailure(ex.Message);
-            return Array.Empty<ExternalSeriesMetadata>();
-        }
-    }
-
-    private static string BuildRequestUri(AppSettings settings, string seriesName, int limit)
+    private static string BuildSearchUri(AppSettings settings, string seriesName, int limit)
     {
         var query = Uri.EscapeDataString(seriesName);
         var apiKey = Uri.EscapeDataString(settings.ComicVineApiKey ?? string.Empty);
         var baseUrl = settings.ComicVineBaseUrl.TrimEnd('/');
-        return $"{baseUrl}/search/?api_key={apiKey}&format=json&resources=volume&limit={limit}&field_list=name,aliases,image,deck,description&query={query}";
+        return $"{baseUrl}/search/?api_key={apiKey}&format=json&resources=volume&limit={limit}&field_list={FieldList}&query={query}";
     }
 
-    private static IReadOnlyList<ExternalSeriesMetadata> ParseResults(JsonElement root)
+    /// <summary>Maps one ComicVine volume to a candidate; null when it has no name.</summary>
+    private static ExternalSeriesMetadata? ParseVolume(JsonElement item)
     {
-        if (!root.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
+        if (item.ValueKind != JsonValueKind.Object)
         {
-            return Array.Empty<ExternalSeriesMetadata>();
+            return null;
         }
 
-        var output = new List<ExternalSeriesMetadata>();
-        foreach (var item in results.EnumerateArray())
+        var canonicalTitle = item.TryGetProperty("name", out var nameProperty) && nameProperty.ValueKind == JsonValueKind.String
+            ? nameProperty.GetString()
+            : null;
+
+        if (string.IsNullOrWhiteSpace(canonicalTitle))
         {
-            var canonicalTitle = item.TryGetProperty("name", out var nameProperty)
-                ? nameProperty.GetString()
-                : null;
-
-            if (string.IsNullOrWhiteSpace(canonicalTitle))
-            {
-                continue;
-            }
-
-            var aliases = item.TryGetProperty("aliases", out var aliasesProperty)
-                ? ParseAliases(aliasesProperty.GetString())
-                : new List<string>();
-
-            var (imageUrl, thumbnailUrl) = ExtractImageUrls(item);
-
-            // ComicVine catalogs the English title of a volume; tag every
-            // entry as English so it participates in the preferred-language
-            // resolver when the user picks "en".
-            var localizedTitles = new List<LocalizedTitle>
-            {
-                new LocalizedTitle(canonicalTitle, "en")
-            };
-            // Except also drops repeated aliases (case-insensitively), keeping the first spelling.
-            localizedTitles.AddRange(aliases
-                .Where(alias => !string.IsNullOrWhiteSpace(alias))
-                .Except(new[] { canonicalTitle }, StringComparer.OrdinalIgnoreCase)
-                .Select(alias => new LocalizedTitle(alias, "en")));
-
-            output.Add(new ExternalSeriesMetadata
-            {
-                CanonicalTitle = canonicalTitle,
-                Aliases = aliases,
-                Source = "ComicVine",
-                ImageUrl = imageUrl,
-                ThumbnailUrl = thumbnailUrl,
-                Synopsis = ExtractSynopsis(item),
-                LocalizedTitles = localizedTitles
-            });
+            return null;
         }
 
-        return output;
+        var aliases = item.TryGetProperty("aliases", out var aliasesProperty) && aliasesProperty.ValueKind == JsonValueKind.String
+            ? ParseAliases(aliasesProperty.GetString())
+            : new List<string>();
+
+        var (imageUrl, thumbnailUrl) = ExtractImageUrls(item);
+
+        // ComicVine catalogs the English title of a volume; tag every
+        // entry as English so it participates in the preferred-language
+        // resolver when the user picks "en".
+        var localizedTitles = new List<LocalizedTitle>
+        {
+            new LocalizedTitle(canonicalTitle, "en")
+        };
+        // Except also drops repeated aliases (case-insensitively), keeping the first spelling.
+        localizedTitles.AddRange(aliases
+            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            .Except(new[] { canonicalTitle }, StringComparer.OrdinalIgnoreCase)
+            .Select(alias => new LocalizedTitle(alias, "en")));
+
+        return new ExternalSeriesMetadata
+        {
+            CanonicalTitle = canonicalTitle,
+            Aliases = aliases,
+            Source = "ComicVine",
+            SourceId = ReadId(item),
+            ImageUrl = imageUrl,
+            ThumbnailUrl = thumbnailUrl,
+            Synopsis = ExtractSynopsis(item),
+            LocalizedTitles = localizedTitles
+        };
     }
 
     /// <summary>
@@ -311,29 +312,6 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
         return (image, thumb);
     }
 
-    private static ExternalSeriesMetadata? PickBestMatch(IReadOnlyList<ExternalSeriesMetadata> candidates, string requestedSeriesName)
-    {
-        var requestedNormalized = Normalize(requestedSeriesName);
-        ExternalSeriesMetadata? bestExact = null;
-        ExternalSeriesMetadata? bestAlias = null;
-
-        foreach (var metadata in candidates)
-        {
-            if (Normalize(metadata.CanonicalTitle) == requestedNormalized)
-            {
-                bestExact ??= metadata;
-                continue;
-            }
-
-            if (metadata.Aliases.Any(alias => Normalize(alias) == requestedNormalized))
-            {
-                bestAlias ??= metadata;
-            }
-        }
-
-        return bestExact ?? bestAlias ?? candidates.FirstOrDefault();
-    }
-
     private static List<string> ParseAliases(string? aliases)
     {
         if (string.IsNullOrWhiteSpace(aliases))
@@ -346,15 +324,5 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
             .Where(alias => !string.IsNullOrWhiteSpace(alias))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-    }
-
-    private static string Normalize(string value)
-    {
-        var filtered = value
-            .ToLowerInvariant()
-            .Where(char.IsLetterOrDigit)
-            .ToArray();
-
-        return new string(filtered);
     }
 }

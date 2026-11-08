@@ -458,6 +458,13 @@
             const status = metadataRefreshJobStatus(job);
             const current = job.currentSeries || job.CurrentSeries || '';
             const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+            // Why the newest failed series failed (e.g. a provider that did not
+            // answer), so an outage is not mistaken for series without a match.
+            const recent = job.recentResults || job.RecentResults || [];
+            const lastFailure = [...recent].reverse().find(r => r && (r.error || r.Error));
+            const lastError = lastFailure
+                ? `${lastFailure.seriesTitle || lastFailure.SeriesTitle || 'Series'}: ${lastFailure.error || lastFailure.Error}`
+                : '';
             renderHtml(toast, html`
                 <div class="metadata-refresh-toast-header">
                     <strong>Refreshing ${label}</strong>
@@ -465,6 +472,7 @@
                 </div>
                 <div class="metadata-refresh-toast-bar"><div class="metadata-refresh-toast-bar-fill" style="width:${pct}%"></div></div>
                 <div class="metadata-refresh-toast-meta">${processed}/${total} · ✓ ${successes} · ✗ ${failures}${current ? html` · now: ${current}` : ''}</div>
+                ${lastError ? html`<div class="metadata-refresh-toast-error" style="color: var(--text-error);">${lastError}</div>` : ''}
             `);
             if (isTerminalJobStatus(status)) {
                 toast.classList.add('metadata-refresh-toast--done');
@@ -683,7 +691,13 @@
                     { headers: getAuthHeaders() }
                 );
                 if (!response.ok) {
-                    status.textContent = 'Search failed.';
+                    // A 503 names the providers that could not answer (plain text).
+                    let msg = 'Search failed.';
+                    if (response.status === 503) {
+                        const reason = await response.text().catch(() => '');
+                        if (reason) msg = `Search failed: ${reason}`;
+                    }
+                    status.textContent = msg;
                     return;
                 }
                 const data = await response.json();
@@ -1035,7 +1049,10 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    showMessage('Failed to refresh metadata', 'error');
+                    // A 503 names the provider that could not answer; the record is kept.
+                    let msg = 'Failed to refresh metadata';
+                    try { const j = await response.json(); if (j && (j.error || typeof j === 'string')) msg = j.error || j; } catch {}
+                    showMessage(msg, 'error');
                     return;
                 }
                 const record = await response.json();
@@ -1088,7 +1105,10 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    renderHtml(container, html`<p style="color: var(--text-error);">Search failed.</p>`);
+                    // A 503 names the providers that could not answer.
+                    let msg = 'Search failed.';
+                    try { const j = await response.json(); if (j && j.error) msg = `Search failed: ${j.error}`; } catch {}
+                    renderHtml(container, html`<p style="color: var(--text-error);">${msg}</p>`);
                     return;
                 }
                 const data = await response.json();
@@ -1272,6 +1292,9 @@
                         canonicalTitle: result.canonical_title,
                         aliases: result.aliases || [],
                         source: result.source || null,
+                        // The provider's id of the candidate, so a later refresh
+                        // re-fetches exactly this entry instead of searching again.
+                        sourceId: result.source_id || null,
                         imageUrl: result.image_url || null,
                         thumbnailUrl: result.thumbnail_url || null,
                         // Forward the provider's per-title language tags so

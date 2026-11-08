@@ -61,6 +61,7 @@ const RESULTS = [
     {
         canonical_title: 'Saga (Image Comics)',
         source: 'ComicVine',
+        source_id: '4050-112',
         match_score: 96.5,
         aliases: ['サーガ', 'Saga Deluxe'],
         image_url: 'https://comicvine.example/saga.jpg',
@@ -166,7 +167,9 @@ test('failed and empty provider searches say so', async () => {
     const page = await bootSeries();
     await openManageNames(page);
     const outcomes = [
-        [respond(500, { error: 'Provider error' }), 'Search failed.'],
+        [respond(503, { error: 'External metadata providers unavailable: MangaDex did not answer within 15s' }),
+            'Search failed: External metadata providers unavailable: MangaDex did not answer within 15s'],
+        [respond(502, 'Bad Gateway'), 'Search failed.'],
         [offline, 'Search failed.'],
         [{ results: [] }, NO_MATCHES],
         [{}, NO_MATCHES]
@@ -539,6 +542,7 @@ test('Use This Match asks first, then replaces the cached provider metadata', as
         canonicalTitle: 'Saga (Image Comics)',
         aliases: ['サーガ', 'Saga Deluxe'],
         source: 'ComicVine',
+        sourceId: '4050-112',
         imageUrl: 'https://comicvine.example/saga.jpg',
         thumbnailUrl: null,
         localizedTitles: [
@@ -580,6 +584,7 @@ test('Use This Match sends what a sparse candidate has and ignores one without a
         canonicalTitle: 'SAGA',
         aliases: [],
         source: null,
+        sourceId: null,
         imageUrl: null,
         thumbnailUrl: null,
         localizedTitles: []

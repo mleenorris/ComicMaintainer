@@ -37,6 +37,8 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
     [
         ("MANGADEX_REQUESTS_PER_SECOND", o => o.MangaDexRequestsPerSecond),
         ("ANILIST_REQUESTS_PER_MINUTE", o => o.AniListRequestsPerMinute),
+        ("COMICVINE_REQUESTS_PER_HOUR", o => o.ComicVineRequestsPerHour),
+        ("METADATA_PROVIDER_TIMEOUT_SECONDS", o => o.MetadataProviderTimeoutSeconds),
         ("SERIES_IMAGE_MAX_BYTES", o => o.SeriesImageMaxBytes),
         ("SERIES_IMAGE_MAX_DOWNLOAD_BYTES", o => o.SeriesImageMaxDownloadBytes),
         ("SERIES_IMAGE_MAX_DIMENSION", o => o.SeriesImageMaxDimension),

@@ -1,3 +1,5 @@
+using ComicMaintainer.Core.Models;
+
 namespace ComicMaintainer.Core.Utilities;
 
 /// <summary>
@@ -5,10 +7,52 @@ namespace ComicMaintainer.Core.Utilities;
 /// user-supplied query. Returns a percentage in the range [0, 100] where 100
 /// means an exact normalized match on the canonical title. The score is used
 /// in the UI so users can pick the best candidate when the automatic pick
-/// was wrong.
+/// was wrong, and it decides which candidate (if any) an automatic lookup
+/// accepts (<see cref="SelectAutomaticMatch"/>).
 /// </summary>
 public static class SeriesMatchScorer
 {
+    /// <summary>
+    /// Lowest score an automatic lookup accepts as a match. Only an exact
+    /// normalized match on the canonical title (100) or on an alias (95)
+    /// reaches it: a containment match scores below 90 unless the titles are
+    /// equal, and a fuzzy match at most 70. Automatic matches are written
+    /// into files and cached for the whole folder, so a near miss such as
+    /// "Monster" for "Monsters" must stay unmatched for the user to resolve.
+    /// </summary>
+    public const double AutomaticMatchThreshold = 90d;
+
+    /// <summary>
+    /// Picks the candidate an automatic lookup for <paramref name="query"/>
+    /// accepts: the highest-scoring candidate that reaches
+    /// <see cref="AutomaticMatchThreshold"/>. On a tie the earlier candidate
+    /// wins, so the provider's own relevance order breaks it. Returns null when
+    /// no candidate is close enough; a provider's top search hit is never
+    /// accepted just for being first.
+    /// </summary>
+    public static (ExternalSeriesMetadata Match, double Score)? SelectAutomaticMatch(
+        IEnumerable<ExternalSeriesMetadata> candidates,
+        string? query)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        (ExternalSeriesMetadata Match, double Score)? best = null;
+        foreach (var candidate in candidates)
+        {
+            if (candidate is null)
+            {
+                continue;
+            }
+
+            var score = Score(query, candidate.CanonicalTitle, candidate.Aliases);
+            if (score >= AutomaticMatchThreshold && (best is null || score > best.Value.Score))
+            {
+                best = (candidate, score);
+            }
+        }
+
+        return best;
+    }
+
     /// <summary>
     /// Computes a confidence score for <paramref name="canonicalTitle"/> /
     /// <paramref name="aliases"/> against <paramref name="query"/>. The score
@@ -82,9 +126,8 @@ public static class SeriesMatchScorer
 
     private static string Normalize(string value)
     {
-        // Lowercase + strip non-alphanumerics. Mirrors the normalization used
-        // by SeriesMetadataCacheService.NormalizeKey (minus the dash join),
-        // which is also what the providers' PickBestMatch routines use.
+        // Lowercase + strip non-alphanumerics: the series key of SeriesKey
+        // without the dashes, so word breaks do not count as differences.
         var chars = value.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray();
         return new string(chars);
     }

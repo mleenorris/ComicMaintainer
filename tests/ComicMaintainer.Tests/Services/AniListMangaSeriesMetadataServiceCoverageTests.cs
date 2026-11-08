@@ -112,21 +112,26 @@ public sealed class AniListMangaSeriesMetadataServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchSeriesAsync_ClientFailure_ReturnsEmptyLogsAndRecordsTheFailure()
+    public async Task SearchSeriesAsync_ClientFailure_ThrowsLogsAndRecordsTheFailure()
     {
         var failure = new HttpRequestException("connection refused");
         var service = CreateServiceWhoseClientThrows(failure);
 
-        Assert.Empty(await service.SearchSeriesAsync("Attack on Titan"));
+        var thrown = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.SearchSeriesAsync("Attack on Titan"));
 
+        Assert.Equal(ExternalMetadataFailureKind.Unavailable, thrown.Kind);
+        Assert.Equal(new[] { "AniListManga" }, thrown.Providers);
         var warning = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
-        Assert.Equal("AniList manga lookup failed for Attack on Titan", warning.Message);
+        Assert.Equal(
+            "AniListManga lookup failed for Attack on Titan: AniListManga request failed: connection refused",
+            warning.Message);
         Assert.Same(failure, warning.Exception);
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
         var health = await service.CheckHealthAsync();
         Assert.Equal(1, health.FailureCount);
-        Assert.Equal("connection refused", health.LastError);
+        Assert.Equal("AniListManga request failed: connection refused", health.LastError);
         Assert.True(health.Reachable);
         Assert.Equal("Reachable", health.StatusMessage);
     }
@@ -155,22 +160,24 @@ public sealed class AniListMangaSeriesMetadataServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchSeriesAsync_RequestTimesOut_ReturnsEmptyLogsAndRecordsTheFailure()
+    public async Task SearchSeriesAsync_RequestTimesOut_ThrowsLogsAndRecordsTheFailure()
     {
         // A cancellation the caller didn't ask for, which is how HttpClient reports its timeout.
         var timeout = new TaskCanceledException("timed out", new TimeoutException());
         var service = CreateServiceWhoseClientThrows(timeout);
 
-        Assert.Empty(await service.SearchSeriesAsync("Attack on Titan"));
+        var thrown = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.SearchSeriesAsync("Attack on Titan"));
 
+        Assert.Equal(ExternalMetadataFailureKind.Timeout, thrown.Kind);
         var warning = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
-        Assert.Equal("AniList manga lookup failed for Attack on Titan", warning.Message);
+        Assert.StartsWith("AniListManga lookup failed for Attack on Titan: ", warning.Message);
         Assert.Same(timeout, warning.Exception);
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
         var health = await service.CheckHealthAsync();
         Assert.Equal(1, health.FailureCount);
-        Assert.Equal("timed out", health.LastError);
+        Assert.Equal(thrown.Message, health.LastError);
     }
 
     [Theory]
@@ -310,20 +317,11 @@ public sealed class AniListMangaSeriesMetadataServiceCoverageTests : IDisposable
         Assert.Equal("Reachable (recent lookup succeeded)", health.StatusMessage);
     }
 
-    // Real request 2 of 2. The test cancels its token as soon as the invoker
-    // announces the back-off, so the production delay ends immediately and the
-    // caller's cancellation surfaces.
+    // Real request 2 of 2. A back-off longer than the invoker waits inline
+    // fails the request at once as rate limited, carrying the server's delay.
     [Fact]
-    public async Task CheckHealthAsync_DuringA429BackOffWindow_ReportsDegraded()
+    public async Task CheckHealthAsync_AfterALong429BackOff_ReportsDegraded()
     {
-        using var cts = new CancellationTokenSource();
-        _logger.OnLog = entry =>
-        {
-            if (entry.Message.Contains(BackOffMessage, StringComparison.Ordinal))
-            {
-                cts.Cancel();
-            }
-        };
         var handler = new StubHandler(_ =>
         {
             var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
@@ -332,23 +330,24 @@ public sealed class AniListMangaSeriesMetadataServiceCoverageTests : IDisposable
         });
         var service = CreateService(handler);
         var before = DateTime.UtcNow;
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => service.SearchSeriesAsync("Attack on Titan", cancellationToken: cts.Token));
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.SearchSeriesAsync("Attack on Titan"));
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
 
         var health = await service.CheckHealthAsync();
 
-        var backOff = Assert.Single(_logger.Entries, e => e.Message.Contains(BackOffMessage, StringComparison.Ordinal));
-        Assert.Equal("AniListManga rate limit hit (HTTP 429); backing off for 120.0s before retry", backOff.Message);
+        Assert.Equal(ExternalMetadataFailureKind.RateLimited, failure.Kind);
+        Assert.Equal(TimeSpan.FromHours(1), failure.RetryAfter);
+        Assert.DoesNotContain(_logger.Entries, e => e.Message.Contains(BackOffMessage, StringComparison.Ordinal));
         Assert.Single(handler.Requests);
         Assert.True(health.Reachable);
         Assert.True(health.RateLimited);
         Assert.Equal("Degraded - rate limited", health.StatusMessage);
         Assert.NotNull(health.RateLimitedUntilUtc);
-        Assert.InRange(health.RateLimitedUntilUtc.Value, before.AddSeconds(119), DateTime.UtcNow.AddSeconds(121));
-        // The 429 counts as a failure; the cancelled back-off doesn't.
+        // The health tracker caps the indicator at ten minutes.
+        Assert.InRange(health.RateLimitedUntilUtc.Value, before.AddSeconds(599), DateTime.UtcNow.AddSeconds(601));
         Assert.Equal(1, health.FailureCount);
-        Assert.Equal("HTTP 429 from AniListManga", health.LastError);
+        Assert.Equal(failure.Message, health.LastError);
     }
 
     private sealed class StubHandler : HttpMessageHandler

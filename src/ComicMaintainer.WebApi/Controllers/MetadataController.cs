@@ -2,7 +2,9 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -143,9 +145,13 @@ public class MetadataController : ControllerBase
     /// and returns the updated cache record. Pass <c>?queue=true</c> to instead
     /// queue the lookup as a background job whose progress can be subscribed to
     /// via the existing job-update event stream — useful when the lookup is
-    /// likely to be slow and the UI wants to render incremental status.
+    /// likely to be slow and the UI wants to render incremental status. The
+    /// synchronous form can wait out a provider's request pace (up to the
+    /// composite's per-provider budget), which is longer than the default
+    /// request timeout.
     /// </summary>
     [HttpPost("refresh/{seriesTitle}")]
+    [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
     public async Task<ActionResult<object>> RefreshOne(
         string seriesTitle,
         [FromQuery] bool queue = false,
@@ -167,12 +173,32 @@ public class MetadataController : ControllerBase
             var record = await _cache.RefreshAsync(seriesTitle, cancellationToken);
             return Ok(record);
         }
+        catch (ExternalMetadataUnavailableException ex)
+        {
+            // The provider could not answer; the cached record was kept.
+            _logger.LogWarning(LoggingHelper.WithWebsitePrefix("Metadata refresh for {SeriesTitle} failed: {Reason}"),
+                LoggingHelper.SanitizeForLog(seriesTitle), LoggingHelper.SanitizeForLog(ex.Message));
+            return ProvidersUnavailable(ex);
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error refreshing metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, new { error = "Error refreshing metadata" });
         }
     }
+
+    /// <summary>
+    /// 503 answer for a lookup that failed because external providers could
+    /// not answer (timeouts, outages, throttling), naming them so the UI can
+    /// say which one is down instead of reporting "not found".
+    /// </summary>
+    private ObjectResult ProvidersUnavailable(ExternalMetadataUnavailableException ex)
+        => StatusCode(StatusCodes.Status503ServiceUnavailable, new
+        {
+            error = ex.Message,
+            providers = ex.Providers,
+            retry_after_seconds = ex.RetryAfter is { } retryAfter ? (int?)Math.Ceiling(retryAfter.TotalSeconds) : null
+        });
 
     /// <summary>
     /// Queue an external metadata refresh for every title that maps to a single
@@ -373,6 +399,9 @@ public class MetadataController : ControllerBase
                     canonical_title = x.metadata.CanonicalTitle,
                     aliases = x.metadata.Aliases ?? new List<string>(),
                     source = x.metadata.Source,
+                    // The provider's id of the candidate; sent back with
+                    // apply-match so a later refresh re-fetches this entry.
+                    source_id = x.metadata.SourceId,
                     image_url = x.metadata.ImageUrl,
                     thumbnail_url = x.metadata.ThumbnailUrl,
                     match_score = x.score,
@@ -385,6 +414,13 @@ public class MetadataController : ControllerBase
                         .Select(lt => new { title = lt.Title, language = lt.Language })
                 })
             });
+        }
+        catch (ExternalMetadataUnavailableException ex)
+        {
+            // No provider produced results and at least one could not answer.
+            _logger.LogWarning(LoggingHelper.WithWebsitePrefix("External metadata search for {Query} failed: {Reason}"),
+                LoggingHelper.SanitizeForLog(query), LoggingHelper.SanitizeForLog(ex.Message));
+            return ProvidersUnavailable(ex);
         }
         // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a search error.
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -498,6 +534,7 @@ public class MetadataController : ControllerBase
                     Aliases = request.Aliases?.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).ToList()
                               ?? new List<string>(),
                     Source = request.Source ?? string.Empty,
+                    SourceId = string.IsNullOrWhiteSpace(request.SourceId) ? null : request.SourceId.Trim(),
                     ImageUrl = string.IsNullOrWhiteSpace(request.ImageUrl) ? null : request.ImageUrl,
                     ThumbnailUrl = string.IsNullOrWhiteSpace(request.ThumbnailUrl) ? null : request.ThumbnailUrl,
                     // Preserve provider-supplied language tags so the cached
@@ -776,6 +813,15 @@ public class MetadataController : ControllerBase
         public string CanonicalTitle { get; set; } = string.Empty;
         public List<string>? Aliases { get; set; }
         public string? Source { get; set; }
+
+        /// <summary>
+        /// The candidate's id at <see cref="Source"/> (the <c>source_id</c> of a
+        /// search result). Lets a later refresh re-fetch exactly this entry;
+        /// without it the refresh looks the matched title up at the same
+        /// provider.
+        /// </summary>
+        public string? SourceId { get; set; }
+
         public string? ImageUrl { get; set; }
         public string? ThumbnailUrl { get; set; }
 
@@ -797,8 +843,9 @@ public class MetadataController : ControllerBase
 
     /// <summary>
     /// Locate every file currently belonging to <paramref name="seriesTitle"/>
-    /// (matched by folder-derived series name, current ComicInfo.xml series,
-    /// or any cached alias of the new canonical title) and queue a background
+    /// (by <see cref="SeriesFileMatcher"/>: its folder-derived series name or
+    /// tracked ComicInfo.xml series matches the requested title or any title of
+    /// the matched record) and queue a background
     /// normalize job so each file's metadata is rewritten to the freshly-matched
     /// canonical title. Mirrors the automatic match flow, which only
     /// re-normalizes (never renames) the affected files. Returns null when there
@@ -815,78 +862,17 @@ public class MetadataController : ControllerBase
             return null;
         }
 
-        // Build a case-insensitive set of names that should map to this series.
-        // We include the requested title (which is typically the current folder
-        // name), the new canonical title, and every cached alias so files whose
-        // metadata still references an older name are picked up.
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void Add(string? value)
-        {
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                names.Add(value!.Trim());
-            }
-        }
-
-        Add(seriesTitle);
-        Add(record.CanonicalTitle);
-        if (record.Aliases is { Count: > 0 })
-        {
-            foreach (var alias in record.Aliases) Add(alias);
-        }
-        if (record.UserAliases is { Count: > 0 })
-        {
-            foreach (var alias in record.UserAliases) Add(alias);
-        }
-
-        if (names.Count == 0)
+        // The series is known by the requested title (typically the current
+        // folder name) and every title of the matched record, so files whose
+        // metadata or folder still references an older name are picked up.
+        var seriesKeys = SeriesFileMatcher.KeysOf(record, seriesTitle);
+        if (seriesKeys.Count == 0)
         {
             return null;
         }
 
-        // Normalize comparison keys via the cache so they line up with how the
-        // rest of the system identifies series (case- and whitespace-tolerant).
-        var keys = new HashSet<string>(
-            names.Select(n => _cache.NormalizeKey(n))
-                 .Where(k => !string.IsNullOrWhiteSpace(k))!,
-            StringComparer.OrdinalIgnoreCase);
-
         var files = await _fileStore.GetAllFilesAsync(cancellationToken);
-        var matchingPaths = new List<string>();
-        foreach (var file in files)
-        {
-            if (string.IsNullOrWhiteSpace(file.FilePath))
-            {
-                continue;
-            }
-
-            // Match on the file's current ComicInfo.xml series (if known).
-            var metadataSeries = file.Metadata?.Series;
-            if (!string.IsNullOrWhiteSpace(metadataSeries))
-            {
-                var metaKey = _cache.NormalizeKey(metadataSeries);
-                if (!string.IsNullOrWhiteSpace(metaKey) && keys.Contains(metaKey))
-                {
-                    matchingPaths.Add(file.FilePath);
-                    continue;
-                }
-            }
-
-            // Fall back to the parent-folder-derived series name so that files
-            // whose metadata has not yet been written still get updated.
-            var folderName = Path.GetFileName(Path.GetDirectoryName(file.FilePath));
-            if (string.IsNullOrWhiteSpace(folderName))
-            {
-                continue;
-            }
-            var folderSeries = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
-            var folderKey = _cache.NormalizeKey(folderSeries);
-            if (!string.IsNullOrWhiteSpace(folderKey) && keys.Contains(folderKey))
-            {
-                matchingPaths.Add(file.FilePath);
-            }
-        }
-
+        var matchingPaths = SeriesFileMatcher.SelectFilePaths(files, seriesKeys);
         if (matchingPaths.Count == 0)
         {
             return null;

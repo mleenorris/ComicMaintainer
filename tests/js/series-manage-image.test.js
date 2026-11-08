@@ -320,6 +320,8 @@ test('failed and empty cover searches say so', async () => {
     assert.equal(candidateCards(page).length, 2);
     const outcomes = [
         [respond(502, { error: 'Bad gateway' }), 'Search failed.'],
+        [respond(503, 'External metadata providers unavailable: MangaDex did not answer within 15s'),
+            'Search failed: External metadata providers unavailable: MangaDex did not answer within 15s'],
         [offline, 'Search failed.'],
         [{ candidates: [] }, 'No provider returned a cover image for that query.'],
         [null, 'No provider returned a cover image for that query.'],

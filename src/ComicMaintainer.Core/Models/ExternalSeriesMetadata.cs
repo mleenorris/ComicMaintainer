@@ -10,6 +10,14 @@ public class ExternalSeriesMetadata
     public string Source { get; set; } = string.Empty;
 
     /// <summary>
+    /// The provider's own identifier of this entry (MangaDex manga id, AniList
+    /// media id, ComicVine volume id), or null when the provider did not
+    /// report one. Stored with a manual match so a later refresh re-fetches
+    /// exactly the entry the user picked instead of searching by title again.
+    /// </summary>
+    public string? SourceId { get; set; }
+
+    /// <summary>
     /// URL of a series-level cover image returned by the provider, if any.
     /// Used by the local image cache to download a poster for the series view.
     /// </summary>

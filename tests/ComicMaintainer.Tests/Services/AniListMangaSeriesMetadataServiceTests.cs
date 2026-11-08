@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -235,7 +236,7 @@ public class AniListMangaSeriesMetadataServiceTests
     }
 
     [Fact]
-    public async Task LookupSeriesAsync_ReturnsNull_WhenApiFails()
+    public async Task LookupSeriesAsync_Throws_WhenApiFails()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
 
@@ -245,9 +246,11 @@ public class AniListMangaSeriesMetadataServiceTests
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
-        var result = await service.LookupSeriesAsync("Attack on Titan");
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.LookupSeriesAsync("Attack on Titan"));
 
-        Assert.Null(result);
+        Assert.Equal(ExternalMetadataFailureKind.Unavailable, failure.Kind);
+        Assert.Equal(new[] { "AniListManga" }, failure.Providers);
     }
 
     [Fact]
@@ -347,7 +350,7 @@ public class AniListMangaSeriesMetadataServiceTests
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
-        await service.LookupSeriesAsync("Anything");
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Anything"));
         var health = await service.CheckHealthAsync();
 
         Assert.True(health.FailureCount >= 1);

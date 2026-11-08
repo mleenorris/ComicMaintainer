@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -17,7 +18,13 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
     private readonly ListLogger _logger = new();
 
-    public void Dispose() => _cache.Dispose();
+    private readonly ProviderRateLimiter _fastThrottle = new("ComicVine test", 1000, TimeSpan.FromSeconds(1));
+
+    public void Dispose()
+    {
+        _cache.Dispose();
+        _fastThrottle.Dispose();
+    }
 
     private static AppSettings Settings(bool enabled = true, string? apiKey = "test-key") => new()
     {
@@ -26,14 +33,25 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
         ComicVineBaseUrl = BaseUrl + "/"
     };
 
-    private ComicVineSeriesMetadataService CreateService(StubHandler handler, AppSettings? settings = null)
+    /// <summary>
+    /// Creates the service. Unless <paramref name="realThrottle"/> is set it gets a
+    /// throttle that never waits, so tests sending several requests do not spend
+    /// ComicVine's one-second spacing each time.
+    /// </summary>
+    private ComicVineSeriesMetadataService CreateService(StubHandler handler, AppSettings? settings = null, bool realThrottle = false)
     {
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(f => f.CreateClient(It.IsAny<string>()))
             .Returns(() => new HttpClient(handler, disposeHandler: false));
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(settings ?? Settings());
-        return new ComicVineSeriesMetadataService(factory.Object, options.Object, _cache, _logger);
+        return new ComicVineSeriesMetadataService(
+            factory.Object,
+            options.Object,
+            _cache,
+            _logger,
+            metrics: null,
+            realThrottle ? null : _fastThrottle);
     }
 
     private static HttpResponseMessage Json(string json) => new(HttpStatusCode.OK)
@@ -89,15 +107,118 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task LookupSeriesAsync_NoMatch_IsNotCached()
+    public async Task LookupSeriesAsync_NoMatch_IsRememberedSoTheNextFileDoesNotSpendQuota()
     {
-        var handler = new StubHandler(_ => Json("{\"results\":[]}"));
+        // Only a fuzzy hit: not a match, and not worth another request soon.
+        var handler = new StubHandler(_ => Json("{\"status_code\":1,\"results\":[{\"id\":1,\"name\":\"Batman Beyond\"}]}"));
         var service = CreateService(handler);
 
         Assert.Null(await service.LookupSeriesAsync("Batman"));
         Assert.Null(await service.LookupSeriesAsync("Batman"));
 
+        Assert.Single(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData(100, ExternalMetadataFailureKind.Configuration)]
+    [InlineData(107, ExternalMetadataFailureKind.RateLimited)]
+    [InlineData(102, ExternalMetadataFailureKind.InvalidResponse)]
+    public async Task LookupSeriesAsync_ErrorStatusCode_IsAFailureNotANoMatch(int statusCode, ExternalMetadataFailureKind expected)
+    {
+        var handler = new StubHandler(_ => Json($$"""{"status_code":{{statusCode}},"error":"Problem","results":[]}"""));
+        var service = CreateService(handler);
+
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
+
+        Assert.Equal(expected, failure.Kind);
+        Assert.Contains($"status {statusCode} (Problem)", failure.Message);
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.Equal(0, health.SuccessCount);
+        Assert.Equal(1, health.FailureCount);
+    }
+
+    [Theory]
+    [InlineData(420)]
+    [InlineData(429)]
+    public async Task LookupSeriesAsync_ThrottlingStatus_IsRateLimited(int status)
+    {
+        var handler = new StubHandler(_ =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)status);
+            response.Headers.TryAddWithoutValidation("Retry-After", "3600");
+            return response;
+        });
+        var service = CreateService(handler);
+
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
+
+        Assert.Equal(ExternalMetadataFailureKind.RateLimited, failure.Kind);
+        Assert.Equal(TimeSpan.FromHours(1), failure.RetryAfter);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Requests_StopOnceTheHourlyBudgetIsSpent()
+    {
+        var handler = new StubHandler(_ => Json("{\"status_code\":1,\"results\":[]}"));
+        var settings = Settings();
+        settings.ComicVineRequestsPerHour = 2;
+        var service = CreateService(handler, settings, realThrottle: true);
+
+        await service.SearchSeriesAsync("one");
+        await service.SearchSeriesAsync("two");
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.SearchSeriesAsync("three"));
+
+        Assert.Equal(ExternalMetadataFailureKind.RateLimited, failure.Kind);
+        Assert.NotNull(failure.RetryAfter);
+        Assert.True(failure.RetryAfter > TimeSpan.Zero);
         Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Requests_AreSpacedAtLeastOneSecondApart()
+    {
+        var times = new List<DateTime>();
+        var handler = new StubHandler(_ =>
+        {
+            lock (times) times.Add(DateTime.UtcNow);
+            return Json("{\"status_code\":1,\"results\":[]}");
+        });
+        var service = CreateService(handler, realThrottle: true);
+
+        await Task.WhenAll(service.SearchSeriesAsync("one"), service.SearchSeriesAsync("two"));
+
+        Assert.Equal(2, times.Count);
+        var gap = (times.Max() - times.Min()).TotalMilliseconds;
+        Assert.True(gap >= 900, $"requests were {gap} ms apart");
+    }
+
+    [Fact]
+    public async Task LookupMatchAsync_FetchesTheVolumeById()
+    {
+        var handler = new StubHandler(_ => Json("""
+            {"status_code":1,"error":"OK","results":{"id":796,"name":"Batman","aliases":"The Batman"}}
+            """));
+        var service = CreateService(handler);
+
+        var result = await service.LookupMatchAsync("ComicVine", "796", "Batman");
+
+        Assert.NotNull(result);
+        Assert.Equal("Batman", result!.CanonicalTitle);
+        Assert.Equal("796", result.SourceId);
+        var uri = Assert.Single(handler.Requests);
+        Assert.Equal("/api/volume/4050-796/", uri.AbsolutePath);
+        Assert.Contains("api_key=test-key", uri.Query);
+        Assert.Contains("field_list=id,name,aliases,image,deck,description", uri.Query);
+    }
+
+    [Fact]
+    public async Task LookupMatchAsync_ObjectNotFound_ReturnsNull()
+    {
+        var service = CreateService(new StubHandler(_ => Json("""{"status_code":101,"error":"Object Not Found","results":[]}""")));
+
+        Assert.Null(await service.LookupMatchAsync("ComicVine", "999999", "Batman"));
     }
 
     [Theory]
@@ -178,26 +299,28 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
     {
         var service = CreateService(new StubHandler(_ => Json("{ not json")));
 
-        Assert.Null(await service.LookupSeriesAsync("Batman"));
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
 
+        Assert.Equal(ExternalMetadataFailureKind.InvalidResponse, failure.Kind);
         var warning = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
-        Assert.Equal("ComicVine lookup failed for Batman", warning.Message);
+        Assert.StartsWith("ComicVine lookup failed for Batman: ", warning.Message);
         Assert.IsAssignableFrom<JsonException>(warning.Exception);
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
         var health = await service.CheckHealthAsync();
         Assert.Equal(1, health.FailureCount);
         Assert.Equal(0, health.SuccessCount);
-        Assert.Equal(warning.Exception!.Message, health.LastError);
+        Assert.Equal(failure.Message, health.LastError);
     }
 
     [Fact]
-    public async Task SearchSeriesAsync_TransportFailure_ReturnsEmptyAndLogsWarning()
+    public async Task SearchSeriesAsync_TransportFailure_ThrowsAndLogsWarning()
     {
         var service = CreateService(new StubHandler(_ => throw new HttpRequestException("connection refused")));
 
-        Assert.Empty(await service.SearchSeriesAsync("Batman"));
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.SearchSeriesAsync("Batman"));
 
+        Assert.Equal(ExternalMetadataFailureKind.Unavailable, failure.Kind);
         var warning = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
         Assert.IsType<HttpRequestException>(warning.Exception);
@@ -231,21 +354,22 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchSeriesAsync_RequestTimesOut_ReturnsEmptyLogsAndRecordsTheFailure()
+    public async Task SearchSeriesAsync_RequestTimesOut_ThrowsLogsAndRecordsTheFailure()
     {
         // A cancellation the caller didn't ask for, which is how HttpClient reports its timeout.
         var service = CreateService(new StubHandler(_ => throw new TaskCanceledException("timed out")));
 
-        Assert.Empty(await service.SearchSeriesAsync("Batman"));
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.SearchSeriesAsync("Batman"));
 
+        Assert.Equal(ExternalMetadataFailureKind.Timeout, failure.Kind);
         var warning = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
-        Assert.Equal("ComicVine lookup failed for Batman", warning.Message);
+        Assert.StartsWith("ComicVine lookup failed for Batman: ", warning.Message);
         Assert.IsType<TaskCanceledException>(warning.Exception);
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
         var health = await service.CheckHealthAsync();
         Assert.Equal(1, health.FailureCount);
-        Assert.Equal(warning.Exception.Message, health.LastError);
+        Assert.Equal(failure.Message, health.LastError);
     }
 
     [Fact]

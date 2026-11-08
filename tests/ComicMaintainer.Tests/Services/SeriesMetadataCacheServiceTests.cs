@@ -339,7 +339,8 @@ public class SeriesMetadataCacheServiceTests
             source: "MangaDex");
 
         Assert.Equal("batman-new.png", record.LocalImageFile);
-        Assert.Equal("MangaDex", record.Source);
+        // A cover from another provider does not re-point the matched series.
+        Assert.Equal("ComicVine", record.Source);
         _imageStore.Verify(s => s.DownloadAsync(
                 It.IsAny<string>(), "https://example.com/new.png", "batman-old.jpg", It.IsAny<CancellationToken>()),
             Times.Once);
@@ -814,10 +815,11 @@ public class SeriesMetadataCacheServiceTests
                 Source = "ComicVine"
             });
 
-        // Subsequent refresh must re-resolve using the manually-selected
-        // canonical title (not the original input), and must keep the series
-        // marked as manually matched.
-        _external.Setup(e => e.LookupSeriesAsync("Batman: Year One", It.IsAny<CancellationToken>()))
+        // Subsequent refresh must re-resolve the manually-selected match at the
+        // provider that supplied it (by its canonical title, as no id was
+        // recorded), never search every provider for the original input, and
+        // must keep the series marked as manually matched.
+        _external.Setup(e => e.LookupMatchAsync("ComicVine", null, "Batman: Year One", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalSeriesMetadata
             {
                 CanonicalTitle = "Batman: Year One",
@@ -831,8 +833,8 @@ public class SeriesMetadataCacheServiceTests
         Assert.Equal("Batman: Year One", refreshed.CanonicalTitle);
         Assert.Equal("ComicVine", refreshed.Source);
         Assert.Contains("Frank Miller", refreshed.Aliases);
-        _external.Verify(e => e.LookupSeriesAsync("Batman: Year One", It.IsAny<CancellationToken>()), Times.Once);
-        _external.Verify(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()), Times.Never);
+        _external.Verify(e => e.LookupMatchAsync("ComicVine", null, "Batman: Year One", It.IsAny<CancellationToken>()), Times.Once);
+        _external.Verify(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -849,7 +851,7 @@ public class SeriesMetadataCacheServiceTests
 
         // Provider can't find the match on this refresh — must not clobber
         // the user's manual selection.
-        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _external.Setup(e => e.LookupMatchAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(default(ExternalSeriesMetadata?));
 
         var refreshed = await _service.RefreshAsync("Batman");
@@ -872,10 +874,12 @@ public class SeriesMetadataCacheServiceTests
                 Source = "ComicVine"
             });
 
-        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("provider down"));
+        _external.Setup(e => e.LookupMatchAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException("ComicVine", ExternalMetadataFailureKind.Unavailable, "provider down"));
 
-        var refreshed = await _service.RefreshAsync("Batman");
+        // The failure is reported, and the match is kept as it was.
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => _service.RefreshAsync("Batman"));
+        var refreshed = (await _service.GetByTitleAsync("Batman"))!;
 
         Assert.Equal("manual_match", refreshed.LookupStatus);
         Assert.Equal("Batman: Year One", refreshed.CanonicalTitle);

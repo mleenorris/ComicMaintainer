@@ -1975,10 +1975,13 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var record = userSelectedRecord
             ? new SeriesMetadataCacheRecord { CanonicalTitle = string.Empty, SeriesName = "Pinned Name", LocalizedTitles = localized }
             : new SeriesMetadataCacheRecord { CanonicalTitle = "Canonical Title", LookupStatus = "success", LocalizedTitles = localized };
+        // The folder record is only reached by the localized-title step when the
+        // earlier steps could not read it (a transient cache failure).
         var folderLookups = 0;
         cache.Setup(c => c.GetAsync("folder name", It.IsAny<CancellationToken>()))
-            .Returns(() => Task.FromResult<SeriesMetadataCacheRecord?>(
-                Interlocked.Increment(ref folderLookups) >= 3 ? record : null));
+            .Returns(() => Interlocked.Increment(ref folderLookups) >= 3
+                ? Task.FromResult<SeriesMetadataCacheRecord?>(record)
+                : Task.FromException<SeriesMetadataCacheRecord?>(new InvalidOperationException("cache busy")));
         var service = CreateService(cache: cache.Object);
         var path = WriteCbz("Folder Name/source.cbz", Xml("Titre Local", "1", "Chapter 1"));
         var expectedSeries = userSelectedRecord ? "Pinned Name" : "Canonical Title";

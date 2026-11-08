@@ -217,7 +217,7 @@ public partial class SeriesLibraryService
 
         foreach (var entry in fileEntries)
         {
-            var fileKey = NormalizeKey(entry.GroupingTitle);
+            var fileKey = SeriesKey.Normalize(entry.GroupingTitle);
             unionFind.Add(fileKey);
 
             UnionWithCacheKey(unionFind, fileKey, entry.GroupingTitle, aliasIndex);
@@ -243,7 +243,7 @@ public partial class SeriesLibraryService
             // path.
             var titleKeys = EnumerateAllRecordTitles(record)
                 .Where(title => !string.IsNullOrWhiteSpace(title))
-                .Select(NormalizeKey);
+                .Select(SeriesKey.Normalize);
             foreach (var titleKey in titleKeys)
             {
                 unionFind.Add(titleKey);
@@ -457,7 +457,7 @@ public partial class SeriesLibraryService
             var titleForDedup = !string.IsNullOrWhiteSpace(accumulator.CanonicalTitle)
                 ? accumulator.CanonicalTitle
                 : accumulator.DisplayTitle;
-            var key = NormalizeKey(titleForDedup);
+            var key = SeriesKey.Normalize(titleForDedup);
             if (IsAmbiguousNormalizedKey(key))
             {
                 // Don't merge on degenerate keys (e.g. "unknown-series" or

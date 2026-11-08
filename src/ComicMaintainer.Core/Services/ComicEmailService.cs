@@ -85,6 +85,13 @@ public class ComicEmailService : IComicEmailService
     /// <summary>Most attempts a delivery gets when its failures are all temporary.</summary>
     public static int MaxDeliveryAttempts => TransientRetryDelays.Count + 1;
 
+    /// <summary>
+    /// Times work on a delivery may begin with no result recorded before it is
+    /// marked failed. A book whose conversion kills the process would otherwise
+    /// be picked up first on every restart, taking the application down each time.
+    /// </summary>
+    public const int MaxStartsWithoutOutcome = 3;
+
     /// <summary>Ticks of <see cref="RateLimitedUntil"/>; 0 when nothing is held back.</summary>
     private long _rateLimitedUntilTicks;
 
@@ -1100,6 +1107,7 @@ public class ComicEmailService : IComicEmailService
     {
         string? temporaryAttachment = null;
         DateTimeOffset? retryAt = null;
+        var startRecorded = false;
         try
         {
             // A condensed delivery carries several issues; an ordinary one only
@@ -1149,6 +1157,12 @@ public class ComicEmailService : IComicEmailService
                 await db.SaveChangesAsync(CancellationToken.None);
                 return;
             }
+
+            // Saved before the work that can take the whole process down, which
+            // leaves nothing else behind to show this delivery was the cause.
+            delivery.StartsWithoutOutcome++;
+            await db.SaveChangesAsync(preparationToken);
+            startRecorded = true;
 
             var maxBytes = GetMaxAttachmentBytes();
 
@@ -1243,7 +1257,13 @@ public class ComicEmailService : IComicEmailService
         }
         catch (OperationCanceledException)
         {
-            // Shutdown: leave the delivery pending.
+            // Shutdown: leave the delivery pending. An orderly stop says nothing
+            // about this delivery, so it is not held against it.
+            if (startRecorded && stoppingToken.IsCancellationRequested)
+            {
+                await WithdrawStartAsync(db, delivery);
+            }
+
             throw;
         }
         catch (TransientEmailSendException ex) when (delivery.AttemptCount < MaxDeliveryAttempts)
@@ -1271,7 +1291,16 @@ public class ComicEmailService : IComicEmailService
         {
             MarkFailed(delivery, ex, $"Failed after {delivery.AttemptCount} attempts: {ex.Message}");
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (OutOfMemoryException ex)
+        {
+            // The book's buffers are released by now, so the queue can go on
+            // with deliveries that fit; trying this one again would only repeat it.
+            MarkFailed(
+                delivery,
+                ex,
+                "The server ran out of memory while preparing this delivery. Try again when it is less busy, or send fewer issues per book.");
+        }
+        catch (Exception ex)
         {
             MarkFailed(delivery, ex, ex.Message);
         }
@@ -1280,6 +1309,7 @@ public class ComicEmailService : IComicEmailService
             CleanupTemporaryAttachment(temporaryAttachment);
         }
 
+        delivery.StartsWithoutOutcome = 0;
         await db.SaveChangesAsync(CancellationToken.None);
 
         // Scheduled only once the retry time is saved, so whatever loads the
@@ -1287,6 +1317,27 @@ public class ComicEmailService : IComicEmailService
         if (retryAt is DateTimeOffset due)
         {
             _queue.Schedule(delivery.Id, due);
+        }
+    }
+
+    /// <summary>
+    /// Takes back the start recorded for a delivery that is being left pending
+    /// because the application is stopping. If this fails the delivery merely
+    /// has one start counted against it, which is not worth failing the stop.
+    /// </summary>
+    private async Task WithdrawStartAsync(ComicMaintainerDbContext db, ComicEmailDeliveryEntity delivery)
+    {
+        try
+        {
+            delivery.StartsWithoutOutcome = Math.Max(0, delivery.StartsWithoutOutcome - 1);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not take back the recorded start of email delivery {DeliveryId} during shutdown",
+                delivery.Id);
         }
     }
 
@@ -1325,7 +1376,7 @@ public class ComicEmailService : IComicEmailService
             .AsNoTracking()
             .Where(d => d.Status == EmailDeliveryStatus.Pending)
             .OrderBy(d => d.Id)
-            .Select(d => new { d.Id, d.NextAttemptAt })
+            .Select(d => new { d.Id, d.NextAttemptAt, d.StartsWithoutOutcome })
             .ToListAsync(cancellationToken);
 
         var now = _timeProvider.GetUtcNow();
@@ -1335,6 +1386,12 @@ public class ComicEmailService : IComicEmailService
             // Being worked on, or already waiting its turn: nothing to resume.
             if (_inFlight.ContainsKey(delivery.Id) || _queue.IsQueued(delivery.Id))
             {
+                continue;
+            }
+
+            if (delivery.StartsWithoutOutcome >= MaxStartsWithoutOutcome)
+            {
+                await FailRepeatedlyInterruptedDeliveryAsync(delivery.Id, cancellationToken);
                 continue;
             }
 
@@ -1361,6 +1418,47 @@ public class ComicEmailService : IComicEmailService
         }
 
         return resumed;
+    }
+
+    /// <summary>
+    /// Marks failed a delivery that has reached <see cref="MaxStartsWithoutOutcome"/>.
+    /// </summary>
+    private async Task FailRepeatedlyInterruptedDeliveryAsync(int deliveryId, CancellationToken cancellationToken)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+
+        await _deliveryStateLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Read again under the lock: the sweep's copy may predate the worker
+            // finishing this delivery, which clears the count.
+            var delivery = await db.ComicEmailDeliveries.FirstOrDefaultAsync(d => d.Id == deliveryId, cancellationToken);
+            if (delivery is null ||
+                !string.Equals(delivery.Status, EmailDeliveryStatus.Pending, StringComparison.Ordinal) ||
+                delivery.StartsWithoutOutcome < MaxStartsWithoutOutcome ||
+                _inFlight.ContainsKey(deliveryId) ||
+                _queue.IsQueued(deliveryId))
+            {
+                return;
+            }
+
+            delivery.Status = EmailDeliveryStatus.Failed;
+            delivery.NextAttemptAt = null;
+            delivery.ErrorMessage =
+                $"Gave up after {delivery.StartsWithoutOutcome} attempts to prepare or send this delivery were interrupted before finishing, most likely because the application crashed or ran out of memory.";
+            await db.SaveChangesAsync(CancellationToken.None);
+            _metrics?.RecordEmailSend(success: false);
+
+            _logger.LogError(
+                "Gave up on email delivery {DeliveryId} of {FilePath}: work on it began {Starts} times without finishing",
+                delivery.Id,
+                LoggingHelper.SanitizePathForLog(delivery.FilePath),
+                delivery.StartsWithoutOutcome);
+        }
+        finally
+        {
+            _deliveryStateLock.Release();
+        }
     }
 
     public async Task SendTestEmailAsync(EmailAccessScope scope, int deviceId, CancellationToken cancellationToken = default)

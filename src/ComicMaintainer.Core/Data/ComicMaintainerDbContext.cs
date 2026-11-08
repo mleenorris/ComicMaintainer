@@ -805,6 +805,14 @@ public class ComicEmailDeliveryEntity
     /// again (UTC); null when no retry is waiting.
     /// </summary>
     public DateTime? NextAttemptAt { get; set; }
+
+    /// <summary>
+    /// How many times work on this delivery has begun since a result was last
+    /// recorded. Saved before converting or sending, so a process that dies
+    /// partway leaves a trace; a delivery that keeps doing so is given up on
+    /// rather than replayed on every start.
+    /// </summary>
+    public int StartsWithoutOutcome { get; set; }
 }
 
 /// <summary>

@@ -53,13 +53,20 @@ public class ComicEmailQueueTests
         service.Verify(s => s.ProcessDeliveryAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact]
-    public async Task ProcessingFailure_DoesNotStopTheConsumer()
+    public static TheoryData<Exception> DeliveryFailures() => new()
+    {
+        new InvalidOperationException("boom"),
+        new OutOfMemoryException(),
+    };
+
+    [Theory]
+    [MemberData(nameof(DeliveryFailures))]
+    public async Task ProcessingFailure_DoesNotStopTheConsumer(Exception failure)
     {
         var secondProcessed = new TaskCompletionSource();
         var service = new Mock<IComicEmailService>();
         service.Setup(s => s.ProcessDeliveryAsync(1, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("boom"));
+            .ThrowsAsync(failure);
         service.Setup(s => s.ProcessDeliveryAsync(2, It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
@@ -172,8 +179,9 @@ public class ComicEmailQueueTests
         Assert.Equal(2, Volatile.Read(ref sweeps));
     }
 
-    [Fact]
-    public async Task PendingSweep_KeepsRunningAfterAFailure()
+    [Theory]
+    [MemberData(nameof(DeliveryFailures))]
+    public async Task PendingSweep_KeepsRunningAfterAFailure(Exception failure)
     {
         var time = new TimerTrackingTimeProvider(DateTimeOffset.UtcNow);
         var sweeps = 0;
@@ -184,7 +192,7 @@ public class ComicEmailQueueTests
             {
                 if (Interlocked.Increment(ref sweeps) == 1)
                 {
-                    return Task.FromException<int>(new InvalidOperationException("database is locked"));
+                    return Task.FromException<int>(failure);
                 }
 
                 recovered.TrySetResult();
@@ -205,7 +213,7 @@ public class ComicEmailQueueTests
                 LogLevel.Error,
                 It.IsAny<EventId>(),
                 It.IsAny<It.IsAnyType>(),
-                It.Is<Exception?>(e => e is InvalidOperationException),
+                It.Is<Exception?>(e => ReferenceEquals(e, failure)),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
     }

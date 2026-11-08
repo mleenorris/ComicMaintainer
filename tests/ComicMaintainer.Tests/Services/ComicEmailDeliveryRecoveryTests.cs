@@ -181,6 +181,149 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
         Assert.Empty(_sentSubjects);
     }
 
+    [Fact]
+    public async Task ResumePendingDeliveriesAsync_FailsADeliveryThatKeepsBeingInterruptedInsteadOfQueueingIt()
+    {
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var stuck = await AddDeliveryAsync(device.Id, "Series 001.cbz", EmailDeliveryStatus.Pending, ComicEmailService.MaxStartsWithoutOutcome);
+        var oneTryLeft = await AddDeliveryAsync(device.Id, "Series 002.cbz", EmailDeliveryStatus.Pending, ComicEmailService.MaxStartsWithoutOutcome - 1);
+
+        var queue = new Mock<IComicEmailQueue>();
+        var enqueued = new List<int>();
+        queue.Setup(q => q.Enqueue(It.IsAny<int>())).Callback<int>(enqueued.Add);
+
+        Assert.Equal(1, await CreateService(queue.Object).ResumePendingDeliveriesAsync());
+
+        Assert.Equal(new[] { oneTryLeft }, enqueued);
+        var deliveries = await GetDeliveriesAsync();
+        var failed = deliveries.Single(d => d.Id == stuck);
+        Assert.Equal(EmailDeliveryStatus.Failed, failed.Status);
+        Assert.Contains("interrupted before finishing", failed.ErrorMessage);
+        Assert.Equal(EmailDeliveryStatus.Pending, deliveries.Single(d => d.Id == oneTryLeft).Status);
+    }
+
+    [Fact]
+    public async Task ADeliveryThatTakesTheProcessDownEveryTime_IsGivenUpOnInsteadOfReplayedForever()
+    {
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        await AddDeliveryAsync(device.Id, "Series 001.cbz", EmailDeliveryStatus.Pending);
+
+        // A process that dies mid-work records no result: the send never
+        // returns, and the "restarted" run knows nothing of the previous one.
+        using var reachedSend = new SemaphoreSlim(0);
+        var neverFinishes = new TaskCompletionSource();
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                reachedSend.Release();
+                return neverFinishes.Task;
+            });
+
+        for (var start = 1; start <= ComicEmailService.MaxStartsWithoutOutcome; start++)
+        {
+            var (_, killedRun) = CreateServiceWithRealQueue();
+            await killedRun.StartAsync();
+            Assert.True(await reachedSend.WaitAsync(Patience));
+
+            var row = (await GetDeliveriesAsync()).Single();
+            Assert.Equal(EmailDeliveryStatus.Pending, row.Status);
+            Assert.Equal(start, row.StartsWithoutOutcome);
+        }
+
+        var (_, queue) = CreateServiceWithRealQueue();
+        await queue.StartAsync();
+        try
+        {
+            await WaitUntilAsync(async () => (await GetDeliveriesAsync()).Single().Status == EmailDeliveryStatus.Failed);
+        }
+        finally
+        {
+            await queue.StopAsync();
+        }
+
+        _sender.Verify(
+            s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(ComicEmailService.MaxStartsWithoutOutcome));
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_RecordsTheStartBeforeWorkBeginsAndClearsItWithTheResult()
+    {
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var id = await AddDeliveryAsync(device.Id, "Series 001.cbz", EmailDeliveryStatus.Pending);
+
+        var startsSeenWhileSending = -1;
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(async () => startsSeenWhileSending = (await GetDeliveriesAsync()).Single().StartsWithoutOutcome);
+
+        await CreateService(new Mock<IComicEmailQueue>().Object).ProcessDeliveryAsync(id);
+
+        Assert.Equal(1, startsSeenWhileSending);
+        var row = (await GetDeliveriesAsync()).Single();
+        Assert.Equal(EmailDeliveryStatus.Sent, row.Status);
+        Assert.Equal(0, row.StartsWithoutOutcome);
+    }
+
+    [Fact]
+    public async Task ADeliveryWaitingForARetry_HasNoInterruptedStartAgainstIt()
+    {
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var id = await AddDeliveryAsync(device.Id, "Series 001.cbz", EmailDeliveryStatus.Pending);
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TransientEmailSendException("busy", new TimeoutException()));
+
+        await CreateService(new Mock<IComicEmailQueue>().Object).ProcessDeliveryAsync(id);
+
+        var row = (await GetDeliveriesAsync()).Single();
+        Assert.Equal(EmailDeliveryStatus.Pending, row.Status);
+        Assert.NotNull(row.NextAttemptAt);
+        Assert.Equal(0, row.StartsWithoutOutcome);
+    }
+
+    [Fact]
+    public async Task AnOrderlyStopDuringADelivery_IsNotHeldAgainstIt()
+    {
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        await AddDeliveryAsync(device.Id, "Series 001.cbz", EmailDeliveryStatus.Pending, startsWithoutOutcome: 1);
+
+        var sending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .Returns<ComicEmailMessage, CancellationToken>(async (_, token) =>
+            {
+                sending.TrySetResult();
+                await Task.Delay(Timeout.Infinite, token);
+            });
+
+        var (_, queue) = CreateServiceWithRealQueue();
+        await queue.StartAsync();
+        await sending.Task.WaitAsync(Patience);
+        Assert.Equal(2, (await GetDeliveriesAsync()).Single().StartsWithoutOutcome);
+
+        using var deadlinePassed = new CancellationTokenSource();
+        await deadlinePassed.CancelAsync();
+        await queue.StopAsync(deadlinePassed.Token);
+
+        var row = (await GetDeliveriesAsync()).Single();
+        Assert.Equal(EmailDeliveryStatus.Pending, row.Status);
+        Assert.Equal(1, row.StartsWithoutOutcome);
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_RunningOutOfMemory_FailsThatDeliveryAndReturnsNormally()
+    {
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var id = await AddDeliveryAsync(device.Id, "Series 001.cbz", EmailDeliveryStatus.Pending);
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OutOfMemoryException());
+
+        await CreateService(new Mock<IComicEmailQueue>().Object).ProcessDeliveryAsync(id);
+
+        var row = (await GetDeliveriesAsync()).Single();
+        Assert.Equal(EmailDeliveryStatus.Failed, row.Status);
+        Assert.Contains("ran out of memory", row.ErrorMessage);
+        Assert.Equal(0, row.StartsWithoutOutcome);
+    }
+
     private ComicEmailService CreateService(IComicEmailQueue queue) => new(
         _dbFactory,
         _sender.Object,
@@ -200,7 +343,7 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
         return (service, queue);
     }
 
-    private async Task<int> AddDeliveryAsync(int deviceId, string fileName, string status)
+    private async Task<int> AddDeliveryAsync(int deviceId, string fileName, string status, int startsWithoutOutcome = 0)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var delivery = new ComicEmailDeliveryEntity
@@ -212,7 +355,8 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
             DeliveryFormat = EmailDeliveryFormat.Original,
             Status = status,
             Source = EmailDeliverySource.Auto,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            StartsWithoutOutcome = startsWithoutOutcome
         };
         db.ComicEmailDeliveries.Add(delivery);
         await db.SaveChangesAsync();

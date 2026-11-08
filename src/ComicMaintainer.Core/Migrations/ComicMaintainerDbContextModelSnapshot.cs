@@ -78,6 +78,9 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("StartsWithoutOutcome")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)

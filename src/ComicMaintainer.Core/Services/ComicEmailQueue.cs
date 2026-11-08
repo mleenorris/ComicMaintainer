@@ -352,8 +352,10 @@ public class ComicEmailQueue : IComicEmailQueue
                 {
                     throw;
                 }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
+                catch (Exception ex)
                 {
+                    // Out of memory included: there is one consumer, and a single
+                    // book too large to build must not end all later deliveries.
                     _logger.LogError(ex, "Unhandled error while processing comic email delivery {DeliveryId}", deliveryId);
                 }
                 finally
@@ -400,8 +402,10 @@ public class ComicEmailQueue : IComicEmailQueue
             {
                 return;
             }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
+            catch (Exception ex)
             {
+                // Out of memory included: a sweep that ended here would strand
+                // whatever is pending until the next restart.
                 _logger.LogError(ex, "Failed to re-queue pending comic email deliveries");
             }
 

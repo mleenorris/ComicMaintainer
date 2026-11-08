@@ -388,6 +388,20 @@ public sealed class ComicArchiveReaderTests : IDisposable
         Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
     }
 
+    [Fact]
+    public void Open_Rar5VolumeSet_ChecksTheFollowingVolumesToo()
+    {
+        // SharpCompress follows ".part1.rar" to ".part2.rar" by name, so a set whose second
+        // volume asks for too much must not get past a check of the first alone.
+        File.WriteAllBytes(Path.Join(_dir, "set.part2.rar"), Rar5(13));
+        var first = Path.Join(_dir, "set.part1.rar");
+        File.WriteAllBytes(first, Rar5(0));
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(first));
+
+        Assert.Contains("set.part2.rar", ex.Message);
+    }
+
     /// <summary>Concatenates the file blocks of two single-file RAR 5 archives.</summary>
     private static byte[] MergeRar5Headers(byte[] first, byte[] second)
     {

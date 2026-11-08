@@ -149,8 +149,8 @@ public static class ArchiveEntryReader
     /// <see cref="MinRewriteTotalBytes"/> and at most <see cref="MaxRewriteTotalBytes"/>.
     /// </summary>
     /// <remarks>
-    /// Tied to the archive's size because that is what tells an omnibus from a bomb: a 5 GiB
-    /// omnibus that is genuinely 5 GiB of pages is 20 times under its budget, while a few
+    /// Tied to the archive's size because that is what tells an omnibus from a bomb: a genuine 5 GiB
+    /// omnibus expands to about 5 GiB, far under its 64 GiB budget, while a few
     /// hundred megabytes that claim to hold hundreds of gigabytes are not.
     /// </remarks>
     public static long RewriteBudgetFor(long archiveBytes)

@@ -144,7 +144,7 @@ public sealed class ComicArchiveReader : IDisposable
 
                 stream.Dispose();
                 // Opened by path, so the following volumes of a multi-part archive are found.
-                return new ComicArchiveReader(archiveName, archiveBytes, zip: null, RarArchive.OpenArchive(filePath, RarReaderOptions));
+                return new ComicArchiveReader(archiveName, archiveBytes, zip: null, OpenRarArchive(filePath));
             }
 
             stream.Position = 0;
@@ -159,6 +159,43 @@ public sealed class ComicArchiveReader : IDisposable
         {
             stream.Dispose();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Opens the RAR archive and checks the dictionaries of the volumes after the first one,
+    /// which SharpCompress reads too; the first was checked before it was opened.
+    /// </summary>
+    private static IArchive OpenRarArchive(string filePath)
+    {
+        var archive = RarArchive.OpenArchive(filePath, RarReaderOptions);
+        try
+        {
+            foreach (var volume in ((IArchive)archive).Volumes.Skip(1))
+            {
+                if (volume.FileName is { } volumePath)
+                {
+                    EnsureRar5VolumeWithinLimits(volumePath);
+                }
+            }
+
+            return archive;
+        }
+        catch
+        {
+            archive.Dispose();
+            throw;
+        }
+    }
+
+    private static void EnsureRar5VolumeWithinLimits(string volumePath)
+    {
+        using var volume = new FileStream(volumePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 4096);
+        Span<byte> signature = stackalloc byte[SignatureLength];
+        if (volume.ReadAtLeast(signature, SignatureLength, throwOnEndOfStream: false) == SignatureLength
+            && signature.StartsWith(Rar5Signature))
+        {
+            ArchiveEntryReader.EnsureRarDictionariesWithinLimit(volume, Path.GetFileName(volumePath));
         }
     }
 

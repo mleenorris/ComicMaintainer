@@ -61,22 +61,26 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.FileName).IsRequired().HasMaxLength(512);
             entity.Property(e => e.Directory).IsRequired().HasMaxLength(2048);
             entity.HasIndex(e => e.FilePath).IsUnique();
-            entity.HasIndex(e => e.IsProcessed);
-            entity.HasIndex(e => e.IsRenamed);
-            entity.HasIndex(e => e.IsNormalized);
-            entity.HasIndex(e => e.IsDuplicate);
-            entity.HasIndex(e => e.IsRead);
-            // Hot filter/sort columns identified during EF query profiling:
-            // - Directory: file-list queries often filter or group by folder
-            // - UpdatedAt / CreatedAt: "recently added/modified" listings and ordering
-            entity.HasIndex(e => e.Directory);
-            entity.HasIndex(e => e.UpdatedAt);
-            entity.HasIndex(e => e.CreatedAt);
+            // Indexes follow the queries FileStoreService actually runs. There are
+            // deliberately none on the status flags (IsRenamed/IsNormalized/IsProcessed),
+            // the legacy IsRead column, CreatedAt or UpdatedAt: no query seeks or sorts on
+            // them (status filters are low-selectivity scans, and IsRead is never read), so
+            // those indexes only made every per-file status write slower.
+            // - "duplicates" filter: duplicates are rare, so a partial index on the flag
+            //   answers it without touching the rest of the table. The filter is the same
+            //   bare-column term EF emits for `Where(f => f.IsDuplicate)`, which is what
+            //   lets SQLite use a partial index.
+            entity.HasIndex(e => e.IsDuplicate).HasFilter("\"IsDuplicate\"");
             // Composite indexes for fast DB-backed file listing:
-            // - (Directory, FileName) covers folder-scoped file pages sorted by name.
-            // - FileName alone covers the default global "sort by name" listing.
+            // - (Directory, FileName) covers folder-scoped file pages sorted by name and the
+            //   `Directory IN (...)` folder lookup (it is also a Directory-prefix index).
+            // - FileName / LastModified / FileSize cover the global "sort by name / date /
+            //   size" listings, so a page is read in index order instead of sorting the
+            //   whole table for every request.
             entity.HasIndex(e => new { e.Directory, e.FileName });
             entity.HasIndex(e => e.FileName);
+            entity.HasIndex(e => e.LastModified);
+            entity.HasIndex(e => e.FileSize);
             // Used by LibraryScanJobHandler to find files whose series-metadata
             // stamp is lower than the current cache record's MetadataVersion.
             entity.HasIndex(e => e.SeriesMetadataVersion);
@@ -111,10 +115,10 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasKey(e => e.Id);
             entity.Property(e => e.FilePath).IsRequired().HasMaxLength(2048);
             entity.Property(e => e.Action).IsRequired().HasMaxLength(100);
+            // Timestamp orders the history pages and drives retention pruning. There is
+            // no index on Success or FilePath: nothing filters on them, and a 2048-char
+            // FilePath index entry per row made the table (and every backup) much larger.
             entity.HasIndex(e => e.Timestamp);
-            entity.HasIndex(e => e.Success);
-            // Used for "show history for a file" lookups and lookup-by-GUID API endpoints.
-            entity.HasIndex(e => e.FilePath);
             entity.HasIndex(e => e.EntryId).IsUnique();
             
             // Configure before/after fields
@@ -415,6 +419,31 @@ public class ComicFileEntity
     /// set again. Cleared once the watcher has processed the file or decided it needs nothing.
     /// </summary>
     public bool IsProcessingPending { get; set; }
+
+    /// <summary>
+    /// When the stale-entry cleanup first failed to find this file on disk (UTC), or
+    /// <c>null</c> while the file is present. Unless an administrator confirms, a cleanup
+    /// deletes the row only when a later run, at least
+    /// <c>AppSettings.StaleCleanupMissingGraceHours</c> after this stamp, still cannot find
+    /// it; the stamp is cleared as soon as the file is seen again, so a briefly unavailable
+    /// library keeps every row and everything stored on it.
+    /// </summary>
+    public DateTime? MissingSince { get; set; }
+
+    /// <summary>
+    /// <see cref="FileSize"/> of the archive when <see cref="Metadata"/> was last read from
+    /// (or written to) it, or <c>null</c> when it never was. Together with
+    /// <see cref="MetadataScannedModified"/> this says whether the cached metadata still
+    /// describes the archive: once the stored size or modification time moves on, the
+    /// background archive-metadata scan reads the archive again.
+    /// </summary>
+    public long? MetadataScannedSize { get; set; }
+
+    /// <summary>
+    /// <see cref="LastModified"/> of the archive when <see cref="Metadata"/> was last read
+    /// from (or written to) it; see <see cref="MetadataScannedSize"/>.
+    /// </summary>
+    public DateTime? MetadataScannedModified { get; set; }
 }
 
 /// <summary>

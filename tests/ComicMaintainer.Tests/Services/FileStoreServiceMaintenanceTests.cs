@@ -62,6 +62,50 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
         Assert.Empty(await service.GetAllFilesAsync());
     }
 
+    [Fact]
+    public async Task InitializeFromDatabaseAsync_AfterRowsWereDeleted_DropsThemFromMemoryToo()
+    {
+        var kept = Path.Join(_library, "Saga 001.cbz");
+        var deleted = Path.Join(_library, "Saga 002.cbz");
+        await SeedAsync(Row(kept), Row(deleted));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+        await using (var db = await _db.CreateDbContextAsync())
+        {
+            // What the settings "reset database" action (or any out-of-band delete) does.
+            db.ComicFiles.Remove(await db.ComicFiles.SingleAsync(e => e.FilePath == deleted));
+            await db.SaveChangesAsync();
+        }
+
+        await service.InitializeFromDatabaseAsync();
+
+        // Regression: the reload only added/updated entries, so after a reset every file was
+        // still listed by the in-memory endpoints although the table was empty.
+        Assert.Equal(kept, Assert.Single(await service.GetAllFilesAsync()).FilePath);
+        Assert.False(await service.FileExistsAsync(deleted));
+    }
+
+    [Fact]
+    public async Task GetFileCountsAsync_CountsTheDatabaseLikeTheUnmarkedCountDoes()
+    {
+        await SeedAsync(
+            Row(Path.Join(_library, "Done.cbz"), e => { e.IsRenamed = true; e.IsNormalized = true; e.IsProcessed = true; }),
+            Row(Path.Join(_library, "Half.cbz"), e => e.IsRenamed = true),
+            Row(Path.Join(_library, "Dupe.cbz"), e => e.IsDuplicate = true),
+            Row(Path.Join(_library, "New.cbz")));
+        var service = CreateService();
+
+        // Nothing was loaded into memory: the counts must still describe the database, the
+        // same source the file list and its unmarked_count read.
+        var (total, processed, unprocessed, duplicates) = await service.GetFileCountsAsync();
+
+        Assert.Equal(4, total);
+        Assert.Equal(1, processed);
+        Assert.Equal(2, unprocessed);
+        Assert.Equal(1, duplicates);
+        Assert.Equal(unprocessed, await service.GetUnmarkedCountAsync());
+    }
+
     // ---- MarkFileBackfilledAsync --------------------------------------------------------
 
     [Fact]
@@ -146,6 +190,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     }
 
     // ---- CleanupStaleEntriesAsync -------------------------------------------------------
+    // The guards and the two-run rule are covered against SQLite in FileStoreServiceStaleCleanupTests.
 
     [Fact]
     public async Task CleanupStaleEntriesAsync_AlreadyCancelled_RemovesNothing()
@@ -154,49 +199,24 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
         await SeedAsync(Row(stale));
         var service = CreateService();
 
-        var removed = await service.CleanupStaleEntriesAsync(new CancellationToken(canceled: true));
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual, new CancellationToken(canceled: true));
 
-        Assert.Equal(0, removed);
+        Assert.Equal(StaleCleanupStatus.Cancelled, result.Status);
+        Assert.Equal(0, result.RemovedCount);
         Assert.True(_logger.Contains(LogLevel.Warning, "Cleanup of stale entries was cancelled"));
         Assert.NotNull(await FindRowAsync(stale));
     }
 
     [Fact]
-    public async Task CleanupStaleEntriesAsync_CancelledMidScan_LeavesUnvisitedEntriesAlone()
-    {
-        var first = Path.Join(_library, "Gone 1.cbz");
-        var second = Path.Join(_library, "Gone 2.cbz");
-        await SeedAsync(Row(first), Row(second));
-        var service = CreateService();
-        await service.InitializeFromDatabaseAsync();
-        using var cts = new CancellationTokenSource();
-        string? visited = null;
-        _logger.OnLog = (_, message) =>
-        {
-            if (visited == null && message.StartsWith("Marking stale entry for removal: ", StringComparison.Ordinal))
-            {
-                visited = message["Marking stale entry for removal: ".Length..];
-                cts.Cancel();
-            }
-        };
-
-        var removed = await service.CleanupStaleEntriesAsync(cts.Token);
-
-        Assert.NotNull(visited);
-        var unvisited = visited == first ? second : first;
-        Assert.Equal(0, removed);
-        Assert.True(_logger.Contains(LogLevel.Warning, "Cleanup of stale entries was cancelled"));
-        Assert.NotNull(await FindRowAsync(unvisited));
-        Assert.True(await service.FileExistsAsync(unvisited));
-    }
-
-    [Fact]
-    public async Task CleanupStaleEntriesAsync_DatabaseUnavailable_ReturnsZeroAndLogsError()
+    public async Task CleanupStaleEntriesAsync_DatabaseUnavailable_ReportsFailureAndLogsError()
     {
         var service = CreateService();
         _factory.FailAll();
 
-        Assert.Equal(0, await service.CleanupStaleEntriesAsync());
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual);
+
+        Assert.Equal(StaleCleanupStatus.Failed, result.Status);
+        Assert.Equal(0, result.RemovedCount);
         Assert.True(_logger.Contains(LogLevel.Error, "Error during cleanup of stale database entries"));
     }
 
@@ -223,12 +243,13 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     }
 
     [Fact]
-    public async Task RefreshFileStatsAsync_PersistFails_StillRefreshesTheSnapshot()
+    public async Task RefreshFileStatsAsync_PersistFails_LeavesTheSnapshotAgreeingWithTheDatabase()
     {
         var path = Path.Join(_library, "Saga 005.cbz");
         File.WriteAllText(path, "comic");
         var service = CreateService();
         await service.AddFileAsync(path);
+        var oldLength = new FileInfo(path).Length;
         File.AppendAllText(path, " grew");
         var length = new FileInfo(path).Length;
         _factory.FailAll();
@@ -237,6 +258,11 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
 
         Assert.Equal(0, changed);
         Assert.True(_logger.Contains(LogLevel.Warning, "RefreshFileStats: failed to persist file stats for 1 file(s)"));
+        Assert.Equal(oldLength, Assert.Single(await service.GetAllFilesAsync()).FileSize);
+
+        // The next refresh still sees the difference and records it once the database is back.
+        _factory.Heal();
+        Assert.Equal(1, await service.RefreshFileStatsAsync(new[] { path }));
         Assert.Equal(length, Assert.Single(await service.GetAllFilesAsync()).FileSize);
     }
 
@@ -291,6 +317,8 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
         public int Created => Volatile.Read(ref _created);
 
         public void FailAll() => _failing = true;
+
+        public void Heal() => _failing = false;
 
         public ComicMaintainerDbContext CreateDbContext()
         {

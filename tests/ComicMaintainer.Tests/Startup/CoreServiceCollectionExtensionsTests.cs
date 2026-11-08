@@ -321,6 +321,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
             .ToList();
         Assert.Contains(typeof(FileWatcherHostedService), hostedServiceTypes);
         Assert.Contains(typeof(DatabaseCleanupHostedService), hostedServiceTypes);
+        Assert.Contains(typeof(ArchiveMetadataScanHostedService), hostedServiceTypes);
         Assert.Contains(typeof(JobStateReconciliationHostedService), hostedServiceTypes);
         Assert.Contains(typeof(AutheliaHealthMonitor), hostedServiceTypes);
         // The sweep for interrupted archive writes starts before the file watcher.

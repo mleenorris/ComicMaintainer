@@ -306,6 +306,10 @@ public partial class ComicProcessorService
                 await CompletePendingDatabaseEditAsync(result.FilePath, pending, metadata, userEdit ? fields : ComicMetadataFieldFlags.None);
             }
 
+            // Cache everything the archive now holds, not only the fields just written, so series
+            // views show it without opening the archive.
+            await _fileStore.RecordArchiveMetadataAsync(result.FilePath, ComicInfoXml.Read(updated) ?? values, cancellationToken);
+
             _logger.LogInformation("Successfully updated metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(result.FilePath));
             return result;
         }

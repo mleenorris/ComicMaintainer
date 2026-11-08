@@ -104,9 +104,21 @@ public interface IFileStoreService
     Task MarkFileReadAsync(string filePath, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Mark multiple files as read or unread
+    /// Mark multiple files as read or unread for the current user, in one transaction.
+    /// Throws when the change could not be saved (nothing is saved then), including
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> fires.
     /// </summary>
     Task MarkFilesReadAsync(IEnumerable<string> filePaths, bool read, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Marks every tracked file in <paramref name="scope"/> read or unread for the current
+    /// user with set-based statements in a single transaction (reading progress included),
+    /// so a whole-library change needs neither a client-side path list nor a write per file.
+    /// Nothing is saved when it fails or <paramref name="cancellationToken"/> fires; the
+    /// exception propagates. Returns the number of tracked files in the scope, or 0 when no
+    /// user is in scope.
+    /// </summary>
+    Task<int> MarkScopeReadAsync(FileReadScope scope, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Save reading progress (current page) for a comic file
@@ -244,9 +256,46 @@ public interface IFileStoreService
     Task<int> RefreshFileStatsAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Remove stale entries from database where files no longer exist on disk
+    /// Cache the metadata just written into the file's archive, stamped with the file's
+    /// stored size and modification time (call it after <see cref="RefreshFileStatsAsync"/>),
+    /// so the library shows it without reading the archive again. A user edit not yet
+    /// written to the archive is kept. Never throws: if the metadata cannot be cached, the
+    /// background archive-metadata scan reads the archive instead.
     /// </summary>
-    Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default);
+    Task RecordArchiveMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Up to <paramref name="max"/> tracked files, in id order after <paramref name="afterId"/>,
+    /// whose cached archive metadata is missing or was read from a different version of the
+    /// file (its stored size or modification time has changed since). Files with a user edit
+    /// waiting to be written to the archive are left out.
+    /// </summary>
+    Task<IReadOnlyList<ArchiveMetadataScanCandidate>> GetFilesNeedingMetadataScanAsync(int afterId, int max, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cache the metadata the background scan read from <paramref name="candidate"/>'s
+    /// archive. Returns false, recording nothing, when the row changed since it was selected
+    /// (the file was modified, replaced or edited meanwhile); a later scan reads it again.
+    /// Library views built from the cached metadata see the new value only after
+    /// <see cref="PublishScannedArchiveMetadata"/>.
+    /// </summary>
+    Task<bool> RecordScannedArchiveMetadataAsync(ArchiveMetadataScanCandidate candidate, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tells the library views that metadata has been recorded by
+    /// <see cref="RecordScannedArchiveMetadataAsync"/>, so they are rebuilt once per batch of
+    /// scanned files. While a whole library is being backfilled, a change notification per
+    /// file would rebuild the library snapshot and change its ETag on every request.
+    /// </summary>
+    void PublishScannedArchiveMetadata();
+
+    /// <summary>
+    /// Remove stale entries from the database for files that no longer exist on disk,
+    /// guarded so a missing or unmounted library can never wipe it: see
+    /// <see cref="StaleCleanupResult"/> for the outcomes. Never throws; failures and
+    /// cancellation are reported through <see cref="StaleCleanupResult.Status"/>.
+    /// </summary>
+    Task<StaleCleanupResult> CleanupStaleEntriesAsync(StaleCleanupOptions options, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Stamp the given file with the series-metadata-cache version it was

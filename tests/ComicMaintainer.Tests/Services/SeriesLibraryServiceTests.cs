@@ -12,7 +12,6 @@ namespace ComicMaintainer.Tests.Services;
 public class SeriesLibraryServiceTests
 {
     private readonly Mock<IFileStoreService> _fileStore = new();
-    private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<ISeriesMetadataCacheService> _metadataCache = new();
     private readonly Mock<ILogger<SeriesLibraryService>> _logger = new();
     private readonly IOptionsMonitor<AppSettings> _settings;
@@ -35,17 +34,12 @@ public class SeriesLibraryServiceTests
     {
         var files = new List<ComicFile>
         {
-            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
-            new() { FilePath = "/library/Dark Knight/Dark Knight 002.cbz", FileName = "Dark Knight 002.cbz", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc) }
+            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman", Issue = "1", Title = "Year One" } },
+            new() { FilePath = "/library/Dark Knight/Dark Knight 002.cbz", FileName = "Dark Knight 002.cbz", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "The Dark Knight", Issue = "2", Title = "Part Two" } }
         };
 
         _fileStore.Setup(store => store.GetFilteredFilesAsync("processed", It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
-
-        _processor.Setup(processor => processor.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Series = "Batman", Issue = "1", Title = "Year One" });
-        _processor.Setup(processor => processor.GetSeriesMetadataAsync(files[1].FilePath, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Series = "The Dark Knight", AlternateSeries = "Batman", Issue = "2", Title = "Part Two" });
 
         // Cached external metadata declares Batman with "Dark Knight" as an alias.
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
@@ -61,7 +55,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync(filter: "processed");
 
@@ -77,19 +71,14 @@ public class SeriesLibraryServiceTests
     {
         var files = new List<ComicFile>
         {
-            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", Directory = "/library/Batman", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
-            new() { FilePath = "/library/Batman/Batman 002.cbz", FileName = "Batman 002.cbz", Directory = "/library/Batman", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc) }
+            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", Directory = "/library/Batman", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman: Year One", Issue = "1", Title = "Year One Part 1" } },
+            new() { FilePath = "/library/Batman/Batman 002.cbz", FileName = "Batman 002.cbz", Directory = "/library/Batman", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman (2011)", Issue = "2", Title = "Year One Part 2" } }
         };
 
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        _processor.Setup(processor => processor.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Series = "Batman: Year One", Issue = "1", Title = "Year One Part 1" });
-        _processor.Setup(processor => processor.GetSeriesMetadataAsync(files[1].FilePath, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Series = "Batman: Year One", AlternateSeries = "Batman (2011)", Issue = "2", Title = "Year One Part 2" });
-
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -119,7 +108,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -127,14 +116,13 @@ public class SeriesLibraryServiceTests
         Assert.Equal("Batman", result.Series[0].Title);
         Assert.Equal(1, result.Series[0].IssueCount);
         Assert.Equal("Year One", result.Series[0].Issues[0].Title);
-        _processor.Verify(
-            p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never);
     }
 
     [Fact]
-    public async Task GetSeriesAsync_FallsBackToArchiveWhenCachedMetadataIsEmpty()
+    public async Task GetSeriesAsync_WithNoCachedMetadataYet_GroupsByFolderWithoutReadingTheArchive()
     {
+        // The background archive-metadata scan has not read this file yet. The library
+        // still lists it (by its folder) instead of opening the archive in the request.
         var files = new List<ComicFile>
         {
             new()
@@ -151,18 +139,13 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        _processor.Setup(processor => processor.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Series = "Batman", Issue = "1", Title = "From Archive" });
-
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
-        Assert.Single(result.Series);
-        Assert.Equal("From Archive", result.Series[0].Issues[0].Title);
-        _processor.Verify(
-            p => p.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()),
-            Times.Once);
+        var series = Assert.Single(result.Series);
+        Assert.Equal("Batman", series.Title);
+        Assert.Null(Assert.Single(series.Issues).Title);
     }
 
     [Fact]
@@ -208,7 +191,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -246,7 +229,7 @@ public class SeriesLibraryServiceTests
         var monitor = new Mock<IOptionsMonitor<AppSettings>>();
         monitor.Setup(m => m.CurrentValue).Returns(new AppSettings { DefaultPreferredLanguage = "ja" });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, monitor.Object, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, monitor.Object, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -265,15 +248,13 @@ public class SeriesLibraryServiceTests
         };
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
         Assert.Single(result.Series);
         Assert.Equal("Batman", result.Series[0].Title);
         Assert.Equal(2, result.Series[0].IssueCount);
-        // Summary mode never opens archives on disk for the listing.
-        _processor.Verify(p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         // SeriesSummaryDto does not expose an Issues collection at all (compile-time check).
         Assert.IsType<SeriesSummaryDto>(result.Series[0]);
     }
@@ -289,7 +270,7 @@ public class SeriesLibraryServiceTests
         };
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
@@ -334,7 +315,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -368,7 +349,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         // New pinned-name id.
         var byPinnedId = await service.GetSeriesIssuesAsync("revenge-of-the-iron-blooded-sword-hound");
@@ -389,7 +370,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var result = await service.GetSeriesIssuesAsync("does-not-exist");
 
         Assert.Null(result);
@@ -409,7 +390,7 @@ public class SeriesLibraryServiceTests
         }).Cast<ComicFile>().ToList();
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
 
@@ -424,53 +405,11 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
-    public async Task GetSeriesIssuesAsync_CapsArchiveUpgradesAtConfiguredLimit()
+    public async Task GetSeriesIssuesAsync_PopulatesIssueNumberFromFileNameWhenTheCacheHasNone()
     {
-        // 50 files with no cached Title — the upgrade loop would normally
-        // open every archive when perPage == -1. With the cap set to 5
-        // (overriding the AppSettings default of 100) we should see at
-        // most 5 processor calls regardless of how many issues lack a title.
-        var files = Enumerable.Range(1, 50).Select(i => new ComicFile
-        {
-            FilePath = $"/library/Batman/Batman {i:000}.cbz",
-            FileName = $"Batman {i:000}.cbz",
-            Directory = "/library/Batman",
-            FileSize = 100,
-            LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(i),
-            // Series set so grouping works, but Issue/Title intentionally null
-            // so the upgrade loop wants to call GetSeriesMetadataAsync.
-            Metadata = new ComicMetadata { Series = "Batman" }
-        }).Cast<ComicFile>().ToList();
-        _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
-        _processor.Setup(p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Series = "Batman", Title = "Upgraded", Issue = "1" });
-
-        var monitor = new Mock<IOptionsMonitor<AppSettings>>();
-        monitor.Setup(m => m.CurrentValue).Returns(new AppSettings { SeriesIssuesMaxArchiveUpgrades = 5 });
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, monitor.Object, _logger.Object);
-
-        var summaries = await service.GetSeriesSummariesAsync();
-        var seriesId = summaries.Series.Single().Id;
-
-        var result = await service.GetSeriesIssuesAsync(seriesId, perPage: -1);
-
-        Assert.NotNull(result);
-        Assert.Equal(50, result!.IssueCount);
-        // The processor was invoked at most cap-many times by the upgrade
-        // loop (Times.AtMost accommodates internal calls outside the loop).
-        _processor.Verify(
-            p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.AtMost(5));
-    }
-
-    [Fact]
-    public async Task GetSeriesIssuesAsync_PopulatesIssueNumberFromFileNameBeyondUpgradeCap()
-    {
-        // 50 files with no cached Issue/Title. With the archive-upgrade cap set
-        // to 5, the disk-read loop only fills metadata for a handful of files.
-        // Every returned issue must still expose a number — parsed cheaply from
-        // the file name — so the overlay badge, ordering, and missing-issue grid
-        // populate for the whole series, not just the first cap-many files.
+        // 50 files whose archives the background scan has not read yet. Every returned
+        // issue must still expose a number, parsed cheaply from the file name, so the
+        // overlay badge, ordering and missing-issue grid populate for the whole series.
         var files = Enumerable.Range(1, 50).Select(i => new ComicFile
         {
             FilePath = $"/library/Batman/Batman {i:000}.cbz",
@@ -481,14 +420,8 @@ public class SeriesLibraryServiceTests
             Metadata = new ComicMetadata { Series = "Batman" }
         }).Cast<ComicFile>().ToList();
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
-        // Archive upgrades never supply an Issue, so the only source of issue
-        // numbers for upgraded files is the file-name fallback as well.
-        _processor.Setup(p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Series = "Batman", Title = "Upgraded" });
 
-        var monitor = new Mock<IOptionsMonitor<AppSettings>>();
-        monitor.Setup(m => m.CurrentValue).Returns(new AppSettings { SeriesIssuesMaxArchiveUpgrades = 5 });
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, monitor.Object, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
@@ -498,7 +431,6 @@ public class SeriesLibraryServiceTests
         Assert.NotNull(result);
         Assert.Equal(50, result!.IssueCount);
         Assert.Equal(50, result.Issues.Count);
-        // Every issue — including those past the upgrade cap — has a number.
         Assert.All(result.Issues, issue => Assert.False(string.IsNullOrWhiteSpace(issue.Issue)));
         // Numbers reflect the file names and are returned in natural order.
         Assert.Equal(
@@ -507,27 +439,28 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
-    public async Task GetSeriesIssuesAsync_SkipsArchiveUpgradeWhenCachedTitleAndIssuePresent()
+    public async Task GetSeriesIssuesAsync_ReturnsTheCachedArchiveMetadata()
     {
         var files = new List<ComicFile>
         {
-            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", Directory = "/library/Batman", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman", Issue = "1", Title = "Year One" } },
+            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", Directory = "/library/Batman", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman", Issue = "1", Title = "Year One", Volume = "2", Publisher = "DC", Year = 1987 } },
             new() { FilePath = "/library/Batman/Batman 002.cbz", FileName = "Batman 002.cbz", Directory = "/library/Batman", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman", Issue = "2", Title = "Year Two" } }
         };
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
 
         var result = await service.GetSeriesIssuesAsync(seriesId);
 
         Assert.NotNull(result);
-        // Every DTO already has Title and Issue, so the upgrade loop should
-        // not call into the processor at all.
-        _processor.Verify(
-            p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        Assert.Equal(new[] { "Year One", "Year Two" }, result!.Issues.Select(i => i.Title));
+        var first = result.Issues[0];
+        Assert.Equal("1", first.Issue);
+        Assert.Equal("2", first.Volume);
+        Assert.Equal("DC", first.Publisher);
+        Assert.Equal(1987, first.Year);
     }
 
     [Fact]
@@ -552,7 +485,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
 
@@ -568,7 +501,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var result = await service.GetTitlesForSeriesIdAsync("nope");
 
         Assert.Empty(result);
@@ -606,7 +539,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -658,7 +591,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -702,7 +635,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -761,7 +694,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var matched = await service.GetSeriesAsync(filter: "matched");
         Assert.Single(matched.Series);
@@ -816,7 +749,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "unmatched");
 
@@ -877,7 +810,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var missing = await service.GetSeriesAsync(filter: "missing");
 
@@ -927,7 +860,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -976,7 +909,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -1027,7 +960,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -1077,7 +1010,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -1118,7 +1051,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -1135,17 +1068,12 @@ public class SeriesLibraryServiceTests
         // must NOT be merged into a single library card.
         var files = new List<ComicFile>
         {
-            new() { FilePath = "/library/kaiju/Kaiju No 8 001.cbz", FileName = "Kaiju No 8 001.cbz", Directory = "/library/kaiju", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
-            new() { FilePath = "/library/mage8/8th Class Mage 002.cbz", FileName = "8th Class Mage 002.cbz", Directory = "/library/mage8", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc) }
+            new() { FilePath = "/library/kaiju/Kaiju No 8 001.cbz", FileName = "Kaiju No 8 001.cbz", Directory = "/library/kaiju", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Kaiju No. 8", Issue = "1" } },
+            new() { FilePath = "/library/mage8/8th Class Mage 002.cbz", FileName = "8th Class Mage 002.cbz", Directory = "/library/mage8", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Return of the 8th Class Mage", Issue = "2" } }
         };
 
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
-
-        _processor.Setup(p => p.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Series = "Kaiju No. 8", Issue = "1" });
-        _processor.Setup(p => p.GetSeriesMetadataAsync(files[1].FilePath, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Series = "Return of the 8th Class Mage", Issue = "2" });
 
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>
@@ -1166,7 +1094,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -1228,7 +1156,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -1284,7 +1212,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -1346,7 +1274,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -1408,7 +1336,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -1484,7 +1412,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -1535,7 +1463,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var seriesList = await service.GetSeriesAsync();
         Assert.Single(seriesList.Series);
@@ -1559,7 +1487,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetFoldersForSeriesIdAsync("does-not-exist");
 
@@ -1581,7 +1509,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         // Next from the last issue of Series A: no adjacent issue.
         var atEnd = await service.GetAdjacentIssueAsync("/library/Series A/Series A 002.cbz", "next");
@@ -1623,7 +1551,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var next = await service.GetAdjacentIssueAsync("/library/Series A/Series A 159.cbz", "next");
         Assert.True(next.HasAdjacent);
@@ -1650,7 +1578,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         // part 2 comes before part 10 (natural order).
         var next = await service.GetAdjacentIssueAsync("/library/S/S 160 part 2.cbz", "next");
@@ -1692,7 +1620,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         // Sanity check: the two folders really are merged into one series card.
         var library = await service.GetSeriesAsync();
@@ -1729,7 +1657,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var next = await service.GetAdjacentIssueAsync("/library/a/Series A/Series A 001.cbz", "next");
         Assert.True(next.HasAdjacent);
@@ -1742,7 +1670,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetAdjacentIssueAsync("/library/Nope/Nope 001.cbz", "next");
 

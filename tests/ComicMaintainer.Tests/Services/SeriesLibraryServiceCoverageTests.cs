@@ -14,7 +14,6 @@ public class SeriesLibraryServiceCoverageTests
     private static readonly DateTime BaseTime = new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     private readonly Mock<IFileStoreService> _fileStore = new();
-    private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<ISeriesMetadataCacheService> _metadataCache = new();
     private readonly AppSettings _appSettings = new();
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
@@ -46,7 +45,6 @@ public class SeriesLibraryServiceCoverageTests
         IUserContextAccessor? user = null,
         IOptionsMonitor<AppSettings>? settings = null) => new(
         _fileStore.Object,
-        _processor.Object,
         _metadataCache.Object,
         settings ?? _settings.Object,
         NullLogger<SeriesLibraryService>.Instance,
@@ -556,20 +554,18 @@ public class SeriesLibraryServiceCoverageTests
     }
 
     [Fact]
-    public async Task NullSettingsValue_UsesDefaultsForSnapshotAndUpgradeBudget()
+    public async Task NullSettingsValue_UsesDefaultsForTheSnapshot()
     {
         var settings = new Mock<IOptionsMonitor<AppSettings>>();
         settings.Setup(s => s.CurrentValue).Returns(default(AppSettings)!);
-        _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga") };
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Saga/Saga 001.cbz", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Title = "From Disk", Issue = "1" });
+        _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1", title: "Cached") };
         var service = CreateService(user: new TestUserContextAccessor("alice"), settings: settings.Object);
 
         var result = await service.GetSeriesIssuesAsync("saga");
 
         Assert.NotNull(result);
         var issue = Assert.Single(result.Issues);
-        Assert.Equal("From Disk", issue.Title);
+        Assert.Equal("Cached", issue.Title);
         Assert.Equal("1", issue.Issue);
     }
 
@@ -712,7 +708,7 @@ public class SeriesLibraryServiceCoverageTests
     }
 
     [Fact]
-    public async Task GetSeriesIssuesAsync_UpgradeKeepsCachedFieldsAndSurvivesProcessorFailures()
+    public async Task GetSeriesIssuesAsync_PagesTheCachedIssuesAndParsesMissingNumbersFromFileNames()
     {
         _files = new List<ComicFile>
         {
@@ -728,12 +724,6 @@ public class SeriesLibraryServiceCoverageTests
                 Metadata = new ComicMetadata { Series = "Upgrade" }
             },
         };
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 001.cbz", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Title = "Disk Title", Issue = "1", Volume = "Disk Volume", Publisher = "Disk Pub", Year = 1999 });
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 002.cbz", It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("corrupt archive"));
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 003.cbz", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(default(SeriesMetadata?));
 
         var result = await CreateService().GetSeriesIssuesAsync("upgrade", perPage: 0);
 
@@ -741,37 +731,31 @@ public class SeriesLibraryServiceCoverageTests
         Assert.Equal(4, result.IssueCount);
         Assert.Equal(1, result.PerPage);
         Assert.Equal(4, result.TotalPages);
-        var upgraded = Assert.Single(result.Issues);
-        Assert.Equal("/lib/Upgrade/Upgrade 001.cbz", upgraded.FilePath);
-        Assert.Equal("Kept Title", upgraded.Title);
-        Assert.Equal("1", upgraded.Issue);
-        Assert.Equal("V1", upgraded.Volume);
-        Assert.Equal("Pub", upgraded.Publisher);
-        Assert.Equal(2001, upgraded.Year);
+        var first = Assert.Single(result.Issues);
+        Assert.Equal("/lib/Upgrade/Upgrade 001.cbz", first.FilePath);
+        Assert.Equal("Kept Title", first.Title);
+        Assert.Equal("1", first.Issue);
+        Assert.Equal("V1", first.Volume);
+        Assert.Equal("Pub", first.Publisher);
+        Assert.Equal(2001, first.Year);
 
         var all = await CreateService().GetSeriesIssuesAsync("upgrade", perPage: -1);
 
         Assert.NotNull(all);
         Assert.Equal(new[] { "1", "2", "3", null }, all.Issues.Select(i => i.Issue));
-        var failed = all.Issues.Single(i => i.FilePath == "/lib/Upgrade/Upgrade 002.cbz");
-        Assert.Null(failed.Title);
+        Assert.Null(all.Issues.Single(i => i.FilePath == "/lib/Upgrade/Upgrade 002.cbz").Title);
         Assert.Equal("/lib/Upgrade/noname", all.Issues[^1].FilePath);
-        _processor.Verify(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 002.cbz", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task GetSeriesIssuesAsync_UpgradeFillsMissingTitleButKeepsCachedIssueNumber()
+    public async Task GetSeriesIssuesAsync_KeepsTheCachedIssueNumberOverTheFileName()
     {
         _files = new List<ComicFile> { File("/lib/Keep/Keep 001.cbz", series: "Keep", issue: "7") };
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Keep/Keep 001.cbz", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Title = "Disk Title", Issue = "99" });
 
         var result = await CreateService().GetSeriesIssuesAsync("keep");
 
         Assert.NotNull(result);
-        var issue = Assert.Single(result.Issues);
-        Assert.Equal("Disk Title", issue.Title);
-        Assert.Equal("7", issue.Issue);
+        Assert.Equal("7", Assert.Single(result.Issues).Issue);
     }
 
     [Fact]

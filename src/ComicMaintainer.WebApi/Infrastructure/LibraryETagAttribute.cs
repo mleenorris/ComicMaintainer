@@ -14,10 +14,11 @@ namespace ComicMaintainer.WebApi.Infrastructure;
 
 /// <summary>
 /// Conditional-GET support for read-only library list endpoints. The ETag is
-/// derived from the library change versions (file store incl. per-user read
-/// state, series metadata cache), the live settings instance, the app build,
-/// the current user and the full request URL — everything those endpoints'
-/// responses depend on — so it can be checked BEFORE running the action. A
+/// derived from the library change versions (file store, the current user's own
+/// read-state version, series metadata cache), the live settings instance, the
+/// app build, the current user and the full request URL — everything those
+/// endpoints' responses depend on — so it can be checked BEFORE running the
+/// action. Another user's read changes therefore keep this user's 304s. A
 /// matching <c>If-None-Match</c> short-circuits with 304 and skips the work
 /// entirely; otherwise the response carries the ETag with
 /// <c>Cache-Control: private, no-cache</c> so the browser always revalidates
@@ -99,10 +100,17 @@ public sealed class LibraryETagAttribute : Attribute, IAsyncActionFilter
         var timeProvider = services.GetService(typeof(TimeProvider)) as TimeProvider ?? TimeProvider.System;
         var validatorGeneration = timeProvider.GetUtcNow().UtcTicks / ValidatorFreshnessInterval.Ticks;
 
+        // Per-user read state is versioned separately from the shared file version, so it
+        // has to be part of the tag for the responses that show read flags to stay correct.
+        var readStateVersion = fileVersions is IUserReadStateSource readState
+            ? readState.GetReadStateVersion(userId)
+            : 0;
+
         var material = string.Join('\n',
             BuildVersion,
             validatorGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture),
             fileVersions.ChangeVersion.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            readStateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture),
             metadataVersions.ChangeVersion.ToString(System.Globalization.CultureInfo.InvariantCulture),
             settingsIdentity.ToString(System.Globalization.CultureInfo.InvariantCulture),
             userId,

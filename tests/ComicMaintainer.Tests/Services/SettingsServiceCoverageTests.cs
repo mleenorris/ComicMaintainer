@@ -172,6 +172,53 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         Assert.False(File.Exists(_settingsPath));
     }
 
+    [Fact]
+    public async Task UpdateDatabaseCleanupSettingsAsync_PersistsEverySettingTogether()
+    {
+        await _service.UpdateDatabaseCleanupSettingsAsync(new DatabaseCleanupSettings(24, 15, 12, "  .library-mounted  ", 30, 20000));
+
+        var section = ReadSection();
+        Assert.Equal(6, section.Count);
+        Assert.Equal(24, section["DatabaseCleanupIntervalHours"].GetInt32());
+        Assert.Equal(15, section["StaleCleanupMaxRemovalPercent"].GetInt32());
+        Assert.Equal(12, section["StaleCleanupMissingGraceHours"].GetInt32());
+        Assert.Equal(".library-mounted", section["StaleCleanupSentinelFile"].GetString());
+        Assert.Equal(30, section["ProcessingHistoryRetentionDays"].GetInt32());
+        Assert.Equal(20000, section["ProcessingHistoryMaxEntries"].GetInt32());
+
+        // Clearing the sentinel saves an empty value, which also overrides appsettings.json.
+        await _service.UpdateDatabaseCleanupSettingsAsync(new DatabaseCleanupSettings(0, 100, 0, "   ", 0, 0));
+        section = ReadSection();
+        Assert.Equal(string.Empty, section["StaleCleanupSentinelFile"].GetString());
+        Assert.Equal(100, section["StaleCleanupMaxRemovalPercent"].GetInt32());
+        Assert.Equal(0, section["ProcessingHistoryMaxEntries"].GetInt32());
+    }
+
+    public static TheoryData<DatabaseCleanupSettings, string> InvalidDatabaseCleanupSettings => new()
+    {
+        { new DatabaseCleanupSettings(-1, 10, 6, null, 90, 50000), "Cleanup interval hours must be non-negative" },
+        { new DatabaseCleanupSettings(12, -1, 6, null, 90, 50000), "Max removal percent must be between 0 and 100" },
+        { new DatabaseCleanupSettings(12, 101, 6, null, 90, 50000), "Max removal percent must be between 0 and 100" },
+        { new DatabaseCleanupSettings(12, 10, -1, null, 90, 50000), "Missing-file grace period must be between 0 and 720 hours" },
+        { new DatabaseCleanupSettings(12, 10, 721, null, 90, 50000), "Missing-file grace period must be between 0 and 720 hours" },
+        { new DatabaseCleanupSettings(12, 10, 6, "line\nbreak", 90, 50000), "Sentinel file must be a path of at most 1024 characters" },
+        { new DatabaseCleanupSettings(12, 10, 6, new string('a', 1025), 90, 50000), "Sentinel file must be a path of at most 1024 characters" },
+        { new DatabaseCleanupSettings(12, 10, 6, null, -1, 50000), "History retention must be between 0 and 3650 days" },
+        { new DatabaseCleanupSettings(12, 10, 6, null, 3651, 50000), "History retention must be between 0 and 3650 days" },
+        { new DatabaseCleanupSettings(12, 10, 6, null, 90, -1), "History max entries must be between 0 and 10000000" },
+        { new DatabaseCleanupSettings(12, 10, 6, null, 90, 10_000_001), "History max entries must be between 0 and 10000000" },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidDatabaseCleanupSettings))]
+    public async Task UpdateDatabaseCleanupSettingsAsync_AnInvalidValueSavesNoneOfThem(DatabaseCleanupSettings settings, string expected)
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateDatabaseCleanupSettingsAsync(settings));
+
+        Assert.StartsWith(expected, ex.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(_settingsPath));
+    }
+
     [Theory]
     [InlineData("GitHubIssueAssignee")]
     [InlineData("ComicVineBaseUrl")]

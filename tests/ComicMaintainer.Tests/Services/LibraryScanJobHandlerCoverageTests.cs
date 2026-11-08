@@ -34,6 +34,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         _cache.Setup(c => c.NormalizeKey(It.IsAny<string?>()))
             .Returns<string?>(s => (s ?? string.Empty).ToLowerInvariant().Replace(' ', '-'));
         SetupTracked();
+        SetupCleanup(removed: 0);
         _fileStore
             .Setup(f => f.GetFilesWithStaleSeriesMetadataAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<string>());
@@ -81,6 +82,11 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
 
     private void SetupTracked(params ComicFile[] files) =>
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(files);
+
+    /// <summary>The guarded stale-entry cleanup the deletion pass runs, reporting <paramref name="removed"/> rows removed.</summary>
+    private void SetupCleanup(int removed, StaleCleanupStatus status = StaleCleanupStatus.Completed) =>
+        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = status, RemovedCount = removed });
 
     private static ProcessingJob Finished(JobStatus status, int processed, int failed) => new()
     {
@@ -156,13 +162,15 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_RemovingOneGhostFails_KeepsItTrackedForTheStalePass()
+    public async Task ExecuteAsync_ReconcileDeletions_RunsTheGuardedCleanupAndRetagsOnlyWhatIsStillTracked()
     {
-        var stuck = Path.Join(_watchDir, "Ghosts", "c001.cbz");
-        var removable = Path.Join(_watchDir, "Ghosts", "c002.cbz");
-        SetupTracked(Tracked(stuck), Tracked(removable));
-        _fileStore.Setup(f => f.RemoveFileAsync(stuck, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("database is locked"));
+        var gone = Path.Join(_watchDir, "Ghosts", "c001.cbz");
+        var kept = Path.Join(_watchDir, "Ghosts", "c002.cbz");
+        // The store reports the rows it has after the cleanup removed one of them.
+        _fileStore.SetupSequence(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { Tracked(gone), Tracked(kept) })
+            .ReturnsAsync(new[] { Tracked(kept) });
+        SetupCleanup(removed: 1);
         _cache.Setup(c => c.GetAsync("ghosts", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord { NormalizedKey = "ghosts", MetadataVersion = 3 });
         List<string>? staleCandidates = null;
@@ -173,9 +181,26 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
 
         Assert.Equal("Library scan: +0 added, -1 removed, 0 stale retagged.", summary);
-        _fileStore.Verify(f => f.RemoveFileAsync(stuck, It.IsAny<CancellationToken>()), Times.Once);
-        _fileStore.Verify(f => f.RemoveFileAsync(removable, It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Equal(new[] { stuck }, staleCandidates);
+        // Deletions go through the guarded, two-run cleanup, never one RemoveFileAsync per
+        // path missing from the enumeration (an unmounted share enumerates as empty).
+        _fileStore.Verify(f => f.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(new[] { kept }, staleCandidates);
+    }
+
+    [Theory]
+    [InlineData(StaleCleanupStatus.WatchedDirectoryEmpty)]
+    [InlineData(StaleCleanupStatus.ThresholdExceeded)]
+    [InlineData(StaleCleanupStatus.SentinelMissing)]
+    public async Task ExecuteAsync_EmptyOrPartlyMountedLibrary_RemovesNothingAndSaysSo(StaleCleanupStatus status)
+    {
+        SetupTracked(Tracked(Path.Join(_watchDir, "Ghosts", "c001.cbz")), Tracked(Path.Join(_watchDir, "Ghosts", "c002.cbz")));
+        SetupCleanup(removed: 0, status);
+
+        var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Equal($"Library scan: +0 added, -0 removed, 0 stale retagged. Deletions not reconciled ({status}).", summary);
+        _fileStore.Verify(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -443,8 +468,10 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
                     .Callback(() => cts.Cancel()).ThrowsAsync(cancelled);
                 break;
             case "remove":
-                _fileStore.Setup(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                    .Callback(() => cts.Cancel()).ThrowsAsync(cancelled);
+                // The store reports a cancelled cleanup rather than throwing.
+                _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+                    .Callback(() => cts.Cancel())
+                    .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Cancelled });
                 break;
             default:
                 _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -511,6 +538,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         var modified = WriteComic("Series", "c001.cbz");
         var fresh = WriteComic("Series", "c002.cbz");
         SetupTracked(Tracked(ghost), Tracked(modified, size: 999));
+        SetupCleanup(removed: 1);
         List<string>? queued = null;
         SetupAddedJob(Finished(JobStatus.Completed, 1, 0), paths => queued = paths);
 
@@ -519,7 +547,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         // Defaults: add new files, reconcile deletions and retag stale files; modified-file reprocessing stays off.
         Assert.Equal("Library scan: +1 added, -1 removed, 0 stale retagged. [added: 1/1 ok, 0 failed]", summary);
         Assert.Equal(new[] { fresh }, queued);
-        _fileStore.Verify(f => f.RemoveFileAsync(ghost, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, It.IsAny<CancellationToken>()), Times.Once);
         _cache.Verify(c => c.GetAsync("series", It.IsAny<CancellationToken>()), Times.Once);
         _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }

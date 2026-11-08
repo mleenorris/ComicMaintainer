@@ -18,7 +18,8 @@ public partial class SeriesLibraryService
         CancellationToken cancellationToken = default)
     {
         var (fileFilter, seriesFilter) = SplitFilter(filter);
-        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: true, cancellationToken);
+        var groups = await BuildGroupsAsync(fileFilter, cancellationToken);
+        var readPaths = await GetReadPathsForProjectionAsync(cancellationToken);
 
         var groupedSeries = groups.Values
             .Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter))
@@ -26,7 +27,9 @@ public partial class SeriesLibraryService
             {
                 // Copy rather than re-assigning accumulator.Issues: accumulators
                 // may be shared with other requests via the library snapshot.
-                var sortedIssues = new List<SeriesIssueDto>(accumulator.GetSortedIssues());
+                var sortedIssues = accumulator.GetSortedIssues()
+                    .Select(issue => ProjectIssue(issue, readPaths))
+                    .ToList();
 
                 return new SeriesLibraryDto
                 {
@@ -100,7 +103,7 @@ public partial class SeriesLibraryService
         var (fileFilter, seriesFilter) = SplitFilter(filter);
         // Summary mode never opens an archive on disk, so even huge libraries
         // stay snappy. Per-issue details are loaded lazily by GetSeriesIssuesAsync.
-        var snapshot = await GetGroupsSnapshotAsync(fileFilter, allowDiskRead: false, cancellationToken);
+        var snapshot = await GetGroupsSnapshotAsync(fileFilter, cancellationToken);
 
         // The filtered + sorted list depends only on the snapshot and these
         // inputs, so infinite-scroll requests for later pages reuse it and
@@ -208,7 +211,8 @@ public partial class SeriesLibraryService
     {
         // Overview never reads archives on disk; it relies on the cached
         // grouping so the home page stays fast even for huge libraries.
-        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(filter: null, cancellationToken);
+        var readPaths = await GetReadPathsForProjectionAsync(cancellationToken);
 
         var entries = new List<SeriesOverviewEntry>(groups.Count);
         foreach (var accumulator in groups.Values)
@@ -245,7 +249,10 @@ public partial class SeriesLibraryService
                 // Issues marked read via the file read flag (independent of the
                 // per-user reading progress) so Continue Reading can recognise a
                 // fully-read series and drop it from the row.
-                ReadFilePaths = sortedIssues.Where(i => i.Read).Select(i => i.FilePath).ToList()
+                ReadFilePaths = sortedIssues
+                    .Where(i => ProjectIssue(i, readPaths).Read)
+                    .Select(i => i.FilePath)
+                    .ToList()
             });
         }
 

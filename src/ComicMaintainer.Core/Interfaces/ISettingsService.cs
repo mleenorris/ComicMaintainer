@@ -109,6 +109,14 @@ public interface ISettingsService
     Task UpdateDatabaseCleanupIntervalHoursAsync(int hours, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Persist every database-cleanup setting (interval, stale-entry cleanup guards and
+    /// processing-history retention) in one write, so they are saved together or not at
+    /// all. Throws <see cref="ArgumentException"/> when a value is out of range; see
+    /// <see cref="DatabaseCleanupSettings"/> for the ranges.
+    /// </summary>
+    Task UpdateDatabaseCleanupSettingsAsync(DatabaseCleanupSettings settings, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update the default library view shown on initial page load ("files" or "series").
     /// </summary>
     Task UpdateDefaultLibraryViewAsync(string view, CancellationToken cancellationToken = default);

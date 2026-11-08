@@ -20,7 +20,7 @@ public partial class SeriesLibraryService
         // Use the unfiltered grouping so adjacency reflects the whole series
         // regardless of any active library filter, and never reads archives
         // off disk so the reader's next/previous prefetch stays fast.
-        var snapshot = await GetGroupsSnapshotAsync(filter: null, allowDiskRead: false, cancellationToken);
+        var snapshot = await GetGroupsSnapshotAsync(filter: null, cancellationToken);
         var groupingKeyByFile = snapshot.GroupingKeyByFile;
 
         if (!snapshot.OwnerByFilePath.TryGetValue(filePath, out var owningSeries))
@@ -94,7 +94,7 @@ public partial class SeriesLibraryService
         // optionally upgrade just that group's metadata via disk reads to fill
         // in per-issue details that may be missing from the DB cache.
         var (fileFilter, _) = SplitFilter(filter);
-        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(fileFilter, cancellationToken);
         if (!TryResolveGroup(groups, seriesId, out var accumulator))
         {
             // The requested series id is not present in the filtered groups.
@@ -117,7 +117,7 @@ public partial class SeriesLibraryService
                 return null;
             }
 
-            var unfilteredGroups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+            var unfilteredGroups = await BuildGroupsAsync(filter: null, cancellationToken);
             if (!TryResolveGroup(unfilteredGroups, seriesId, out var unfilteredAccumulator))
             {
                 return null;
@@ -150,7 +150,7 @@ public partial class SeriesLibraryService
     {
         ArgumentNullException.ThrowIfNull(seriesIds);
 
-        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(filter: null, cancellationToken);
         var results = new Dictionary<string, SeriesIssuesResult>(StringComparer.Ordinal);
         foreach (var seriesId in seriesIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
         {
@@ -173,9 +173,7 @@ public partial class SeriesLibraryService
         int perPage,
         CancellationToken cancellationToken)
     {
-        // Best-effort upgrade: for issues with empty title metadata, try the
-        // archive on disk. Bounded to the requested page so we never read more
-        // archives than the user actually sees.
+        // Built from the cached archive metadata only; no archive is opened here.
         // Copy: the page list below may be patched in place, and the sorted
         // list can be shared with other requests through the library snapshot.
         var sortedIssues = new List<SeriesIssueDto>(accumulator.GetSortedIssues());
@@ -187,68 +185,10 @@ public partial class SeriesLibraryService
             ? sortedIssues
             : sortedIssues.Skip((page - 1) * effectivePerPage).Take(effectivePerPage).ToList();
 
-        // Best-effort upgrade: for issues with empty title metadata, try the
-        // archive on disk. Bounded to the requested page so we never read more
-        // archives than the user actually sees. An additional hard cap from
-        // AppSettings.SeriesIssuesMaxArchiveUpgrades protects against
-        // pathological requests (e.g. perPage == -1 with a 1000-issue series
-        // and no cached metadata) where the upgrade loop would otherwise
-        // dominate request latency.
-        var upgradeBudget = Math.Max(0, _settings.CurrentValue?.SeriesIssuesMaxArchiveUpgrades ?? 100);
-
-        // Upgrade missing titles by opening just the visible archives.
-        for (var i = 0; i < pageIssues.Count; i++)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            var issue = pageIssues[i];
-            if (!string.IsNullOrWhiteSpace(issue.Title) && !string.IsNullOrWhiteSpace(issue.Issue))
-            {
-                continue;
-            }
-            if (upgradeBudget <= 0)
-            {
-                break;
-            }
-            upgradeBudget--;
-
-            try
-            {
-                var meta = await _processor.GetSeriesMetadataAsync(issue.FilePath, cancellationToken);
-                if (meta is null) continue;
-                pageIssues[i] = new SeriesIssueDto
-                {
-                    FilePath = issue.FilePath,
-                    FileName = issue.FileName,
-                    Title = string.IsNullOrWhiteSpace(issue.Title) ? meta.Title : issue.Title,
-                    Issue = string.IsNullOrWhiteSpace(issue.Issue) ? meta.Issue : issue.Issue,
-                    Volume = string.IsNullOrWhiteSpace(issue.Volume) ? meta.Volume : issue.Volume,
-                    Publisher = string.IsNullOrWhiteSpace(issue.Publisher) ? meta.Publisher : issue.Publisher,
-                    Year = issue.Year ?? meta.Year,
-                    Size = issue.Size,
-                    Modified = issue.Modified,
-                    Processed = issue.Processed,
-                    Renamed = issue.Renamed,
-                    Normalized = issue.Normalized,
-                    Duplicate = issue.Duplicate,
-                    Read = issue.Read
-                };
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                _logger.LogDebug(ex, "Issue metadata upgrade failed for {FilePath}",
-                    LoggingHelper.SanitizePathForLog(issue.FilePath));
-            }
-        }
-
-        // Final, cheap, unbounded pass: any issue still missing its number
-        // (e.g. files beyond the archive-upgrade budget, or files whose archive
-        // has no <Number>) gets its number parsed from the file name in memory.
-        // This guarantees the issue badge, ordering, and missing-issue grid are
-        // populated for every file in the series, not just the first
-        // SeriesIssuesMaxArchiveUpgrades of them.
+        // Any issue still missing its number (the background scan has not read its
+        // archive yet, or the archive has no <Number>) gets it parsed from the file
+        // name in memory, so the issue badge, ordering and missing-issue grid are
+        // populated for every file in the series.
         for (var i = 0; i < pageIssues.Count; i++)
         {
             var issue = pageIssues[i];
@@ -278,6 +218,12 @@ public partial class SeriesLibraryService
                 Duplicate = issue.Duplicate,
                 Read = issue.Read
             };
+        }
+
+        var readPaths = await GetReadPathsForProjectionAsync(cancellationToken);
+        for (var i = 0; i < pageIssues.Count; i++)
+        {
+            pageIssues[i] = ProjectIssue(pageIssues[i], readPaths);
         }
 
         return new SeriesIssuesResult
@@ -314,10 +260,8 @@ public partial class SeriesLibraryService
     /// Returns the issue number for a DTO, falling back to a cheap, in-memory
     /// parse of the file name when the cached metadata lacks one. This keeps
     /// the issue badge, ordering, and missing-issue grid populated for every
-    /// file in a series — including series with more than
-    /// <see cref="AppSettings.SeriesIssuesMaxArchiveUpgrades"/> files, where the
-    /// best-effort archive-upgrade loop would otherwise stop reading titles
-    /// from disk and leave later issues' overlays blank.
+    /// file in a series, including files whose archive the background
+    /// archive-metadata scan has not read yet.
     /// </summary>
     private static string? ResolveIssueNumber(SeriesIssueDto issue)
     {

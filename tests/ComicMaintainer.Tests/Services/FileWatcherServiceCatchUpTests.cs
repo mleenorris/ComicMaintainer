@@ -563,7 +563,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
 
         var processed = new ConcurrentQueue<string>();
         var store = CreateRealStore(factory);
-        Task<int>? cleanup = null;
+        Task<StaleCleanupResult>? cleanup = null;
 
         // As at startup: the cleanup starts while the scan is running, before it has read the
         // tracked files. The wait gives a cleanup that is not held off the time to prune.
@@ -571,7 +571,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
         {
             if (message.Contains("Found 1 comic files on filesystem", StringComparison.Ordinal))
             {
-                cleanup = Task.Run(() => store.CleanupStaleEntriesAsync());
+                cleanup = Task.Run(() => store.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: true)));
                 cleanup.Wait(TimeSpan.FromSeconds(1));
             }
         };
@@ -583,7 +583,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
         await WaitForLogAsync("Incremental scan completed");
         await WaitUntilAsync(() => Task.FromResult(cleanup is { IsCompleted: true }), "the cleanup to run once the scan is done");
 
-        Assert.Equal(0, await cleanup!);
+        Assert.Equal(0, (await cleanup!).RemovedCount);
         var rows = (await store.GetAllFilesAsync()).ToList();
         var row = Assert.Single(rows);
         Assert.Equal(newPath, row.FilePath);

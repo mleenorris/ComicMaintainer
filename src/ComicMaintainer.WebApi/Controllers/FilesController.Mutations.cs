@@ -1,4 +1,6 @@
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -176,31 +178,16 @@ public partial class FilesController
     }
 
     /// <summary>
-    /// Remove stale database entries for files that no longer exist on disk
+    /// Remove stale database entries for files that no longer exist on disk. Refuses (409)
+    /// while the library looks unmounted, and asks for confirmation (409 with
+    /// <c>requiresConfirmation</c>; repeat with <c>?confirm=true</c>) before removing more
+    /// than the configured share of the library; see <see cref="StaleCleanupResponses"/>.
     /// </summary>
     [HttpPost("cleanup-stale")]
-    public async Task<ActionResult<object>> CleanupStaleEntries(CancellationToken cancellationToken = default)
+    public async Task<ActionResult> CleanupStaleEntries([FromQuery] bool confirm = false, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation("Cleanup stale entries endpoint called");
-            var removedCount = await _fileStore.CleanupStaleEntriesAsync(cancellationToken);
-            
-            return Ok(new 
-            { 
-                success = true, 
-                removedCount = removedCount,
-                message = $"Removed {removedCount} stale database entries"
-            });
-        }
-        catch (OperationCanceledException)
-        {
-            return StatusCode(499, new { error = "Cleanup operation was cancelled" });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error during stale entry cleanup");
-            return StatusCode(500, new { error = "Failed to cleanup stale entries" });
-        }
+        _logger.LogInformation("Cleanup stale entries endpoint called (confirmed: {Confirmed})", confirm);
+        var result = await _fileStore.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: confirm), cancellationToken);
+        return StaleCleanupResponses.ToActionResult(this, result);
     }
 }

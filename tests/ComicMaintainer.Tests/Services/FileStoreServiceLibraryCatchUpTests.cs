@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.Data.Sqlite;
@@ -135,7 +136,7 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
         var lease = store.SuspendStaleCleanup();
         Assert.True(store.IsStaleCleanupSuspended);
 
-        var cleanup = store.CleanupStaleEntriesAsync();
+        var cleanup = store.CleanupStaleEntriesAsync(ConfirmedCleanup);
 
         await Task.Delay(100);
         Assert.False(cleanup.IsCompleted);
@@ -143,7 +144,7 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
 
         lease.Dispose();
 
-        Assert.Equal(1, await cleanup.WaitAsync(WaitTimeout));
+        Assert.Equal(1, (await cleanup.WaitAsync(WaitTimeout)).RemovedCount);
         Assert.False(store.IsStaleCleanupSuspended);
         Assert.False(await store.FileExistsAsync(gone));
     }
@@ -156,7 +157,7 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
         var first = store.SuspendStaleCleanup();
         var second = store.SuspendStaleCleanup();
 
-        var cleanup = store.CleanupStaleEntriesAsync();
+        var cleanup = store.CleanupStaleEntriesAsync(ConfirmedCleanup);
         first.Dispose();
         first.Dispose(); // Disposing twice ends one lease, not two.
 
@@ -166,7 +167,7 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
 
         second.Dispose();
 
-        Assert.Equal(1, await cleanup.WaitAsync(WaitTimeout));
+        Assert.Equal(1, (await cleanup.WaitAsync(WaitTimeout)).RemovedCount);
         Assert.False(await store.FileExistsAsync(gone));
     }
 
@@ -178,10 +179,10 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
         var lease = store.SuspendStaleCleanup();
         using var cts = new CancellationTokenSource();
 
-        var cleanup = store.CleanupStaleEntriesAsync(cts.Token);
+        var cleanup = store.CleanupStaleEntriesAsync(ConfirmedCleanup, cts.Token);
         cts.Cancel();
 
-        Assert.Equal(0, await cleanup.WaitAsync(WaitTimeout));
+        Assert.Equal(StaleCleanupStatus.Cancelled, (await cleanup.WaitAsync(WaitTimeout)).Status);
         lease.Dispose();
         Assert.True(await store.FileExistsAsync(gone));
     }
@@ -193,9 +194,12 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
         var gone = await SeedGoneFileAsync(store);
 
         Assert.False(store.IsStaleCleanupSuspended);
-        Assert.Equal(1, await store.CleanupStaleEntriesAsync().WaitAsync(WaitTimeout));
+        Assert.Equal(1, (await store.CleanupStaleEntriesAsync(ConfirmedCleanup).WaitAsync(WaitTimeout)).RemovedCount);
         Assert.False(await store.FileExistsAsync(gone));
     }
+
+    /// <summary>A confirmed manual run removes what is missing right now, without a grace period.</summary>
+    private static readonly StaleCleanupOptions ConfirmedCleanup = new(IsManual: true, Confirmed: true);
 
     private FileStoreService CreateService() =>
         new(

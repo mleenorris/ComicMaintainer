@@ -246,6 +246,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IComicReaderService, ComicReaderService>();
         services.AddSingleton<IFileCoverCacheService, FileCoverCacheService>();
         services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
+        services.AddSingleton<ArchiveMetadataScanService>();
         services.AddSingleton<IOverviewService, OverviewService>();
         services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheService>();
         services.AddSingleton<IFolderCombineService, FolderCombineService>();
@@ -399,6 +400,10 @@ internal static class CoreServiceCollectionExtensions
 
         // Add hosted service for database cleanup
         services.AddHostedService<DatabaseCleanupHostedService>();
+
+        // Keep the cached archive metadata (ComicFiles.Metadata) in step with the files, so
+        // library requests never open archives.
+        services.AddHostedService<ArchiveMetadataScanHostedService>();
 
         // Reconcile persisted batch job state, marking anything left in flight by a restart as
         // interrupted so clients polling an old job id get a definite answer.

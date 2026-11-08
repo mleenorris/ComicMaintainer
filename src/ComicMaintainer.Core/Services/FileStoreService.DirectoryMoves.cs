@@ -34,6 +34,7 @@ public partial class FileStoreService
 
         var cachedPaths = TrackedPathsUnder(oldPrefix);
         var moved = 0;
+        IReadOnlyCollection<ComicFileEntity> movedRows = Array.Empty<ComicFileEntity>();
         var affectedUsers = new HashSet<string>(StringComparer.Ordinal);
 
         try
@@ -87,6 +88,7 @@ public partial class FileStoreService
 
                 await dbContext.SaveChangesAsync(cancellationToken);
                 moved = rows.Count;
+                movedRows = rows;
             }
 
             await MoveUserStateUnderAsync(dbContext, oldPrefix, Rebase, cachedPaths, affectedUsers, cancellationToken);
@@ -101,24 +103,7 @@ public partial class FileStoreService
         }
 
         // The database now has every row under the new directory; make the in-memory copy agree.
-        foreach (var oldPath in cachedPaths)
-        {
-            if (!_files.TryRemove(oldPath, out var file))
-            {
-                continue;
-            }
-
-            var newPath = Rebase(oldPath);
-            var movedFile = file.ShallowCopy();
-            movedFile.FilePath = newPath;
-            movedFile.Directory = Path.GetDirectoryName(newPath) ?? string.Empty;
-            _files[newPath] = movedFile;
-
-            if (_duplicateFiles.TryRemove(oldPath, out _) || movedFile.IsDuplicate)
-            {
-                _duplicateFiles[newPath] = true;
-            }
-        }
+        await MirrorCommittedRowsAsync(movedRows, cachedPaths);
 
         foreach (var userId in affectedUsers)
         {
@@ -146,6 +131,7 @@ public partial class FileStoreService
 
         var cachedPaths = TrackedPathsUnder(prefix);
         var removed = 0;
+        var removedPaths = new List<string>(cachedPaths);
 
         try
         {
@@ -156,6 +142,7 @@ public partial class FileStoreService
                 dbContext.ComicFiles.RemoveRange(rows);
                 await dbContext.SaveChangesAsync(cancellationToken);
                 removed = rows.Count;
+                removedPaths.AddRange(rows.Select(r => r.FilePath));
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
@@ -164,11 +151,7 @@ public partial class FileStoreService
             return 0;
         }
 
-        foreach (var path in cachedPaths)
-        {
-            _files.TryRemove(path, out _);
-            _duplicateFiles.TryRemove(path, out _);
-        }
+        await MirrorCommittedRowsAsync(Array.Empty<ComicFileEntity>(), removedPaths);
 
         if (removed > 0 || cachedPaths.Count > 0)
         {

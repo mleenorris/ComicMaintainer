@@ -21,7 +21,7 @@ const SAVE_STEPS = {
     format: 'POST /api/settings/filename-format',
     log: 'POST /api/settings/log-max-bytes',
     padding: 'POST /api/settings/issue-number-padding',
-    cleanup: 'POST /api/settings/database-cleanup-interval-hours',
+    cleanup: 'PUT /api/settings/database-cleanup',
     metadata: 'POST /api/settings/external-series-metadata',
     images: 'POST /api/settings/series-image-limits',
     email: 'PUT /api/settings/email',
@@ -34,7 +34,7 @@ const SAVED_MESSAGE = 'Settings saved successfully! Changes to log rotation, ext
 
 // How a failure message names each group, in SAVE_STEPS order.
 const GROUP_NAMES = [
-    'filename format', 'log max size', 'issue number padding', 'database cleanup interval',
+    'filename format', 'log max size', 'issue number padding', 'database cleanup settings',
     'external metadata settings', 'series image limits', 'email settings', 'email rate limit', 'Suwayomi settings',
     'error reporting settings'
 ];
@@ -85,6 +85,11 @@ test('saving sends each settings group in order with the edited values', async (
     page.input('#logMaxSize', '7.5');
     page.input('#issueNumberPadding', '2');
     page.input('#dbCleanupInterval', '0');
+    page.input('#staleCleanupMaxRemovalPercent', '25');
+    page.input('#staleCleanupMissingGraceHours', '0');
+    page.input('#staleCleanupSentinelFile', '  .library-mounted  ');
+    page.input('#processingHistoryRetentionDays', '0');
+    page.input('#processingHistoryMaxEntries', '1000');
     page.input('#enableAniListMetadata', true);
     page.input('#comicVineApiKey', ' new-key ');
     page.input('#mangaDexBaseUrl', '   ');
@@ -127,7 +132,7 @@ test('saving sends each settings group in order with the edited values', async (
         'POST /api/settings/filename-format',
         'POST /api/settings/log-max-bytes',
         'POST /api/settings/issue-number-padding',
-        'POST /api/settings/database-cleanup-interval-hours',
+        'PUT /api/settings/database-cleanup',
         'POST /api/settings/external-series-metadata',
         'POST /api/settings/series-image-limits',
         'PUT /api/settings/email',
@@ -143,7 +148,14 @@ test('saving sends each settings group in order with the edited values', async (
     assert.deepEqual(body(page, 'format', since), { format: '{series} #{issue}' });
     assert.deepEqual(body(page, 'log', since), { maxMB: 7.5 });
     assert.deepEqual(body(page, 'padding', since), { padding: 2 });
-    assert.deepEqual(body(page, 'cleanup', since), { hours: 0 });
+    assert.deepEqual(body(page, 'cleanup', since), {
+        intervalHours: 0,
+        staleCleanupMaxRemovalPercent: 25,
+        staleCleanupMissingGraceHours: 0,
+        staleCleanupSentinelFile: '.library-mounted',
+        processingHistoryRetentionDays: 0,
+        processingHistoryMaxEntries: 1000
+    });
     assert.deepEqual(body(page, 'metadata', since), {
         enabled: true,
         comicVineApiKey: 'new-key',
@@ -363,6 +375,18 @@ const INVALID_FORMS = [
     ['log size above the server limit', { logMaxSize: '2048' }, 'Log max size must be 2047 MB or less'],
     ['missing cleanup interval', { dbCleanupInterval: '' }, 'Database cleanup interval must be 0 or greater'],
     ['negative cleanup interval', { dbCleanupInterval: '-2' }, 'Database cleanup interval must be 0 or greater'],
+    ['missing removal share', { staleCleanupMaxRemovalPercent: '' },
+        'Largest share removed without confirmation must be a whole number from 0 to 100'],
+    ['removal share above 100%', { staleCleanupMaxRemovalPercent: '101' },
+        'Largest share removed without confirmation must be a whole number from 0 to 100'],
+    ['fractional missing-file grace period', { staleCleanupMissingGraceHours: '1.5' },
+        'Remove missing files after must be a whole number of hours from 0 to 720'],
+    ['missing-file grace period above 30 days', { staleCleanupMissingGraceHours: '721' },
+        'Remove missing files after must be a whole number of hours from 0 to 720'],
+    ['negative history retention', { processingHistoryRetentionDays: '-1' },
+        'Processing history retention must be a whole number of days from 0 to 3650'],
+    ['history entries above the server limit', { processingHistoryMaxEntries: '10000001' },
+        'Maximum processing history entries must be a whole number from 0 to 10000000'],
     ['missing stored cover size', { seriesImageMaxMB: '' }, 'Max stored cover size must be a positive number'],
     ['zero stored cover size', { seriesImageMaxMB: '0' }, 'Max stored cover size must be a positive number'],
     ['missing download size', { seriesImageMaxDownloadMB: '' }, 'Max download size must be a positive number'],
@@ -429,12 +453,12 @@ const FAILED_SAVES = [
     ['padding refused with a reason', 'padding', { success: false, error: 'Padding too wide' },
         'Failed to save issue number padding: Padding too wide.', 3],
     ['padding refused', 'padding', { success: false }, 'Failed to save issue number padding.', 3],
-    ['cleanup interval rejected', 'cleanup', 500, 'Failed to save database cleanup interval: HTTP error! status: 500.', 4],
+    ['cleanup interval rejected', 'cleanup', 500, 'Failed to save database cleanup settings: HTTP error! status: 500.', 4],
     ['cleanup interval failed with a non-JSON body', 'cleanup', respond(504, 'Gateway Timeout'),
-        'Failed to save database cleanup interval: HTTP error! status: 504.', 4],
+        'Failed to save database cleanup settings: HTTP error! status: 504.', 4],
     ['cleanup interval refused with a reason', 'cleanup', { success: false, error: 'Interval too long' },
-        'Failed to save database cleanup interval: Interval too long.', 4],
-    ['cleanup interval refused', 'cleanup', { success: false }, 'Failed to save database cleanup interval.', 4],
+        'Failed to save database cleanup settings: Interval too long.', 4],
+    ['cleanup interval refused', 'cleanup', { success: false }, 'Failed to save database cleanup settings.', 4],
     ['metadata rejected', 'metadata', 500, 'Failed to save external metadata settings: HTTP error! status: 500.', 5],
     ['metadata failed with an HTML error page', 'metadata',
         respond(502, '<html><body><h1>502 Bad Gateway</h1></body></html>', { 'Content-Type': 'text/html' }),
@@ -522,7 +546,7 @@ test('after a partial save the page shows what was saved and keeps the edits for
         type: 'error',
         text: "Failed to save email settings: 'comics@' is not a valid email address (Parameter 'fromAddress'). " +
             'Only these settings were saved: filename format, log max size, issue number padding, ' +
-            'database cleanup interval, external metadata settings, series image limits.'
+            'database cleanup settings, external metadata settings, series image limits.'
     }]);
     assert.deepEqual(saveRequests(page, since), Object.values(SAVE_STEPS).slice(0, 7));
     assert.equal(page.$('#currentFormat').textContent, '{series} - {issue}', 'the saved format is now the current one');

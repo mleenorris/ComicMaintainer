@@ -60,6 +60,56 @@ public class AppSettings
     // Database cleanup settings
     public int DatabaseCleanupIntervalHours { get; set; } = 12;
 
+    /// <summary>The largest accepted <see cref="StaleCleanupMaxRemovalPercent"/>.</summary>
+    public const int MaxStaleCleanupRemovalPercent = 100;
+
+    /// <summary>The largest accepted <see cref="StaleCleanupMissingGraceHours"/> (30 days).</summary>
+    public const int MaxStaleCleanupMissingGraceHours = 720;
+
+    /// <summary>
+    /// Largest share (percent of all tracked files) that one stale-entry cleanup may delete
+    /// without explicit confirmation. A run that would delete more is skipped and logged, so
+    /// a library mount that is missing or only partly available cannot wipe the database.
+    /// Removals of at most <c>FileStoreService.StaleCleanupAlwaysAllowedRemovals</c> rows are
+    /// never blocked, so small libraries can still be tidied. 100 disables the guard.
+    /// </summary>
+    public int StaleCleanupMaxRemovalPercent { get; set; } = 10;
+
+    /// <summary>
+    /// How long (hours) a tracked file must have been missing, as seen by two cleanup runs at
+    /// least this far apart, before a cleanup deletes its row. The first run that cannot find
+    /// the file only stamps <c>MissingSince</c>, so even 0 takes a second run; a file that
+    /// reappears in the meantime keeps its row and everything stored on it. A manual cleanup
+    /// asks for confirmation before deleting a file that has not been missing this long.
+    /// </summary>
+    public int StaleCleanupMissingGraceHours { get; set; } = 6;
+
+    /// <summary>
+    /// Optional path of a file that must exist before any stale-entry cleanup runs, relative
+    /// to <see cref="WatchedDirectory"/> (or absolute). Create it on the library share (for
+    /// example <c>.comicmaintainer-library</c>) so the cleanup can tell a mounted library
+    /// from an empty mount point. Empty disables the check.
+    /// </summary>
+    public string? StaleCleanupSentinelFile { get; set; }
+
+    /// <summary>The largest accepted <see cref="ProcessingHistoryRetentionDays"/> (10 years).</summary>
+    public const int MaxProcessingHistoryRetentionDays = 3650;
+
+    /// <summary>The largest accepted <see cref="ProcessingHistoryMaxEntries"/>.</summary>
+    public const int MaxProcessingHistoryEntries = 10_000_000;
+
+    /// <summary>
+    /// Processing-history entries older than this many days are pruned by the scheduled
+    /// database cleanup. 0 keeps entries regardless of age.
+    /// </summary>
+    public int ProcessingHistoryRetentionDays { get; set; } = 90;
+
+    /// <summary>
+    /// Upper bound on the number of processing-history entries kept; the oldest are pruned by
+    /// the scheduled database cleanup. 0 disables the cap.
+    /// </summary>
+    public int ProcessingHistoryMaxEntries { get; set; } = 50000;
+
     /// <summary>
     /// Default library view shown on initial page load.
     /// Supported values: "files" (folder/file list) or "series" (grouped series grid).
@@ -216,19 +266,6 @@ public class AppSettings
     /// available, the library will show it in place of the canonical title.
     /// </summary>
     public string? DefaultPreferredLanguage { get; set; }
-
-    /// <summary>
-    /// Hard cap on the number of comic archives a single
-    /// <c>GetSeriesIssuesAsync</c> call is allowed to open from disk to
-    /// upgrade missing <c>Title</c> / <c>Issue</c> metadata. The upgrade
-    /// path is best-effort and only runs for issues whose cached DTO is
-    /// missing both fields, so most requests do zero disk reads. This cap
-    /// protects the request from pathological cases (e.g. a 1000-issue
-    /// series with no cached metadata) where the upgrade loop would
-    /// otherwise dominate the request latency. Default 100 matches the
-    /// default frontend page size.
-    /// </summary>
-    public int SeriesIssuesMaxArchiveUpgrades { get; set; } = 100;
 
     /// <summary>
     /// When true (the default), the server caches the cover (page 1) bytes of

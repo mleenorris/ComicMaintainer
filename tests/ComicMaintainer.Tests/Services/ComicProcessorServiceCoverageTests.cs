@@ -442,6 +442,33 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
                 It.Is<IEnumerable<string>>(paths => paths.Single().EndsWith("round.cbz")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+        // What was written is cached for the library, so it never has to reopen the archive.
+        _fileStore.Verify(
+            f => f.RecordArchiveMetadataAsync(
+                It.Is<string>(p => p.EndsWith("round.cbz")),
+                It.Is<ComicMetadata>(m => m.Series == "New Series" && m.Issue == "2" && m.Publisher == "Pub"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task WriteMetadataAsync_PartialWrite_CachesEverythingTheArchiveHolds()
+    {
+        var service = CreateService();
+        var path = WriteCbz("Series/partial.cbz", Xml("Old", "1", "Old Title"));
+
+        var result = await service.WriteMetadataAsync(
+            path,
+            new ComicMetadata { Series = "New Series" },
+            ComicMetadataFieldFlags.Series);
+
+        Assert.True(result.Succeeded);
+        _fileStore.Verify(
+            f => f.RecordArchiveMetadataAsync(
+                It.Is<string>(p => p.EndsWith("partial.cbz")),
+                It.Is<ComicMetadata>(m => m.Series == "New Series" && m.Issue == "1" && m.Title == "Old Title"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -781,7 +808,8 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(expectInfoLog,
             _logger.Has(LogLevel.Information, "Queued {Count} automatic ereader delivery/deliveries for {FilePath}"));
         Assert.Contains(_historyEntries, e => e.Action == "Rename" && e.Success && e.ErrorMessage == "Rename disabled");
-        Assert.Contains(_historyEntries, e => e.Action == "Process" && e.Success);
+        // Nothing about the file changed, so the run leaves no summary row.
+        Assert.DoesNotContain(_historyEntries, e => e.Action == "Process");
     }
 
     [Fact]

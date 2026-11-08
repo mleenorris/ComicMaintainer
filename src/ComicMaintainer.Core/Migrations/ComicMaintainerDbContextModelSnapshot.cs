@@ -141,6 +141,12 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<DateTime?>("LastWriteAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("MetadataScannedModified")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("MetadataScannedSize")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("MetadataSource")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -150,6 +156,9 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.Property<int>("MetadataVersion")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("MissingSince")
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("SeriesMetadataVersion")
                         .HasColumnType("INTEGER");
@@ -162,28 +171,19 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CreatedAt");
-
-                    b.HasIndex("Directory");
-
                     b.HasIndex("FileName");
 
                     b.HasIndex("FilePath")
                         .IsUnique();
 
-                    b.HasIndex("IsDuplicate");
+                    b.HasIndex("FileSize");
 
-                    b.HasIndex("IsNormalized");
+                    b.HasIndex("IsDuplicate")
+                        .HasFilter("\"IsDuplicate\"");
 
-                    b.HasIndex("IsProcessed");
-
-                    b.HasIndex("IsRead");
-
-                    b.HasIndex("IsRenamed");
+                    b.HasIndex("LastModified");
 
                     b.HasIndex("SeriesMetadataVersion");
-
-                    b.HasIndex("UpdatedAt");
 
                     b.HasIndex("Directory", "FileName");
 
@@ -475,10 +475,6 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.HasIndex("EntryId")
                         .IsUnique();
-
-                    b.HasIndex("FilePath");
-
-                    b.HasIndex("Success");
 
                     b.HasIndex("Timestamp");
 

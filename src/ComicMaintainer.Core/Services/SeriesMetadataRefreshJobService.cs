@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -20,6 +22,8 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly IFileStoreService? _fileStore;
     private readonly IComicProcessorService? _processor;
+    private readonly IOptionsMonitor<AppSettings>? _settings;
+    private readonly ISeriesNameResolver? _seriesNameResolver;
     private readonly ILogger<SeriesMetadataRefreshJobService> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<Guid, MetadataRefreshJob> _jobs = new();
@@ -34,7 +38,9 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         IEventBroadcaster? eventBroadcaster = null,
         IFileStoreService? fileStore = null,
         IComicProcessorService? processor = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOptionsMonitor<AppSettings>? settings = null,
+        ISeriesNameResolver? seriesNameResolver = null)
     {
         _cache = cache;
         _logger = logger;
@@ -42,6 +48,8 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         _fileStore = fileStore;
         _processor = processor;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _settings = settings;
+        _seriesNameResolver = seriesNameResolver;
     }
 
     public Task<Guid> StartAsync(IEnumerable<string> seriesTitles, CancellationToken cancellationToken = default)
@@ -145,18 +153,23 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     // We always include the input title so files whose
                     // SeriesName still matches the pre-refresh value get
                     // re-tagged with the freshly resolved canonical name.
-                    titlesToRetag.Add(title);
-                    if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
+                    // A lookup that found nothing has no new name to apply, so
+                    // its files keep their tags.
+                    if (record.LookupStatus is "success" or "manual_match")
                     {
-                        titlesToRetag.Add(record.CanonicalTitle);
-                    }
-                    if (record.Aliases is { Count: > 0 })
-                    {
-                        titlesToRetag.UnionWith(record.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
-                    }
-                    if (record.UserAliases is { Count: > 0 })
-                    {
-                        titlesToRetag.UnionWith(record.UserAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
+                        titlesToRetag.Add(title);
+                        if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
+                        {
+                            titlesToRetag.Add(record.CanonicalTitle);
+                        }
+                        if (record.Aliases is { Count: > 0 })
+                        {
+                            titlesToRetag.UnionWith(record.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
+                        }
+                        if (record.UserAliases is { Count: > 0 })
+                        {
+                            titlesToRetag.UnionWith(record.UserAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
+                        }
                     }
                 }
                 catch (OperationCanceledException)
@@ -257,12 +270,20 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     }
 
     /// <summary>
-    /// Enumerate every tracked comic file whose <c>Metadata.Series</c> matches
-    /// any of the just-refreshed titles (canonical title or alias) and queue
-    /// them for normalization so their per-file ComicInfo.xml is rewritten
-    /// using the updated series metadata cache. No-op when the file store or
-    /// processor services are not wired up (e.g. lightweight unit tests).
+    /// Queues a forced normalization of the tracked files that carry one of the
+    /// just-refreshed titles (canonical title or alias) in <c>Metadata.Series</c>
+    /// and still need rewriting, so their per-file ComicInfo.xml picks up the
+    /// updated series metadata cache. No-op when the file store or processor
+    /// services are not wired up (e.g. lightweight unit tests).
     /// </summary>
+    /// <remarks>
+    /// <c>ComicFiles.Metadata</c> caches every archive's tags, so a matching title
+    /// no longer means "the user edited this file": after a refresh of the whole
+    /// library most files match. Only the files whose cached <c>&lt;Series&gt;</c>
+    /// differs from what normalization would write are queued, which keeps a refresh
+    /// from opening and rewriting the whole library, and nothing is queued when the
+    /// administrator has turned normalization off.
+    /// </remarks>
     private async Task QueueFileRetagAsync(
         Guid sourceJobId,
         HashSet<string> titles,
@@ -270,16 +291,23 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     {
         if (_fileStore is null || _processor is null) return;
 
+        if (_settings?.CurrentValue.WatcherEnableNormalize == false)
+        {
+            _logger.LogWarning(
+                "Metadata refresh job {JobId} will not rewrite per-file metadata because WatcherEnableNormalize is false.",
+                sourceJobId);
+            return;
+        }
+
         var files = await _fileStore.GetAllFilesAsync(cancellationToken);
-        var matchedPaths = files
+        var matchedFiles = files
             .Where(f => !string.IsNullOrWhiteSpace(f.Metadata?.Series)
-                && titles.Contains(f.Metadata!.Series!))
-            .Select(f => f.FilePath)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+                && titles.Contains(f.Metadata!.Series!)
+                && !string.IsNullOrWhiteSpace(f.FilePath))
+            .DistinctBy(f => f.FilePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (matchedPaths.Count == 0)
+        if (matchedFiles.Count == 0)
         {
             _logger.LogInformation(
                 "Metadata refresh job {JobId} completed; no tracked files matched the refreshed series titles, nothing to retag.",
@@ -287,12 +315,60 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
             return;
         }
 
+        var pathsToRetag = await SelectFilesNeedingRetagAsync(matchedFiles, cancellationToken);
+        if (pathsToRetag.Count == 0)
+        {
+            _logger.LogInformation(
+                "Metadata refresh job {JobId} completed; all {FileCount} matching files already carry the resolved series name, nothing to retag.",
+                sourceJobId, matchedFiles.Count);
+            return;
+        }
+
         // Force re-normalization so files already flagged as normalized still
         // get rewritten with the updated series name pulled from the cache.
-        var processJobId = await _processor.NormalizeFilesAsync(matchedPaths, forceReprocess: true, cancellationToken);
+        var processJobId = await _processor.NormalizeFilesAsync(pathsToRetag, forceReprocess: true, cancellationToken);
         _logger.LogInformation(
             "Metadata refresh job {JobId} queued normalization job {ProcessJobId} for {FileCount} files to propagate updated series metadata.",
-            sourceJobId, processJobId, matchedPaths.Count);
+            sourceJobId, processJobId, pathsToRetag.Count);
+    }
+
+    /// <summary>
+    /// The files of <paramref name="candidates"/> whose cached <c>&lt;Series&gt;</c> differs
+    /// from the name normalization would write, decided without opening any archive. The
+    /// name depends only on the file's folder and its current tag, so each combination is
+    /// resolved once. Without a resolver every candidate is returned.
+    /// </summary>
+    private async Task<List<string>> SelectFilesNeedingRetagAsync(
+        IReadOnlyList<ComicFile> candidates,
+        CancellationToken cancellationToken)
+    {
+        if (_seriesNameResolver is null)
+        {
+            return candidates.Select(f => f.FilePath).ToList();
+        }
+
+        var resolvedNames = new Dictionary<(string? Folder, string? Series), string?>();
+        var paths = new List<string>();
+        foreach (var file in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var key = (Path.GetDirectoryName(file.FilePath), file.Metadata?.Series);
+            if (!resolvedNames.TryGetValue(key, out var resolved))
+            {
+                var resolution = await _seriesNameResolver.ResolveAsync(
+                    file.FilePath, file.Metadata, mutateCache: false, cancellationToken);
+                resolved = resolution.ResolvedSeries;
+                resolvedNames[key] = resolved;
+            }
+
+            if (!string.Equals(file.Metadata?.Series, resolved, StringComparison.Ordinal))
+            {
+                paths.Add(file.FilePath);
+            }
+        }
+
+        return paths;
     }
 
     // Best-effort: a failed broadcast (thrown or a faulted task) is logged and

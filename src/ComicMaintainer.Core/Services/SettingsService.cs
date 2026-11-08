@@ -217,6 +217,55 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("DatabaseCleanupIntervalHours", hours, cancellationToken);
     }
 
+    public async Task UpdateDatabaseCleanupSettingsAsync(DatabaseCleanupSettings settings, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (settings.IntervalHours < 0)
+        {
+            throw new ArgumentException("Cleanup interval hours must be non-negative (0 = only on startup)", nameof(settings));
+        }
+
+        if (settings.StaleCleanupMaxRemovalPercent is < 0 or > AppSettings.MaxStaleCleanupRemovalPercent)
+        {
+            throw new ArgumentException($"Max removal percent must be between 0 and {AppSettings.MaxStaleCleanupRemovalPercent}", nameof(settings));
+        }
+
+        if (settings.StaleCleanupMissingGraceHours is < 0 or > AppSettings.MaxStaleCleanupMissingGraceHours)
+        {
+            throw new ArgumentException($"Missing-file grace period must be between 0 and {AppSettings.MaxStaleCleanupMissingGraceHours} hours", nameof(settings));
+        }
+
+        var sentinel = string.IsNullOrWhiteSpace(settings.StaleCleanupSentinelFile) ? string.Empty : settings.StaleCleanupSentinelFile.Trim();
+        if (sentinel.Length > DatabaseCleanupSettings.MaxSentinelFileLength || sentinel.Any(char.IsControl))
+        {
+            throw new ArgumentException($"Sentinel file must be a path of at most {DatabaseCleanupSettings.MaxSentinelFileLength} characters without control characters", nameof(settings));
+        }
+
+        if (settings.ProcessingHistoryRetentionDays is < 0 or > AppSettings.MaxProcessingHistoryRetentionDays)
+        {
+            throw new ArgumentException($"History retention must be between 0 and {AppSettings.MaxProcessingHistoryRetentionDays} days (0 = keep regardless of age)", nameof(settings));
+        }
+
+        if (settings.ProcessingHistoryMaxEntries is < 0 or > AppSettings.MaxProcessingHistoryEntries)
+        {
+            throw new ArgumentException($"History max entries must be between 0 and {AppSettings.MaxProcessingHistoryEntries} (0 = no cap)", nameof(settings));
+        }
+
+        await UpdateSettingsAsync(
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["DatabaseCleanupIntervalHours"] = settings.IntervalHours,
+                ["StaleCleanupMaxRemovalPercent"] = settings.StaleCleanupMaxRemovalPercent,
+                ["StaleCleanupMissingGraceHours"] = settings.StaleCleanupMissingGraceHours,
+                // Saved as "" rather than null so clearing it also overrides appsettings.json.
+                ["StaleCleanupSentinelFile"] = sentinel,
+                ["ProcessingHistoryRetentionDays"] = settings.ProcessingHistoryRetentionDays,
+                ["ProcessingHistoryMaxEntries"] = settings.ProcessingHistoryMaxEntries
+            },
+            cancellationToken);
+    }
+
     public async Task UpdateDefaultLibraryViewAsync(string view, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(view))

@@ -10,6 +10,33 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class FileStoreService
 {
+    /// <summary>
+    /// The file filters <see cref="GetFilteredFilesAsync"/> understands, keyed by lowercase
+    /// name. Any other value selects every file.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, Func<ComicFile, bool>> FileFilters =
+        new Dictionary<string, Func<ComicFile, bool>>(StringComparer.Ordinal)
+        {
+            ["processed"] = f => f.IsProcessed,
+            ["unprocessed"] = f => !f.IsProcessed && !f.IsDuplicate,
+            ["duplicates"] = f => f.IsDuplicate,
+            ["renamed"] = f => f.IsRenamed,
+            ["normalized"] = f => f.IsNormalized,
+            ["read"] = f => f.IsRead,
+            ["unread"] = f => !f.IsRead,
+        };
+
+    /// <summary>
+    /// The canonical form of a file filter, or <c>null</c> when it selects every file
+    /// (blank or not a known filter), so callers caching per filter do not keep a separate
+    /// entry for each value a client happens to send.
+    /// </summary>
+    public static string? NormalizeFileFilter(string? filter)
+    {
+        var normalized = filter?.Trim().ToLowerInvariant();
+        return normalized is not null && FileFilters.ContainsKey(normalized) ? normalized : null;
+    }
+
     public async Task<IEnumerable<ComicFile>> GetAllFilesAsync(CancellationToken cancellationToken = default)
     {
         var files = _files.Values.Select(f => f.ShallowCopy()).ToList();
@@ -36,18 +63,8 @@ public partial class FileStoreService
             var filterLower = filter.ToLower();
             _logger.LogDebug("GetFilteredFilesAsync: Applying filter: '{Filter}'", filterLower);
             
-            files = filterLower switch
-            {
-                "processed" => files.Where(f => f.IsProcessed),
-                "unprocessed" => files.Where(f => !f.IsProcessed && !f.IsDuplicate),
-                "duplicates" => files.Where(f => f.IsDuplicate),
-                "renamed" => files.Where(f => f.IsRenamed),
-                "normalized" => files.Where(f => f.IsNormalized),
-                "read" => files.Where(f => f.IsRead),
-                "unread" => files.Where(f => !f.IsRead),
-                _ => files
-            };
-            
+            files = FileFilters.TryGetValue(filterLower, out var predicate) ? files.Where(predicate) : files;
+
             var filteredList = files.ToList();
             _logger.LogDebug("GetFilteredFilesAsync: Filter '{Filter}' resulted in {FilteredCount} files (reduced from {TotalFiles})", 
                 filterLower, filteredList.Count, totalFileCount);

@@ -59,7 +59,7 @@ public class SeriesLibrarySnapshotCacheTests
     };
 
     private SeriesLibraryService CreateService(IUserContextAccessor? user) => new(
-        _fileStore.Object,
+        _fileStore.Object,
         _metadataCache.Object,
         _settings.Object,
         new Mock<ILogger<SeriesLibraryService>>().Object,
@@ -151,11 +151,39 @@ public class SeriesLibrarySnapshotCacheTests
     public async Task DifferentFileFilters_GetSeparateSnapshots()
     {
         var service = CreateService(_user);
-        await service.GetSeriesSummariesAsync(filter: "unmarked");
+        await service.GetSeriesSummariesAsync(filter: "processed");
         await service.GetSeriesSummariesAsync(filter: null);
-        await service.GetSeriesSummariesAsync(filter: "unmarked");
+        await service.GetSeriesSummariesAsync(filter: "processed");
 
         VerifyBuilds(2);
+    }
+
+    [Fact]
+    public async Task UnknownFileFilters_ShareTheUnfilteredSnapshot()
+    {
+        // Each distinct ?filter= value a client sends must not cost another snapshot and
+        // another build lock kept forever.
+        var service = CreateService(_user);
+        await service.GetSeriesSummariesAsync(filter: null);
+        await service.GetSeriesSummariesAsync(filter: "bogus-1");
+        await service.GetSeriesSummariesAsync(filter: "bogus-2");
+        await service.GetSeriesSummariesAsync(filter: "   ");
+
+        VerifyBuilds(1);
+        _fileStore.Verify(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("processed", "processed")]
+    [InlineData("  ProCessed ", "processed")]
+    [InlineData("unread", "unread")]
+    [InlineData("matched", null)]
+    [InlineData("bogus", null)]
+    [InlineData("   ", null)]
+    [InlineData(null, null)]
+    public void NormalizeFileFilter_KeepsOnlyWhatTheStoreUnderstands(string? filter, string? expected)
+    {
+        Assert.Equal(expected, FileStoreService.NormalizeFileFilter(filter));
     }
 
     [Fact]

@@ -48,7 +48,9 @@ public partial class SeriesLibraryService
         string? filter,
         CancellationToken cancellationToken)
     {
-        var normalizedFilter = string.IsNullOrWhiteSpace(filter) ? null : filter.Trim().ToLowerInvariant();
+        // Filters the file store does not know select everything, so they share the unfiltered
+        // snapshot; the client-supplied text never becomes a cache or build-lock key.
+        var normalizedFilter = FileStoreService.NormalizeFileFilter(filter);
         var bakeReadState = _fileStore is not IUserReadStateSource;
         var perUser = bakeReadState || IsReadStateFilter(normalizedFilter);
 
@@ -84,7 +86,7 @@ public partial class SeriesLibraryService
                 return cached;
             }
 
-            var snapshot = await BuildGroupsSnapshotAsync(filter, bakeReadState, versions, cancellationToken);
+            var snapshot = await BuildGroupsSnapshotAsync(normalizedFilter, bakeReadState, versions, cancellationToken);
 
             // Drop snapshots that can never be served again, each judged by its own
             // versions (another user's read-filtered view survives as long as that

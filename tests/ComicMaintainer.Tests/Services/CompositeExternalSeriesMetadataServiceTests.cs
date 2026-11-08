@@ -93,8 +93,10 @@ public class CompositeExternalSeriesMetadataServiceTests
             .Returns(async (string _, CancellationToken token) =>
             {
                 // Only completes once the second provider has been asked, which
-                // a sequential chain would never do.
-                await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+                // a sequential chain would never do: it would wait out the
+                // composite's per-provider budget and fail the lookup instead.
+                // No wall-clock limit of its own, so a slow machine cannot fail it.
+                await secondStarted.Task.WaitAsync(token);
                 return Meta("Berserk", "First");
             });
         var second = Provider("Second");

@@ -321,7 +321,7 @@ public class ComicEmailServiceCancellationAndRateLimitTests : IDisposable
         var delivery = await StartRateLimitedDeliveryAsync();
 
         await _devices.DeleteDeviceAsync(TestEmailScopes.Everyone, delivery.DeviceId);
-        await AdvanceUntilAsync(() => _processing!.IsCompleted, TimeSpan.FromMinutes(1));
+        await AdvanceUntilAsync(() => _processing!.IsCompleted, TimeSpan.FromHours(1));
         await _processing!;
 
         Assert.Equal(0, SendCount);

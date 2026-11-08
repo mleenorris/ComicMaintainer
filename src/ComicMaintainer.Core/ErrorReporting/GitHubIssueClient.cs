@@ -334,7 +334,9 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         }
 
         var status = response.StatusCode;
-        var isRateLimited = IsRateLimited(response) || status == HttpStatusCode.TooManyRequests;
+        var isRateLimited = IsRateLimited(response)
+            || status == HttpStatusCode.TooManyRequests
+            || (status == HttpStatusCode.Forbidden && await SaysRateLimitedAsync(response, cancellationToken));
         var retryAfter = GetRetryAfter(response, isRateLimited);
         var isAssigneeRejection = status == HttpStatusCode.UnprocessableEntity
             && await IsAssigneeValidationFailureAsync(response, cancellationToken);
@@ -343,8 +345,9 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         // A rate-limited or unavailable GitHub is a "come back later"; anything
         // else is a misconfiguration that retrying would only turn into an
         // endless loop of rejected requests. Secondary rate limits arrive as a
-        // 403 rather than a 429, so the rate-limit headers decide rather than
-        // the status code alone — a permissions 403 stays permanent.
+        // 403 rather than a 429, so the rate-limit headers and GitHub's message
+        // decide rather than the status code alone — a permissions 403 stays
+        // permanent.
         if (isRateLimited
             || status is HttpStatusCode.RequestTimeout
             or HttpStatusCode.InternalServerError
@@ -461,6 +464,28 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
     }
 
     /// <summary>
+    /// Detects a rate limit GitHub announces only in words: a secondary rate
+    /// limit can be a 403 with neither Retry-After nor an exhausted quota, and
+    /// treating it as a permanent rejection would park the report until the
+    /// configuration changes. Only <c>message</c> is inspected; the rest of the
+    /// body is discarded.
+    /// </summary>
+    private static async Task<bool> SaysRateLimitedAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var body = await ReadJsonAsync<ErrorMessageResponse>(response.Content, cancellationToken);
+            return body?.Message?.Contains("rate limit", StringComparison.OrdinalIgnoreCase) == true;
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or HttpRequestException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Detects the specific validation failure that says the assignee could not
     /// be assigned. Only the <c>field</c>/<c>resource</c> markers are inspected;
     /// the rest of the body (which echoes the reported error text) is discarded.
@@ -523,6 +548,11 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         /// <summary>Present only on pull requests, which the issues listing includes.</summary>
         [JsonPropertyName("pull_request")]
         public JsonElement? PullRequest { get; init; }
+    }
+
+    private sealed record ErrorMessageResponse
+    {
+        public string? Message { get; init; }
     }
 
     private sealed record ValidationErrorResponse

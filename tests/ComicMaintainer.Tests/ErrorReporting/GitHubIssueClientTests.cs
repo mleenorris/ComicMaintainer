@@ -274,6 +274,29 @@ public sealed class GitHubIssueClientTests
     }
 
     [Theory]
+    [InlineData("You have exceeded a secondary rate limit. Please wait a few minutes before you try again.")]
+    [InlineData("API rate limit exceeded for user ID 1.")]
+    public async Task ForbiddenResponses_ThatOnlySayTheyAreRateLimited_AreTransientAndWaitAMinute(string message)
+    {
+        var (client, _, _) = CreateClient(_ => Json(HttpStatusCode.Forbidden, JsonSerializer.Serialize(new { message })));
+
+        var ex = await Assert.ThrowsAsync<GitHubIssueTransientException>(() => CreateIssue(client));
+
+        Assert.Equal(TimeSpan.FromMinutes(1), ex.RetryAfter);
+        Assert.False(ex.MayHaveSucceeded);
+    }
+
+    [Fact]
+    public async Task ForbiddenResponses_MentioningARateLimitOutsideTheMessage_StayPermanent()
+    {
+        var (client, _, _) = CreateClient(_ => Json(
+            HttpStatusCode.Forbidden,
+            """{ "message": "Resource not accessible by integration", "documentation_url": "see the rate limit docs" }"""));
+
+        await Assert.ThrowsAsync<GitHubIssuePermanentException>(() => CreateIssue(client));
+    }
+
+    [Theory]
     [InlineData("0", true)]
     [InlineData("-1", true)]
     [InlineData("12", false)]

@@ -710,7 +710,7 @@
                                 <span>Convert CBR/RAR to CBZ when writing tags</span>
                             </label>
                             <small class="form-hint form-hint--indent">
-                                Only CBZ files can be rewritten in place. When enabled, writing tags (normalize, tag edits, batch updates) to a CBR, RAR or ZIP file saves it as a CBZ with the same name and removes the original; its read status and reading progress move with it. When disabled, those files are never modified: tag edits are kept in the database only and normalize leaves them as they are.
+                                Only CBZ files can be rewritten in place. When enabled, writing tags (normalize, tag edits, batch updates) to a CBR, RAR or ZIP file saves it as a CBZ with the same name and removes the original; its read status and reading progress move with it. When disabled, those files are never modified: tag edits are kept in the database only, and files that normalize would change stay unprocessed; process them again after turning this on to normalize and convert them.
                             </small>
                         </div>
                     </section>

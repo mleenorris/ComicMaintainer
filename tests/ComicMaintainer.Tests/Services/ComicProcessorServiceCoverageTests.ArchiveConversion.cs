@@ -255,8 +255,10 @@ public partial class ComicProcessorServiceCoverageTests
     }
 
     [Fact]
-    public async Task NormalizeFilesAsync_CbrWithConversionOff_LeavesTheArchiveAndRecordsWhy()
+    public async Task NormalizeFilesAsync_CbrWithConversionOff_LeavesTheArchiveAndTheFileNotNormalized()
     {
+        // The normalize could not be written, so the file must not be marked normalized: it
+        // would never be normalized once the setting is turned on.
         _settings.ConvertRarToCbzOnWrite = false;
         var service = CreateService();
         var cbr = WriteCbr("Series/Series Ch 4.cbr", Xml("Wrong", null, null));
@@ -264,12 +266,90 @@ public partial class ComicProcessorServiceCoverageTests
 
         var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { cbr }));
 
-        Assert.Equal(0, job.FailedFiles);
+        Assert.Equal(1, job.FailedFiles);
         Assert.Equal(before, await File.ReadAllBytesAsync(cbr));
         Assert.False(File.Exists(Path.ChangeExtension(cbr, ".cbz")));
-        _fileStore.Verify(f => f.MarkFileNormalizedAsync(cbr, true, It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.Success &&
-            e.ErrorMessage == "Archive not rewritten: converting CBR/RAR to CBZ is turned off");
+        _fileStore.Verify(f => f.MarkFileNormalizedAsync(cbr, false, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && !e.Success &&
+            e.ErrorMessage == ComicProcessorService.NormalizeNotWritableMessage);
+    }
+
+    [Fact]
+    public async Task NormalizeFilesAsync_CbrWithConversionOff_IsStampedSoTheStaleMetadataPassDoesNotRetryIt()
+    {
+        _settings.ConvertRarToCbzOnWrite = false;
+        var cache = CreateCache();
+        cache.Setup(c => c.GetAsync("series", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord { MetadataVersion = 7 });
+        var service = CreateService(cache: cache.Object);
+        var cbr = WriteCbr("Series/Series Ch 4.cbr", Xml("Wrong", null, null));
+
+        await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { cbr }));
+
+        _fileStore.Verify(f => f.SetFileSeriesMetadataVersionAsync(cbr, 7, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.MarkFileNormalizedAsync(cbr, false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NormalizeAndRenameFilesAsync_CbrWithConversionOff_RenamesButDoesNotMarkItNormalized()
+    {
+        _settings.ConvertRarToCbzOnWrite = false;
+        var service = CreateService();
+        var cbr = WriteCbr("Series/Series Ch 7.cbr", Xml("Series", "7", null));
+        var before = await File.ReadAllBytesAsync(cbr);
+        var renamed = Path.Join(_library, "Series", "Series - Chapter 0007.cbr");
+
+        var job = await RunJobAsync(service, s => s.NormalizeAndRenameFilesAsync(new[] { cbr }));
+
+        Assert.Equal(1, job.FailedFiles);
+        Assert.Equal(before, await File.ReadAllBytesAsync(renamed));
+        Assert.False(File.Exists(cbr));
+        _fileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_CbrWithConversionOff_StaysUnprocessedUntilConversionIsTurnedOn()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
+            options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
+        using var provider = services.BuildServiceProvider();
+        var fileStore = new FileStoreService(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            NullLogger<FileStoreService>.Instance,
+            provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
+        _settings.ConvertRarToCbzOnWrite = false;
+        var cbr = WriteCbr("Series/Series Ch 4.cbr", Xml("Wrong", null, null));
+        var before = await File.ReadAllBytesAsync(cbr);
+        await fileStore.AddFileAsync(cbr);
+        var service = CreateService(fileStore: fileStore);
+
+        // Off: the archive is renamed (with the normalized values) but never rewritten, and the
+        // file shows as unprocessed.
+        Assert.True(await service.ProcessFileAsync(cbr));
+
+        var renamedCbr = Path.Join(_library, "Series", "Series - Chapter 0004.cbr");
+        Assert.Equal(before, await File.ReadAllBytesAsync(renamedCbr));
+        var pending = await fileStore.GetFileAsync(renamedCbr);
+        Assert.NotNull(pending);
+        Assert.True(pending!.IsRenamed);
+        Assert.False(pending.IsNormalized);
+        Assert.Contains(await fileStore.GetFilteredFilesAsync("unprocessed"), f => f.FilePath == renamedCbr);
+
+        // On: the next processing run normalizes it into a CBZ.
+        _settings.ConvertRarToCbzOnWrite = true;
+        Assert.True(await service.ProcessFileAsync(renamedCbr));
+
+        var cbz = Path.ChangeExtension(renamedCbr, ".cbz");
+        Assert.False(File.Exists(renamedCbr));
+        var info = ReadComicInfo(cbz)!;
+        Assert.Equal("Series", info.Element("Series")?.Value);
+        Assert.Equal("4", info.Element("Number")?.Value);
+        var processed = await fileStore.GetFileAsync(cbz);
+        Assert.NotNull(processed);
+        Assert.True(processed!.IsNormalized);
+        Assert.True(processed.IsProcessed);
     }
 
     [Fact]

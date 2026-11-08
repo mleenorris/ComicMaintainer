@@ -241,11 +241,15 @@ public partial class ComicProcessorService
             {
                 // Normalize can convert a CBR/RAR to a CBZ; the rename follows the file there.
                 var normalized = await NormalizeFileWithResultAsync(filePath, true, token);
-                if (!normalized.Succeeded)
+                if (!normalized.Succeeded && !normalized.ArchiveNotWritable)
                 {
                     return false;
                 }
-                return await RenameFileCoreAsync(normalized.FilePath, true, token);
+
+                // A CBR/RAR/ZIP that is not rewritten while converting to CBZ is off is still
+                // renamed (a rename never rewrites the archive), but stays not normalized.
+                var renamed = await RenameFileCoreAsync(normalized.FilePath, true, token);
+                return renamed && normalized.Succeeded;
             },
             "Normalize and rename failed",
             cancellationToken);

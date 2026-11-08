@@ -31,10 +31,23 @@ public partial class ComicProcessorService
         (await NormalizeFileWithResultAsync(filePath, forceReprocess, cancellationToken)).Succeeded;
 
     /// <summary>
-    /// Normalizes one file and returns whether it succeeded and where the file is afterwards: a
-    /// CBR/RAR/ZIP that normalize wrote is a new CBZ (see <see cref="UpdateMetadataCoreAsync"/>).
+    /// The outcome of normalizing one file.
     /// </summary>
-    private async Task<(bool Succeeded, string FilePath)> NormalizeFileWithResultAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
+    /// <param name="Succeeded">True when the file's metadata is normalized.</param>
+    /// <param name="FilePath">
+    /// Where the file is afterwards: a CBR/RAR/ZIP that normalize wrote is a new CBZ
+    /// (see <see cref="UpdateMetadataCoreAsync"/>).
+    /// </param>
+    /// <param name="ArchiveNotWritable">
+    /// True when the file needs normalizing but is a CBR/RAR/ZIP that is not rewritten because
+    /// converting them to CBZ is turned off (see <see cref="DeferUnwritableNormalizeAsync"/>).
+    /// </param>
+    private readonly record struct NormalizeFileResult(bool Succeeded, string FilePath, bool ArchiveNotWritable = false);
+
+    /// <summary>
+    /// Normalizes one file and returns whether it succeeded and where the file is afterwards.
+    /// </summary>
+    private async Task<NormalizeFileResult> NormalizeFileWithResultAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
     {
         try
         {
@@ -44,7 +57,7 @@ public partial class ComicProcessorService
             if (!forceReprocess && await _fileStore.IsFileNormalizedAsync(filePath, cancellationToken))
             {
                 _logger.LogInformation("NormalizeFileAsync: File already normalized (database), skipping: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                return (true, filePath);
+                return new(true, filePath);
             }
 
             _logger.LogDebug("NormalizeFileAsync: Checking if file exists and is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -54,7 +67,7 @@ public partial class ComicProcessorService
                 _logger.LogWarning("NormalizeFileAsync: File not found or not a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", false, "File not found or not a comic archive", cancellationToken);
-                return (false, filePath);
+                return new(false, filePath);
             }
 
             _logger.LogDebug("NormalizeFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -67,7 +80,7 @@ public partial class ComicProcessorService
                 _logger.LogWarning("NormalizeFileAsync: No metadata found for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", false, "No metadata found", cancellationToken);
-                return (false, filePath);
+                return new(false, filePath);
             }
 
             _logger.LogDebug("NormalizeFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}, Title: {Title}", 
@@ -88,7 +101,7 @@ public partial class ComicProcessorService
                 var filename = Path.GetFileName(filePath);
                 await LogHistoryWithChangesAsync(filePath, "Normalize", true, "File already normalized",
                     filename, filename, metadata, metadata, cancellationToken);
-                return (true, filePath);
+                return new(true, filePath);
             }
             
             _logger.LogDebug("NormalizeFileAsync: File needs normalization, updating metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -99,6 +112,12 @@ public partial class ComicProcessorService
 
             // Write only the fields normalize owns into ComicInfo.xml; every other element stays.
             var write = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken);
+            if (write.Outcome == MetadataWriteOutcome.NotWritable)
+            {
+                await DeferUnwritableNormalizeAsync(filePath, normalizedMetadata.Series, cancellationToken);
+                return new(false, filePath, ArchiveNotWritable: true);
+            }
+
             var success = write.Succeeded;
             var beforeFilename = Path.GetFileName(filePath);
             filePath = write.FilePath;
@@ -117,7 +136,7 @@ public partial class ComicProcessorService
                 await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
             }
             
-            return (success, filePath);
+            return new(success, filePath);
         }
         // A cancelled job didn't fail this file: leave it and its stored state as they are.
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -129,7 +148,7 @@ public partial class ComicProcessorService
             _logger.LogError(ex, "NormalizeFileAsync: Error normalizing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
             await LogHistoryAsync(filePath, "Normalize", false, ex.Message, cancellationToken);
-            return (false, filePath);
+            return new(false, filePath);
         }
     }
 
@@ -252,10 +271,34 @@ public partial class ComicProcessorService
     private static string? DescribeUnwrittenOutcome(MetadataWriteResult write) => write.Outcome switch
     {
         MetadataWriteOutcome.Unchanged => "ComicInfo.xml already up to date",
-        MetadataWriteOutcome.NotWritable => "Archive not rewritten: converting CBR/RAR to CBZ is turned off",
         MetadataWriteOutcome.KeptInDatabase => "Kept in the database: converting CBR/RAR to CBZ is turned off",
         _ => null
     };
+
+    /// <summary>
+    /// The history note for a normalize that could not be written (see
+    /// <see cref="DeferUnwritableNormalizeAsync"/>).
+    /// </summary>
+    internal const string NormalizeNotWritableMessage =
+        "Not normalized: converting CBR/RAR/ZIP to CBZ is turned off, so the archive was left unchanged";
+
+    /// <summary>
+    /// Records a normalize whose result could not be written: the file is a CBR, RAR or ZIP and
+    /// converting them to CBZ is turned off. The file stays marked as not normalized, so it shows
+    /// as unprocessed and the next Process or Normalize writes it once the setting is turned on;
+    /// nothing is lost by not storing the normalized values, since they are worked out again
+    /// then. It is still stamped with the current series-metadata version, so the library scan's
+    /// stale-metadata pass does not retry it on every run while the setting is off.
+    /// </summary>
+    private async Task DeferUnwritableNormalizeAsync(string filePath, string? normalizedSeries, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Not normalizing {FilePath}: converting CBR/RAR/ZIP archives to CBZ is turned off, so it stays unprocessed until the setting is turned on",
+            LoggingHelper.SanitizePathForLog(filePath));
+        await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
+        await StampSeriesMetadataVersionAsync(filePath, normalizedSeries, cancellationToken);
+        await LogHistoryAsync(filePath, "Normalize", false, NormalizeNotWritableMessage, cancellationToken);
+    }
 
     /// <summary>
     /// When a file's metadata is missing the issue/chapter number but the

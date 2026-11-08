@@ -176,7 +176,7 @@ public partial class ComicProcessorService
                         // Use the normalized metadata for the rename phase so the new filename
                         // reflects the resolved series name and any populated issue/title.
                         metadata = normalizedMetadata;
-                        fileChanged = normalizeWrite.Outcome == MetadataWriteOutcome.Written;
+                        fileChanged = normalizeWrite.Outcome is MetadataWriteOutcome.Written or MetadataWriteOutcome.ConvertedToCbz;
                     }
                     else
                     {

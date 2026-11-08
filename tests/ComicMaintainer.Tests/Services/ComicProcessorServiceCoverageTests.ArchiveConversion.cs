@@ -316,6 +316,19 @@ public partial class ComicProcessorServiceCoverageTests
     }
 
     [Fact]
+    public async Task ProcessFileAsync_ConversionTheOnlyChange_IsRecordedInTheHistory()
+    {
+        var service = CreateService();
+        // Already named as the rename would name it, so converting is all that changes the file.
+        var cbr = WriteCbr("Series/Series - Chapter 0005.cbr", Xml(null, null, null));
+
+        Assert.True(await service.ProcessFileAsync(cbr));
+
+        Assert.True(File.Exists(Path.ChangeExtension(cbr, ".cbz")));
+        Assert.Contains(_historyEntries, e => e.Action == "Process" && e.Success);
+    }
+
+    [Fact]
     public async Task NormalizeAndRenameFilesAsync_CbrWithConversionOn_RenamesTheConvertedCbz()
     {
         var service = CreateService();

@@ -35,6 +35,14 @@ mkdir -p "${WATCH_DIR}" "${DUP_DIR}" "${HOST_CONFIG_DIR}"
 log()  { echo "[smoke] $*"; }
 fail() { echo "[smoke][FAIL] $*" >&2; dump_logs; cleanup; exit 1; }
 
+# Whether the container's logs match the given grep arguments. No pipeline feeds grep: under pipefail, grep -q stopping
+# at its first match could end whatever is still writing to it with SIGPIPE, and the check would report no match.
+container_logs_match() {
+    local logs
+    logs="$(docker logs "${CONTAINER_NAME}" 2>&1 || true)"
+    grep -q "$@" <<<"${logs}"
+}
+
 dump_logs() {
     echo "----- container logs (${CONTAINER_NAME}) -----" >&2
     docker logs "${CONTAINER_NAME}" 2>&1 | tail -200 >&2 || true
@@ -140,7 +148,7 @@ admin_password_owner_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%
 # handed to PUID, so the app user can write it and the entrypoint does not warn that it cannot.
 library_owner_mode="$(docker exec --user 0 "${CONTAINER_NAME}" stat -c '%u:%g %a' /watched_dir)"
 [ "${library_owner_mode}" = "10001:10001 775" ] || fail "/watched_dir is ${library_owner_mode}, expected 10001:10001 775"
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q 'cannot write to'; then
+if container_logs_match 'cannot write to'; then
     fail "The entrypoint warned that the app user cannot write to a library folder"
 fi
 
@@ -151,7 +159,7 @@ processed=0
 # Patterns indicating the watcher noticed the file. Any one is sufficient.
 patterns='smoke-test\.cbz|File watcher started|Found .* comic files|Incremental scan'
 while [ "$(date +%s)" -lt "${deadline}" ]; do
-    if docker logs "${CONTAINER_NAME}" 2>&1 | grep -E -q "${patterns}"; then
+    if container_logs_match -E "${patterns}"; then
         processed=1
         break
     fi

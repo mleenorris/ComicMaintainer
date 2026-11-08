@@ -293,6 +293,19 @@ public sealed class WorkflowTests
         Assert.All(new[] { "NU1900", "NU1901", "NU1902", "NU1903", "NU1904", "NU1905" }, code => Assert.Contains(code, exempt));
     }
 
+    [Fact]
+    public void ContainerSmokeTest_ReadsTheLogsBeforeSearchingThem()
+    {
+        // The script runs under pipefail, where grep -q stopping at its first match can end a still-writing docker logs
+        // with SIGPIPE. The check then reports no match: a release is blocked, or a warning goes unnoticed.
+        var repositoryRoot = Path.GetDirectoryName(Path.GetDirectoryName(WorkflowDirectory))!;
+        var script = File.ReadAllText(Path.Join(repositoryRoot, "scripts", "container-smoke-test.sh"));
+
+        Assert.Contains("set -euo pipefail", script);
+        Assert.DoesNotMatch(@"docker logs[^\n]*\|\s*grep\b", script);
+        Assert.Contains("grep -q \"$@\" <<<\"${logs}\"", script);
+    }
+
     private static string WorkflowDirectory
     {
         get

@@ -180,6 +180,30 @@ public interface IFileStoreService
     Task<IReadOnlyList<string>> GetProcessingPendingFilesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Whether the file watcher has completely scanned <paramref name="directory"/>, or a
+    /// directory containing it, at some point (see <see cref="RecordLibraryScannedAsync"/>):
+    /// then an untracked comic under it arrived since, rather than belonging to a collection
+    /// the application has not seen yet. False when that cannot be read.
+    /// </summary>
+    Task<bool> IsLibraryScannedAsync(string directory, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records that the file watcher has completely scanned <paramref name="directory"/>,
+    /// adding every comic under it to the store. Replaces the directory recorded before, so a
+    /// directory the watcher stopped watching has to be scanned completely again.
+    /// </summary>
+    Task RecordLibraryScannedAsync(string directory, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Holds off <see cref="CleanupStaleEntriesAsync"/> until the returned lease is disposed.
+    /// The file watcher takes it while it matches the files it finds on disk with the tracked
+    /// files missing from their paths (files moved while it was not watching): until it has
+    /// moved their rows to the new paths, those rows look stale, and pruning them would lose
+    /// their processing state, user metadata edits and read state.
+    /// </summary>
+    IDisposable SuspendStaleCleanup();
+
+    /// <summary>
     /// Re-reads the on-disk size and last-write time of each tracked file in
     /// <paramref name="filePaths"/> and stores them as <c>FileSize</c> /
     /// <c>LastModified</c> (local time, matching <see cref="AddFileAsync"/>).

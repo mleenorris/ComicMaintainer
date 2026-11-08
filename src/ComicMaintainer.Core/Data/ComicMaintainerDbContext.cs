@@ -34,6 +34,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<SeriesEmailSubscriptionEntity> SeriesEmailSubscriptions { get; set; } = null!;
     public DbSet<ComicEmailDeliveryEntity> ComicEmailDeliveries { get; set; } = null!;
     public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
+    public DbSet<LibraryScanEntity> LibraryScans { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -336,7 +337,32 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             // Supports the rolling "issues created in the last 24 hours" cap.
             entity.HasIndex(e => e.IssueCreatedAt);
         });
+
+        // Configure LibraryScanEntity
+        modelBuilder.Entity<LibraryScanEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Directory).IsRequired().HasMaxLength(2048);
+            entity.HasIndex(e => e.Directory).IsUnique();
+        });
     }
+}
+
+/// <summary>
+/// The watched directory the file watcher last scanned completely, every comic under it added
+/// to the store. A file the store does not track under a directory scanned this way arrived
+/// after that scan, so the watcher's catch-up at its next start processes it; under any other
+/// directory it may belong to a collection the application has not seen yet, which the
+/// catch-up only adds. The store keeps one row, replaced by each newly scanned directory.
+/// </summary>
+public class LibraryScanEntity
+{
+    public int Id { get; set; }
+
+    /// <summary>The scanned directory, a full path without a trailing separator.</summary>
+    public string Directory { get; set; } = string.Empty;
+
+    public DateTime CompletedAt { get; set; }
 }
 
 /// <summary>

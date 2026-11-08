@@ -152,6 +152,55 @@ public sealed class FileWatcherServiceDirectoryChangeTests : IDisposable
         _store.Verify(s => s.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
     }
 
+    /// <summary>
+    /// The processor rewrites an archive with File.Replace(temp, archive, archive + ".backup"),
+    /// which on Windows is reported as the archive being renamed to its backup name and a new
+    /// file appearing at its path. The archive never left the library: its row, with its
+    /// processing state, user metadata edits and field locks, must not be removed.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ArchiveRewrittenWithFileReplace_IsNotRemovedFromTheStore(bool tempFileInTheLibrary)
+    {
+        var series = CreateSeries("Akira", "Akira 001.cbz", "Akira 002.cbz");
+        var comic = Path.Join(series, "Akira 001.cbz");
+        var renamedAway = Path.Join(series, "Akira 002.cbz");
+        await StartWatchingAsync();
+
+        // What ComicProcessorService.ReplaceFileWithRetryAsync does.
+        var temp = Path.Join(tempFileInTheLibrary ? series : _staging, $".tmp_{Guid.NewGuid()}.cbz");
+        File.WriteAllText(temp, "rewritten");
+        File.Replace(temp, comic, comic + ".backup");
+        File.Delete(comic + ".backup");
+
+        // A comic really renamed away is removed through the same path, after the rewrite's
+        // events: once it is, they have all been handled.
+        File.Move(renamedAway, renamedAway + ".bak");
+        await WaitUntilAsync(() => RemoveFileCalledFor(renamedAway), $"{renamedAway} to be removed");
+
+        Assert.False(RemoveFileCalledFor(comic), $"{comic} was removed from the store although it was only rewritten");
+        Assert.Equal("rewritten", File.ReadAllText(comic));
+    }
+
+    [Fact]
+    public async Task ComicRenamedAsideAndReplacedByAnotherFile_IsNotRemovedFromTheStore()
+    {
+        var series = CreateSeries("Akira", "Akira 001.cbz");
+        var comic = Path.Join(series, "Akira 001.cbz");
+        await StartWatchingAsync(stabilitySeconds: 1);
+
+        // A tool's safe save: keep the old file aside, then move the new one into place.
+        File.Move(comic, comic + ".bak");
+        MoveIn("Akira 001.cbz", series);
+
+        await WaitForLogAsync($"File was replaced in place rather than renamed away, keeping it: {comic}");
+        Assert.False(RemoveFileCalledFor(comic), $"{comic} was removed from the store although it was replaced in place");
+    }
+
+    private bool RemoveFileCalledFor(string path) =>
+        _store.Invocations.Any(i => i.Method.Name == nameof(IFileStoreService.RemoveFileAsync) && Equals(i.Arguments[0], path));
+
     private string CreateSeries(string name, params string[] fileNames)
     {
         var directory = Path.Join(_library, name);

@@ -879,9 +879,10 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         if (IsComicFile(e.OldFullPath) && !Directory.Exists(e.FullPath))
         {
             // A comic renamed to a name that is not a comic ("x.cbz" -> "x.cbz.bak") has left
-            // the library just as if it had been deleted.
+            // the library just as if it had been deleted, unless the rename was the first step
+            // of replacing it in place, see ForgetRenamedAwayFile.
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File renamed to a non-comic name: {OldPath} -> {NewPath}"), e.OldFullPath, e.FullPath);
-            ForgetFile(e.OldFullPath);
+            ForgetRenamedAwayFile(e.OldFullPath);
             return;
         }
 
@@ -935,6 +936,41 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         CancelPending(e.FullPath);
         CancelPendingUnder(e.FullPath);
         QueueDirectoryWork(() => _fileStore.RemoveDirectoryAsync(e.FullPath));
+    }
+
+    /// <summary>
+    /// Stops tracking a comic renamed to a non-comic name once the file has settled, unless its
+    /// path holds a file again by then.
+    /// <para>
+    /// Renaming a file aside is how many tools replace it safely: on Windows, File.Replace
+    /// (which the processor and other taggers use to rewrite an archive) renames the original to
+    /// its backup name and then moves the new archive into place, and the second step may be
+    /// reported as a creation rather than a rename. The file never left the library, so its
+    /// row (processing state, user metadata edits and field locks) must stay. The processor's
+    /// own backup name is ignored outright (see <see cref="IsTemporaryFile"/>); this check
+    /// covers every other tool.
+    /// </para>
+    /// </summary>
+    private void ForgetRenamedAwayFile(string filePath)
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, _settings.WatcherFileStabilityDelaySeconds)));
+
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (File.Exists(filePath))
+            {
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                    "File was replaced in place rather than renamed away, keeping it: {Path}"), filePath);
+                return;
+            }
+
+            ForgetFile(filePath);
+        });
     }
 
     /// <summary>
@@ -1578,24 +1614,39 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     }
 
     /// <summary>
+    /// The suffix the processor appends to an archive's name for the backup it keeps while it
+    /// replaces the archive (see ComicProcessorService.ReplaceFileWithRetryAsync).
+    /// </summary>
+    private const string ArchiveBackupSuffix = ".backup";
+
+    /// <summary>
     /// Check if a file is a temporary file that should be ignored
     /// </summary>
     private static bool IsTemporaryFile(string path)
     {
         var fileName = Path.GetFileName(path);
-        
+
         // Ignore files starting with .tmp_ (common temporary file pattern)
         if (fileName.StartsWith(".tmp_", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
-        
+
         // Ignore files with .tmp extension
         if (path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
-        
+
+        // Ignore the backup the processor keeps while it rewrites an archive ("x.cbz.backup").
+        // On Windows, File.Replace reports moving the archive to it as a rename, which is not
+        // the archive leaving the library.
+        if (fileName.EndsWith(ArchiveBackupSuffix, StringComparison.OrdinalIgnoreCase)
+            && ComicFileExtensions.IsComicArchive(fileName[..^ArchiveBackupSuffix.Length]))
+        {
+            return true;
+        }
+
         return false;
     }
 

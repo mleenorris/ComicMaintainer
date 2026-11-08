@@ -179,7 +179,12 @@ public class SmtpComicEmailSender : IComicEmailSender
     /// </summary>
     internal static bool IsTransient(Exception exception, CancellationToken cancellationToken) => exception switch
     {
-        SmtpCommandException command => (int)command.StatusCode is >= 400 and < 500,
+        SmtpCommandException command => IsTemporaryReply(command),
+
+        // MailKit reports every refused login this way, keeping the server's
+        // reply inside. A temporary refusal such as "454 too many login
+        // attempts" is the login throttling a batch of sends runs into.
+        AuthenticationException { InnerException: SmtpCommandException command } => IsTemporaryReply(command),
         AuthenticationException or SslHandshakeException => false,
         System.Security.Authentication.AuthenticationException => false,
         SmtpProtocolException or ServiceNotConnectedException => true,
@@ -190,10 +195,15 @@ public class SmtpComicEmailSender : IComicEmailSender
         _ => false,
     };
 
+    private static bool IsTemporaryReply(SmtpCommandException command) =>
+        (int)command.StatusCode is >= 400 and < 500;
+
     private static string DescribeTransientFailure(Exception exception) => exception switch
     {
         SmtpCommandException command =>
             $"The mail server temporarily refused the message ({(int)command.StatusCode}): {command.Message}",
+        AuthenticationException { InnerException: SmtpCommandException command } =>
+            $"The mail server temporarily refused the login ({(int)command.StatusCode}): {command.Message}",
         OperationCanceledException or TimeoutException =>
             "The mail server did not respond in time.",
         _ => $"Could not reach the mail server: {exception.Message}",

@@ -282,6 +282,27 @@ public class SmtpComicEmailSenderTests : IDisposable
             _guard.Token));
     }
 
+    [Theory]
+    [InlineData("454 4.7.0 Too many login attempts, please try again later.", 454)]
+    [InlineData("421 4.7.0 Temporary System Problem. Try again later.", 421)]
+    public async Task SendAsync_WhenTheLoginIsRefusedTemporarily_ThrowsATransientFailure(string reply, int status)
+    {
+        using var server = new FakeSmtpServer();
+        server.Replies["AUTH"] = reply;
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+        _settings.SmtpUsername = "reader";
+        _settings.SmtpPassword = "s3cret";
+
+        var ex = await Assert.ThrowsAsync<TransientEmailSendException>(() => _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
+            _guard.Token));
+
+        Assert.Contains("temporarily refused the login", ex.Message);
+        Assert.Contains($"({status})", ex.Message);
+        Assert.False(server.Message.IsCompleted);
+    }
+
     [Fact]
     public async Task SendAsync_WhenTheConnectionDropsMidConversation_ThrowsATransientFailure()
     {
@@ -366,6 +387,9 @@ public class SmtpComicEmailSenderTests : IDisposable
         { new TimeoutException(), true },
         { new OperationCanceledException(), true },
         { new AuthenticationException("bad password"), false },
+        { new AuthenticationException("throttled", new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.UnexpectedStatusCode, (MailKit.Net.Smtp.SmtpStatusCode)454, "try later")), true },
+        { new AuthenticationException("rejected", new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.UnexpectedStatusCode, (MailKit.Net.Smtp.SmtpStatusCode)535, "bad password")), false },
+        { new AuthenticationException("other", new IOException("not an SMTP reply")), false },
         { new SslHandshakeException("handshake failed"), false },
         { new System.Security.Authentication.AuthenticationException("tls"), false },
         { new NotSupportedException("STARTTLS required"), false },

@@ -154,7 +154,6 @@ public partial class ComicProcessorService
                     else if (normalizeSuccess)
                     {
                         await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
-                    {
                         await LogHistoryWithChangesAsync(filePath, "Normalize", true, DescribeUnwrittenOutcome(normalizeWrite),
                             beforeFilename, Path.GetFileName(filePath), beforeMetadata, normalizedMetadata, cancellationToken);
 

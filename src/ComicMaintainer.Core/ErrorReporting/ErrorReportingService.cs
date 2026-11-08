@@ -396,6 +396,15 @@ public sealed class ErrorReportingService : IErrorReportingService
                     throw;
                 }
 
+                // The wait comes before the lookup: a request that timed out on
+                // this side may still be finishing on GitHub's, and only a lookup
+                // made once it has landed can find the issue it created.
+                var delay = _retryDelays[i];
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay, _timeProvider, cancellationToken);
+                }
+
                 if (ex.MayHaveSucceeded)
                 {
                     // A failure here propagates with the outcome still unknown.
@@ -410,12 +419,6 @@ public sealed class ErrorReportingService : IErrorReportingService
                         attempt.FoundExisting = true;
                         return existing;
                     }
-                }
-
-                var delay = _retryDelays[i];
-                if (delay > TimeSpan.Zero)
-                {
-                    await Task.Delay(delay, _timeProvider, cancellationToken);
                 }
             }
         }

@@ -66,6 +66,30 @@ public class ErrorReportingServiceIssueDedupeTests
     }
 
     [Fact]
+    public async Task ATimedOutCreate_IsLookedUpOnlyAfterTheBackoffJustBeforeItIsRepeated()
+    {
+        var backoff = TimeSpan.FromSeconds(2);
+        var github = new SimulatedGitHub(_time);
+        github.CreateResults.Enqueue(CreateResult.FailedResponseLost);
+        var service = CreateService(github, new[] { backoff });
+
+        var processing = service.ProcessAsync(CreateReport());
+        while (!processing.IsCompleted)
+        {
+            _time.Advance(TimeSpan.FromMilliseconds(500));
+            await Task.Delay(1);
+        }
+
+        Assert.Equal(ErrorReportOutcome.IssueCreated, await processing);
+
+        // The first request gets the whole backoff to land before it is looked
+        // for, and the repeat comes straight after the lookup found nothing.
+        var lookedUpAt = Assert.Single(github.LookupTimes);
+        Assert.True(lookedUpAt >= Start + backoff, $"Looked up {lookedUpAt - Start} after the first request.");
+        Assert.Equal(new[] { Start, lookedUpAt }, github.CreateTimes);
+    }
+
+    [Fact]
     public async Task AFailureThatNeverReachedGitHub_IsRetriedWithoutLookingFirst()
     {
         var github = new SimulatedGitHub(_time);
@@ -189,7 +213,7 @@ public class ErrorReportingServiceIssueDedupeTests
         Assert.Equal(2, github.CommentAttempts);
     }
 
-    private ErrorReportingService CreateService(IGitHubIssueClient client)
+    private ErrorReportingService CreateService(IGitHubIssueClient client, IReadOnlyList<TimeSpan>? retryDelays = null)
         => new(
             _dbContextFactory,
             new TestOptionsMonitor<AppSettings>(new AppSettings
@@ -202,7 +226,7 @@ public class ErrorReportingServiceIssueDedupeTests
             client,
             NullLogger<ErrorReportingService>.Instance,
             _time,
-            new[] { TimeSpan.Zero, TimeSpan.Zero });
+            retryDelays ?? new[] { TimeSpan.Zero, TimeSpan.Zero });
 
     private ErrorReport CreateReport(string fingerprint = "0123456789abcdef") => new()
     {
@@ -259,6 +283,12 @@ public class ErrorReportingServiceIssueDedupeTests
 
         public List<DateTimeOffset> Lookups { get; } = new();
 
+        /// <summary>When each lookup was made.</summary>
+        public List<DateTimeOffset> LookupTimes { get; } = new();
+
+        /// <summary>When each create request was made.</summary>
+        public List<DateTimeOffset> CreateTimes { get; } = new();
+
         public Func<Exception>? LookupFailure { get; set; }
 
         public int CreateAttempts { get; private set; }
@@ -274,6 +304,7 @@ public class ErrorReportingServiceIssueDedupeTests
             CancellationToken cancellationToken)
         {
             CreateAttempts++;
+            CreateTimes.Add(clock.GetUtcNow());
             var result = CreateResults.Count > 0 ? CreateResults.Dequeue() : null;
             switch (result?.Kind)
             {
@@ -312,6 +343,7 @@ public class ErrorReportingServiceIssueDedupeTests
             CancellationToken cancellationToken)
         {
             Lookups.Add(createdSince);
+            LookupTimes.Add(clock.GetUtcNow());
             if (LookupFailure is not null)
             {
                 throw LookupFailure();

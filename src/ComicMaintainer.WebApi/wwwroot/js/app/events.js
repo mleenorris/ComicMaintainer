@@ -27,7 +27,9 @@
         //    when the browser comes back online, the tab becomes visible or the
         //    page is restored from the back/forward cache;
         //  - a reconnected stream catches up on the job, the watcher status and
-        //    the library, whose events were lost while it was down.
+        //    the library, whose events were lost while it was down;
+        //  - only a definite answer that the session has ended leaves the app;
+        //    an outage is retried like any other failure (checkSessionState).
         let eventSource = null;
         let eventSourceReconnectTimer = null;
         let eventSourceWatchdogTimer = null;
@@ -49,46 +51,65 @@
         // Set when the page is put into the back/forward cache with a stream, so it is reopened on return.
         let eventSourceSuspended = false;
 
-        // Helper function to check if user is still authenticated (supports both JWT and Authelia)
-        async function checkAuthenticationStatus() {
+        // What checkSessionState() found out about the user's session.
+        const SESSION_ACTIVE = 'active';
+        const SESSION_ENDED = 'ended';
+        const SESSION_UNKNOWN = 'unknown'; // The server could not say: offline, restarting, or a proxy error
+
+        // Whether the user is still signed in, with JWT or Authelia. Only a definite answer ends the
+        // session: a network or server outage is SESSION_UNKNOWN and the caller keeps retrying, so a
+        // wifi change or a container restart signs nobody out.
+        async function checkSessionState() {
             try {
-                // First check if using Authelia authentication
-                const isAutheliaAuth = isAutheliaAuthenticated();
-
-                if (isAutheliaAuth) {
-                    // For Authelia, check server auth status to verify session is still valid
-                    const response = await fetch(apiUrl('/api/auth/status'), {
-                        credentials: 'include' // Important for Authelia cookies
-                    });
-
-                    if (response.ok) {
-                        const authStatus = await response.json();
-                        if (authStatus.autheliaEnabled && authStatus.isAuthenticated) {
-                            return true; // Authelia session is still valid
-                        }
-                    }
-                    // If we get here, Authelia session is invalid
-                    console.warn('[AUTH] Authelia session expired or invalid');
-                    return false;
-                } else {
-                    // For JWT authentication, check if token exists and is not expired
-                    const token = localStorage.getItem('jwt_token');
-                    if (!token) {
-                        console.warn('[AUTH] No JWT token found');
-                        return false;
-                    }
-
-                    if (isTokenExpired(token)) {
-                        console.warn('[AUTH] JWT token expired');
-                        return false;
-                    }
-
-                    return true; // JWT token is valid
-                }
+                return isAutheliaAuthenticated() ? await checkAutheliaSession() : checkJwtSession();
             } catch (error) {
-                console.error('[AUTH] Error checking authentication status:', error);
-                return false;
+                console.warn('[AUTH] Could not check the session:', error.message);
+                return SESSION_UNKNOWN;
             }
+        }
+
+        async function checkAutheliaSession() {
+            // The server knows whether the Authelia session is still valid. A proxy sends an expired
+            // session to the Authelia portal with a redirect, and following that one fails just like
+            // being offline does (the portal is another origin), so it is looked at and not followed.
+            const response = await fetch(apiUrl('/api/auth/status'), {
+                credentials: 'include', // Important for Authelia cookies
+                redirect: 'manual'
+            });
+
+            if (response.type === 'opaqueredirect' || response.status === 401 || response.status === 403) {
+                console.warn('[AUTH] Authelia session expired or invalid');
+                return SESSION_ENDED;
+            }
+
+            if (!response.ok) {
+                console.warn(`[AUTH] Could not check the Authelia session - status: ${response.status}`);
+                return SESSION_UNKNOWN;
+            }
+
+            const authStatus = await response.json();
+            if (authStatus.autheliaEnabled && authStatus.isAuthenticated) {
+                return SESSION_ACTIVE;
+            }
+
+            console.warn('[AUTH] Authelia session expired or invalid');
+            return SESSION_ENDED;
+        }
+
+        // A JWT is judged here, without asking the server: it exists and has not expired.
+        function checkJwtSession() {
+            const token = localStorage.getItem('jwt_token');
+            if (!token) {
+                console.warn('[AUTH] No JWT token found');
+                return SESSION_ENDED;
+            }
+
+            if (isTokenExpired(token)) {
+                console.warn('[AUTH] JWT token expired');
+                return SESSION_ENDED;
+            }
+
+            return SESSION_ACTIVE;
         }
 
         /**
@@ -138,12 +159,17 @@
             try {
                 // Check authentication status for both JWT and Authelia before connecting
                 console.log('SSE: Checking authentication status...');
-                const isAuthenticated = await checkAuthenticationStatus();
+                const session = await checkSessionState();
                 if (generation !== eventSourceGeneration) return;
-                if (!isAuthenticated) {
+                if (session === SESSION_ENDED) {
                     console.error('SSE: Authentication check failed - cannot establish SSE connection');
                     console.error('SSE: User will be redirected to login page');
                     endEventSourceForSignOut();
+                    return;
+                }
+                if (session === SESSION_UNKNOWN) {
+                    console.warn('SSE: Could not check the session, the server may be unreachable');
+                    scheduleEventSourceReconnect();
                     return;
                 }
                 console.log('SSE: Authentication check passed');
@@ -224,10 +250,11 @@
             closeEventSource();
             const generation = eventSourceGeneration;
 
-            // Check authentication status for both JWT and Authelia
-            const isAuthenticated = await checkAuthenticationStatus();
+            // Check authentication status for both JWT and Authelia. Anything but a definite
+            // "signed out" (an outage, say) is retried, and the active job is polled meanwhile.
+            const session = await checkSessionState();
             if (generation !== eventSourceGeneration || eventSource || eventSourceConnecting) return;
-            if (!isAuthenticated) {
+            if (session === SESSION_ENDED) {
                 console.warn('SSE: Authentication expired during connection');
                 endEventSourceForSignOut();
                 return;

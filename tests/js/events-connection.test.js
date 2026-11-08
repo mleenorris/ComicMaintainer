@@ -372,19 +372,94 @@ test('a refused Authelia stream token is retried with backoff until the server i
     assert.equal(wentToLogin(page), false);
 });
 
-for (const [description, status, expectedLog] of [
-    ['reports the Authelia session as ended', { autheliaEnabled: true, isAuthenticated: false }, ['warn', '[AUTH] Authelia session expired or invalid']],
-    ['fails', 503, ['warn', '[AUTH] Authelia session expired or invalid']],
-    ['is unreachable', () => { throw new TypeError('Failed to fetch'); }, ['error', '[AUTH] Error checking authentication status: Failed to fetch']]
+// A proxy sending an expired session to the Authelia portal, as a fetch with redirect: 'manual' sees it.
+function opaqueRedirect() {
+    const response = new Response(null, { status: 200 });
+    Object.defineProperties(response, {
+        type: { value: 'opaqueredirect' },
+        status: { value: 0 },
+        ok: { value: false }
+    });
+    return response;
+}
+
+for (const [description, status] of [
+    ['reports the Authelia session as ended', { autheliaEnabled: true, isAuthenticated: false }],
+    ['reports that Authelia is no longer in use', { autheliaEnabled: false, isAuthenticated: true }],
+    ['answers 401', 401],
+    ['answers 403', 403],
+    ['is redirected to the Authelia portal', () => opaqueRedirect()]
 ]) {
     test(`a dropped Authelia stream goes to login when the session check ${description}`, async () => {
         const page = await bootAuthelia();
         page.route('GET /api/auth/status', status);
         await dropStream(page);
-        assert.ok(consoleLines(page, expectedLog[0]).includes(expectedLog[1]));
+        assert.ok(consoleLines(page, 'warn').includes('[AUTH] Authelia session expired or invalid'));
         assert.ok(wentToLogin(page));
     });
 }
+
+// An outage says nothing about the session: a wifi change or a container restart must not sign anybody out.
+for (const [description, status, expectedLog] of [
+    ['fails', 503, '[AUTH] Could not check the Authelia session - status: 503'],
+    ['fails at the proxy', 502, '[AUTH] Could not check the Authelia session - status: 502'],
+    ['is unreachable', () => { throw new TypeError('Failed to fetch'); }, '[AUTH] Could not check the session:'],
+    ['answers with something other than JSON', respond(200, '<html>Starting up</html>', { 'Content-Type': 'text/html' }), '[AUTH] Could not check the session:']
+]) {
+    test(`a dropped Authelia stream keeps retrying when the session check ${description}, until the server is back`, async t => {
+        useMockTimers(t);
+        const page = await bootAuthelia();
+        page.route('GET /api/auth/status', status);
+
+        await dropStream(page);
+        assert.ok(consoleLines(page, 'warn').some(line => line.startsWith(expectedLog)), `logged: ${consoleLines(page, 'warn').join(' | ')}`);
+        assert.equal(wentToLogin(page), false);
+        assert.deepEqual(retryDelays(page), ['1@5s']);
+
+        // The retry finds the outage still going, and backs off.
+        t.mock.timers.tick(5000);
+        await page.settle(3);
+        assert.equal(wentToLogin(page), false);
+        assert.equal(page.eventSources.length, 1);
+        assert.deepEqual(retryDelays(page), ['1@5s', '2@7.5s']);
+
+        page.route('GET /api/auth/status', AUTHELIA_SESSION);
+        t.mock.timers.tick(7500);
+        await page.settle(3);
+        assert.equal(page.eventSources.length, 2);
+        assert.equal(wentToLogin(page), false);
+    });
+}
+
+test('during an Authelia outage the active job is still polled, and the stream returns when the browser is online again', async t => {
+    useMockTimers(t);
+    const { routes } = activeJobRoutes();
+    const page = await bootAuthelia(routes);
+    await page.settle(3);
+    const polls = () => requests(page, 'GET', `/api/jobs/${JOB_ID}`).length;
+    page.route('GET /api/auth/status', () => { throw new TypeError('Failed to fetch'); });
+    await dropStream(page);
+
+    const before = polls();
+    await advance(t, page, 15000);
+    assert.ok(polls() >= before + 2, 'the job keeps being polled during the outage');
+    assert.equal(wentToLogin(page), false);
+    const streams = page.eventSources.length;
+
+    page.route('GET /api/auth/status', AUTHELIA_SESSION);
+    page.window.dispatchEvent(new page.window.Event('online'));
+    await page.settle(3);
+    assert.equal(page.eventSources.length, streams + 1);
+    assert.equal(wentToLogin(page), false);
+});
+
+test('the Authelia session check does not follow redirects, which would look like being offline', async () => {
+    const page = await bootAuthelia();
+    await dropStream(page);
+    const check = requests(page, 'GET', '/api/auth/status').at(-1);
+    assert.equal(check.init.redirect, 'manual');
+    assert.equal(check.init.credentials, 'include');
+});
 
 test('a dropped Authelia stream with a live session is reconnected with a new stream token', async t => {
     useMockTimers(t);

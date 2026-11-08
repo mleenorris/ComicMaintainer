@@ -605,6 +605,97 @@ public sealed class SuwayomiServiceSourceSearchTests
     }
 
     [Fact]
+    public async Task DownloadMissingIssuesAsync_SkipsTheSourcesLeftOnceTheSeriesSearchBudgetIsSpent()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        var sources = string.Join(",", Enumerable.Range(1, 8).Select(i => $$"""{"id":"{{i}}","name":"S{{i}}","displayName":"S{{i}}"}"""));
+        var handler = new SuwayomiHandler(request =>
+        {
+            switch (request.Operation)
+            {
+                case "Library":
+                    return Json(Library("[]"));
+                case "Sources":
+                    return Json(Sources("[" + sources + "]"));
+                case "SearchSource":
+                    // Every source is slower than the whole series is allowed.
+                    lock (time)
+                    {
+                        time.Advance(SuwayomiService.SourceDiscoveryBudget + TimeSpan.FromMinutes(1));
+                    }
+
+                    return Json(SearchResults("""[{"id":3,"title":"Unrelated"}]"""));
+                default:
+                    throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation);
+            }
+        });
+
+        var ex = await Assert.ThrowsAsync<SuwayomiException>(() => CreateService(handler, timeProvider: time)
+            .DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 }));
+
+        // At most the first batch started before the budget was spent, and
+        // every source after them was skipped.
+        var searched = handler.Requests.Where(request => request.Operation == "SearchSource").ToList();
+        Assert.InRange(searched.Count, 1, 4);
+        Assert.Contains(
+            $"1 source check(s) failed; Installed Suwayomi sources: {8 - searched.Count} of 8 sources were not searched because the search reached its 10-minute limit.",
+            ex.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_StopsASourceStartedLateAtTheSeriesSearchBudget()
+    {
+        // The first source takes 9 minutes, so the fifth starts with only one
+        // minute of the series' budget left, less than its own 2 minutes.
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        using var fifthSearched = new ManualResetEventSlim();
+        var sources = string.Join(",", Enumerable.Range(1, 5).Select(i => $$"""{"id":"{{i}}","name":"S{{i}}","displayName":"S{{i}}"}"""));
+        var handler = new SuwayomiHandler(request =>
+        {
+            switch (request.Operation)
+            {
+                case "Library":
+                    return Json(Library("[]"));
+                case "Sources":
+                    return Json(Sources("[" + sources + "]"));
+                case "SearchSource":
+                    switch (request.Variables.GetProperty("source").GetString())
+                    {
+                        case "1":
+                            time.Advance(TimeSpan.FromMinutes(9));
+                            return Json(SearchResults("[]"));
+                        case "5":
+                            time.Advance(TimeSpan.FromMinutes(2));
+                            fifthSearched.Set();
+                            return Json(SearchResults("""[{"id":5,"title":"Unrelated"}]""", "true"));
+                        default:
+                            // Keep the other workers busy so the fifth source
+                            // can only start once the first one has finished.
+                            if (!fifthSearched.Wait(TimeSpan.FromSeconds(10)))
+                            {
+                                throw new TimeoutException("The fifth source was never searched.");
+                            }
+
+                            return Json(SearchResults("[]"));
+                    }
+
+                default:
+                    throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation);
+            }
+        });
+
+        var ex = await Assert.ThrowsAsync<SuwayomiException>(() => CreateService(handler, timeProvider: time)
+            .DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 }));
+
+        Assert.Single(handler.Requests, request =>
+            request.Operation == "SearchSource" && request.Variables.GetProperty("source").GetString() == "5");
+        Assert.Contains(
+            "S5: The search was stopped when the search of all sources reached its 10-minute limit, without an exact title match.",
+            ex.Message);
+        Assert.DoesNotContain("were not searched", ex.Message);
+    }
+
+    [Fact]
     public async Task DownloadMissingIssuesAsync_StartsTheNextSourceWithoutWaitingForTheSlowestOne()
     {
         // The first source only answers once the fifth one has been searched:

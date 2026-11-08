@@ -66,6 +66,14 @@ public class SuwayomiService : ISuwayomiService
     /// </summary>
     internal static readonly TimeSpan SourceSearchBudget = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// Time the discovery for one series may spend across all of its sources.
+    /// Sources not yet started when it runs out are skipped, and those still
+    /// being searched request no further page, so a library with many
+    /// installed sources cannot stretch one series into a long scheduled run.
+    /// </summary>
+    internal static readonly TimeSpan SourceDiscoveryBudget = TimeSpan.FromMinutes(10);
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -481,6 +489,7 @@ public class SuwayomiService : ISuwayomiService
         // A few sources at a time, starting the next one as soon as any
         // finishes, so one slow site does not hold up the sources behind it.
         var outcomes = new SourceSearchOutcome[sources.Count];
+        var discoveryDeadline = _timeProvider.GetUtcNow() + SourceDiscoveryBudget;
         await Parallel.ForEachAsync(
             Enumerable.Range(0, sources.Count),
             new ParallelOptions
@@ -490,11 +499,22 @@ public class SuwayomiService : ISuwayomiService
             },
             async (index, token) =>
             {
+                if (_timeProvider.GetUtcNow() >= discoveryDeadline)
+                {
+                    outcomes[index] = new SourceSearchOutcome(
+                        sources[index],
+                        new List<SourceSeriesCandidate>(),
+                        null,
+                        Skipped: true);
+                    return;
+                }
+
                 outcomes[index] = await SearchSourceForCandidatesAsync(
                     sources[index],
                     index,
                     normalizedTitle,
                     searchTitles,
+                    discoveryDeadline,
                     token);
             });
 
@@ -524,6 +544,15 @@ public class SuwayomiService : ISuwayomiService
                     result,
                     "Installed Suwayomi sources",
                     $"Only the first {MaxSourceSearchTitles} of the series' {searchTitles.Count} titles were searched on the sources.");
+            }
+
+            var skippedSources = outcomes.Count(outcome => outcome.Skipped);
+            if (skippedSources > 0)
+            {
+                AddDiscoveryFailure(
+                    result,
+                    "Installed Suwayomi sources",
+                    $"{skippedSources} of {sources.Count} sources were not searched because the search reached its {SourceDiscoveryBudget.TotalMinutes:0}-minute limit.");
             }
         }
         var partialTitle = exactFound || !allowPartialMatches
@@ -625,6 +654,7 @@ public class SuwayomiService : ISuwayomiService
         int sourceIndex,
         string normalizedTitle,
         IReadOnlyList<(string Title, string Key)> searchTitles,
+        DateTimeOffset discoveryDeadline,
         CancellationToken cancellationToken)
     {
         if (!long.TryParse(source.Id, NumberStyles.None, CultureInfo.InvariantCulture, out var sourceId))
@@ -635,7 +665,8 @@ public class SuwayomiService : ISuwayomiService
         var candidates = new List<SourceSeriesCandidate>();
         var resultIndex = 0;
         string? truncation = null;
-        var deadline = _timeProvider.GetUtcNow() + SourceSearchBudget;
+        var sourceDeadline = _timeProvider.GetUtcNow() + SourceSearchBudget;
+        var deadline = sourceDeadline < discoveryDeadline ? sourceDeadline : discoveryDeadline;
         var titleCount = Math.Min(searchTitles.Count, MaxSourceSearchTitles);
         for (var queryIndex = 0; queryIndex < titleCount; queryIndex++)
         {
@@ -646,7 +677,9 @@ public class SuwayomiService : ISuwayomiService
             {
                 if (_timeProvider.GetUtcNow() >= deadline)
                 {
-                    truncation = $"The search was stopped after {SourceSearchBudget.TotalMinutes:0} minutes without an exact title match.";
+                    truncation = deadline == sourceDeadline
+                        ? $"The search was stopped after {SourceSearchBudget.TotalMinutes:0} minutes without an exact title match."
+                        : $"The search was stopped when the search of all sources reached its {SourceDiscoveryBudget.TotalMinutes:0}-minute limit, without an exact title match.";
                     return new SourceSearchOutcome(source, candidates, null, truncation);
                 }
 
@@ -818,11 +851,16 @@ public class SuwayomiService : ISuwayomiService
     /// Why the search of the source was cut short before it ran out of results,
     /// when it was: the page cap or the time budget.
     /// </param>
+    /// <param name="Skipped">
+    /// The source was never searched: the discovery for the series had used up
+    /// <see cref="SourceDiscoveryBudget"/> before its turn came.
+    /// </param>
     private sealed record SourceSearchOutcome(
         SuwayomiSource Source,
         List<SourceSeriesCandidate> Candidates,
         string? Error,
-        string? Truncation = null);
+        string? Truncation = null,
+        bool Skipped = false);
 
     private sealed record SourceSeriesCandidate(
         SuwayomiSource Source,

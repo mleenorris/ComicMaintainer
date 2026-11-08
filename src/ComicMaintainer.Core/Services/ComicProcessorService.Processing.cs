@@ -162,6 +162,7 @@ public partial class ComicProcessorService
                         // unprocessed until the setting is turned on. The rename never rewrites
                         // the archive, so it still uses the normalized values.
                         normalizeSuccess = false;
+                        normalizeError = NormalizeNotWritableMessage;
                         await DeferUnwritableNormalizeAsync(filePath, normalizedMetadata.Series, cancellationToken);
                         metadata = normalizedMetadata;
                     }

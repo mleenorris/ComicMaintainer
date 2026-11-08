@@ -455,8 +455,8 @@ public partial class ComicProcessorServiceCoverageTests
         var service = CreateService(fileStore: fileStore);
 
         // Off: the archive is renamed (with the normalized values) but never rewritten, and the
-        // file shows as unprocessed.
-        Assert.True(await service.ProcessFileAsync(cbr));
+        // file shows as unprocessed, so processing reports it as not done.
+        Assert.False(await service.ProcessFileAsync(cbr));
 
         var renamedCbr = Path.Join(_library, "Series", "Series - Chapter 0004.cbr");
         Assert.Equal(before, await File.ReadAllBytesAsync(renamedCbr));

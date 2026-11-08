@@ -32,6 +32,9 @@
         // over the modal, and do nothing once their job is no longer the current one.
         let jobFinalizeTimer = null;
         let progressModalCloseTimer = null;
+        // The finished job whose progress modal stays open until the user closes
+        // it, because the job reported problems (showReportedJobProblems).
+        let progressModalHeldJobId = null;
         // Set while a job is being started: from beginJobStart() (or
         // showProgressModal()) until the job is tracked (trackJobStatus) or its
         // start is given up (endJobStart / closeProgressModal). Only jobs.js
@@ -1701,9 +1704,9 @@
         }
 
         // Close the progress modal of a job that ended after `delay` ms, unless
-        // another job has taken the modal over by then.
+        // another job has taken the modal over by then or it has to stay open.
         function scheduleProgressModalClose(jobId, delay) {
-            if (currentJobId !== jobId) return;
+            if (currentJobId !== jobId || progressModalHeldJobId === jobId) return;
             clearTimeout(progressModalCloseTimer);
             progressModalCloseTimer = setTimeout(() => {
                 progressModalCloseTimer = null;
@@ -1717,8 +1720,44 @@
             clearTimeout(jobFinalizeTimer);
             jobFinalizeTimer = setTimeout(async () => {
                 jobFinalizeTimer = null;
-                if (currentJobId === jobId) await finalize();
+                if (currentJobId === jobId) await Promise.all([finalize(), showReportedJobProblems(jobId)]);
             }, delay);
+        }
+
+        // A job can report problems with things that are not its items, such as
+        // a source folder a combine had to keep. Each gets a row as it happens,
+        // but the modal then reads "Completed!" and closes itself a moment
+        // later, so a job that reported any keeps the modal open (restoring it
+        // if it was minimized or already closed) until the user closes it.
+        async function showReportedJobProblems(jobId) {
+            let status;
+            try {
+                const response = await fetch(apiUrl(`/api/jobs/${jobId}`), {
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) return;
+                status = await response.json();
+            } catch (error) {
+                console.warn(`[JOB ${jobId}] Could not check for reported problems:`, error);
+                return;
+            }
+
+            const problems = Array.isArray(status.reported_problems) ? status.reported_problems : [];
+            if (problems.length === 0 || currentJobId !== jobId) return;
+
+            progressModalHeldJobId = jobId;
+            clearTimeout(progressModalCloseTimer);
+            progressModalCloseTimer = null;
+            for (const problem of problems) {
+                // Named as the server named the row it broadcast, so this
+                // replaces that row instead of repeating it.
+                addProgressDetail(extractDisplayName(problem.subject.replace(/[/\\]+$/, '')), false, problem.message);
+            }
+            if (status.status === 'completed') {
+                const needAttention = problems.length === 1 ? '1 item needs' : `${problems.length} items need`;
+                document.getElementById('progressTitle').textContent = `Completed! ${needAttention} your attention (see below)`;
+            }
+            restoreProgressModal();
         }
 
         // Drop the pending finish (and close) of a job that ended, when another

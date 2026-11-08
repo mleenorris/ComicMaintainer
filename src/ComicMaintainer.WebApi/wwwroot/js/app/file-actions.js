@@ -615,11 +615,11 @@
                 : folder.directory;
         }
 
-        /** "/comics/Saga (Digital): notes.pdf, Extras/art1.jpg", or why it is kept. */
+        /** "/comics/Saga (Digital): still holds notes.pdf, Extras/art1.jpg", or why it is kept. */
         function describeKeptCombineFolder(folder, maxNames) {
             const leftovers = Array.isArray(folder.leftovers) ? folder.leftovers : [];
             return leftovers.length
-                ? `${folder.directory}: ${combineFolderNameList(leftovers, folder.leftoverCount, maxNames)}`
+                ? `${folder.directory}: still holds ${combineFolderNameList(leftovers, folder.leftoverCount, maxNames)}`
                 : `${folder.directory}: ${folder.reason || 'It still holds other files.'}`;
         }
 
@@ -636,7 +636,7 @@
             const keptItems = kept.map(folder => html`<li class="conflict">${describeKeptCombineFolder(folder, Infinity)}</li>`);
             const cleanup = html`
                 ${removed.length > 0 && html`<h4>Folders removed after the move (${removed.length})</h4><ul>${removedItems}</ul>`}
-                ${kept.length > 0 && html`<h4>Folders kept because they still hold other files (${kept.length})</h4><ul>${keptItems}</ul>`}
+                ${kept.length > 0 && html`<h4>Folders kept after the move (${kept.length})</h4><ul>${keptItems}</ul>`}
             `;
             if (moves.length === 0) {
                 return html`<em>No files will be moved.</em>${cleanup}`;
@@ -674,7 +674,7 @@
                 sections.push(section('These folders will be removed once their files have moved:', removed, describeRemovedCombineFolder));
             }
             if (kept.length > 0) {
-                sections.push(section('These folders will be kept because they still hold other files:', kept, describeKeptCombineFolder));
+                sections.push(section('These folders will be kept:', kept, describeKeptCombineFolder));
             }
             return sections.length > 0
                 ? `${head}\n\n${sections.join('\n\n')}\n\nContinue?`

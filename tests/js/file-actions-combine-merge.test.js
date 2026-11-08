@@ -207,8 +207,8 @@ test('Preview Merge lists the source folders removed after the move and those ke
         { list: [['', '/comics/Saga/Saga 001.cbz → /comics/Saga (2012)/Saga 001.cbz']] },
         { h4: 'Folders removed after the move (1)' },
         { list: [['', '/comics/Saga (also deletes ComicInfo.xml, cover.jpg)']] },
-        { h4: 'Folders kept because they still hold other files (1)' },
-        { list: [['conflict', '/comics/Saga (Digital): Saga v01.pdf, Extras/art1.jpg']] }
+        { h4: 'Folders kept after the move (1)' },
+        { list: [['conflict', '/comics/Saga (Digital): still holds Saga v01.pdf, Extras/art1.jpg']] }
     ]);
     assert.equal(page.$('#combineFoldersPreview').style.display, 'block');
 });
@@ -394,15 +394,15 @@ test('Combine names the source folders it removes and keeps, and what keeps them
         'Combine 2 folders into:\n/comics/Saga\n\nFiles will be moved on disk.\n\n'
         + 'These folders will be removed once their files have moved:\n'
         + '  /comics/Saga (also deletes ComicInfo.xml, cover.jpg)\n\n'
-        + 'These folders will be kept because they still hold other files:\n'
-        + '  /comics/Saga (Digital): Saga v01.pdf, Extras/art1.jpg\n\n'
+        + 'These folders will be kept:\n'
+        + '  /comics/Saga (Digital): still holds Saga v01.pdf, Extras/art1.jpg\n\n'
         + 'Continue?'
     ]);
     assert.deepEqual(callsTo(page, 'POST', '/api/files/combine-folders'), []);
     // Declining leaves the plan on screen.
     assert.deepEqual(rendered.filter(entry => entry.h4), [
         { h4: 'Folders removed after the move (1)' },
-        { h4: 'Folders kept because they still hold other files (1)' }
+        { h4: 'Folders kept after the move (1)' }
     ]);
     assert.equal(page.$('#combineFoldersPreview').style.display, 'block');
     assert.deepEqual(actions(page), { preview: true, combine: true });
@@ -427,7 +427,7 @@ test('the Combine question shortens long folder and file lists', async t => {
     const lines = page.dialogs[0].message.split('\n');
     const listed = lines.filter(line => line.startsWith('  '));
     assert.equal(listed.length, 11);
-    assert.equal(listed[0], '  /comics/Saga 0: a.pdf, b.pdf, c.pdf, d.pdf, e.pdf and 35 more');
+    assert.equal(listed[0], '  /comics/Saga 0: still holds a.pdf, b.pdf, c.pdf, d.pdf, e.pdf and 35 more');
     assert.equal(listed[1], '  /comics/Saga 1: It is a link; links are never removed.');
     assert.equal(listed[10], '  ...and 2 more');
     assert.equal(lines.at(-1), 'Continue?');

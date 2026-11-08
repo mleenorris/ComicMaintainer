@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 
@@ -21,6 +23,7 @@ public class SeriesMetadataRefreshJobServiceTests
     private readonly Mock<ISeriesMetadataCacheService> _cache = new();
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<ISeriesNameResolver> _resolver = new();
     private readonly Mock<IEventBroadcaster> _broadcaster = new();
     private readonly RecordingLogger _logger = new();
     private readonly SemaphoreSlim _cleanupCalls = new(0);
@@ -41,13 +44,17 @@ public class SeriesMetadataRefreshJobServiceTests
         bool withBroadcaster = true,
         bool withFileStore = true,
         bool withProcessor = true,
-        TimeProvider? timeProvider = null) => new(
+        TimeProvider? timeProvider = null,
+        AppSettings? settings = null,
+        bool withResolver = false) => new(
             _cache.Object,
             _logger,
             withBroadcaster ? _broadcaster.Object : null,
             withFileStore ? _fileStore.Object : null,
             withProcessor ? _processor.Object : null,
-            timeProvider);
+            timeProvider,
+            settings is null ? null : Mock.Of<IOptionsMonitor<AppSettings>>(o => o.CurrentValue == settings),
+            withResolver ? _resolver.Object : null);
 
     private void SetupCleanup(int removed) =>
         _cache.Setup(c => c.CleanupStaleSiblingRecordsAsync(It.IsAny<CancellationToken>()))
@@ -476,24 +483,113 @@ public class SeriesMetadataRefreshJobServiceTests
         _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
-    public async Task RunJob_ErrorOutcomeStillRetagsFilesMatchingTheRequestedTitle()
+    [Theory]
+    [InlineData("error")]
+    [InlineData("not_found")]
+    [InlineData(null)]
+    public async Task RunJob_LookupThatFoundNothing_LeavesItsFilesAlone(string? lookupStatus)
     {
-        // Even when the lookup failed the requested title is kept in the retag set, so
-        // files whose <Series> still holds that title are re-normalized from the cache.
-        SetupRefresh("Alpha", "error", aliases: new List<string>(), userAliases: new List<string>());
-        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"));
+        // Beta's lookup taught us nothing, so a provider outage during "refresh all" must
+        // not queue a rewrite of every file. Alpha shows the retag step really ran.
+        SetupRefresh("Alpha", "success");
+        SetupRefresh("Beta", lookupStatus, aliases: new List<string>(), userAliases: new List<string>());
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"), TrackedFile("/library/Beta/c001.cbz", "Beta"));
+        List<string>? normalized = null;
         var normalizeJobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => normalized = paths.ToList())
             .ReturnsAsync(normalizeJobId);
         var service = CreateService();
 
-        var jobId = await service.StartAsync(new[] { "Alpha" });
+        await service.StartAsync(new[] { "Alpha", "Beta" });
 
         await _logger.WaitForAsync(e => e.Message.Contains($"queued normalization job {normalizeJobId} for 1 files"));
-        var job = service.GetJob(jobId)!;
-        Assert.Equal(JobStatus.Completed, job.Status);
-        Assert.Equal(1, job.Failures);
+        Assert.Equal(new[] { "/library/Alpha/c001.cbz" }, normalized);
+    }
+
+    [Fact]
+    public async Task RunJob_NormalizeTurnedOff_RewritesNoFile()
+    {
+        SetupRefresh("Alpha", "success");
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Old Alpha"), TrackedFile("/library/Alpha/c002.cbz", "Alpha"));
+        var service = CreateService(settings: new AppSettings { WatcherEnableNormalize = false });
+
+        var jobId = await service.StartAsync(new[] { "Alpha" });
+
+        await _logger.WaitForAsync(e => e.Level == LogLevel.Warning
+            && e.Message.Contains($"Metadata refresh job {jobId} will not rewrite per-file metadata")
+            && e.Message.Contains("WatcherEnableNormalize is false"));
+        _fileStore.Verify(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunJob_RefreshAllWithAFilledCache_QueuesOnlyFilesWhoseTagDiffersFromTheResolvedName()
+    {
+        // The archive-metadata cache gives every file a Metadata.Series, so refreshing the
+        // whole library matches every file. Only the one still carrying an alias needs a
+        // rewrite; the others already hold what normalization would write.
+        SetupRefresh("One Piece", "success", aliases: new List<string> { "Wan Pisu" });
+        SetupRefresh("Naruto", "success");
+        SetupTrackedFiles(
+            TrackedFile("/library/One Piece/c001.cbz", "One Piece"),
+            TrackedFile("/library/One Piece/c002.cbz", "One Piece"),
+            TrackedFile("/library/One Piece/c003.cbz", "Wan Pisu"),
+            TrackedFile("/library/Naruto/c001.cbz", "Naruto"),
+            TrackedFile("/library/Naruto/c002.cbz", "Naruto"));
+        _resolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string path, ComicMetadata? _, bool _, CancellationToken _) => new SeriesNameResolution
+            {
+                ResolvedSeries = path.Contains("Naruto") ? "Naruto" : "One Piece",
+            });
+        List<string>? normalized = null;
+        var normalizeJobId = Guid.NewGuid();
+        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => normalized = paths.ToList())
+            .ReturnsAsync(normalizeJobId);
+        var service = CreateService(withResolver: true);
+
+        await service.StartAsync(new[] { "One Piece", "Naruto" });
+
+        await _logger.WaitForAsync(e => e.Message.Contains($"queued normalization job {normalizeJobId} for 1 files"));
+        Assert.Equal(new[] { "/library/One Piece/c003.cbz" }, normalized);
+
+        // Decided per folder-and-tag, read-only: one lookup per combination, not per file.
+        _resolver.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()), Times.Exactly(3));
+        _resolver.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunJob_EveryMatchingFileAlreadyCarriesTheResolvedName_QueuesNothing()
+    {
+        SetupRefresh("Alpha", "success");
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"), TrackedFile("/library/Alpha/c002.cbz", "Alpha"));
+        _resolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesNameResolution { ResolvedSeries = "Alpha" });
+        var service = CreateService(withResolver: true);
+
+        var jobId = await service.StartAsync(new[] { "Alpha" });
+
+        await _logger.WaitForAsync(e => e.Level == LogLevel.Information
+            && e.Message.Contains($"Metadata refresh job {jobId} completed; all 2 matching files already carry the resolved series name"));
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunJob_TagDiffersOnlyByCase_IsQueuedBecauseTheResolvedNameIsWrittenExactly()
+    {
+        SetupRefresh("Alpha", "success");
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "alpha"));
+        _resolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesNameResolution { ResolvedSeries = "Alpha" });
+        var normalizeJobId = Guid.NewGuid();
+        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(normalizeJobId);
+        var service = CreateService(withResolver: true);
+
+        await service.StartAsync(new[] { "Alpha" });
+
+        await _logger.WaitForAsync(e => e.Message.Contains($"queued normalization job {normalizeJobId} for 1 files"));
     }
 
     [Fact]

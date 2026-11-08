@@ -188,7 +188,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
         _interceptor.BeforeNextSave = () => InsertFileRowAsync(newPath, renamedAndNormalized: false);
         _interceptor.AfterNextFailure = () => DeleteFileRowsAsync(newPath);
 
-        await service.UpdateFilePathAsync(oldPath, newPath);
+        await Assert.ThrowsAnyAsync<DbUpdateException>(() => service.UpdateFilePathAsync(oldPath, newPath));
 
         Assert.True(_logger.Contains(LogLevel.Error, "Error updating file path in database"));
         Assert.False(_logger.Contains(LogLevel.Debug, "New path row was created concurrently"));

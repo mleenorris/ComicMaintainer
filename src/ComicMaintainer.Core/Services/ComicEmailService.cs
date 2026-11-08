@@ -1,7 +1,6 @@
 using ComicMaintainer.Core.Telemetry;
 using System.Collections.Concurrent;
 using System.Globalization;
-using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.ErrorReporting;
@@ -394,7 +393,7 @@ public class ComicEmailService : IComicEmailService
                     DeliveryFormat = format,
                     Status = EmailDeliveryStatus.Pending,
                     Source = normalizedSource,
-                    CondensedFilePaths = group.Count > 1 ? JsonSerializer.Serialize(group) : null,
+                    CondensedFilePaths = group.Count > 1 ? CondensedFilePathList.Serialize(group) : null,
                     DisplayName = displayName,
                     CreatedAt = DateTime.UtcNow
                 };
@@ -744,32 +743,13 @@ public class ComicEmailService : IComicEmailService
         foreach (var row in rows)
         {
             delivered.Add(row.FilePath);
-            foreach (var member in DeserializeCondensedPaths(row.CondensedFilePaths))
+            foreach (var member in CondensedFilePathList.Parse(row.CondensedFilePaths))
             {
                 delivered.Add(member);
             }
         }
 
         return delivered;
-    }
-
-    private static IReadOnlyList<string> DeserializeCondensedPaths(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return Array.Empty<string>();
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
-        }
-        catch (JsonException)
-        {
-            // A delivery row whose member list cannot be read is treated as a
-            // single-issue delivery rather than failing the whole request.
-            return Array.Empty<string>();
-        }
     }
 
     private static IEnumerable<List<string>> Chunk(IReadOnlyList<string> items, int size)
@@ -1077,7 +1057,7 @@ public class ComicEmailService : IComicEmailService
         {
             // A condensed delivery carries several issues; an ordinary one only
             // has FilePath.
-            var members = DeserializeCondensedPaths(delivery.CondensedFilePaths);
+            var members = CondensedFilePathList.Parse(delivery.CondensedFilePaths);
             var sources = members.Count > 0 ? members : new[] { delivery.FilePath };
 
             var resolved = new List<string>(sources.Count);
@@ -2067,7 +2047,7 @@ public class ComicEmailService : IComicEmailService
         entity.ErrorMessage,
         entity.CreatedAt,
         entity.SentAt,
-        Math.Max(1, DeserializeCondensedPaths(entity.CondensedFilePaths).Count),
+        Math.Max(1, CondensedFilePathList.Parse(entity.CondensedFilePaths).Count),
         entity.AttemptCount,
         entity.NextAttemptAt is DateTime nextAttempt ? DateTime.SpecifyKind(nextAttempt, DateTimeKind.Utc) : null,
         entity.OwnerUserId);

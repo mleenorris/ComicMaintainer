@@ -225,7 +225,20 @@ public partial class ComicProcessorService
         // Move the database record to the new path, preserving all processing state, so the
         // FileSystemWatcher's rename event sees the entry as already tracked and does not
         // re-queue it for processing.
-        await _fileStore.UpdateFilePathAsync(oldPath, newPath, bookkeeping);
+        try
+        {
+            await _fileStore.UpdateFilePathAsync(oldPath, newPath, bookkeeping);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The file has moved and the rename succeeded, so this is not reported as a failed
+            // rename. The file watcher's rename event and the next library scan follow the file.
+            _logger.LogWarning(ex,
+                "Could not move the library record of {OldPath} to {NewPath}; the file watcher or the next scan will",
+                LoggingHelper.SanitizePathForLog(oldPath),
+                LoggingHelper.SanitizePathForLog(newPath));
+        }
+
         await _fileStore.MarkFileRenamedAsync(newPath, true, bookkeeping);
 
         // Re-assert the normalized state on the new path so the move can't drop it if the

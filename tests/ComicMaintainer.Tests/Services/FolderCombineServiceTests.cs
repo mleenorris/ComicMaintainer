@@ -400,6 +400,26 @@ public sealed class FolderCombineServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task StartAsync_LibraryRecordCannotFollowTheFile_MovesTheFileBackAndKeepsTheSourceFolder()
+    {
+        var destination = Dir("Berserk");
+        var source = Dir("Berserk (Digital)");
+        Track(destination, "Berserk 001.cbz", T1);
+        var file = Track(source, "Berserk 002.cbz", T2);
+        var target = Path.Join(destination, "Berserk 002.cbz");
+        _fileStore
+            .Setup(f => f.UpdateFilePathAsync(file.FilePath, target, It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        var started = await CreateService().StartAsync(Combine(destination, source));
+
+        Assert.Null(started.Error);
+        Assert.True(File.Exists(file.FilePath));
+        Assert.False(File.Exists(target));
+        Assert.Contains(HistoryFor(file.FilePath), h => !h.Success && h.ErrorMessage == "The library database could not be updated, so the file was not moved");
+    }
+
+    [Fact]
     public async Task StartAsync_WhileAnImportHoldsTheLock_WaitsAndThenKeepsTheFolderTheImportStagedInto()
     {
         var destination = Dir("Berserk");

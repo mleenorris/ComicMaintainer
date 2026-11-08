@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -298,6 +299,91 @@ public partial class ComicProcessorServiceCoverageTests
         Assert.True(moved!.IsNormalized);
         Assert.True(Assert.Single(await fileStore.GetAllFilesAsync()).IsRead);
         Assert.Equal(2, await fileStore.GetReadingProgressAsync(cbz));
+    }
+
+    [Fact]
+    public async Task ApplyMetadataEditAsync_Cbr_RepointsTheEmailHistoryToTheCbz()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
+            options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var fileStore = new FileStoreService(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            NullLogger<FileStoreService>.Instance,
+            factory);
+        var cbr = WriteCbr("Series/book.cbr", Xml("Old", "3", null));
+        var cbz = Path.ChangeExtension(cbr, ".cbz");
+        await fileStore.AddFileAsync(cbr);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.ComicEmailDeliveries.Add(new ComicEmailDeliveryEntity
+            {
+                FilePath = cbr,
+                DeviceName = "Kindle",
+                DeviceEmail = "reader@example.com",
+                DeliveryFormat = "original",
+                Status = "sent",
+                Source = "manual",
+                CondensedFilePaths = CondensedFilePathList.Serialize(new[] { cbr, "/lib/other.cbz" }),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = CreateService(fileStore: fileStore);
+
+        await service.ApplyMetadataEditAsync(cbr, new ComicMetadata { Series = "New" }, ComicMetadataFieldFlags.Series);
+
+        await using var check = await factory.CreateDbContextAsync();
+        var delivery = await check.ComicEmailDeliveries.SingleAsync();
+        Assert.Equal(cbz, delivery.FilePath);
+        Assert.Equal(new[] { cbz, "/lib/other.cbz" }, CondensedFilePathList.Parse(delivery.CondensedFilePaths));
+    }
+
+    /// <summary>
+    /// The store must not swallow the failure: if it did, the conversion would go on to delete
+    /// the original with the row still pointing at it.
+    /// </summary>
+    [Fact]
+    public async Task ApplyMetadataEditAsync_DatabaseFailsWhileMovingTheRecord_KeepsTheOriginalAndItsRow()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
+            options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
+        using var provider = services.BuildServiceProvider();
+        var factory = new FailingDbContextFactory(provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
+        var fileStore = new FileStoreService(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            NullLogger<FileStoreService>.Instance,
+            factory);
+        var cbr = WriteCbr("Series/book.cbr", Xml("Old", "3", null));
+        var cbz = Path.ChangeExtension(cbr, ".cbz");
+        var before = await File.ReadAllBytesAsync(cbr);
+        await fileStore.AddFileAsync(cbr);
+        var service = CreateService(fileStore: fileStore);
+        factory.FailWhenMoving = true;
+
+        var result = await service.ApplyMetadataEditAsync(cbr, new ComicMetadata { Series = "New" }, ComicMetadataFieldFlags.Series);
+
+        Assert.Equal(MetadataWriteResult.Failed(cbr), result);
+        Assert.Equal(before, await File.ReadAllBytesAsync(cbr));
+        Assert.False(File.Exists(cbz));
+        factory.FailWhenMoving = false;
+        Assert.NotNull(await fileStore.GetFileAsync(cbr));
+        Assert.Null(await fileStore.GetFileAsync(cbz));
+    }
+
+    /// <summary>Fails every context once armed, as a locked or unavailable database would.</summary>
+    private sealed class FailingDbContextFactory(IDbContextFactory<ComicMaintainerDbContext> inner) : IDbContextFactory<ComicMaintainerDbContext>
+    {
+        public bool FailWhenMoving { get; set; }
+
+        public ComicMaintainerDbContext CreateDbContext() =>
+            FailWhenMoving ? throw new InvalidOperationException("database is locked") : inner.CreateDbContext();
+
+        public Task<ComicMaintainerDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(CreateDbContext());
     }
 
     [Fact]

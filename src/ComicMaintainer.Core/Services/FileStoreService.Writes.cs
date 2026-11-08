@@ -380,6 +380,10 @@ public partial class FileStoreService
                 // path (from a watcher-inserted stub the user has since touched) win, so the
                 // stale old-path rows are simply dropped after the move.
                 await MoveUserReadStatusAsync(dbContext, oldPath, newPath, cancellationToken);
+
+                // The email history is keyed by path too, or a re-send would fail or send
+                // whatever now has the old name.
+                await MoveEmailDeliveriesAsync(dbContext, oldPath, newPath, cancellationToken);
             }
             else
             {
@@ -391,39 +395,44 @@ public partial class FileStoreService
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogError(ex, "Error updating file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
-
-            // Part of the move may have committed before the failure (the row move itself,
-            // a restored new-path row), while the tracked entity may also carry merged state
-            // that never did. Mirror whatever the database now holds for the new path.
-            if (survivor is not null)
+            if (ex is OperationCanceledException)
             {
-                var (loaded, row) = await TryLoadRowAsync(newPath);
-                if (!loaded)
-                {
-                    return;
-                }
-
-                survivor = row;
-                if (survivor is null)
-                {
-                    await MirrorCommittedRowsAsync(Array.Empty<ComicFileEntity>(), new[] { oldPath });
-                    MarkChanged();
-                    return;
-                }
+                _logger.LogDebug("Updating file path in database was cancelled: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
             }
-        }
+            else
+            {
+                _logger.LogError(ex, "Error updating file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+            }
 
-        if (survivor is null)
-        {
-            // Nothing was committed, so the in-memory copy (still at the old path) agrees
-            // with the database; the watcher or the next scan re-tracks the new path.
-            return;
+            // Nothing was committed, so both stores still agree on the old path. The caller has
+            // to know: a CBR-to-CBZ conversion must not delete the original with the row left
+            // behind, and folder combine must not report the file as moved.
+            if (survivor is null)
+            {
+                throw;
+            }
+
+            // Part of the move committed before the failure (the row move itself, a restored
+            // new-path row), while the tracked entity may also carry merged state that never
+            // did. Mirror whatever the database now holds for the new path.
+            var (loaded, row) = await TryLoadRowAsync(newPath);
+            if (!loaded)
+            {
+                return;
+            }
+
+            survivor = row;
+            if (survivor is null)
+            {
+                await MirrorCommittedRowsAsync(Array.Empty<ComicFileEntity>(), new[] { oldPath });
+                MarkChanged();
+                return;
+            }
         }
 
         // The row move committed (even if repointing read state afterwards failed), so the
         // in-memory copy follows it.
-        await MirrorCommittedRowsAsync(new[] { survivor }, new[] { oldPath });
+        await MirrorCommittedRowsAsync(new[] { survivor! }, new[] { oldPath });
         MarkChanged();
         _logger.LogDebug("Updated file path in memory store: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
 

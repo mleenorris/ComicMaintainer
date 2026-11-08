@@ -328,9 +328,10 @@ function missingOfflinePages(urls, filePath, totalPages) {
 }
 
 // Run `task` for every item, at most `limit` at a time. Stops starting new
-// items after the first failure, but only rejects (with that failure) once the
-// ones already running have settled, so nothing is still being stored when
-// the caller cleans up.
+// items after the first failure, but only rejects once the ones already
+// running have settled, so nothing is still being stored when the caller
+// cleans up. Of several failures an interrupted one is the one reported: the
+// caller keeps what was stored then, and a resume meets any real refusal again.
 async function forEachConcurrently(items, limit, task) {
   let next = 0;
   let failed = false;
@@ -350,9 +351,9 @@ async function forEachConcurrently(items, limit, task) {
     lanes.push(lane());
   }
   const results = await Promise.allSettled(lanes);
-  const rejected = results.find((result) => result.status === 'rejected');
-  if (rejected) {
-    throw rejected.reason;
+  const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+  if (failures.length > 0) {
+    throw failures.find((failure) => failure && failure.interrupted) || failures[0];
   }
 }
 
@@ -398,8 +399,16 @@ async function runOfflineDownload(download, headers) {
 
   const fetchAndStore = async (requestUrl, key) => {
     let response;
+    let body;
     try {
       response = await fetch(requestUrl, fetchOptions);
+      // fetch() resolves once the headers are in, so most of a page's transfer
+      // is still to come. Reading the body here is what makes a connection
+      // lost during it count as one: left to cache.put() it would look like a
+      // storage failure.
+      if (response.ok) {
+        body = await response.blob();
+      }
     } catch (error) {
       // The connection went away: what is stored so far is kept for a resume.
       throw Object.assign(new Error(errorText(error)), { interrupted: true });
@@ -407,8 +416,13 @@ async function runOfflineDownload(download, headers) {
     if (!response.ok) {
       throw new Error(`Request failed with status ${response.status}`);
     }
-    await cache.put(key, response.clone());
-    return response;
+    const complete = new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    });
+    await cache.put(key, complete.clone());
+    return complete;
   };
 
   try {

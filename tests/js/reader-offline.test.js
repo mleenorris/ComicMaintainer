@@ -211,7 +211,7 @@ test('without its label element the offline button is never shown', async () => 
 
 const RESUME = (saved, total) => ({
     hidden: false,
-    label: 'Resume saving',
+    label: `Resume ${saved}/${total}`,
     title: `Finish saving this comic for offline reading (${saved} of ${total} pages saved)`,
     ariaLabel: `Finish saving this comic for offline reading (${saved} of ${total} pages saved)`,
     disabled: false

@@ -165,9 +165,14 @@ class FakeCache {
 
     async put(request, response) {
         const url = absolute(request);
+        // Like the real put(): the body is read to its end before anything is
+        // stored, which uses the response up and rejects if the body fails.
+        const stored = response.body === null
+            ? response
+            : new Response(await response.arrayBuffer(), { status: response.status, statusText: response.statusText, headers: response.headers });
         // Like the real batch "put": the old entry goes and the new one is appended.
         this.entries.delete(url);
-        this.entries.set(url, { request: typeof request === 'object' ? request : new Request(url), response });
+        this.entries.set(url, { request: typeof request === 'object' ? request : new Request(url), response: stored });
     }
 
     async keys() {

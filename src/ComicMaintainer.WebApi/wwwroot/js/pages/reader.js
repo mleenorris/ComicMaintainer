@@ -2217,8 +2217,8 @@
         //
         // A comic only counts as saved once the worker finished it. One whose
         // download was cut off (connection lost, worker stopped by the browser,
-        // app closed) keeps the pages it got and is offered as "Resume saving",
-        // which fetches only what is missing.
+        // app closed) keeps the pages it got and is offered as "Resume N/M"
+        // (pages saved of the total), which fetches only what is missing.
         // ------------------------------------------------------------------
 
         // How long a running download may go without reporting progress before
@@ -2261,8 +2261,10 @@
             } else if (offlineComicSaved) {
                 updateOfflineButton('Saved', 'Remove this comic from offline storage');
             } else if (offlinePartialDownload) {
+                // The label is short because the phone header has little room,
+                // and carries the counts because a phone never shows the title.
                 updateOfflineButton(
-                    'Resume saving',
+                    `Resume ${offlinePartialDownload.savedPages}/${offlinePartialDownload.pageCount}`,
                     `Finish saving this comic for offline reading (${offlinePartialDownload.savedPages} of ${offlinePartialDownload.pageCount} pages saved)`
                 );
             } else {

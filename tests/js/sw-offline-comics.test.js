@@ -385,6 +385,98 @@ test('a dropped connection keeps the pages saved so far and reports the download
     assert.ok(sw.caches.urls(OFFLINE_CACHE).includes(offlineKey('a.cbz', 'page/2')));
 });
 
+// A body that delivers part of a page and then fails, as when the connection
+// is lost after the headers arrived.
+const droppedBody = () => new Response(
+    new ReadableStream({
+        start(controller) {
+            controller.enqueue(new Uint8Array([1, 2, 3]));
+        },
+        pull(controller) {
+            controller.error(new TypeError('network error'));
+        }
+    }),
+    { status: 200, headers: { 'Content-Type': 'image/jpeg' } }
+);
+
+test('a connection lost during a page body keeps the pages saved so far, and resuming fetches only the missing ones', async () => {
+    const sw = await installedWorker();
+    routeComic(sw.network, 'a.cbz', { pages: 3 });
+    sw.network.route(call => pageRoute(call) && call.query.page === '3', () => droppedBody());
+
+    const client = await download(sw, 'a.cbz');
+
+    assert.deepEqual(client.messages.at(-1), {
+        filePath: 'a.cbz', type: 'OFFLINE_DOWNLOAD_FAILED', error: 'network error', resumable: true, completed: 2, total: 3
+    });
+    const urls = sw.caches.urls(OFFLINE_CACHE);
+    assert.ok(urls.includes(offlineKey('a.cbz', 'page/1')) && urls.includes(offlineKey('a.cbz', 'page/2')));
+    assert.equal(urls.includes(offlineKey('a.cbz', 'page/3')), false, 'the half-received page is not stored');
+    assert.deepEqual(await listOffline(sw), {
+        type: 'OFFLINE_COMICS',
+        comics: [],
+        incomplete: [{ filePath: 'a.cbz', savedPages: 2, pageCount: 3, active: false }]
+    });
+
+    // The connection is back.
+    routeComic(sw.network, 'a.cbz', { pages: 3 });
+    sw.network.calls.length = 0;
+    const retry = await download(sw, 'a.cbz');
+
+    assert.deepEqual(pagesRequested(sw), [3]);
+    assert.equal(retry.messages.at(-1).type, 'OFFLINE_DOWNLOAD_COMPLETE');
+    assert.deepEqual(await listOffline(sw), { type: 'OFFLINE_COMICS', comics: [{ filePath: 'a.cbz', pageCount: 3 }], incomplete: [] });
+});
+
+test('a connection lost during the info body of a resumed download keeps what was saved', async () => {
+    const sw = await installedWorker();
+    routeComic(sw.network, 'a.cbz', { pages: 3 });
+    sw.network.route(call => pageRoute(call) && call.query.page === '3', () => {
+        throw new TypeError('Failed to fetch');
+    });
+    await download(sw, 'a.cbz');
+
+    sw.network.route(call => call.path === '/api/ComicReader/info', () => droppedBody());
+    const retry = await download(sw, 'a.cbz');
+
+    assert.deepEqual(retry.messages.at(-1), {
+        filePath: 'a.cbz', type: 'OFFLINE_DOWNLOAD_FAILED', error: 'network error', resumable: true, completed: 2, total: 3
+    });
+    assert.ok(sw.caches.urls(OFFLINE_CACHE).includes(offlineKey('a.cbz', 'page/2')));
+    assert.deepEqual((await listOffline(sw)).incomplete, [{ filePath: 'a.cbz', savedPages: 2, pageCount: 3, active: false }]);
+});
+
+test('when pages fail together, a lost connection decides over a refused page', async () => {
+    const sw = await installedWorker();
+    routeComic(sw.network, 'a.cbz', { pages: 3 });
+    // All three start together; the refused page's lane is reported first.
+    sw.network.route(call => pageRoute(call) && call.query.page === '1', reply(502, 'Bad Gateway'));
+    sw.network.route(call => pageRoute(call) && call.query.page === '2', () => droppedBody());
+
+    const client = await download(sw, 'a.cbz');
+
+    assert.deepEqual(client.messages.at(-1), {
+        filePath: 'a.cbz', type: 'OFFLINE_DOWNLOAD_FAILED', error: 'network error', resumable: true, completed: 1, total: 3
+    });
+    assert.ok(sw.caches.urls(OFFLINE_CACHE).includes(offlineKey('a.cbz', 'page/3')));
+});
+
+test('a storage failure while saving a page still rolls the download back', async () => {
+    const sw = await installedWorker();
+    routeComic(sw.network, 'a.cbz', { pages: 3 });
+    const cache = await sw.caches.open(OFFLINE_CACHE);
+    const put = cache.put.bind(cache);
+    cache.put = async (key, response) => {
+        if (String(key).endsWith('/page/3')) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        return put(key, response);
+    };
+
+    const client = await download(sw, 'a.cbz');
+
+    assert.deepEqual(client.messages.at(-1), { filePath: 'a.cbz', type: 'OFFLINE_DOWNLOAD_FAILED', error: 'Quota exceeded' });
+    assert.deepEqual(sw.caches.urls(OFFLINE_CACHE), []);
+});
+
 test('a dropped connection before any page was saved leaves nothing behind', async () => {
     const sw = await installedWorker();
     sw.network.offline = true;

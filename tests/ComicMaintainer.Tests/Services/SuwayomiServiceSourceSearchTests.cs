@@ -527,7 +527,36 @@ public sealed class SuwayomiServiceSourceSearchTests
             Enumerable.Range(1, SuwayomiService.MaxSourceSearchPages),
             handler.Requests.Where(request => request.Operation == "SearchSource")
                 .Select(request => request.Variables.GetProperty("page").GetInt32()));
-        Assert.Contains($"Source: Only the first {SuwayomiService.MaxSourceSearchPages} pages of results for 'Solo Leveling' were searched.", ex.Message);
+        Assert.Contains($"1 search(es) were cut short; Source: Only the first {SuwayomiService.MaxSourceSearchPages} pages of results for 'Solo Leveling' were searched.", ex.Message);
+        Assert.DoesNotContain("failed", ex.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_ReportsACutShortSearchApartFromFailures()
+    {
+        // Partial matches keep the search going to the page cap, and one of
+        // them is still good enough to download from.
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("[]")),
+            "Sources" => Json(Sources("""[{"id":"20","name":"Source","displayName":"Source"}]""")),
+            "SearchSource" => Json(SearchResults(
+                $$"""[{"id":{{request.Variables.GetProperty("page").GetInt32() * 10}},"title":"Solo Leveling: Ragnarok {{request.Variables.GetProperty("page").GetInt32()}}"}]""",
+                "true")),
+            "FetchChapters" => Json(FetchedChapters("""
+                [{"id":82,"name":"Chapter 2","chapterNumber":2,"isDownloaded":false}]
+                """)),
+            "Enqueue" => Json(Enqueued),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var result = await CreateService(handler).DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 });
+
+        Assert.Equal(new[] { 82 }, result.QueuedChapters.Select(chapter => chapter.Id));
+        Assert.Empty(result.DiscoveryFailures);
+        var cutShort = Assert.Single(result.CutShortSearches);
+        Assert.Equal("Source", cutShort.Target);
+        Assert.Contains($"Only the first {SuwayomiService.MaxSourceSearchPages} pages", cutShort.Reason);
     }
 
     [Fact]
@@ -638,7 +667,7 @@ public sealed class SuwayomiServiceSourceSearchTests
         var searched = handler.Requests.Where(request => request.Operation == "SearchSource").ToList();
         Assert.InRange(searched.Count, 1, 4);
         Assert.Contains(
-            $"1 source check(s) failed; Installed Suwayomi sources: {8 - searched.Count} of 8 sources were not searched because the search reached its 10-minute limit.",
+            $"1 search(es) were cut short; Installed Suwayomi sources: {8 - searched.Count} of 8 sources were not searched because the search reached its 10-minute limit.",
             ex.Message);
     }
 

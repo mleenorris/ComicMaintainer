@@ -397,6 +397,13 @@ public class SuwayomiService : ISuwayomiService
                                + $"{firstFailure.Target}: {firstFailure.Error}";
                 }
 
+                if (result.CutShortSearches.Count > 0)
+                {
+                    var firstCutShort = result.CutShortSearches[0];
+                    message += $" {result.CutShortSearches.Count} search(es) were cut short; "
+                               + $"{firstCutShort.Target}: {firstCutShort.Reason}";
+                }
+
                 throw new SuwayomiException(message);
             }
         }
@@ -535,12 +542,12 @@ public class SuwayomiService : ISuwayomiService
         {
             foreach (var outcome in outcomes.Where(o => o.Error is null && o.Truncation is not null))
             {
-                AddDiscoveryFailure(result, outcome.Source.DisplayName, outcome.Truncation!);
+                AddCutShortSearch(result, outcome.Source.DisplayName, outcome.Truncation!);
             }
 
             if (searchTitles.Count > MaxSourceSearchTitles && sources.Count > 0)
             {
-                AddDiscoveryFailure(
+                AddCutShortSearch(
                     result,
                     "Installed Suwayomi sources",
                     $"Only the first {MaxSourceSearchTitles} of the series' {searchTitles.Count} titles were searched on the sources.");
@@ -549,7 +556,7 @@ public class SuwayomiService : ISuwayomiService
             var skippedSources = outcomes.Count(outcome => outcome.Skipped);
             if (skippedSources > 0)
             {
-                AddDiscoveryFailure(
+                AddCutShortSearch(
                     result,
                     "Installed Suwayomi sources",
                     $"{skippedSources} of {sources.Count} sources were not searched because the search reached its {SourceDiscoveryBudget.TotalMinutes:0}-minute limit.");
@@ -765,6 +772,22 @@ public class SuwayomiService : ISuwayomiService
             "Suwayomi missing-issue discovery could not check {Target}: {Message}",
             LoggingHelper.SanitizeForLog(target),
             LoggingHelper.SanitizeForLog(error));
+    }
+
+    private void AddCutShortSearch(
+        SuwayomiDownloadResult result,
+        string target,
+        string reason)
+    {
+        result.CutShortSearches.Add(new SuwayomiCutShortSearch
+        {
+            Target = target,
+            Reason = reason
+        });
+        _logger.LogInformation(
+            "Suwayomi missing-issue discovery did not finish searching {Target}: {Reason}",
+            LoggingHelper.SanitizeForLog(target),
+            LoggingHelper.SanitizeForLog(reason));
     }
 
     private static List<SuwayomiSeries> FindLibraryCandidates(

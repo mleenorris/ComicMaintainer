@@ -58,6 +58,16 @@ public sealed class FilesControllerFileActionsTests
         Assert.Equal(expectedValue, objectResult.Value);
     }
 
+    private void VerifyNoErrorLogged() =>
+        _logger.Verify(
+            l => l.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+
     private void VerifyWarned(string fragment) =>
         _logger.Verify(
             l => l.Log(
@@ -117,6 +127,22 @@ public sealed class FilesControllerFileActionsTests
         var result = await _controller.MarkFileRead(Encode(path), new FilesController.ReadStatusRequest { Read = true });
 
         AssertStatus(result, 500, "Error updating read status");
+    }
+
+    [Fact]
+    public async Task MarkFileRead_Cancelled_Returns499WithoutLoggingAnError()
+    {
+        // The reader closing mid-request is not a server error.
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var path = InRoot("Saga 001.cbz");
+        _fileStore.Setup(f => f.MarkFileReadAsync(path, true, cancelled.Token))
+            .ThrowsAsync(new OperationCanceledException(cancelled.Token));
+
+        var result = await _controller.MarkFileRead(Encode(path), new FilesController.ReadStatusRequest { Read = true }, cancelled.Token);
+
+        Assert.Equal(499, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        VerifyNoErrorLogged();
     }
 
     // ---------------------------------------------------------- MarkFilesReadBatch
@@ -179,6 +205,22 @@ public sealed class FilesControllerFileActionsTests
         });
 
         AssertStatus(result, 500, "Error updating read status");
+    }
+
+    [Fact]
+    public async Task MarkFilesReadBatch_Cancelled_Returns499WithoutLoggingAnError()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        _fileStore.Setup(f => f.MarkFilesReadAsync(It.IsAny<IEnumerable<string>>(), true, cancelled.Token))
+            .ThrowsAsync(new OperationCanceledException(cancelled.Token));
+
+        var result = await _controller.MarkFilesReadBatch(
+            new FilesController.ReadBatchRequest { Files = new List<string> { InRoot("Saga 001.cbz") }, Read = true },
+            cancelled.Token);
+
+        Assert.Equal(499, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        VerifyNoErrorLogged();
     }
 
     // --------------------------------------------------------------- MarkScopeRead

@@ -29,6 +29,10 @@ public partial class FilesController
             await _fileStore.MarkFileReadAsync(filePath, request.Read, cancellationToken);
             return Ok();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return StatusCode(499, new { error = "Read status update was cancelled" });
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
@@ -61,6 +65,10 @@ public partial class FilesController
 
             await _fileStore.MarkFilesReadAsync(request.Files, request.Read, cancellationToken);
             return Ok();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return StatusCode(499, new { error = "Read status update was cancelled" });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

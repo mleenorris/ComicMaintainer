@@ -43,6 +43,29 @@ public class SuwayomiService : ISuwayomiService
     private static readonly TimeSpan ChapterFetchTimeout = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan ThumbnailTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Result pages read per source for each title during missing-issue
+    /// discovery. Every page is a scrape of the source's site, and sources
+    /// with broad fuzzy search report hundreds of pages; the right series, when
+    /// a source has it, is on the first page or two.
+    /// </summary>
+    internal const int MaxSourceSearchPages = 3;
+
+    /// <summary>
+    /// Titles searched on each source during discovery: the series title and
+    /// its highest-priority alternate titles. Cached aliases often run to a
+    /// dozen multilingual titles, each of which would be another round of
+    /// scrapes on every source.
+    /// </summary>
+    internal const int MaxSourceSearchTitles = 4;
+
+    /// <summary>
+    /// Time one source may spend on discovery, across every title and page,
+    /// before the search of it is cut short. A request already sent finishes
+    /// (it has its own timeout), but no further page is requested.
+    /// </summary>
+    internal static readonly TimeSpan SourceSearchBudget = TimeSpan.FromMinutes(2);
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -51,15 +74,18 @@ public class SuwayomiService : ISuwayomiService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SuwayomiService> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public SuwayomiService(
         IHttpClientFactory httpClientFactory,
         IOptionsMonitor<AppSettings> settings,
-        ILogger<SuwayomiService> logger)
+        ILogger<SuwayomiService> logger,
+        TimeProvider? timeProvider = null)
     {
         _httpClientFactory = httpClientFactory;
         _settings = settings;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public bool IsConfigured
@@ -452,20 +478,25 @@ public class SuwayomiService : ISuwayomiService
             sources = Array.Empty<SuwayomiSource>();
         }
 
+        // A few sources at a time, starting the next one as soon as any
+        // finishes, so one slow site does not hold up the sources behind it.
         var outcomes = new SourceSearchOutcome[sources.Count];
-        for (var offset = 0; offset < sources.Count; offset += SourceSearchConcurrency)
-        {
-            var count = Math.Min(SourceSearchConcurrency, sources.Count - offset);
-            await Task.WhenAll(Enumerable.Range(offset, count).Select(async index =>
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, sources.Count),
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = SourceSearchConcurrency,
+                CancellationToken = cancellationToken
+            },
+            async (index, token) =>
             {
                 outcomes[index] = await SearchSourceForCandidatesAsync(
                     sources[index],
                     index,
                     normalizedTitle,
                     searchTitles,
-                    cancellationToken);
-            }));
-        }
+                    token);
+            });
 
         foreach (var outcome in outcomes.Where(o => o.Error is not null))
         {
@@ -477,6 +508,24 @@ public class SuwayomiService : ISuwayomiService
             .ToList();
         var exact = found.Where(candidate => candidate.ExactTitlePriority >= 0).ToList();
         var exactFound = found.Any(candidate => candidate.ExactTitlePriority >= 0);
+
+        // A search that was cut short only matters when nothing matched
+        // exactly: the series might have been further down the results.
+        if (!exactFound)
+        {
+            foreach (var outcome in outcomes.Where(o => o.Error is null && o.Truncation is not null))
+            {
+                AddDiscoveryFailure(result, outcome.Source.DisplayName, outcome.Truncation!);
+            }
+
+            if (searchTitles.Count > MaxSourceSearchTitles && sources.Count > 0)
+            {
+                AddDiscoveryFailure(
+                    result,
+                    "Installed Suwayomi sources",
+                    $"Only the first {MaxSourceSearchTitles} of the series' {searchTitles.Count} titles were searched on the sources.");
+            }
+        }
         var partialTitle = exactFound || !allowPartialMatches
             ? null
             : libraryCandidates
@@ -585,28 +634,41 @@ public class SuwayomiService : ISuwayomiService
 
         var candidates = new List<SourceSeriesCandidate>();
         var resultIndex = 0;
-        for (var queryIndex = 0; queryIndex < searchTitles.Count; queryIndex++)
+        string? truncation = null;
+        var deadline = _timeProvider.GetUtcNow() + SourceSearchBudget;
+        var titleCount = Math.Min(searchTitles.Count, MaxSourceSearchTitles);
+        for (var queryIndex = 0; queryIndex < titleCount; queryIndex++)
         {
-            var page = 1;
-            SuwayomiSourceSearchResult search;
+            var title = searchTitles[queryIndex].Title;
+            var seenSeriesIds = new HashSet<int>();
             var foundExactForQuery = false;
-            do
+            for (var page = 1; ; page++)
             {
+                if (_timeProvider.GetUtcNow() >= deadline)
+                {
+                    truncation = $"The search was stopped after {SourceSearchBudget.TotalMinutes:0} minutes without an exact title match.";
+                    return new SourceSearchOutcome(source, candidates, null, truncation);
+                }
+
+                SuwayomiSourceSearchResult search;
                 try
                 {
-                    search = await SearchSourceAsync(
-                        sourceId,
-                        searchTitles[queryIndex].Title,
-                        page++,
-                        cancellationToken);
+                    search = await SearchSourceAsync(sourceId, title, page, cancellationToken);
                 }
                 catch (SuwayomiException ex)
                 {
-                    return new SourceSearchOutcome(source, candidates, ex.Message);
+                    return new SourceSearchOutcome(source, candidates, ex.Message, truncation);
                 }
 
+                var newResults = 0;
                 foreach (var series in search.Series)
                 {
+                    if (!seenSeriesIds.Add(series.Id))
+                    {
+                        continue;
+                    }
+
+                    newResults++;
                     series.Source = source.DisplayName;
                     var key = Normalize(series.Title);
                     var exactTitlePriority = ExactTitlePriority(key, searchTitles);
@@ -623,7 +685,21 @@ public class SuwayomiService : ISuwayomiService
                             partialScore));
                     }
                 }
-            } while (search.HasNextPage && !foundExactForQuery);
+
+                // A source that ignores the page number answers every page with
+                // the same results and claims there are more forever.
+                var repeatedPage = search.Series.Count > 0 && newResults == 0;
+                if (foundExactForQuery || !search.HasNextPage || repeatedPage)
+                {
+                    break;
+                }
+
+                if (page >= MaxSourceSearchPages)
+                {
+                    truncation ??= $"Only the first {MaxSourceSearchPages} pages of results for '{title}' were searched.";
+                    break;
+                }
+            }
 
             // Search aliases in order. A lower-priority alias found while
             // searching the primary title must not skip higher-priority aliases.
@@ -633,7 +709,7 @@ public class SuwayomiService : ISuwayomiService
             }
         }
 
-        return new SourceSearchOutcome(source, candidates, null);
+        return new SourceSearchOutcome(source, candidates, null, truncation);
     }
 
     private void AddDiscoveryFailure(
@@ -738,10 +814,15 @@ public class SuwayomiService : ISuwayomiService
 
     private sealed record SourceDiscoveryResult(SuwayomiSeries? FirstMatchedSeries);
 
+    /// <param name="Truncation">
+    /// Why the search of the source was cut short before it ran out of results,
+    /// when it was: the page cap or the time budget.
+    /// </param>
     private sealed record SourceSearchOutcome(
         SuwayomiSource Source,
         List<SourceSeriesCandidate> Candidates,
-        string? Error);
+        string? Error,
+        string? Truncation = null);
 
     private sealed record SourceSeriesCandidate(
         SuwayomiSource Source,

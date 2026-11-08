@@ -167,9 +167,12 @@ public sealed class FileStoreServiceDirectoryMoveTests : IAsyncLifetime
         await SeedAsync(db => db.ComicFiles.AddRange(Row(inside, true), Row(nested, false), Row(sibling, true)));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
+        var versionBefore = service.ChangeVersion;
 
         Assert.Equal(2, await service.RemoveDirectoryAsync(OldDir));
 
+        // Caches keyed on the change version (series library snapshot, library ETag) refresh.
+        Assert.NotEqual(versionBefore, service.ChangeVersion);
         await using var db = await _factory.CreateDbContextAsync();
         Assert.Equal(sibling, Assert.Single(await db.ComicFiles.AsNoTracking().ToListAsync()).FilePath);
         Assert.False(await service.FileExistsAsync(inside));
@@ -183,10 +186,12 @@ public sealed class FileStoreServiceDirectoryMoveTests : IAsyncLifetime
         await SeedAsync(db => db.ComicFiles.Add(Row(file, true)));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
+        var versionBefore = service.ChangeVersion;
 
         Assert.Equal(0, await service.RemoveDirectoryAsync(Path.Join(_library, "Saga")));
         Assert.Equal(0, await service.RemoveDirectoryAsync("  "));
         Assert.True(await service.FileExistsAsync(file));
+        Assert.Equal(versionBefore, service.ChangeVersion);
     }
 
     private FileStoreService CreateService(string? userId = null) =>

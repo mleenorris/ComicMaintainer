@@ -172,6 +172,9 @@ public partial class FileStoreService
 
         if (removed > 0 || cachedPaths.Count > 0)
         {
+            // Derived views (the series library snapshot, the library ETag) key their caches on
+            // the change version; they must not keep serving the removed files.
+            MarkChanged();
             _logger.LogInformation("Removed {Count} tracked file(s) under deleted directory {Directory}",
                 Math.Max(removed, cachedPaths.Count), SanitizeForLogging(directory));
             await BroadcastFileListUpdateSafeAsync();

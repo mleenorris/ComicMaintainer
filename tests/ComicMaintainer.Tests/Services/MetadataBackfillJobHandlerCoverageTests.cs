@@ -281,7 +281,7 @@ public class MetadataBackfillJobHandlerCoverageTests
         var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
 
         Assert.Equal(
-            "Backfill: 1 files updated, 0 failed, 1 kept in the database (converting CBR/RAR/ZIP to CBZ is turned off) (queue size was 2).",
+            "Backfill: 1 files updated, 0 failed, 1 kept in the database (CBR/RAR/ZIP not converted to CBZ) (queue size was 2).",
             summary);
         _fileStore.Verify(f => f.MarkFileBackfilledAsync(kept.FilePath, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         _fileStore.Verify(f => f.MarkFileBackfilledAsync(written.FilePath, written.MetadataVersion, It.IsAny<CancellationToken>()), Times.Once);

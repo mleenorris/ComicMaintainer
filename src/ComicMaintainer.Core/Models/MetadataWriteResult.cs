@@ -23,14 +23,15 @@ public enum MetadataWriteOutcome
     ConvertedToCbz,
 
     /// <summary>
-    /// The archive is not rewritten (a CBR/RAR/ZIP while converting to CBZ is turned off), so the
-    /// edit was recorded in the database only.
+    /// The archive is not rewritten (a CBR/RAR/ZIP while converting to CBZ is turned off, or one
+    /// that is a symbolic link), so the edit was recorded in the database only.
     /// </summary>
     KeptInDatabase,
 
     /// <summary>
-    /// The archive is not rewritten (a CBR/RAR/ZIP while converting to CBZ is turned off) and
-    /// the caller did not ask for the edit to be recorded in the database.
+    /// The archive is not rewritten (a CBR/RAR/ZIP while converting to CBZ is turned off, or one
+    /// that is a symbolic link) and the caller did not ask for the edit to be recorded in the
+    /// database.
     /// </summary>
     NotWritable
 }

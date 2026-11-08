@@ -76,10 +76,10 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
             afterFilePath = batch[^1].FilePath;
         }
 
-        // A CBR/RAR/ZIP is not written while converting them to CBZ is turned off; it stays
-        // queued, so its edits are written once the setting is turned back on.
+        // A CBR/RAR/ZIP that is not converted to CBZ is not written; it stays queued, so its
+        // edits are written once the setting is turned back on.
         var keptInDatabase = notWritable > 0
-            ? $", {notWritable} kept in the database (converting CBR/RAR/ZIP to CBZ is turned off)"
+            ? $", {notWritable} kept in the database (CBR/RAR/ZIP not converted to CBZ)"
             : string.Empty;
         return $"Backfill: {processed} files updated, {failed} failed{keptInDatabase} (queue size was {processed + failed + notWritable}).";
     }

@@ -373,8 +373,9 @@ internal static class CoreServiceCollectionExtensions
 
     public static IServiceCollection AddComicMaintainerHostedServices(this IServiceCollection services)
     {
-        // Clean up after archive writes a previous run was stopped in the middle of. Registered
-        // first so its sweep starts before the file watcher begins processing.
+        // Clean up after archive writes a previous run was stopped in the middle of. The sweep
+        // runs in the background alongside the file watcher, which is safe because it only
+        // touches files written before it started.
         services.AddHostedService<ArchiveWriteRecoveryHostedService>();
 
         // Add hosted service for file watcher

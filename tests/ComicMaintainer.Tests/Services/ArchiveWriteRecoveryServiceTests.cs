@@ -2,7 +2,7 @@ using System.IO.Compression;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
 namespace ComicMaintainer.Tests.Services;
@@ -10,7 +10,9 @@ namespace ComicMaintainer.Tests.Services;
 /// <summary>
 /// The startup sweep after interrupted archive writes: unfinished temp archives are deleted, a
 /// backup is restored only over a missing or unreadable archive and only when the backup itself
-/// can be read, and a redundant backup of an intact archive is removed.
+/// can be read, and a backup next to an intact archive is reported but never deleted, since it
+/// may be the user's own copy. What cleans up after versions before 3.0 runs until it has
+/// finished once.
 /// </summary>
 public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
 {
@@ -20,20 +22,25 @@ public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
     private readonly string _root;
     private readonly string _library;
     private readonly string _temp;
+    private readonly string _config;
     private readonly AppSettings _settings;
+    private readonly RecordingLogger _logger = new();
 
     public ArchiveWriteRecoveryServiceTests()
     {
         _root = Path.Join(Path.GetTempPath(), "archive-recovery-" + Guid.NewGuid().ToString("N"));
         _library = Path.Join(_root, "library");
         _temp = Path.Join(_root, "temp");
+        _config = Path.Join(_root, "config");
         Directory.CreateDirectory(_library);
         Directory.CreateDirectory(_temp);
+        Directory.CreateDirectory(_config);
         _settings = new AppSettings
         {
             WatchedDirectory = _library,
             DuplicateDirectory = Path.Join(_root, "duplicates"),
-            TempFileDirectory = _temp
+            TempFileDirectory = _temp,
+            ConfigDirectory = _config
         };
     }
 
@@ -98,16 +105,19 @@ public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RecoverAsync_IntactArchive_RemovesTheRedundantBackup()
+    public async Task RecoverAsync_BackupNextToAnIntactArchive_IsReportedAndNeverDeleted()
     {
+        // This version makes no backups, so such a file may be the user's own copy.
         var archive = WriteArchive("Series/book.cbz", "new");
         var backup = WriteArchive("Series/book.cbz.backup", "old");
 
         var result = await CreateService().RecoverAsync();
 
-        Assert.Equal(1, result.BackupsRemoved);
-        Assert.False(File.Exists(backup));
+        Assert.Equal(1, result.BackupsLeftInPlace);
+        Assert.True(result.DidAnything);
+        Assert.Equal("old", PageOf(backup));
         Assert.Equal("new", PageOf(archive));
+        Assert.Contains(_logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("left in place"));
     }
 
     [Fact]
@@ -148,11 +158,14 @@ public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
         var backup = WriteArchive("Series/book.cbz.backup", "partial");
         Truncate(backup);
 
+        var backupBytes = await File.ReadAllBytesAsync(backup);
+
         var result = await CreateService().RecoverAsync();
 
-        Assert.Equal(1, result.BackupsRemoved);
+        Assert.Equal(1, result.BackupsLeftInPlace);
         Assert.Equal(0, result.BackupsRestored);
         Assert.Equal("intact", PageOf(archive));
+        Assert.Equal(backupBytes, await File.ReadAllBytesAsync(backup));
     }
 
     [Fact]
@@ -167,9 +180,88 @@ public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
 
         var result = await CreateService().RecoverAsync();
 
-        Assert.Equal(1, result.BackupsKept);
+        Assert.Equal(1, result.BackupsUnreadable);
         Assert.Equal(archiveBytes, await File.ReadAllBytesAsync(archive));
         Assert.Equal(backupBytes, await File.ReadAllBytesAsync(backup));
+    }
+
+    [Fact]
+    public async Task RecoverAsync_AfterTheUpgradeCleanupHasRun_LeavesLegacyFilesAlone()
+    {
+        // From then on anything with these names is the user's own: this version creates none.
+        var firstResult = await CreateService().RecoverAsync();
+        Assert.True(firstResult.UpgradeCleanupRan);
+        Assert.True(File.Exists(MarkerPath));
+
+        var archive = WriteArchive("Series/book.cbz", "damaged");
+        var backup = WriteArchive("Series/book.cbz.backup", "mine");
+        Truncate(archive);
+        var archiveBytes = await File.ReadAllBytesAsync(archive);
+        var missingArchiveBackup = WriteArchive("Series/other.cbz.backup", "mine too");
+        var coverTemp = Stale(Path.Join(_library, "Series", "book.cbz.cover.tmp"), "mine");
+        var legacyTemp = Stale(Path.Join(_temp, $".tmp_{Guid.NewGuid()}.cbz"), "mine");
+
+        var result = await CreateService().RecoverAsync();
+
+        Assert.False(result.UpgradeCleanupRan);
+        Assert.False(result.DidAnything);
+        Assert.Equal(archiveBytes, await File.ReadAllBytesAsync(archive));
+        Assert.Equal("mine", PageOf(backup));
+        Assert.Equal("mine too", PageOf(missingArchiveBackup));
+        Assert.False(File.Exists(Path.Join(_library, "Series", "other.cbz")));
+        Assert.True(File.Exists(coverTemp));
+        Assert.True(File.Exists(legacyTemp));
+    }
+
+    [Fact]
+    public async Task RecoverAsync_AfterTheUpgradeCleanupHasRun_StillDeletesUnfinishedTempArchives()
+    {
+        await CreateService().RecoverAsync();
+        var series = Directory.CreateDirectory(Path.Join(_library, "Series")).FullName;
+        var temp = Stale(ArchiveWriteRecoveryService.CreateTempPath(series), "half-written");
+
+        var result = await CreateService().RecoverAsync();
+
+        Assert.False(result.UpgradeCleanupRan);
+        Assert.Equal(1, result.TempFilesDeleted);
+        Assert.False(File.Exists(temp));
+    }
+
+    [Fact]
+    public async Task RecoverAsync_LibraryNotMounted_LeavesTheUpgradeCleanupDueForTheNextStartup()
+    {
+        _settings.WatchedDirectory = Path.Join(_root, "unmounted");
+
+        var result = await CreateService().RecoverAsync();
+
+        Assert.True(result.UpgradeCleanupRan);
+        Assert.False(File.Exists(MarkerPath));
+    }
+
+    [Fact]
+    public async Task RecoverAsync_CancelledMidSweep_LeavesTheUpgradeCleanupDueForTheNextStartup()
+    {
+        WriteArchive("Series/book.cbz", "page");
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => CreateService().RecoverAsync(cancelled.Token));
+
+        Assert.False(File.Exists(MarkerPath));
+    }
+
+    [Fact]
+    public async Task RecoverAsync_DeletingTheMarker_RunsTheUpgradeCleanupAgain()
+    {
+        await CreateService().RecoverAsync();
+        File.Delete(MarkerPath);
+        var coverTemp = Stale(Path.Join(Directory.CreateDirectory(Path.Join(_library, "Series")).FullName, "book.cbz.cover.tmp"), "x");
+
+        var result = await CreateService().RecoverAsync();
+
+        Assert.True(result.UpgradeCleanupRan);
+        Assert.Equal(1, result.TempFilesDeleted);
+        Assert.False(File.Exists(coverTemp));
     }
 
     [Fact]
@@ -217,8 +309,10 @@ public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
         Assert.True(ArchiveWriteRecoveryService.IsTempPath(ArchiveWriteRecoveryService.CreateTempPath(_library)));
     }
 
+    private string MarkerPath => Path.Join(_config, ArchiveWriteRecoveryService.UpgradeMarkerFileName);
+
     private ArchiveWriteRecoveryService CreateService() =>
-        new(new TestOptionsMonitor<AppSettings>(_settings), NullLogger<ArchiveWriteRecoveryService>.Instance, new FakeTimeProvider(Now));
+        new(new TestOptionsMonitor<AppSettings>(_settings), _logger, new FakeTimeProvider(Now));
 
     private static string Stale(string path, string content)
     {
@@ -254,5 +348,17 @@ public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
         using var zip = ZipFile.OpenRead(path);
         using var reader = new StreamReader(zip.GetEntry("page001.txt")!.Open());
         return reader.ReadToEnd();
+    }
+
+    private sealed class RecordingLogger : ILogger<ArchiveWriteRecoveryService>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 }

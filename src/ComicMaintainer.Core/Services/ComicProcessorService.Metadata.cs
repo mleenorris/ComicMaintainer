@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32.SafeHandles;
 using System.Xml;
 using System.Xml.Linq;
 using SharpCompress.Archives;
@@ -272,7 +273,7 @@ public partial class ComicProcessorService
             }
 
             var convert = !ComicFileExtensions.IsWritableArchive(physicalPath);
-            if (convert && !_settings.ConvertRarToCbzOnWrite)
+            if (convert && !CanConvertToCbz(filePath))
             {
                 if (userEdit)
                 {
@@ -280,7 +281,7 @@ public partial class ComicProcessorService
                 }
 
                 _logger.LogDebug(
-                    "Not writing metadata into {FilePath}: converting CBR/RAR/ZIP archives to CBZ is turned off",
+                    "Not writing metadata into {FilePath}: this CBR/RAR/ZIP archive is not converted to CBZ",
                     LoggingHelper.SanitizePathForLog(filePath));
                 return new MetadataWriteResult(MetadataWriteOutcome.NotWritable, filePath);
             }
@@ -326,9 +327,34 @@ public partial class ComicProcessorService
     }
 
     /// <summary>
-    /// Records a user's edit of an archive that is not rewritten (a CBR, RAR or ZIP while
-    /// converting them to CBZ is turned off) in the file's stored metadata, queued for the write
-    /// that eventually converts it. Reads of the file show it from then on.
+    /// True when the CBR, RAR or ZIP at <paramref name="filePath"/> may be converted to CBZ: the
+    /// setting is on and the library entry is the archive itself. A file symlink is never
+    /// converted, because the conversion works on the physical file: it would create the CBZ next
+    /// to the link's target and delete the target, leaving the link in the library dangling.
+    /// Linked folders are fine, since the converted file stays reachable through them.
+    /// </summary>
+    private bool CanConvertToCbz(string filePath)
+    {
+        if (!_settings.ConvertRarToCbzOnWrite)
+        {
+            return false;
+        }
+
+        if (new FileInfo(filePath).LinkTarget is null)
+        {
+            return true;
+        }
+
+        _logger.LogWarning(
+            "Not converting {FilePath} to CBZ: it is a symbolic link, and converting it would delete the file the link points to",
+            LoggingHelper.SanitizePathForLog(filePath));
+        return false;
+    }
+
+    /// <summary>
+    /// Records a user's edit of an archive that is not rewritten (a CBR, RAR or ZIP that is not
+    /// converted to CBZ, see <see cref="CanConvertToCbz"/>) in the file's stored metadata, queued
+    /// for the write that eventually converts it. Reads of the file show it from then on.
     /// </summary>
     private async Task<MetadataWriteResult> KeepMetadataEditInDatabaseAsync(
         string filePath,
@@ -351,7 +377,7 @@ public partial class ComicProcessorService
         ComicMetadataFields.Copy(metadata, values, fields);
         await _fileStore.RecordUserMetadataEditAsync(filePath, values, fields, pendingWrite: true, cancellationToken);
         _logger.LogInformation(
-            "Kept the metadata edit of {FilePath} in the database: converting CBR/RAR/ZIP archives to CBZ is turned off",
+            "Kept the metadata edit of {FilePath} in the database: this CBR/RAR/ZIP archive is not converted to CBZ",
             LoggingHelper.SanitizePathForLog(filePath));
         return new MetadataWriteResult(MetadataWriteOutcome.KeptInDatabase, filePath);
     }
@@ -434,10 +460,10 @@ public partial class ComicProcessorService
                 return new MetadataWriteResult(MetadataWriteOutcome.Unchanged, filePath);
             }
 
-            if (!ComicFileExtensions.IsWritableArchive(physicalPath) && !_settings.ConvertRarToCbzOnWrite)
+            if (!ComicFileExtensions.IsWritableArchive(physicalPath) && !CanConvertToCbz(filePath))
             {
                 _logger.LogWarning(
-                    "Cannot remove metadata from {FilePath}: converting CBR/RAR/ZIP archives to CBZ is turned off, so the archive is not rewritten",
+                    "Cannot remove metadata from {FilePath}: this CBR/RAR/ZIP archive is not converted to CBZ, so it is not rewritten",
                     LoggingHelper.SanitizePathForLog(filePath));
                 return MetadataWriteResult.Failed(filePath);
             }
@@ -523,10 +549,11 @@ public partial class ComicProcessorService
     /// <remarks>
     /// The CBZ is created by a same-directory rename that never replaces an existing file, so a
     /// CBZ already there fails the conversion and both files are kept. The original is deleted
-    /// only once the CBZ is in place and the record has moved; when it cannot be deleted the
-    /// conversion is undone (record moved back, CBZ removed) so the library never holds the
-    /// file twice. Past the rename the steps are not cancelled, so a cancelled job cannot leave
-    /// a half-finished conversion.
+    /// only once the CBZ is in place and the record has moved. When the record cannot be moved
+    /// or the original cannot be deleted, the conversion is undone (record moved back, CBZ
+    /// removed) so the library never holds the file twice and later writes to the original do
+    /// not fail on a leftover CBZ. Past the rename the steps are not cancelled, so a cancelled
+    /// job cannot leave a half-finished conversion.
     /// </remarks>
     private async Task<MetadataWriteResult> ConvertToCbzAsync(
         string logicalPath,
@@ -550,7 +577,20 @@ public partial class ComicProcessorService
         using var directoryHandle = OpenDeleteDirectory(physicalPath);
         var movedPath = MoveFileInRenameDirectory(OperatingSystem.IsLinux() ? directoryHandle : null, tempFile, cbzPhysicalPath);
 
-        await _fileStore.UpdateFilePathAsync(logicalPath, cbzLogicalPath, CancellationToken.None);
+        try
+        {
+            await _fileStore.UpdateFilePathAsync(logicalPath, cbzLogicalPath, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not move the library record of {FilePath} to its new CBZ; keeping the original and removing the CBZ",
+                LoggingHelper.SanitizePathForLog(logicalPath));
+            RemoveUndoneCbz(directoryHandle, movedPath, cbzLogicalPath);
+            throw;
+        }
+
         try
         {
             DeleteFileInDirectory(directoryHandle, physicalPath);
@@ -561,19 +601,8 @@ public partial class ComicProcessorService
                 ex,
                 "Could not delete {FilePath} after converting it to CBZ; keeping the original and removing the new CBZ",
                 LoggingHelper.SanitizePathForLog(logicalPath));
-            await _fileStore.UpdateFilePathAsync(cbzLogicalPath, logicalPath, CancellationToken.None);
-            try
-            {
-                DeleteFileInDirectory(directoryHandle, movedPath);
-            }
-            catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException)
-            {
-                _logger.LogWarning(
-                    cleanupEx,
-                    "Could not remove {CbzPath} after the conversion was undone",
-                    LoggingHelper.SanitizePathForLog(cbzLogicalPath));
-            }
-
+            await MoveRecordBackAfterUndoneConversionAsync(cbzLogicalPath, logicalPath);
+            RemoveUndoneCbz(directoryHandle, movedPath, cbzLogicalPath);
             throw;
         }
 
@@ -583,6 +612,42 @@ public partial class ComicProcessorService
             LoggingHelper.SanitizePathForLog(logicalPath),
             LoggingHelper.SanitizePathForLog(cbzLogicalPath));
         return new MetadataWriteResult(MetadataWriteOutcome.ConvertedToCbz, cbzLogicalPath);
+    }
+
+    /// <summary>
+    /// Moves a file's library record back to the original after its conversion had to be undone.
+    /// Best effort, so the new CBZ still gets removed and the caller still sees the first failure;
+    /// when this fails, the next library scan picks the original up again.
+    /// </summary>
+    private async Task MoveRecordBackAfterUndoneConversionAsync(string cbzLogicalPath, string logicalPath)
+    {
+        try
+        {
+            await _fileStore.UpdateFilePathAsync(cbzLogicalPath, logicalPath, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not move the library record back to {FilePath} after its conversion was undone",
+                LoggingHelper.SanitizePathForLog(logicalPath));
+        }
+    }
+
+    /// <summary>Removes the CBZ of a conversion that had to be undone. Best effort.</summary>
+    private void RemoveUndoneCbz(SafeFileHandle directoryHandle, string cbzPhysicalPath, string cbzLogicalPath)
+    {
+        try
+        {
+            DeleteFileInDirectory(directoryHandle, cbzPhysicalPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not remove {CbzPath} after the conversion was undone",
+                LoggingHelper.SanitizePathForLog(cbzLogicalPath));
+        }
     }
 
     /// <summary>

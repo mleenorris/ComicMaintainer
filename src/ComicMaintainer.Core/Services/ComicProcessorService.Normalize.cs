@@ -271,7 +271,7 @@ public partial class ComicProcessorService
     private static string? DescribeUnwrittenOutcome(MetadataWriteResult write) => write.Outcome switch
     {
         MetadataWriteOutcome.Unchanged => "ComicInfo.xml already up to date",
-        MetadataWriteOutcome.KeptInDatabase => "Kept in the database: converting CBR/RAR to CBZ is turned off",
+        MetadataWriteOutcome.KeptInDatabase => "Kept in the database: this CBR/RAR/ZIP is not converted to CBZ",
         _ => null
     };
 
@@ -280,20 +280,21 @@ public partial class ComicProcessorService
     /// <see cref="DeferUnwritableNormalizeAsync"/>).
     /// </summary>
     internal const string NormalizeNotWritableMessage =
-        "Not normalized: converting CBR/RAR/ZIP to CBZ is turned off, so the archive was left unchanged";
+        "Not normalized: this CBR/RAR/ZIP was left unchanged because converting it to CBZ is turned off or it is a symbolic link";
 
     /// <summary>
-    /// Records a normalize whose result could not be written: the file is a CBR, RAR or ZIP and
-    /// converting them to CBZ is turned off. The file stays marked as not normalized, so it shows
-    /// as unprocessed and the next Process or Normalize writes it once the setting is turned on;
-    /// nothing is lost by not storing the normalized values, since they are worked out again
-    /// then. It is still stamped with the current series-metadata version, so the library scan's
-    /// stale-metadata pass does not retry it on every run while the setting is off.
+    /// Records a normalize whose result could not be written: the file is a CBR, RAR or ZIP that
+    /// is not converted to CBZ (see <see cref="CanConvertToCbz"/>). The file stays marked as not
+    /// normalized, so it shows as unprocessed and the next Process or Normalize writes it once
+    /// the setting is turned on; nothing is lost by not storing the normalized values, since
+    /// they are worked out again then. It is still stamped with the current series-metadata
+    /// version, so the library scan's stale-metadata pass does not retry it on every run while
+    /// the setting is off.
     /// </summary>
     private async Task DeferUnwritableNormalizeAsync(string filePath, string? normalizedSeries, CancellationToken cancellationToken)
     {
         _logger.LogInformation(
-            "Not normalizing {FilePath}: converting CBR/RAR/ZIP archives to CBZ is turned off, so it stays unprocessed until the setting is turned on",
+            "Not normalizing {FilePath}: this CBR/RAR/ZIP archive is not converted to CBZ, so it stays unprocessed",
             LoggingHelper.SanitizePathForLog(filePath));
         await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
         await StampSeriesMetadataVersionAsync(filePath, normalizedSeries, cancellationToken);

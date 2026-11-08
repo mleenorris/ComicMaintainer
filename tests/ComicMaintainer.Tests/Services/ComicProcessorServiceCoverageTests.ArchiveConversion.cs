@@ -136,6 +136,135 @@ public partial class ComicProcessorServiceCoverageTests
     }
 
     [Fact]
+    public async Task ApplyMetadataEditAsync_OriginalCannotBeDeletedAndRecordCannotMoveBack_StillRemovesTheCbz()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            // Only Windows refuses to delete a file that is held open without delete sharing.
+            return;
+        }
+
+        var service = CreateService();
+        var cbr = WriteCbr("Series/book.cbr", Xml("Old", "3", null));
+        var cbz = Path.ChangeExtension(cbr, ".cbz");
+        _fileStore.Setup(f => f.UpdateFilePathAsync(cbz, cbr, It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        MetadataWriteResult result;
+        using (new FileStream(cbr, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            result = await service.ApplyMetadataEditAsync(cbr, new ComicMetadata { Series = "New" }, ComicMetadataFieldFlags.Series);
+        }
+
+        Assert.Equal(MetadataWriteResult.Failed(cbr), result);
+        Assert.True(File.Exists(cbr));
+        Assert.False(File.Exists(cbz));
+    }
+
+    [Fact]
+    public async Task ApplyMetadataEditAsync_LibraryRecordCannotBeMoved_UndoesTheConversionSoALaterWriteWorks()
+    {
+        // A CBZ left behind would become a second library entry and make every later write to
+        // the CBR fail with "already exists".
+        var service = CreateService();
+        var cbr = WriteCbr("Series/book.cbr", Xml("Old", "3", null));
+        var cbz = Path.ChangeExtension(cbr, ".cbz");
+        var before = await File.ReadAllBytesAsync(cbr);
+        _fileStore.Setup(f => f.UpdateFilePathAsync(cbr, cbz, It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        var failed = await service.ApplyMetadataEditAsync(cbr, new ComicMetadata { Series = "New" }, ComicMetadataFieldFlags.Series);
+
+        Assert.Equal(MetadataWriteResult.Failed(cbr), failed);
+        Assert.Equal(before, await File.ReadAllBytesAsync(cbr));
+        Assert.False(File.Exists(cbz));
+        _fileStore.Verify(f => f.UpdateFilePathAsync(cbz, cbr, It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
+
+        _fileStore.Setup(f => f.UpdateFilePathAsync(cbr, cbz, It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .Returns(Task.CompletedTask);
+
+        var retried = await service.ApplyMetadataEditAsync(cbr, new ComicMetadata { Series = "New" }, ComicMetadataFieldFlags.Series);
+
+        Assert.Equal(new MetadataWriteResult(MetadataWriteOutcome.ConvertedToCbz, cbz), retried);
+        Assert.False(File.Exists(cbr));
+        Assert.Equal("New", ReadComicInfo(cbz)!.Element("Series")?.Value);
+    }
+
+    [Fact]
+    public async Task ApplyMetadataEditAsync_CbrThatIsAFileSymlink_KeepsTheEditInTheDatabaseAndTheTargetIntact()
+    {
+        var service = CreateService();
+        var target = WriteCbr("Series/target.cbr", Xml("Old", "3", null));
+        var before = await File.ReadAllBytesAsync(target);
+        var link = Path.Join(_library, "Series", "alias.cbr");
+        if (!TryCreateFileSymlink(link, target))
+        {
+            return;
+        }
+
+        _fileStore.Setup(f => f.GetFileAsync(link, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicFile { FilePath = link });
+
+        var result = await service.ApplyMetadataEditAsync(link, new ComicMetadata { Series = "New" }, ComicMetadataFieldFlags.Series);
+
+        Assert.Equal(new MetadataWriteResult(MetadataWriteOutcome.KeptInDatabase, link), result);
+        Assert.Equal(before, await File.ReadAllBytesAsync(target));
+        Assert.False(File.Exists(Path.ChangeExtension(target, ".cbz")));
+        Assert.False(File.Exists(Path.ChangeExtension(link, ".cbz")));
+        Assert.Equal(target, new FileInfo(link).ResolveLinkTarget(returnFinalTarget: true)!.FullName);
+        Assert.True(_logger.Has(
+            LogLevel.Warning,
+            "Not converting {FilePath} to CBZ: it is a symbolic link, and converting it would delete the file the link points to"));
+        _fileStore.Verify(f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RemoveMetadataAsync_CbrThatIsAFileSymlink_FailsAndLeavesTheTargetIntact()
+    {
+        var service = CreateService();
+        var target = WriteCbr("Series/target.cbr", Xml("Old", "3", null));
+        var before = await File.ReadAllBytesAsync(target);
+        var link = Path.Join(_library, "Series", "alias.cbr");
+        if (!TryCreateFileSymlink(link, target))
+        {
+            return;
+        }
+
+        var result = await service.RemoveMetadataAsync(link);
+
+        Assert.Equal(MetadataWriteResult.Failed(link), result);
+        Assert.Equal(before, await File.ReadAllBytesAsync(target));
+        Assert.False(File.Exists(Path.ChangeExtension(target, ".cbz")));
+    }
+
+    [Fact]
+    public async Task ApplyMetadataEditAsync_CbrInALinkedFolder_IsConvertedAndStaysReachable()
+    {
+        // Only a link on the file itself is refused: a converted file stays reachable through a
+        // linked folder, as a renamed one does.
+        var service = CreateService();
+        var cbr = WriteCbr("Series/book.cbr", Xml("Old", "3", null));
+        var cbz = Path.ChangeExtension(cbr, ".cbz");
+        var alias = Path.Join(_library, "Alias");
+        try
+        {
+            Directory.CreateSymbolicLink(alias, Path.Join(_library, "Series"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Creating links needs a privilege Windows accounts usually do not have.
+            return;
+        }
+
+        var result = await service.ApplyMetadataEditAsync(
+            Path.Join(alias, "book.cbr"), new ComicMetadata { Series = "New" }, ComicMetadataFieldFlags.Series);
+
+        Assert.Equal(MetadataWriteOutcome.ConvertedToCbz, result.Outcome);
+        Assert.False(File.Exists(cbr));
+        Assert.True(File.Exists(cbz));
+        Assert.True(File.Exists(Path.Join(alias, "book.cbz")));
+    }
+
+    [Fact]
     public async Task ApplyMetadataEditAsync_Conversion_MovesTheLibraryRecordReadStatusAndProgress()
     {
         var services = new ServiceCollection();
@@ -366,7 +495,7 @@ public partial class ComicProcessorServiceCoverageTests
         Assert.Equal(before, await File.ReadAllBytesAsync(cbr));
         Assert.True(_logger.Has(
             LogLevel.Warning,
-            "Cannot remove metadata from {FilePath}: converting CBR/RAR/ZIP archives to CBZ is turned off, so the archive is not rewritten"));
+            "Cannot remove metadata from {FilePath}: this CBR/RAR/ZIP archive is not converted to CBZ, so it is not rewritten"));
     }
 
     [Fact]
@@ -514,6 +643,23 @@ public partial class ComicProcessorServiceCoverageTests
         }
 
         return path;
+    }
+
+    /// <summary>
+    /// Creates a file symlink; false where it is not allowed (creating links needs a privilege
+    /// Windows accounts usually do not have), so the test has nothing to check there.
+    /// </summary>
+    private static bool TryCreateFileSymlink(string link, string target)
+    {
+        try
+        {
+            File.CreateSymbolicLink(link, target);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static byte[] ReadZipEntry(string path, string name)

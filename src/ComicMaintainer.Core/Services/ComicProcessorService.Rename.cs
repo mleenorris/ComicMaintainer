@@ -234,7 +234,7 @@ public partial class ComicProcessorService
             // The file has moved and the rename succeeded, so this is not reported as a failed
             // rename. The file watcher's rename event and the next library scan follow the file.
             _logger.LogWarning(ex,
-                "Could not move the library record of {OldPath} to {NewPath}; the file watcher or the next scan will",
+                "Could not move the library record of {OldPath} to {NewPath}; it is left to the file watcher and the next scan",
                 LoggingHelper.SanitizePathForLog(oldPath),
                 LoggingHelper.SanitizePathForLog(newPath));
         }

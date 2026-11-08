@@ -702,6 +702,8 @@
             totalPages = meta.totalPages;
             const titleEl = document.getElementById('comicTitle');
             if (titleEl) titleEl.textContent = meta.name;
+            // The offline button is about the comic on screen.
+            refreshOfflineStatus().catch((error) => console.log('Offline status unavailable:', error));
         }
 
         // True when `earlierPath` was stitched into the stream before
@@ -2043,9 +2045,26 @@
         // same way with or without a connection. This UI drives that cache:
         // it asks the worker to download every page of the current comic,
         // reports progress, and can delete the download again.
+        //
+        // A comic only counts as saved once the worker finished it. One whose
+        // download was cut off (connection lost, worker stopped by the browser,
+        // app closed) keeps the pages it got and is offered as "Resume saving",
+        // which fetches only what is missing.
         // ------------------------------------------------------------------
-        let offlineDownloadInProgress = false;
+
+        // How long a running download may go without reporting progress before
+        // the reader asks the worker whether it is still working on it. A
+        // worker the browser stopped mid-download never reports back, and the
+        // button must not stay on "Saving N%" for good.
+        const OFFLINE_DOWNLOAD_STALL_MS = 30000;
+
+        // The download this page is following ({ filePath, percent, stallTimer }),
+        // or null. It is tracked by file path rather than as "the current comic"
+        // because stitched webcomic issues change the current comic mid-download.
+        let offlineDownload = null;
+        // What the worker reported for the current comic.
         let offlineComicSaved = false;
+        let offlinePartialDownload = null;
 
         function offlineButtonElements() {
             return {
@@ -2061,7 +2080,25 @@
             label.textContent = text;
             button.title = title;
             button.setAttribute('aria-label', title);
-            button.disabled = offlineDownloadInProgress;
+            button.disabled = offlineDownload !== null;
+        }
+
+        function renderOfflineButton() {
+            if (offlineDownload) {
+                updateOfflineButton(
+                    offlineDownload.percent === null ? 'Saving…' : `Saving ${offlineDownload.percent}%`,
+                    'Downloading this comic for offline reading'
+                );
+            } else if (offlineComicSaved) {
+                updateOfflineButton('Saved', 'Remove this comic from offline storage');
+            } else if (offlinePartialDownload) {
+                updateOfflineButton(
+                    'Resume saving',
+                    `Finish saving this comic for offline reading (${offlinePartialDownload.savedPages} of ${offlinePartialDownload.pageCount} pages saved)`
+                );
+            } else {
+                updateOfflineButton('Save offline', 'Save this comic for offline reading');
+            }
         }
 
         function sendServiceWorkerMessage(message) {
@@ -2081,24 +2118,102 @@
             });
         }
 
+        function downloadPercent(completed, total) {
+            return total ? Math.round((completed / total) * 100) : 0;
+        }
+
+        function armOfflineDownloadStallTimer() {
+            if (!offlineDownload) return;
+            clearTimeout(offlineDownload.stallTimer);
+            offlineDownload.stallTimer = setTimeout(checkStalledOfflineDownload, OFFLINE_DOWNLOAD_STALL_MS);
+        }
+
+        // Ask the worker to download (or resume, or join the running download
+        // of) `filePath`, and follow its progress.
+        function followOfflineDownload(controller, filePath, percent = null) {
+            offlineDownload = { filePath, percent, stallTimer: null };
+            renderOfflineButton();
+            armOfflineDownloadStallTimer();
+
+            // Reuse the reader's normal auth headers: the worker cannot read
+            // the token out of localStorage itself.
+            const headers = Object.assign({}, buildFetchOptions().headers || {});
+
+            controller.postMessage({
+                type: 'DOWNLOAD_COMIC',
+                filePath,
+                headers: headers
+            });
+        }
+
+        // Stop following the running download; `partial` is what an
+        // interrupted download left for the current comic, if anything.
+        function endOfflineDownload({ saved = false, partial = null } = {}) {
+            const filePath = offlineDownload.filePath;
+            clearTimeout(offlineDownload.stallTimer);
+            offlineDownload = null;
+            if (filePath === comicFilePath) {
+                offlineComicSaved = saved;
+                offlinePartialDownload = partial;
+                renderOfflineButton();
+            } else {
+                // The reader moved on to another (stitched) comic meanwhile.
+                void refreshOfflineStatus();
+            }
+        }
+
+        // No progress for a while: either the worker is still busy (a slow
+        // page), it finished without the page hearing about it, or it was
+        // stopped and the download is not running any more.
+        async function checkStalledOfflineDownload() {
+            if (!offlineDownload) return;
+            const filePath = offlineDownload.filePath;
+            const response = await sendServiceWorkerMessage({ type: 'LIST_OFFLINE_COMICS' });
+            if (!offlineDownload || offlineDownload.filePath !== filePath) return;
+
+            const comics = (response && response.comics) || [];
+            const incomplete = (response && response.incomplete) || [];
+            if (comics.some((comic) => comic.filePath === filePath)) {
+                endOfflineDownload({ saved: true });
+                showMessage('Available for offline reading', 'success');
+                return;
+            }
+            const partial = incomplete.find((comic) => comic.filePath === filePath);
+            if (partial && partial.active) {
+                offlineDownload.percent = downloadPercent(partial.savedPages, partial.pageCount);
+                renderOfflineButton();
+                armOfflineDownloadStallTimer();
+                return;
+            }
+            endOfflineDownload({ partial: partial || null });
+            showMessage('Offline download was interrupted', 'error');
+        }
+
         async function refreshOfflineStatus() {
             if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
                 return;
             }
+            const filePath = comicFilePath;
             const response = await sendServiceWorkerMessage({ type: 'LIST_OFFLINE_COMICS' });
+            if (filePath !== comicFilePath) return;
             const comics = (response && response.comics) || [];
-            offlineComicSaved = comics.some((comic) => comic.filePath === comicFilePath);
-            if (offlineDownloadInProgress) return;
-            updateOfflineButton(
-                offlineComicSaved ? 'Saved' : 'Save offline',
-                offlineComicSaved
-                    ? 'Remove this comic from offline storage'
-                    : 'Save this comic for offline reading'
-            );
+            const incomplete = (response && response.incomplete) || [];
+            const partial = incomplete.find((comic) => comic.filePath === filePath) || null;
+            offlineComicSaved = comics.some((comic) => comic.filePath === filePath);
+            offlinePartialDownload = partial && !partial.active ? partial : null;
+
+            const controller = navigator.serviceWorker.controller;
+            if (partial && partial.active && !offlineDownload && controller) {
+                // The worker is still downloading this comic (started before
+                // the page was reloaded): follow that download.
+                followOfflineDownload(controller, filePath, downloadPercent(partial.savedPages, partial.pageCount));
+                return;
+            }
+            renderOfflineButton();
         }
 
         async function toggleOfflineDownload() {
-            if (offlineDownloadInProgress) return;
+            if (offlineDownload) return;
 
             const controller = navigator.serviceWorker && navigator.serviceWorker.controller;
             if (!controller) {
@@ -2109,48 +2224,41 @@
             if (offlineComicSaved) {
                 await sendServiceWorkerMessage({ type: 'REMOVE_OFFLINE_COMIC', filePath: comicFilePath });
                 offlineComicSaved = false;
-                updateOfflineButton('Save offline', 'Save this comic for offline reading');
+                offlinePartialDownload = null;
+                renderOfflineButton();
                 showMessage('Removed from offline storage', 'info');
                 return;
             }
 
-            offlineDownloadInProgress = true;
-            updateOfflineButton('Saving…', 'Downloading this comic for offline reading');
-
-            // Reuse the reader's normal auth headers: the worker cannot read
-            // the token out of localStorage itself.
-            const headers = Object.assign({}, buildFetchOptions().headers || {});
-
-            controller.postMessage({
-                type: 'DOWNLOAD_COMIC',
-                filePath: comicFilePath,
-                headers: headers
-            });
+            followOfflineDownload(controller, comicFilePath);
         }
 
         function handleServiceWorkerMessage(event) {
             const data = event.data;
-            if (!data || data.filePath !== comicFilePath) return;
+            if (!data || !offlineDownload || data.filePath !== offlineDownload.filePath) return;
 
             if (data.type === 'OFFLINE_DOWNLOAD_PROGRESS') {
-                const percent = data.total ? Math.round((data.completed / data.total) * 100) : 0;
-                updateOfflineButton(`Saving ${percent}%`, 'Downloading this comic for offline reading');
+                offlineDownload.percent = downloadPercent(data.completed, data.total);
+                renderOfflineButton();
+                armOfflineDownloadStallTimer();
                 return;
             }
 
             if (data.type === 'OFFLINE_DOWNLOAD_COMPLETE') {
-                offlineDownloadInProgress = false;
-                offlineComicSaved = true;
-                updateOfflineButton('Saved', 'Remove this comic from offline storage');
+                endOfflineDownload({ saved: true });
                 showMessage('Available for offline reading', 'success');
                 return;
             }
 
             if (data.type === 'OFFLINE_DOWNLOAD_FAILED') {
-                offlineDownloadInProgress = false;
-                offlineComicSaved = false;
-                updateOfflineButton('Save offline', 'Save this comic for offline reading');
-                showMessage('Offline download failed', 'error');
+                // A dropped connection keeps what was saved so far; anything
+                // else (the server refused the comic, storage ran out) left
+                // nothing behind.
+                const partial = data.resumable
+                    ? { savedPages: data.completed, pageCount: data.total }
+                    : null;
+                endOfflineDownload({ partial });
+                showMessage(partial ? 'Offline download was interrupted' : 'Offline download failed', 'error');
             }
         }
 

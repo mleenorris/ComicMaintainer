@@ -276,27 +276,134 @@ async function matchCachedDocument(url) {
   return cached || null;
 }
 
+// How many pages of one comic are fetched at once while downloading it. A few
+// requests in flight hide the per-request latency that dominates on a slow or
+// distant connection without hogging the bandwidth the reader itself needs.
+const OFFLINE_DOWNLOAD_CONCURRENCY = 3;
+
+// A download the worker could not finish (the browser stops a worker whose
+// event runs for minutes, the app was closed, the connection dropped) keeps
+// the pages it already stored, so saving the comic again resumes where it
+// stopped instead of starting over. Until it finishes it is never reported as
+// saved, and one nobody resumed for this long is assumed abandoned and removed.
+const INCOMPLETE_DOWNLOAD_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Downloads running in this worker, by file path: the pages to report progress
+// to, how far it got and the promise that settles when it ends. A worker that
+// was stopped mid-download starts again with none, which is how an interrupted
+// download is told apart from one that is still running.
+const activeOfflineDownloads = new Map();
+
+function errorText(error) {
+  return String(error && error.message ? error.message : error);
+}
+
+function jsonResponse(value) {
+  return new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+}
+
+async function readCachedJson(cache, key) {
+  try {
+    const response = await cache.match(key);
+    return response ? await response.json() : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function offlineCacheUrls(cache) {
+  return new Set((await cache.keys()).map((request) => request.url));
+}
+
+// The page numbers in 1..totalPages that are not stored for filePath; `urls`
+// is the set of URLs in the offline cache.
+function missingOfflinePages(urls, filePath, totalPages) {
+  const missing = [];
+  for (let page = 1; page <= totalPages; page++) {
+    if (!urls.has(offlineCacheKey(filePath, 'page', page))) {
+      missing.push(page);
+    }
+  }
+  return missing;
+}
+
+// Run `task` for every item, at most `limit` at a time. Stops starting new
+// items after the first failure, but only rejects (with that failure) once the
+// ones already running have settled, so nothing is still being stored when
+// the caller cleans up.
+async function forEachConcurrently(items, limit, task) {
+  let next = 0;
+  let failed = false;
+  const lane = async () => {
+    while (!failed && next < items.length) {
+      const item = items[next++];
+      try {
+        await task(item);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    }
+  };
+  const lanes = [];
+  for (let i = 0; i < Math.min(limit, items.length); i++) {
+    lanes.push(lane());
+  }
+  const results = await Promise.allSettled(lanes);
+  const rejected = results.find((result) => result.status === 'rejected');
+  if (rejected) {
+    throw rejected.reason;
+  }
+}
+
 // Download every page of a comic (plus its info payload, which the reader
-// needs before it can render anything) into the offline cache. Progress is
-// reported back to the requesting page so it can show a progress indicator.
-async function downloadComicForOffline(client, options) {
+// needs before it can render anything) into the offline cache, reporting
+// progress to every page that asked for it. Asking again while the comic is
+// downloading joins that download; asking for a comic an earlier attempt left
+// incomplete fetches only the pages it is missing. The comic only counts as
+// saved once its completion record is written, after the last page.
+function downloadComicForOffline(client, options) {
   const filePath = options && options.filePath;
-  const headers = (options && options.headers) || {};
   if (!filePath) {
-    return;
+    return Promise.resolve();
   }
 
+  const canReply = Boolean(client) && typeof client.postMessage === 'function';
+  let download = activeOfflineDownloads.get(filePath);
+  if (!download) {
+    download = { filePath, clients: new Set(), completed: 0, total: 0 };
+    download.promise = runOfflineDownload(download, (options && options.headers) || {})
+      .finally(() => activeOfflineDownloads.delete(filePath));
+    activeOfflineDownloads.set(filePath, download);
+  } else if (canReply && download.total) {
+    // A page joining a running download learns how far it already got.
+    client.postMessage({ filePath, type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: download.completed, total: download.total });
+  }
+  if (canReply) {
+    download.clients.add(client);
+  }
+  return download.promise;
+}
+
+async function runOfflineDownload(download, headers) {
+  const filePath = download.filePath;
   const post = (message) => {
-    if (client && typeof client.postMessage === 'function') {
+    for (const client of download.clients) {
       client.postMessage(Object.assign({ filePath }, message));
     }
   };
 
   const fetchOptions = { credentials: 'include', headers };
-  const cache = await caches.open(OFFLINE_CACHE_NAME);
+  let cache;
 
   const fetchAndStore = async (requestUrl, key) => {
-    const response = await fetch(requestUrl, fetchOptions);
+    let response;
+    try {
+      response = await fetch(requestUrl, fetchOptions);
+    } catch (error) {
+      // The connection went away: what is stored so far is kept for a resume.
+      throw Object.assign(new Error(errorText(error)), { interrupted: true });
+    }
     if (!response.ok) {
       throw new Error(`Request failed with status ${response.status}`);
     }
@@ -305,6 +412,20 @@ async function downloadComicForOffline(client, options) {
   };
 
   try {
+    cache = await caches.open(OFFLINE_CACHE_NAME);
+
+    // Until this attempt finishes, whatever is stored for the comic belongs to
+    // an unfinished download; the timestamp lets an abandoned one expire.
+    await cache.delete(offlineCacheKey(filePath, 'complete'));
+    await cache.put(offlineCacheKey(filePath, 'pending'), jsonResponse({ updatedAt: Date.now() }));
+
+    const previousInfo = await readCachedJson(cache, offlineCacheKey(filePath, 'info'));
+    if (previousInfo) {
+      download.total = Number(previousInfo.pageCount) || 0;
+      download.completed = download.total
+        - missingOfflinePages(await offlineCacheUrls(cache), filePath, download.total).length;
+    }
+
     const infoResponse = await fetchAndStore(
       `/api/ComicReader/info?filePath=${encodeURIComponent(filePath)}`,
       offlineCacheKey(filePath, 'info')
@@ -315,15 +436,25 @@ async function downloadComicForOffline(client, options) {
       throw new Error('Comic reports no pages');
     }
 
-    post({ type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: 0, total: totalPages });
+    // Pages kept from an earlier attempt belong to another version of the
+    // file when its page count changed since; they cannot be mixed in.
+    if (previousInfo && Number(previousInfo.pageCount) !== totalPages) {
+      await removeOfflineEntries(cache, filePath, 'page/');
+    }
 
-    for (let page = 1; page <= totalPages; page++) {
+    const missing = missingOfflinePages(await offlineCacheUrls(cache), filePath, totalPages);
+    download.total = totalPages;
+    download.completed = totalPages - missing.length;
+    post({ type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: download.completed, total: totalPages });
+
+    await forEachConcurrently(missing, OFFLINE_DOWNLOAD_CONCURRENCY, async (page) => {
       await fetchAndStore(
         `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${page}`,
         offlineCacheKey(filePath, 'page', page)
       );
-      post({ type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: page, total: totalPages });
-    }
+      download.completed++;
+      post({ type: 'OFFLINE_DOWNLOAD_PROGRESS', completed: download.completed, total: totalPages });
+    });
 
     // The cover is what the offline list renders; failing to get it must not
     // invalidate an otherwise complete download.
@@ -336,18 +467,31 @@ async function downloadComicForOffline(client, options) {
       console.log('Service Worker: Failed to cache cover for offline comic', error);
     }
 
+    await cache.put(offlineCacheKey(filePath, 'complete'), jsonResponse({ pageCount: totalPages }));
+    await cache.delete(offlineCacheKey(filePath, 'pending'));
     post({ type: 'OFFLINE_DOWNLOAD_COMPLETE', total: totalPages, fileName: info.fileName });
   } catch (error) {
-    // A partial download is useless and would masquerade as a complete one, so
-    // roll it back.
+    if (error && error.interrupted && download.completed > 0) {
+      post({
+        type: 'OFFLINE_DOWNLOAD_FAILED',
+        error: errorText(error),
+        resumable: true,
+        completed: download.completed,
+        total: download.total
+      });
+      return;
+    }
+    // Nothing worth resuming (the server refused the comic or a page, or
+    // storage ran out): roll the download back rather than keep a fragment.
     await removeOfflineComic(filePath);
-    post({ type: 'OFFLINE_DOWNLOAD_FAILED', error: String(error && error.message ? error.message : error) });
+    post({ type: 'OFFLINE_DOWNLOAD_FAILED', error: errorText(error) });
   }
 }
 
-async function removeOfflineComic(filePath) {
-  const cache = await caches.open(OFFLINE_CACHE_NAME);
-  const prefix = `${self.location.origin}${OFFLINE_KEY_PREFIX}${encodeURIComponent(filePath)}/`;
+// Delete the offline entries stored for filePath whose kind ('info', 'cover',
+// 'page/N', ...) starts with `kindPrefix`; all of them by default.
+async function removeOfflineEntries(cache, filePath, kindPrefix = '') {
+  const prefix = `${self.location.origin}${OFFLINE_KEY_PREFIX}${encodeURIComponent(filePath)}/${kindPrefix}`;
   const keys = await cache.keys();
   await Promise.all(
     keys
@@ -356,13 +500,21 @@ async function removeOfflineComic(filePath) {
   );
 }
 
-// Summarise the offline cache as one entry per downloaded comic so a client
-// (the reader button, the offline page) can render what is available.
+async function removeOfflineComic(filePath) {
+  await removeOfflineEntries(await caches.open(OFFLINE_CACHE_NAME), filePath);
+}
+
+// Summarise the offline cache for a client (the reader button, the offline
+// page). `comics` lists the comics that finished downloading, with the number
+// of pages saved; `incomplete` lists the ones still downloading (`active`) or
+// left unfinished by an interrupted download, which saving again resumes.
+// Interrupted downloads that cannot or will not be resumed are removed.
 async function listOfflineComics() {
   const cache = await caches.open(OFFLINE_CACHE_NAME);
   const keys = await cache.keys();
+  const urls = new Set(keys.map((request) => request.url));
   const prefix = `${self.location.origin}${OFFLINE_KEY_PREFIX}`;
-  const comics = new Map();
+  const stored = new Map();
 
   for (const request of keys) {
     if (!request.url.startsWith(prefix)) {
@@ -379,14 +531,56 @@ async function listOfflineComics() {
     } catch (error) {
       continue;
     }
-    const entry = comics.get(filePath) || { filePath, pageCount: 0 };
-    if (remainder.slice(separator + 1).startsWith('page/')) {
+    const entry = stored.get(filePath) || { filePath, pageCount: 0, complete: false };
+    const kind = remainder.slice(separator + 1);
+    if (kind.startsWith('page/')) {
       entry.pageCount++;
+    } else if (kind === 'complete') {
+      entry.complete = true;
     }
-    comics.set(filePath, entry);
+    stored.set(filePath, entry);
   }
 
-  return Array.from(comics.values());
+  const comics = [];
+  const incomplete = [];
+  for (const entry of stored.values()) {
+    const { filePath } = entry;
+    const running = activeOfflineDownloads.get(filePath);
+    if (running) {
+      incomplete.push({ filePath, savedPages: running.completed, pageCount: running.total, active: true });
+      continue;
+    }
+
+    if (entry.complete) {
+      comics.push({ filePath, pageCount: entry.pageCount });
+      continue;
+    }
+
+    const info = await readCachedJson(cache, offlineCacheKey(filePath, 'info'));
+    const totalPages = (info && Number(info.pageCount)) || 0;
+    const pending = await readCachedJson(cache, offlineCacheKey(filePath, 'pending'));
+    if (!pending) {
+      // Downloads made before completion was recorded have neither marker.
+      // Those that got every page their info lists are complete: record it,
+      // so they are listed straight away from now on.
+      if (totalPages > 0 && missingOfflinePages(urls, filePath, totalPages).length === 0) {
+        await cache.put(offlineCacheKey(filePath, 'complete'), jsonResponse({ pageCount: totalPages }));
+        comics.push({ filePath, pageCount: entry.pageCount });
+      } else {
+        await removeOfflineEntries(cache, filePath);
+      }
+      continue;
+    }
+
+    const age = Date.now() - (Number(pending.updatedAt) || 0);
+    if (totalPages > 0 && entry.pageCount > 0 && age < INCOMPLETE_DOWNLOAD_MAX_AGE_MS) {
+      incomplete.push({ filePath, savedPages: entry.pageCount, pageCount: totalPages, active: false });
+    } else {
+      await removeOfflineEntries(cache, filePath);
+    }
+  }
+
+  return { comics, incomplete };
 }
 
 function replyToMessage(event, payload) {
@@ -836,9 +1030,10 @@ self.addEventListener('message', (event) => {
 
   if (event.data.type === 'LIST_OFFLINE_COMICS') {
     event.waitUntil(
-      listOfflineComics().then((comics) => replyToMessage(event, {
+      listOfflineComics().then(({ comics, incomplete }) => replyToMessage(event, {
         type: 'OFFLINE_COMICS',
-        comics
+        comics,
+        incomplete
       }))
     );
   }

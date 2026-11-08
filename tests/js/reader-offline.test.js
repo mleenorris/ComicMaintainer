@@ -206,3 +206,129 @@ test('without its label element the offline button is never shown', async () => 
 
     assert.equal(page.$('#offlineBtn').hidden, true);
 });
+
+// --- interrupted downloads ------------------------------------------------------
+
+const RESUME = (saved, total) => ({
+    hidden: false,
+    label: 'Resume saving',
+    title: `Finish saving this comic for offline reading (${saved} of ${total} pages saved)`,
+    ariaLabel: `Finish saving this comic for offline reading (${saved} of ${total} pages saved)`,
+    disabled: false
+});
+const STALL_MS = 30000;
+const downloadsSent = controller => controller.messages.filter(message => message.type === 'DOWNLOAD_COMIC').length;
+
+test('a comic whose download was cut off is offered for resuming, never shown as saved', async () => {
+    const { page, controller } = await openWithWorker({
+        incomplete: [{ filePath: FILE, savedPages: 64, pageCount: 150, active: false }]
+    });
+    assert.deepEqual(offlineButton(page), RESUME(64, 150));
+
+    page.click('#offlineBtn');
+    assert.deepEqual(offlineButton(page), savingAs('Saving…'));
+    assert.deepEqual(controller.messages.at(-1).type, 'DOWNLOAD_COMIC');
+});
+
+test('a dropped connection leaves the comic resumable', async () => {
+    const { page } = await openWithWorker();
+    page.click('#offlineBtn');
+
+    workerMessage(page, { type: 'OFFLINE_DOWNLOAD_FAILED', filePath: FILE, error: 'Failed to fetch', resumable: true, completed: 2, total: 8 });
+
+    assert.deepEqual(offlineButton(page), RESUME(2, 8));
+    assert.deepEqual(toasts(page), [{ message: 'Offline download was interrupted', type: 'error' }]);
+});
+
+test('a download that stops reporting progress is checked on, and released once the worker no longer runs it', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { page, controller } = await openWithWorker();
+    page.click('#offlineBtn');
+    workerMessage(page, { type: 'OFFLINE_DOWNLOAD_PROGRESS', filePath: FILE, completed: 3, total: 8 });
+
+    // Progress re-arms the check.
+    t.mock.timers.tick(STALL_MS - 1);
+    workerMessage(page, { type: 'OFFLINE_DOWNLOAD_PROGRESS', filePath: FILE, completed: 4, total: 8 });
+    t.mock.timers.tick(STALL_MS - 1);
+    await page.settle();
+    assert.equal(controller.messages.filter(message => message.type === 'LIST_OFFLINE_COMICS').length, 1);
+
+    // Still running (one slow page): keep following it.
+    controller.incomplete = [{ filePath: FILE, savedPages: 5, pageCount: 8, active: true }];
+    t.mock.timers.tick(1);
+    await page.waitFor(() => offlineButton(page).label === 'Saving 63%');
+    assert.deepEqual(offlineButton(page), savingAs('Saving 63%'));
+    assert.deepEqual(toasts(page), []);
+
+    // The browser stopped the worker: the button goes back to resuming.
+    controller.incomplete = [{ filePath: FILE, savedPages: 5, pageCount: 8, active: false }];
+    t.mock.timers.tick(STALL_MS);
+    await page.waitFor(() => !offlineButton(page).disabled);
+    assert.deepEqual(offlineButton(page), RESUME(5, 8));
+    assert.deepEqual(toasts(page), [{ message: 'Offline download was interrupted', type: 'error' }]);
+    assert.equal(controller.messages.filter(message => message.type === 'LIST_OFFLINE_COMICS').length, 3);
+});
+
+test('a download that finished without the page hearing of it shows as saved', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { page, controller } = await openWithWorker();
+    page.click('#offlineBtn');
+
+    controller.saved.add(FILE);
+    t.mock.timers.tick(STALL_MS);
+    await page.waitFor(() => offlineButton(page).label === 'Saved');
+
+    assert.deepEqual(offlineButton(page), SAVED);
+    assert.deepEqual(toasts(page), [{ message: 'Available for offline reading', type: 'success' }]);
+});
+
+test('a worker that no longer answers releases a stalled download', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { page, controller } = await openWithWorker();
+    page.click('#offlineBtn');
+    controller.postMessage = message => controller.messages.push(JSON.parse(JSON.stringify(message)));
+
+    t.mock.timers.tick(STALL_MS);
+    await page.settle();
+    assert.equal(offlineButton(page).disabled, true);
+    t.mock.timers.tick(5000);
+    await page.waitFor(() => !offlineButton(page).disabled);
+
+    assert.deepEqual(offlineButton(page), SAVE);
+    assert.deepEqual(toasts(page), [{ message: 'Offline download was interrupted', type: 'error' }]);
+    page.click('#offlineBtn');
+    assert.equal(downloadsSent(controller), 2);
+});
+
+test('a comic the worker is still downloading when the reader opens shows that download', async () => {
+    const { page, controller } = await openWithWorker({
+        incomplete: [{ filePath: FILE, savedPages: 2, pageCount: 8, active: true }]
+    });
+
+    assert.deepEqual(offlineButton(page), savingAs('Saving 25%'));
+    // Asking again joins the running download, so its progress reaches this page.
+    assert.equal(downloadsSent(controller), 1);
+
+    workerMessage(page, { type: 'OFFLINE_DOWNLOAD_COMPLETE', filePath: FILE });
+    assert.deepEqual(offlineButton(page), SAVED);
+});
+
+test('a download still finishes after the stream moved on to the next issue, and the button then follows that issue', async () => {
+    const { page, controller } = await openWithWorker();
+    page.click('#offlineBtn');
+
+    await page.run(`
+        comicMeta.set(${JSON.stringify(NEXT_FILE)}, { totalPages: 3, name: 'Next' });
+        setActiveComic(${JSON.stringify(NEXT_FILE)});
+    `);
+    workerMessage(page, { type: 'OFFLINE_DOWNLOAD_PROGRESS', filePath: FILE, completed: 1, total: 2 });
+    assert.deepEqual(offlineButton(page), savingAs('Saving 50%'));
+
+    controller.saved.add(FILE);
+    workerMessage(page, { type: 'OFFLINE_DOWNLOAD_COMPLETE', filePath: FILE });
+    await page.waitFor(() => !offlineButton(page).disabled);
+
+    // The comic on screen now is the next issue, which is not saved.
+    assert.deepEqual(offlineButton(page), SAVE);
+    assert.deepEqual(toasts(page), [{ message: 'Available for offline reading', type: 'success' }]);
+});

@@ -68,6 +68,45 @@ public class IssueNumberParserTests
         Assert.Null(IssueNumberParser.Parse(name));
     }
 
+    [Theory]
+    // Scene tags and checksums are not chapter markers. A bare "c" before a digit used to count
+    // anywhere, so "(c2c)" (cover to cover) and the "C2" in a CRC tag were read as chapter 2.
+    [InlineData("Amazing Spider-Man 001 (1963) (c2c) (Digital)", "1")]
+    [InlineData("Hellboy 001 (2003) (c2c)", "1")]
+    [InlineData("X 001 c2c", "1")]
+    [InlineData("X 001 C2C (Digital)", "1")]
+    [InlineData("[Group] Series - 005 [5C2A9E01]", "5")]
+    [InlineData("[Group] Series - 005 (C2A9E01B)", "5")]
+    // A marker inside brackets is a qualifier, not the issue.
+    [InlineData("Series 005 (Ch 9)", "5")]
+    [InlineData("Series 005 [#9]", "5")]
+    // A bare "c" marker still works when only a separator or the end follows its number.
+    [InlineData("Series c012", "12")]
+    [InlineData("Series c012.5 (v01)", "12.5")]
+    [InlineData("Series - c012 (v01) - p000 [Group]", "12")]
+    public void Parse_SceneTagsChecksumsAndBracketedMarkers_AreNotChapterMarkers(string name, string expected)
+    {
+        Assert.Equal(expected, IssueNumberParser.Parse(name));
+    }
+
+    [Theory]
+    // A number in a chapter title after a " - " separator does not beat the issue number.
+    [InlineData("Series 012 - Part 2", "12")]
+    [InlineData("One Piece 1001 - Wano Act 3", "1001")]
+    [InlineData("Series - 012 - Title 2", "12")]
+    [InlineData("Mob Psycho 100 - 005 - Part 2", "5")]
+    [InlineData("Series v02 - 012 - The Title", "12")]
+    [InlineData("Batman - Detective Comics 005", "5")]
+    [InlineData("Series – 012 – Title 3", "12")]
+    [InlineData("Series_-_012_-_Title 3", "12")]
+    // A part that is only a number is the issue, even when the series name is a number.
+    [InlineData("86 - 012", "12")]
+    [InlineData("005 - The Title 2", "5")]
+    public void Parse_NumberInAChapterTitle_DoesNotWin(string name, string expected)
+    {
+        Assert.Equal(expected, IssueNumberParser.Parse(name));
+    }
+
     [Fact]
     public void Parse_MarkerInsideAWord_IsNotAMarker()
     {
@@ -86,6 +125,11 @@ public class IssueNumberParserTests
     [InlineData("Series Vol 2", null)]
     [InlineData("Series 042", null)]
     [InlineData("Series Name (2023)", null)]
+    [InlineData("Hellboy 001 (2003) (c2c)", null)]
+    [InlineData("X 001 c2c", null)]
+    [InlineData("[Group] Series - 005 [5C2A9E01]", null)]
+    [InlineData("Series 005 (Ch 9)", null)]
+    [InlineData("Series c012 (c2c)", "12")]
     [InlineData(null, null)]
     public void ParseMarked_ReturnsOnlyAnExplicitlyMarkedNumber(string? name, string? expected)
     {
@@ -100,6 +144,8 @@ public class IssueNumberParserTests
     [InlineData("Batman (0005)", "5", false)]
     [InlineData("Batman v5", "5", false)]
     [InlineData("Batman v2 #0005", "5", true)]
+    [InlineData("Batman (c2c)", "2", false)]
+    [InlineData("Batman [Ch 5]", "5", false)]
     [InlineData("Batman 12.5", "12.5", true)]
     [InlineData("Batman 12", "12.5", false)]
     [InlineData("", "5", false)]

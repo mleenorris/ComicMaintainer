@@ -9,14 +9,20 @@ namespace ComicMaintainer.Core.Utilities;
 /// all go through it, so a file name yields the same number everywhere.
 /// </summary>
 /// <remarks>
-/// <para>The rules, in order:</para>
+/// <para>Bracketed qualifiers such as "(2016)", "[Digital]", "(c2c)", "{HQ}" or a "[5C2A9E01]"
+/// checksum are ignored by every rule. The rules, in order:</para>
 /// <list type="number">
 /// <item>An explicitly marked number wins: "Ch 12", "Ch.12", "Chapter 012.5", "c012", "Issue 3"
-/// or "#007". A marker must start a word, so "Punch 5" is not read as chapter 5.</item>
-/// <item>Otherwise bracketed qualifiers such as "(2016)", "[Digital]" or "{HQ}" and volume tokens
-/// such as "Vol.1", "Vol 2", "Volume 3" or "v01" are ignored, and the last remaining standalone
-/// number is used: "Batman (2016) 005" gives 5, "Vol.1 005" gives 5 and "Spider-Man 2099 012"
-/// gives 12. A number glued to letters ("20th", "x2") is not a candidate.</item>
+/// or "#007". A marker must start a word, so "Punch 5" is not read as chapter 5. A bare "c"
+/// marker must be followed by the number alone, so the scene tag "c2c" is not chapter 2.</item>
+/// <item>Otherwise volume tokens such as "Vol.1", "Vol 2", "Volume 3" or "v01" are ignored too,
+/// and the name is split into parts at " - " title separators. The last part that is only a
+/// number is the issue: "Mob Psycho 100 - 005" gives 5 and "Series - 012 - Title 2" gives 12.
+/// When no part is only a number, the last standalone number of the first part that has one is
+/// used. A number in the series name or a year then gives way to the issue ("Batman (2016) 005"
+/// gives 5, "Spider-Man 2099 012" gives 12), and a number in a chapter title after the separator
+/// does not win ("Series 012 - Part 2" gives 12). A number glued to letters ("20th", "x2") is
+/// never a candidate.</item>
 /// <item>A name with no such number ("Series (2023)", "Series Vol 2") has no issue number.</item>
 /// </list>
 /// <para>Returned numbers have the zero padding of their integer part removed ("0012" becomes
@@ -28,10 +34,13 @@ public static class IssueNumberParser
 
     /// <summary>
     /// An explicitly marked chapter or issue number. The marker must not follow a letter, so it
-    /// starts a word; "c" only counts directly before a digit ("c012").
+    /// starts a word. A bare "c" only counts directly before a number that no letter, digit or
+    /// further decimal follows ("c012", but not the "c2c" scene tag or a "5C2A9E01" checksum).
     /// </summary>
     private static readonly Regex MarkedNumberPattern = new(
-        @"(?:(?<!\p{L})(?:ch(?:ap(?:ter)?)?|issue)[\s._#-]*|(?<!\p{L})c(?=\d)|#\s*)(?<number>\d+(?:\.\d+)?)",
+        @"(?<!\p{L})(?:ch(?:ap(?:ter)?)?|issue)[\s._#-]*(?<number>\d+(?:\.\d+)?)" +
+        @"|(?<!\p{L})c(?<number>\d+(?:\.\d+)?)(?![\p{L}\p{N}]|\.\d)" +
+        @"|#\s*(?<number>\d+(?:\.\d+)?)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         MatchTimeout);
 
@@ -47,11 +56,29 @@ public static class IssueNumberParser
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         MatchTimeout);
 
+    /// <summary>
+    /// A " - " title separator (also with an en or em dash, or underscores instead of spaces).
+    /// A hyphen inside a word, as in "Spider-Man", is not a separator.
+    /// </summary>
+    private static readonly Regex TitleSeparatorPattern = new(
+        @"[\s_]+[-–—]+[\s_]+",
+        RegexOptions.CultureInvariant,
+        MatchTimeout);
+
+    /// <summary>A name part that holds nothing but a number.</summary>
+    private static readonly Regex NumberOnlyPattern = new(
+        @"^\d+(?:\.\d+)?$",
+        RegexOptions.CultureInvariant,
+        MatchTimeout);
+
     /// <summary>A number that is not glued to letters or other digits.</summary>
     private static readonly Regex StandaloneNumberPattern = new(
         @"(?<![\p{L}\p{N}])\d+(?:\.\d+)?(?![\p{L}\p{N}])",
         RegexOptions.CultureInvariant,
         MatchTimeout);
+
+    /// <summary>Characters trimmed from a name part before checking whether it is only a number.</summary>
+    private static readonly char[] PartTrimCharacters = [' ', '\t', '_', '.', '-', '–', '—'];
 
     /// <summary>
     /// Returns the issue number of a file name (without its extension), or null when the name
@@ -64,26 +91,43 @@ public static class IssueNumberParser
             return null;
         }
 
-        var marked = ParseMarked(fileNameStem);
-        if (marked is not null)
+        var withoutBrackets = RemoveBracketedQualifiers(fileNameStem);
+        var marked = MarkedNumberPattern.Match(withoutBrackets);
+        if (marked.Success)
         {
-            return marked;
+            return StripLeadingZeros(marked.Groups["number"].Value);
         }
 
-        string? last = null;
-        foreach (var candidate in UnmarkedCandidates(fileNameStem))
+        string? numberOnlyPart = null;
+        string? lastNumberOfFirstNumberedPart = null;
+        foreach (var part in TitleSeparatorPattern.Split(VolumePattern.Replace(withoutBrackets, " ")))
         {
-            last = candidate;
+            var trimmed = part.Trim(PartTrimCharacters);
+            if (NumberOnlyPattern.IsMatch(trimmed))
+            {
+                numberOnlyPart = trimmed;
+                continue;
+            }
+
+            if (lastNumberOfFirstNumberedPart is null)
+            {
+                var numbers = StandaloneNumberPattern.Matches(part);
+                if (numbers.Count > 0)
+                {
+                    lastNumberOfFirstNumberedPart = numbers[^1].Value;
+                }
+            }
         }
 
-        return last is null ? null : StripLeadingZeros(last);
+        var issue = numberOnlyPart ?? lastNumberOfFirstNumberedPart;
+        return issue is null ? null : StripLeadingZeros(issue);
     }
 
     /// <summary>
     /// Returns the explicitly marked chapter/issue number of a file name ("Ch 12", "#007",
-    /// "Issue 3", "c012"), or null when there is no marker. Unlike <see cref="Parse"/> this never
-    /// guesses from an unmarked number, so it cannot mistake a volume, year or title number for
-    /// the chapter.
+    /// "Issue 3", "c012"), or null when there is no marker outside brackets. Unlike
+    /// <see cref="Parse"/> this never guesses from an unmarked number, so it cannot mistake a
+    /// volume, year or title number for the chapter.
     /// </summary>
     public static string? ParseMarked(string? fileNameStem)
     {
@@ -92,7 +136,7 @@ public static class IssueNumberParser
             return null;
         }
 
-        var match = MarkedNumberPattern.Match(fileNameStem);
+        var match = MarkedNumberPattern.Match(RemoveBracketedQualifiers(fileNameStem));
         return match.Success ? StripLeadingZeros(match.Groups["number"].Value) : null;
     }
 
@@ -108,7 +152,8 @@ public static class IssueNumberParser
             return false;
         }
 
-        foreach (Match match in MarkedNumberPattern.Matches(fileNameStem))
+        var withoutBrackets = RemoveBracketedQualifiers(fileNameStem);
+        foreach (Match match in MarkedNumberPattern.Matches(withoutBrackets))
         {
             if (AreEquivalent(match.Groups["number"].Value, issue))
             {
@@ -116,9 +161,9 @@ public static class IssueNumberParser
             }
         }
 
-        foreach (var candidate in UnmarkedCandidates(fileNameStem))
+        foreach (Match match in StandaloneNumberPattern.Matches(VolumePattern.Replace(withoutBrackets, " ")))
         {
-            if (AreEquivalent(candidate, issue))
+            if (AreEquivalent(match.Value, issue))
             {
                 return true;
             }
@@ -175,16 +220,9 @@ public static class IssueNumberParser
     }
 
     /// <summary>
-    /// The standalone numbers of a name once bracketed qualifiers and volume tokens are removed,
-    /// in the order they appear.
+    /// Replaces bracketed qualifiers with a space, so neither a marker nor a number inside them
+    /// ("(c2c)", "(2016)", "[5C2A9E01]") is read and the words around them stay apart.
     /// </summary>
-    private static IEnumerable<string> UnmarkedCandidates(string fileNameStem)
-    {
-        var stripped = BracketedQualifierPattern.Replace(fileNameStem, " ");
-        stripped = VolumePattern.Replace(stripped, " ");
-        foreach (Match match in StandaloneNumberPattern.Matches(stripped))
-        {
-            yield return match.Value;
-        }
-    }
+    private static string RemoveBracketedQualifiers(string fileNameStem) =>
+        BracketedQualifierPattern.Replace(fileNameStem, " ");
 }

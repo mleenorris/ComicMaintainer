@@ -50,6 +50,12 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     [InlineData("Batman", "Batman (2016) 005.cbz", "5", "Batman - Chapter 0005.cbz")]
     [InlineData("Series", "Vol.1 Ch.12.cbz", "12", "Series - Chapter 0012.cbz")]
     [InlineData("Spider-Man 2099", "Spider-Man 2099 012.cbz", "12", "Spider-Man 2099 - Chapter 0012.cbz")]
+    // "(c2c)", "c2c" and a CRC tag are not chapter 2.
+    [InlineData("Amazing Spider-Man", "Amazing Spider-Man 001 (1963) (c2c) (Digital).cbz", "1", "Amazing Spider-Man - Chapter 0001.cbz")]
+    [InlineData("Hellboy", "Hellboy 001 c2c.cbz", "1", "Hellboy - Chapter 0001.cbz")]
+    [InlineData("Series", "[Group] Series - 005 [5C2A9E01].cbz", "5", "Series - Chapter 0005.cbz")]
+    // A number in the chapter title does not beat the issue number.
+    [InlineData("One Piece", "One Piece 1001 - Wano Act 3.cbz", "1001", "One Piece - Chapter 1001.cbz")]
     public async Task ProcessFileAsync_NoComicInfo_WritesAndRenamesWithTheIssueNumberFromTheName(
         string folder, string fileName, string expectedNumber, string expectedFileName)
     {
@@ -93,12 +99,46 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         Assert.Equal("5", metadata!.Issue);
     }
 
-    private string WriteArchive(string folder, string fileName)
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProcessFileAsync_SeriesOnlyComicInfoAndAC2cTag_NeverUsesChapter2(bool normalize)
+    {
+        // With only <Series> in ComicInfo.xml the chapter comes from the file name: normalize
+        // reads it with Parse, the rename safety net with ParseMarked. Both used to read the
+        // "(c2c)" tag as chapter 2.
+        _settings.WatcherEnableNormalize = normalize;
+        _settings.WatcherEnableRename = true;
+        var path = WriteArchive("Hellboy", "Hellboy 001 (2003) (c2c).cbz", "<ComicInfo><Series>Hellboy</Series></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "Hellboy"), "*.cbz").Single();
+        Assert.DoesNotContain("0002", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        if (normalize)
+        {
+            Assert.Equal("Hellboy - Chapter 0001.cbz", Path.GetFileName(archive));
+            Assert.Equal("1", info.Element("Number")?.Value);
+        }
+        else
+        {
+            Assert.Null(info.Element("Number"));
+        }
+    }
+
+    private string WriteArchive(string folder, string fileName, string? comicInfo = null)
     {
         var directory = Path.Join(_root, folder);
         Directory.CreateDirectory(directory);
         var path = Path.Join(directory, fileName);
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
+        if (comicInfo is not null)
+        {
+            using var writer = new StreamWriter(zip.CreateEntry("ComicInfo.xml").Open());
+            writer.Write(comicInfo);
+        }
+
         using var page = zip.CreateEntry("page001.jpg").Open();
         page.Write(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
         return path;

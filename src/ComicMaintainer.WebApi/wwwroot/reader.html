@@ -52,6 +52,9 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
+            /* The visible viewport: on phones 100vh also counts the space
+               under the browser's toolbars, pushing the footer off screen. */
+            height: 100dvh;
             width: 100vw;
             position: relative;
         }
@@ -377,6 +380,7 @@
             left: 0;
             width: 100vw;
             height: 100vh;
+            height: 100dvh;
             z-index: 9999;
         }
 
@@ -691,7 +695,7 @@
         <div class="reader-progress" aria-hidden="true">
             <div class="reader-progress-bar" id="readerProgressBar"></div>
         </div>
-        <div class="chrome-hint show-once" id="chromeHint" aria-hidden="true">Move mouse or tap to show controls</div>
+        <div class="chrome-hint show-once" id="chromeHint" aria-hidden="true">Tap the middle of the page or move the mouse to show controls</div>
         <div class="reader-header" id="readerHeader">
             <button class="reader-btn" onclick="goBack()" title="Back to library" aria-label="Back to library">
                 <span aria-hidden="true">←</span>

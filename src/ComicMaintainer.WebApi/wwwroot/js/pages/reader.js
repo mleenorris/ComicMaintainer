@@ -313,15 +313,17 @@
                 // The footer only contains the manga slider / nav; hide it
                 // entirely in webcomic mode to avoid an empty bar.
                 footer.style.display = 'none';
-                if (pageInfo) pageInfo.style.display = 'inline';
             } else {
                 if (modeLabel) modeLabel.textContent = 'Manga';
                 content.classList.remove('webcomic-mode');
                 container.classList.remove('reader-mode-webcomic');
                 container.classList.add('reader-mode-manga');
                 footer.style.display = 'flex';
-                if (pageInfo) pageInfo.style.display = 'inline';
             }
+            // On a phone the header drops its non-essential controls. In manga
+            // mode the footer shows the page number, but in webcomic mode
+            // (no footer) the header's page info is the only one.
+            if (pageInfo) pageInfo.classList.toggle('hide-on-mobile', readingMode !== 'webcomic');
         }
 
         function updateDirectionUI() {
@@ -529,11 +531,25 @@
             });
         }
 
-        // Update page info display in webcomic mode
+        // Update page info display in webcomic mode. The progress bar along
+        // the top stays visible while the controls are hidden, so it is what
+        // shows the position on a phone while reading.
         function updatePageInfoInWebcomicMode() {
+            if (readingMode !== 'webcomic') return;
             const pageInfo = document.getElementById('pageInfo');
-            if (pageInfo && readingMode === 'webcomic') {
+            if (pageInfo) {
                 pageInfo.textContent = `Page ${currentVisiblePage} / ${totalPages}`;
+            }
+            updateProgressBar(currentVisiblePage, totalPages);
+        }
+
+        // The thin bar along the top of the reader: how far into the comic
+        // `page` of `pages` is.
+        function updateProgressBar(page, pages) {
+            const progressBar = document.getElementById('readerProgressBar');
+            if (progressBar && pages > 0) {
+                const pct = Math.min(100, Math.max(0, (page / pages) * 100));
+                progressBar.style.width = pct + '%';
             }
         }
         
@@ -1297,11 +1313,7 @@
             if (footerPageInfo) footerPageInfo.textContent = `${currentPage} / ${totalPages}`;
             const slider = document.getElementById('pageSlider');
             if (slider) slider.value = String(currentPage);
-            const progressBar = document.getElementById('readerProgressBar');
-            if (progressBar && totalPages > 0) {
-                const pct = Math.min(100, Math.max(0, (currentPage / totalPages) * 100));
-                progressBar.style.width = pct + '%';
-            }
+            updateProgressBar(currentPage, totalPages);
 
             // In manga mode, keep navigation buttons enabled at boundaries to allow comic navigation
             // In webcomic mode, buttons are hidden anyway by updateModeUI()
@@ -1684,16 +1696,64 @@
             }
         }
 
-        // Auto-hide chrome after a few seconds of inactivity. Any mouse move,
-        // tap, or key press resets the timer and re-shows the chrome.
+        // Keys that read (turn a page, scroll the stream) rather than ask for
+        // the controls.
+        const READING_KEYS = new Set([
+            'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'PageUp', 'PageDown', 'Home', 'End', 'a', 'A', 'd', 'D'
+        ]);
+        // After a tap, browsers also fire emulated mouse events (mousemove
+        // included) for pages that only listen to the mouse. Mouse moves this
+        // soon after a touch are those, not someone reaching for the mouse.
+        const TOUCH_MOUSE_EMULATION_MS = 1000;
+        let touchMouseEmulationTimer = null;
+
+        // True for events on the reading surface (#readerContent: the page,
+        // its tap zones, the webcomic stream). Touching it turns a page,
+        // scrolls, or toggles the controls on purpose (the middle tap zone, a
+        // tap on the stream), so it must not also bring the controls back.
+        function isReadingSurfaceEvent(event) {
+            const content = document.getElementById('readerContent');
+            return Boolean(content && event.target instanceof Node && content.contains(event.target));
+        }
+
+        // Auto-hide chrome after a few seconds of inactivity. Moving the
+        // mouse, touching or clicking anything but the page, a key other than
+        // a reading key, or focus moving to a control re-shows it and resets
+        // the timer; reading (page turns, scrolling) leaves it as it is.
         function setupChromeAutoHide() {
             const container = document.getElementById('readerContainer');
-            const reset = () => resetChromeIdleTimer();
-            ['mousemove', 'touchstart', 'pointerdown', 'keydown'].forEach(ev => {
-                document.addEventListener(ev, reset, { passive: true });
+            document.addEventListener('mousemove', () => {
+                if (touchMouseEmulationTimer) return;
+                resetChromeIdleTimer();
+            }, { passive: true });
+            ['touchstart', 'pointerdown'].forEach(type => {
+                document.addEventListener(type, (event) => {
+                    if (type === 'touchstart' || event.pointerType === 'touch' || event.pointerType === 'pen') {
+                        clearTimeout(touchMouseEmulationTimer);
+                        touchMouseEmulationTimer = setTimeout(() => {
+                            touchMouseEmulationTimer = null;
+                        }, TOUCH_MOUSE_EMULATION_MS);
+                    }
+                    if (!isReadingSurfaceEvent(event)) resetChromeIdleTimer();
+                }, { passive: true });
             });
-            container.addEventListener('focusin', reset);
+            document.addEventListener('keydown', (event) => {
+                if (!READING_KEYS.has(event.key)) resetChromeIdleTimer();
+            }, { passive: true });
+            container.addEventListener('focusin', () => resetChromeIdleTimer());
+            const content = document.getElementById('readerContent');
+            if (content) content.addEventListener('click', handleReadingSurfaceClick);
             resetChromeIdleTimer();
+        }
+
+        // Webcomic mode has no tap zones: the whole stream is the page, and a
+        // tap on it (one that did not scroll) toggles the controls the way the
+        // middle tap zone does in manga mode.
+        function handleReadingSurfaceClick(event) {
+            if (readingMode !== 'webcomic') return;
+            const target = event.target;
+            if (target instanceof Element && target.closest('button, a, input, select, textarea, label')) return;
+            toggleChromeHidden();
         }
 
         function resetChromeIdleTimer() {

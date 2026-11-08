@@ -32,7 +32,8 @@ test('webcomic mode opens a buffer of pages around the saved page and scrolls to
     assert.equal(page.$('#readerContainer').classList.contains('reader-mode-manga'), false);
     // The footer only holds manga navigation.
     assert.equal(page.$('#readerFooter').style.display, 'none');
-    assert.equal(page.$('#pageInfo').style.display, 'inline');
+    // With no footer, the header's page info is shown even on a phone.
+    assert.equal(page.$('#pageInfo').classList.contains('hide-on-mobile'), false);
 
     // Five pages either side of page 8, in order, each one observed.
     assert.deepEqual(streamPages(page).slice(0, 11), pagesOf(FILE, range(3, 13)));
@@ -57,6 +58,8 @@ test('the most visible page becomes the current page, is saved, and pulls in its
 
     pageObserver(page).trigger(true, [streamImage(page, FILE, 11)]);
     assert.equal(page.$('#pageInfo').textContent, 'Page 11 / 30');
+    // The bar along the top, which stays up when the controls hide, follows too.
+    assert.equal(page.$('#readerProgressBar').style.width, `${(11 / 30) * 100}%`);
     assert.deepEqual(progressPosts(page), [{ file: FILE, page: 11 }]);
     // Pages up to 16 are fetched and slot in after the ones already shown.
     await page.waitFor(() => streamImage(page, FILE, 16));

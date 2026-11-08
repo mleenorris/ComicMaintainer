@@ -5,7 +5,12 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ComicMaintainer.Core.Migrations
 {
-    /// <inheritdoc />
+    /// <summary>
+    /// Adds <c>LibraryScans</c>, the durable record of the directory the file watcher last
+    /// scanned completely: an untracked file under it arrived after that scan, whereas under
+    /// any other directory it may belong to a collection not yet added. Starts empty, so the
+    /// first scan of an upgraded library only adds files, as earlier versions did.
+    /// </summary>
     public partial class V3_pipeline_LibraryScans : Migration
     {
         /// <inheritdoc />

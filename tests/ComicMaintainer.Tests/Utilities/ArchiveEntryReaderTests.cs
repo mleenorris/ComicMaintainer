@@ -114,6 +114,23 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         Assert.Contains("decompression bomb", ex.Message);
     }
 
+    [Fact]
+    public void EnsureWithinLimits_AnUncompressedRasterPageThatExpandsFar_IsRefusedWithTheRemedy()
+    {
+        // A genuine near-blank BMP page over 16 MiB can deflate past 100:1 too. Its
+        // name cannot tell it from a bomb (names are the archive author's choice),
+        // so it is refused, and the reason says how to make the page readable.
+        const long size = 72L * 1024 * 1024;
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(
+            () => ArchiveEntryReader.EnsureWithinLimits("blank.bmp", size, size / 400, ArchiveEntryReader.MaxPageBytes));
+
+        Assert.Equal(
+            "Archive entry 'blank.bmp' expands from 184.3 KiB to 72 MiB, more than 100:1, which is refused as a likely "
+                + "decompression bomb. If it is a genuine page, repack the archive with that page saved as JPEG, PNG or WebP.",
+            ex.Message);
+    }
+
     [Theory]
     [InlineData(16L * 1024 * 1024, 1024)]        // at the threshold: ratio not checked
     [InlineData(64L * 1024 * 1024, 32L * 1024 * 1024)] // 2:1, like a PNG
@@ -202,6 +219,56 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         var zip = BuildZip(Pages(4), comment: "scanned by someone");
 
         Assert.Equal(4, ArchiveEntryReader.CountZipEntries(new MemoryStream(zip), stopAfter: 100));
+    }
+
+    [Fact]
+    public void CountZipEntries_FindsTheRecordBeforeALongArchiveComment()
+    {
+        // Past the first kilobyte searched, so the whole 64 KiB window is.
+        var zip = BuildZip(Pages(4), comment: new string('c', 30_000));
+
+        Assert.Equal(4, ArchiveEntryReader.CountZipEntries(new MemoryStream(zip), stopAfter: 100));
+    }
+
+    [Fact]
+    public void EnsureZipEntryCountWithinLimit_ARealComic_ReadsOnlyItsLastKilobyte()
+    {
+        // Opening a comic for a page turn must not read and walk its central
+        // directory a second time on top of ZipArchive: a directory this short
+        // cannot hold too many records, so only the end record is looked up.
+        var zip = BuildZip(Pages(200, size: 2048));
+        Assert.True(zip.Length > 256 * 1024);
+        using var stream = new ReadCountingStream(zip);
+
+        ArchiveEntryReader.EnsureZipEntryCountWithinLimit(stream, "a.cbz");
+
+        Assert.InRange(stream.BytesRead, 22, 1024);
+    }
+
+    [Fact]
+    public void EnsureZipEntryCountWithinLimit_TooManyEntriesBehindALongComment_IsRefused()
+    {
+        var zip = BuildZip(Pages(ArchiveEntryReader.MaxEntries + 1, size: 0), comment: new string('c', 5_000));
+
+        Assert.Throws<ArchiveLimitExceededException>(
+            () => ArchiveEntryReader.EnsureZipEntryCountWithinLimit(new MemoryStream(zip), "many.cbz"));
+    }
+
+    [Fact]
+    public void EnsureZipEntryCountWithinLimit_WalksEveryDirectoryLongEnoughForTooManyRecords()
+    {
+        // Records of the smallest possible size (no name, extra field or comment):
+        // the shortest directory that can hold one record too many is still walked.
+        var full = BuildBareCentralDirectory(ArchiveEntryReader.MaxEntries);
+        var overfull = BuildBareCentralDirectory(ArchiveEntryReader.MaxEntries + 1);
+        using var fullStream = new ReadCountingStream(full);
+
+        ArchiveEntryReader.EnsureZipEntryCountWithinLimit(fullStream, "full.cbz");
+        var ex = Assert.Throws<ArchiveLimitExceededException>(
+            () => ArchiveEntryReader.EnsureZipEntryCountWithinLimit(new MemoryStream(overfull), "overfull.cbz"));
+
+        Assert.InRange(fullStream.BytesRead, 22, 1024);
+        Assert.Contains("overfull.cbz", ex.Message);
     }
 
     [Theory]
@@ -298,6 +365,60 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         }
 
         return output.ToArray();
+    }
+
+    /// <summary>
+    /// A central directory of <paramref name="records"/> minimal records (46 bytes,
+    /// no name) starting at offset 0, followed by its end record: what
+    /// <see cref="ZipArchive"/> would walk, without any file data.
+    /// </summary>
+    private static byte[] BuildBareCentralDirectory(int records)
+    {
+        const int RecordLength = 46;
+        var bytes = new byte[(records * RecordLength) + 22];
+        for (var i = 0; i < records; i++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(i * RecordLength), 0x02014b50);
+        }
+
+        var eocd = bytes.AsSpan(records * RecordLength);
+        BinaryPrimitives.WriteUInt32LittleEndian(eocd, 0x06054b50);
+        BinaryPrimitives.WriteUInt16LittleEndian(eocd[8..], (ushort)records);
+        BinaryPrimitives.WriteUInt16LittleEndian(eocd[10..], (ushort)records);
+        BinaryPrimitives.WriteUInt32LittleEndian(eocd[12..], (uint)(records * RecordLength));
+        BinaryPrimitives.WriteUInt32LittleEndian(eocd[16..], 0);
+        return bytes;
+    }
+
+    /// <summary>A read-only in-memory stream that counts the bytes read from it.</summary>
+    private sealed class ReadCountingStream(byte[] data) : MemoryStream(data, writable: false)
+    {
+        public long BytesRead { get; private set; }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = base.Read(buffer, offset, count);
+            BytesRead += read;
+            return read;
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            var read = base.Read(buffer);
+            BytesRead += read;
+            return read;
+        }
+
+        public override int ReadByte()
+        {
+            var value = base.ReadByte();
+            if (value >= 0)
+            {
+                BytesRead++;
+            }
+
+            return value;
+        }
     }
 
     /// <summary>

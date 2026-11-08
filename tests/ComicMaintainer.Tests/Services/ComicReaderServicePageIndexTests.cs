@@ -248,6 +248,63 @@ public sealed class ComicReaderServicePageIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task ARefusedArchive_IsLoggedAsAWarningOnlyWhenItIsFound()
+    {
+        // The library grid asks for an over-limit archive's cover on every view:
+        // one warning, not one per request.
+        var cbz = Path.Join(_dir, "many.cbz");
+        File.WriteAllBytes(cbz, ArchiveEntryReaderTests.BuildZip(Enumerable.Range(0, ArchiveEntryReader.MaxEntries + 1)
+            .Select(i => ($"p{i:D5}.jpg", Array.Empty<byte>(), CompressionLevel.NoCompression)).ToArray()));
+
+        await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(
+            () => Assert.ThrowsAsync<ArchiveLimitExceededException>(() => _service.GetPageCountAsync(cbz)))));
+        await Assert.ThrowsAsync<ArchiveLimitExceededException>(() => _service.GetPageAsync(cbz, 1));
+        await Assert.ThrowsAsync<ArchiveLimitExceededException>(() => _service.GetPageNamesAsync(cbz));
+
+        VerifyLogged(LogLevel.Warning, "Refused to read", Times.Once());
+        VerifyLogged(LogLevel.Debug, "Still refusing", Times.AtLeast(2));
+        VerifyLogged(LogLevel.Error, string.Empty, Times.Never());
+    }
+
+    [Fact]
+    public async Task ARefusedPage_IsRememberedAndLoggedAsAWarningOnce()
+    {
+        var cbz = Path.Join(_dir, "bomb.cbz");
+        File.WriteAllBytes(cbz, ArchiveEntryReaderTests.BuildZip(
+            ("p1.png", new byte[32 * 1024 * 1024], CompressionLevel.SmallestSize),
+            ("p2.jpg", Encoding.ASCII.GetBytes("fine"), CompressionLevel.NoCompression)));
+        Assert.Equal(2, await _service.GetPageCountAsync(cbz));
+        var listedBytes = _service.CachedPageIndexBytes;
+
+        var first = await Assert.ThrowsAsync<ArchiveLimitExceededException>(() => _service.GetPageAsync(cbz, 1));
+        var again = await Assert.ThrowsAsync<ArchiveLimitExceededException>(() => _service.GetPageAsync(cbz, 1));
+        await Assert.ThrowsAsync<ArchiveLimitExceededException>(() => _service.GetPageAsync(cbz, 1));
+
+        Assert.Equal(first.Message, again.Message);
+        Assert.Equal(1, _service.PageReadCount);
+        VerifyLogged(LogLevel.Warning, "Refused to read", Times.Once());
+        // The remembered reason counts against the cache's memory budget.
+        Assert.True(_service.CachedPageIndexBytes > listedBytes);
+        // The other pages and the page list are unaffected.
+        Assert.Equal(Encoding.ASCII.GetBytes("fine"), (await _service.GetPageAsync(cbz, 2))!.Value.Data);
+        Assert.Equal(2, await _service.GetPageCountAsync(cbz));
+        Assert.Equal(1, _service.ListingCount);
+    }
+
+    [Fact]
+    public async Task ARefusedPage_IsReadAgainOnceTheFileChanges()
+    {
+        var cbz = Path.Join(_dir, "bomb.cbz");
+        File.WriteAllBytes(cbz, ArchiveEntryReaderTests.BuildZip(
+            ("p1.png", new byte[32 * 1024 * 1024], CompressionLevel.SmallestSize)));
+        await Assert.ThrowsAsync<ArchiveLimitExceededException>(() => _service.GetPageAsync(cbz, 1));
+
+        WriteCbz("bomb.cbz", ("p1.png", "repacked"));
+
+        Assert.Equal(Encoding.ASCII.GetBytes("repacked"), (await _service.GetPageAsync(cbz, 1))!.Value.Data);
+    }
+
+    [Fact]
     public async Task ARefusedArchive_IsReadAgainOnceItChanges()
     {
         var cbz = Path.Join(_dir, "many.cbz");
@@ -283,7 +340,9 @@ public sealed class ComicReaderServicePageIndexTests : IDisposable
         }
     }
 
-    private void VerifyLogged(LogLevel level, string fragment) =>
+    private void VerifyLogged(LogLevel level, string fragment) => VerifyLogged(level, fragment, Times.AtLeastOnce());
+
+    private void VerifyLogged(LogLevel level, string fragment, Times times) =>
         _logger.Verify(
             l => l.Log(
                 level,
@@ -291,5 +350,5 @@ public sealed class ComicReaderServicePageIndexTests : IDisposable
                 It.Is<It.IsAnyType>((state, _) => $"{state}".Contains(fragment)),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
+            times);
 }

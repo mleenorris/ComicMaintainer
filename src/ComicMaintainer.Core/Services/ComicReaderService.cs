@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Caching.Memory;
@@ -28,9 +29,11 @@ namespace ComicMaintainer.Core.Services;
 /// archives with too many entries and entries that would expand past
 /// <see cref="ArchiveEntryReader.MaxPageBytes"/> with an
 /// <see cref="ArchiveLimitExceededException"/>. Those propagate to the caller so it
-/// can report a clear error; a refused listing is remembered for that version of
-/// the file, so it is not re-read on every request. Every other failure is
-/// logged and reported as "no pages" exactly as before.
+/// can report a clear error. A refused listing, and a refused page, is remembered
+/// for that version of the file, so it is neither re-read nor logged again on every
+/// request (a refused cover would otherwise be retried on every library view): it is
+/// logged at Warning when it is found and at Debug when it is repeated. Every other
+/// failure is logged and reported as "no pages" exactly as before.
 /// </para>
 /// </remarks>
 public class ComicReaderService : IComicReaderService, IDisposable
@@ -64,6 +67,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
     private readonly ConcurrentDictionary<FileVersion, Lazy<Task<PageIndex>>> _listings = new();
 
     private int _listingCount;
+    private int _pageReadCount;
 
     public ComicReaderService(ILogger<ComicReaderService> logger)
         : this(logger, DefaultPageIndexCacheBytes)
@@ -94,6 +98,12 @@ public class ComicReaderService : IComicReaderService, IDisposable
     /// <summary>Number of times an archive has been listed (for tests).</summary>
     internal int ListingCount => Volatile.Read(ref _listingCount);
 
+    /// <summary>Number of times a page entry has been opened (for tests).</summary>
+    internal int PageReadCount => Volatile.Read(ref _pageReadCount);
+
+    // Refusals by the archive read limits pass through every public method
+    // unlogged: they were logged where they were found (see LogRefused).
+
     public async Task<int> GetPageCountAsync(string filePath)
     {
         try
@@ -101,12 +111,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
             var index = await GetPageIndexAsync(filePath);
             return index?.Names.Length ?? 0;
         }
-        catch (ArchiveLimitExceededException ex)
-        {
-            LogLimitExceeded(ex, filePath);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not ArchiveLimitExceededException)
         {
             _logger.LogError(ex, "Error getting page count for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return 0;
@@ -135,7 +140,25 @@ public class ComicReaderService : IComicReaderService, IDisposable
                     return null;
                 }
 
-                var data = await Task.Run(() => ReadPage(index, pageNumber));
+                if (index.PageRefusals.TryGetValue(pageNumber, out var refusal))
+                {
+                    LogRefusedAgain(filePath, refusal);
+                    throw new ArchiveLimitExceededException(refusal);
+                }
+
+                byte[]? data;
+                try
+                {
+                    Interlocked.Increment(ref _pageReadCount);
+                    data = await Task.Run(() => ReadPage(index, pageNumber));
+                }
+                catch (ArchiveLimitExceededException ex)
+                {
+                    LogRefused(filePath, ex.Message);
+                    RememberPageRefusal(index, pageNumber, ex.Message);
+                    throw;
+                }
+
                 if (data is not null)
                 {
                     return (data, GetContentType(index.Names[pageNumber - 1]));
@@ -148,12 +171,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
                 pageNumber, LoggingHelper.SanitizePathForLog(filePath));
             return null;
         }
-        catch (ArchiveLimitExceededException ex)
-        {
-            LogLimitExceeded(ex, filePath);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not ArchiveLimitExceededException)
         {
             _logger.LogError(ex, "Error getting page {PageNumber} from {FilePath}", pageNumber, LoggingHelper.SanitizePathForLog(filePath));
             return null;
@@ -168,12 +186,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
             // A copy: callers own the list they get, the cached array stays intact.
             return index is null ? new List<string>() : new List<string>(index.Names);
         }
-        catch (ArchiveLimitExceededException ex)
-        {
-            LogLimitExceeded(ex, filePath);
-            throw;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not ArchiveLimitExceededException)
         {
             _logger.LogError(ex, "Error getting page names from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return new List<string>();
@@ -191,7 +204,8 @@ public class ComicReaderService : IComicReaderService, IDisposable
     /// cache when the file's length and last-write time still match, otherwise by
     /// listing the archive. Returns <c>null</c> when the file is missing or is not
     /// a supported archive. Failures are not cached, except a refusal by the
-    /// archive read limits, which is rethrown for as long as the file is unchanged.
+    /// archive read limits, which is rethrown for as long as the file is unchanged
+    /// (logged at Warning by the listing that found it, at Debug afterwards).
     /// </summary>
     /// <exception cref="ArchiveLimitExceededException">The archive is over the read limits.</exception>
     private async Task<PageIndex?> GetPageIndexAsync(string filePath)
@@ -217,22 +231,31 @@ public class ComicReaderService : IComicReaderService, IDisposable
         }
 
         var version = new FileVersion(filePath, kind.Value, info.Length, info.LastWriteTimeUtc.Ticks);
-        if (!_pageIndexes.TryGetValue(filePath, out PageIndex? index)
-            || index is null
-            || index.Version != version)
+        if (_pageIndexes.TryGetValue(filePath, out PageIndex? index)
+            && index is not null
+            && index.Version == version)
         {
-            var listing = _listings.GetOrAdd(version, v => new Lazy<Task<PageIndex>>(() => ListAndCacheAsync(v)));
-            try
+            if (index.Refusal is not null)
             {
-                index = await listing.Value;
+                LogRefusedAgain(filePath, index.Refusal);
+                throw new ArchiveLimitExceededException(index.Refusal);
             }
-            finally
-            {
-                // Only this listing: a later one for the same version may have started since.
-                _listings.TryRemove(KeyValuePair.Create(version, listing));
-            }
+
+            return index;
         }
 
+        var listing = _listings.GetOrAdd(version, v => new Lazy<Task<PageIndex>>(() => ListAndCacheAsync(v)));
+        try
+        {
+            index = await listing.Value;
+        }
+        finally
+        {
+            // Only this listing: a later one for the same version may have started since.
+            _listings.TryRemove(KeyValuePair.Create(version, listing));
+        }
+
+        // A refusal found by the listing this request waited for, which logged it.
         if (index.Refusal is not null)
         {
             throw new ArchiveLimitExceededException(index.Refusal);
@@ -257,16 +280,39 @@ public class ComicReaderService : IComicReaderService, IDisposable
         }
         catch (ArchiveLimitExceededException ex)
         {
+            LogRefused(version.Path, ex.Message);
             index = PageIndex.Refused(version, ex.Message);
         }
 
         Interlocked.Increment(ref _listingCount);
-        _pageIndexes.Set(version.Path, index, new MemoryCacheEntryOptions
+        CacheIndex(index);
+        return index;
+    }
+
+    private void CacheIndex(PageIndex index) =>
+        _pageIndexes.Set(index.Version.Path, index, new MemoryCacheEntryOptions
         {
             Size = index.EstimatedBytes,
             SlidingExpiration = PageIndexSlidingExpiration,
         });
-        return index;
+
+    /// <summary>
+    /// Records that the read limits refused a page of the cached version of the
+    /// file, so later requests for it (the library grid asks for every cover on
+    /// every view) are answered without opening the entry or logging another
+    /// warning. The cached list is replaced by a copy carrying the refusal, so its
+    /// size stays accounted for. Nothing is recorded once the cache holds another
+    /// version; losing a refusal to a concurrent update only means one more read.
+    /// </summary>
+    private void RememberPageRefusal(PageIndex index, int pageNumber, string reason)
+    {
+        if (_pageIndexes.TryGetValue(index.Version.Path, out PageIndex? current)
+            && current is not null
+            && current.Version == index.Version
+            && current.Refusal is null)
+        {
+            CacheIndex(current.WithPageRefusal(pageNumber, reason));
+        }
     }
 
     private static PageIndex BuildZipIndex(FileVersion version)
@@ -357,9 +403,15 @@ public class ComicReaderService : IComicReaderService, IDisposable
         return ArchiveEntryReader.ReadAllBytes(entry, ArchiveEntryReader.MaxPageBytes);
     }
 
-    private void LogLimitExceeded(ArchiveLimitExceededException ex, string filePath) =>
+    /// <summary>Logs a refusal by the read limits where it is found: once per file version (and page).</summary>
+    private void LogRefused(string filePath, string reason) =>
         _logger.LogWarning("Refused to read {FilePath}: {Reason}",
-            LoggingHelper.SanitizePathForLog(filePath), LoggingHelper.SanitizeForLog(ex.Message));
+            LoggingHelper.SanitizePathForLog(filePath), LoggingHelper.SanitizeForLog(reason));
+
+    /// <summary>Logs a remembered refusal being repeated for another request.</summary>
+    private void LogRefusedAgain(string filePath, string reason) =>
+        _logger.LogDebug("Still refusing {FilePath}, unchanged since it was refused: {Reason}",
+            LoggingHelper.SanitizePathForLog(filePath), LoggingHelper.SanitizeForLog(reason));
 
     private static bool IsImageFile(string fileName)
     {
@@ -393,18 +445,37 @@ public class ComicReaderService : IComicReaderService, IDisposable
     /// <summary>
     /// The image entries of one version of an archive, in reading order, with the
     /// position of each in the archive's entry list; or, when the read limits
-    /// refused the archive, the reason.
+    /// refused the archive, the reason. Pages the limits refused are recorded on
+    /// a copy (<see cref="WithPageRefusal"/>), so a cached index is never mutated.
     /// </summary>
     private sealed class PageIndex
     {
         public PageIndex(FileVersion version, string[] names, int[] entryPositions, string? refusal)
+            : this(
+                version,
+                names,
+                entryPositions,
+                refusal,
+                ImmutableDictionary<int, string>.Empty,
+                // Rough managed footprint: the object and arrays, plus each string.
+                96 + 2L * (refusal?.Length ?? 0) + names.Sum(n => 40L + 2L * n.Length) + 4L * entryPositions.Length)
+        {
+        }
+
+        private PageIndex(
+            FileVersion version,
+            string[] names,
+            int[] entryPositions,
+            string? refusal,
+            ImmutableDictionary<int, string> pageRefusals,
+            long estimatedBytes)
         {
             Version = version;
             Names = names;
             EntryPositions = entryPositions;
             Refusal = refusal;
-            // Rough managed footprint: the object and arrays, plus each string.
-            EstimatedBytes = 96 + 2L * (refusal?.Length ?? 0) + names.Sum(n => 40L + 2L * n.Length) + 4L * entryPositions.Length;
+            PageRefusals = pageRefusals;
+            EstimatedBytes = estimatedBytes;
         }
 
         public static PageIndex Refused(FileVersion version, string reason) =>
@@ -414,6 +485,25 @@ public class ComicReaderService : IComicReaderService, IDisposable
         public string[] Names { get; }
         public int[] EntryPositions { get; }
         public string? Refusal { get; }
+
+        /// <summary>Pages (1-based) the read limits refused, with the reason.</summary>
+        public ImmutableDictionary<int, string> PageRefusals { get; }
+
         public long EstimatedBytes { get; }
+
+        /// <summary>A copy of this index that also records a refused page; the page list is shared.</summary>
+        public PageIndex WithPageRefusal(int pageNumber, string reason)
+        {
+            var estimatedBytes = EstimatedBytes + RefusalBytes(reason);
+            if (PageRefusals.TryGetValue(pageNumber, out var previous))
+            {
+                estimatedBytes -= RefusalBytes(previous);
+            }
+
+            return new PageIndex(Version, Names, EntryPositions, Refusal, PageRefusals.SetItem(pageNumber, reason), estimatedBytes);
+        }
+
+        // Rough managed footprint of one recorded refusal: a dictionary node and the message.
+        private static long RefusalBytes(string reason) => 64 + 2L * reason.Length;
     }
 }

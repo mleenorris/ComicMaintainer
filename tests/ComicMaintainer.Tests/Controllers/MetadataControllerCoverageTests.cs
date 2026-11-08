@@ -3,7 +3,9 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Controllers;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -721,6 +723,27 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
         Assert.Equal("ComicVine answered HTTP 503 Service Unavailable", ErrorOf(obj));
         Assert.Null((int?)Json(obj.Value)["retry_after_seconds"]);
+    }
+
+    [Fact]
+    public void RefreshOne_RunsUnderTheLongRunningRequestTimeout()
+    {
+        // The synchronous form can wait out a provider's request pace.
+        var attribute = typeof(MetadataController).GetMethod(nameof(MetadataController.RefreshOne))!
+            .GetCustomAttributes(typeof(RequestTimeoutAttribute), inherit: true)
+            .Cast<RequestTimeoutAttribute>()
+            .Single();
+
+        Assert.Equal(RequestTimeoutPolicies.LongRunning, attribute.PolicyName);
+    }
+
+    [Fact]
+    public void Search_AnswersWithinTheDefaultRequestTimeout()
+    {
+        // The pickers run under the default timeout; a slow provider must be
+        // cut off first, so they show what answered instead of a 504.
+        Assert.True(CompositeExternalSeriesMetadataService.SearchCallTimeout < RequestTimeoutPolicies.DefaultTimeout);
+        Assert.True(RateLimitedHttpInvoker.InteractivePermitWait < CompositeExternalSeriesMetadataService.SearchCallTimeout);
     }
 
     // ---- GetSeries ----------------------------------------------------------------------

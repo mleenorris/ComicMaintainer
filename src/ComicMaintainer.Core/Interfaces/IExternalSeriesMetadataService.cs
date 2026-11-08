@@ -69,6 +69,16 @@ public interface IExternalSeriesMetadataService
     }
 
     /// <summary>
+    /// Forgets that a lookup of <paramref name="seriesName"/> recently found
+    /// no match, so the next lookup asks the provider again. An explicit
+    /// refresh calls this; automatic lookups keep using the remembered answer
+    /// so every file of an unmatched folder does not query the provider.
+    /// </summary>
+    void ForgetNoMatch(string seriesName)
+    {
+    }
+
+    /// <summary>
     /// Returns a snapshot of the provider's configuration + recent runtime
     /// status, used to render a per-provider health indicator in the UI.
     /// Implementations should make this cheap and cache reachability probes

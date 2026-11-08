@@ -2,7 +2,9 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -143,9 +145,13 @@ public class MetadataController : ControllerBase
     /// and returns the updated cache record. Pass <c>?queue=true</c> to instead
     /// queue the lookup as a background job whose progress can be subscribed to
     /// via the existing job-update event stream — useful when the lookup is
-    /// likely to be slow and the UI wants to render incremental status.
+    /// likely to be slow and the UI wants to render incremental status. The
+    /// synchronous form can wait out a provider's request pace (up to the
+    /// composite's per-provider budget), which is longer than the default
+    /// request timeout.
     /// </summary>
     [HttpPost("refresh/{seriesTitle}")]
+    [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
     public async Task<ActionResult<object>> RefreshOne(
         string seriesTitle,
         [FromQuery] bool queue = false,

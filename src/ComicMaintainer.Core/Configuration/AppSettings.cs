@@ -140,7 +140,7 @@ public class AppSettings
     /// Per-attempt timeout, in seconds, for a request to an external metadata
     /// provider (ComicVine, MangaDex, AniList). A provider that does not answer
     /// in time counts as failed, so it is skipped for a back-off period instead
-    /// of holding up file processing. Clamped to 1-120 seconds.
+    /// of holding up file processing. Clamped to 1-30 seconds.
     /// </summary>
     public int MetadataProviderTimeoutSeconds { get; set; } = 15;
 

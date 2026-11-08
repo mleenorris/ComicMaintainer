@@ -8,7 +8,9 @@ namespace ComicMaintainer.Core.Services;
 /// Shared helper that wraps outbound provider HTTP calls with three safeguards:
 /// 1. Client-side throttling via <see cref="ProviderRateLimiter"/> so we stay
 ///    under published provider rate limits before they throttle us. The wait
-///    for a permit is bounded by <see cref="MaxQueueWait"/>.
+///    for a permit covers the limiter's window
+///    (<see cref="ProviderRateLimiter.MaxPermitWait"/>) unless the caller
+///    allows less.
 /// 2. A timeout per attempt, so a provider that accepts the connection but
 ///    never answers fails fast instead of holding the caller for the
 ///    <see cref="HttpClient"/> default of 100 seconds.
@@ -20,12 +22,13 @@ namespace ComicMaintainer.Core.Services;
 ///    (<see cref="MaxInlineRetryAfter"/> or less).
 /// </summary>
 /// <remarks>
-/// A permit that is not granted in time, a longer server-requested delay and
-/// an attempt that times out are thrown as
-/// <see cref="ExternalMetadataUnavailableException"/>, so callers can tell a
-/// provider failure from an answer. Other transport errors propagate as is.
-/// Only the caller's own cancellation surfaces as
-/// <see cref="OperationCanceledException"/>.
+/// A spent request budget, a longer server-requested delay and an attempt
+/// that times out are thrown as <see cref="ExternalMetadataUnavailableException"/>,
+/// so callers can tell a provider failure from an answer. A permit that was
+/// not granted in time is thrown with
+/// <see cref="ExternalMetadataFailureKind.Paced"/>: nothing was sent, so it is
+/// not held against the provider. Other transport errors propagate as is. Only
+/// the caller's own cancellation surfaces as <see cref="OperationCanceledException"/>.
 /// </remarks>
 internal static class RateLimitedHttpInvoker
 {
@@ -36,8 +39,12 @@ internal static class RateLimitedHttpInvoker
     /// </summary>
     internal static readonly TimeSpan MaxInlineRetryAfter = TimeSpan.FromSeconds(10);
 
-    /// <summary>Longest wait for a client-side rate-limit permit.</summary>
-    internal static readonly TimeSpan MaxQueueWait = TimeSpan.FromSeconds(20);
+    /// <summary>
+    /// Longest wait for a client-side permit when a user is waiting for the
+    /// answer (the manual-match and cover pickers), so the wait fits inside
+    /// the request timeout along with the request itself.
+    /// </summary>
+    internal static readonly TimeSpan InteractivePermitWait = TimeSpan.FromSeconds(8);
 
     /// <summary>Floor applied to a 429 back-off so we don't hot-loop.</summary>
     private static readonly TimeSpan MinRetryAfter = TimeSpan.FromMilliseconds(250);
@@ -57,9 +64,13 @@ internal static class RateLimitedHttpInvoker
     /// <param name="isRateLimitStatus">
     /// Recognizes the provider's throttling statuses; defaults to HTTP 429.
     /// </param>
+    /// <param name="maxPermitWait">
+    /// Longest wait for a client-side permit; defaults to
+    /// <see cref="ProviderRateLimiter.MaxPermitWait"/>.
+    /// </param>
     /// <exception cref="ExternalMetadataUnavailableException">
-    /// No permit was granted in time, the server asked for a longer back-off,
-    /// or an attempt timed out.
+    /// No permit was granted in time, the request budget is used up, the
+    /// server asked for a longer back-off, or an attempt timed out.
     /// </exception>
     public static async Task<HttpResponseMessage> SendAsync(
         HttpClient client,
@@ -71,21 +82,31 @@ internal static class RateLimitedHttpInvoker
         HttpCompletionOption completionOption,
         TimeSpan attemptTimeout,
         CancellationToken cancellationToken,
-        Func<HttpStatusCode, bool>? isRateLimitStatus = null)
+        Func<HttpStatusCode, bool>? isRateLimitStatus = null,
+        TimeSpan? maxPermitWait = null)
     {
         isRateLimitStatus ??= static status => status == HttpStatusCode.TooManyRequests;
+        var permitWait = maxPermitWait ?? limiter.MaxPermitWait;
         for (var attempt = 0; ; attempt++)
         {
             var acquireStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-            var throttledFor = await limiter.AcquireAsync(MaxQueueWait, cancellationToken);
+            var permit = await limiter.AcquireAsync(permitWait, cancellationToken);
             health.RecordClientThrottleWait(System.Diagnostics.Stopwatch.GetElapsedTime(acquireStarted));
-            if (throttledFor is { } wait)
+            if (permit.Status == ProviderPermitStatus.BudgetSpent)
             {
                 throw new ExternalMetadataUnavailableException(
                     providerLabel,
                     ExternalMetadataFailureKind.RateLimited,
-                    $"{providerLabel} client-side request budget is used up; retry in {wait.TotalSeconds:F0}s",
-                    wait);
+                    $"{providerLabel} client-side request budget is used up; retry in {permit.RetryAfter.TotalSeconds:F0}s",
+                    permit.RetryAfter);
+            }
+
+            if (!permit.IsGranted)
+            {
+                throw new ExternalMetadataUnavailableException(
+                    providerLabel,
+                    ExternalMetadataFailureKind.Paced,
+                    $"{providerLabel} is at its request pace limit (no slot within {permitWait.TotalSeconds:F0}s); try again shortly");
             }
 
             HttpResponseMessage response;

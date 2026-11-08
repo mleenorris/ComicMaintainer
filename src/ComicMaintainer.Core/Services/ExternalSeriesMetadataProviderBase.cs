@@ -42,6 +42,12 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     /// <summary>Overall budget of a reachability probe, including any 429 retry.</summary>
     protected static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
 
+    /// <summary>Longest a reachability probe waits for a client-side permit.</summary>
+    private static readonly TimeSpan ProbePermitWait = TimeSpan.FromSeconds(2);
+
+    /// <summary>Upper limit of the configurable per-attempt request timeout, in seconds.</summary>
+    internal const int MaxRequestTimeoutSeconds = 30;
+
     /// <summary>Number of search results considered when choosing an automatic match.</summary>
     protected const int LookupCandidateCount = 10;
 
@@ -143,22 +149,20 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             return null;
         }
 
-        // Lowercase letters and digits only, the same folding the match
-        // scorer applies, so every spelling it treats as equal shares an entry.
-        var key = new string(seriesName.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+        var key = LookupCacheKey(seriesName);
         var cacheKey = $"{CacheKeyPrefix}:{key}";
         if (Cache.TryGetValue(cacheKey, out ExternalSeriesMetadata? cached))
         {
             return cached;
         }
 
-        var missKey = $"{CacheKeyPrefix}-miss:{key}";
+        var missKey = MissCacheKey(key);
         if (Cache.TryGetValue(missKey, out _))
         {
             return null;
         }
 
-        var results = await SearchCoreAsync(config, seriesName, LookupCandidateCount, cancellationToken);
+        var results = await SearchCoreAsync(config, seriesName, LookupCandidateCount, maxPermitWait: null, cancellationToken);
         var match = SeriesMatchScorer.SelectAutomaticMatch(results, seriesName)?.Match;
         if (match != null)
         {
@@ -173,6 +177,19 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     }
 
     /// <inheritdoc />
+    public void ForgetNoMatch(string seriesName)
+    {
+        if (!string.IsNullOrWhiteSpace(seriesName))
+        {
+            Cache.Remove(MissCacheKey(LookupCacheKey(seriesName)));
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A user is waiting for the answer, so the wait for a client-side permit
+    /// is limited to <see cref="RateLimitedHttpInvoker.InteractivePermitWait"/>.
+    /// </remarks>
     public async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchSeriesAsync(
         string query,
         int limit = 10,
@@ -189,7 +206,12 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             return Array.Empty<ExternalSeriesMetadata>();
         }
 
-        return await SearchCoreAsync(config, query, Math.Clamp(limit, 1, MaxSearchLimit), cancellationToken);
+        return await SearchCoreAsync(
+            config,
+            query,
+            Math.Clamp(limit, 1, MaxSearchLimit),
+            RateLimitedHttpInvoker.InteractivePermitWait,
+            cancellationToken);
     }
 
     /// <inheritdoc />
@@ -226,6 +248,7 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             () => CreateGetByIdRequest(config, id),
             $"{title} (id {id})",
             ParseGetByIdResult,
+            maxPermitWait: null,
             cancellationToken,
             notFoundIsEmpty: true);
     }
@@ -233,9 +256,22 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     /// <inheritdoc />
     public abstract Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Per-attempt request timeout from the settings, clamped to 1-120 seconds.</summary>
-    private protected static TimeSpan RequestTimeout(AppSettings settings)
-        => TimeSpan.FromSeconds(Math.Clamp(settings.MetadataProviderTimeoutSeconds, 1, 120));
+    /// <summary>
+    /// Per-attempt request timeout from the settings, clamped to 1 to
+    /// <see cref="MaxRequestTimeoutSeconds"/> seconds (the provider HttpClients'
+    /// own timeout is the same 30 seconds).
+    /// </summary>
+    internal static TimeSpan RequestTimeout(AppSettings settings)
+        => TimeSpan.FromSeconds(Math.Clamp(settings.MetadataProviderTimeoutSeconds, 1, MaxRequestTimeoutSeconds));
+
+    /// <summary>
+    /// Lowercase letters and digits only, the same folding the match scorer
+    /// applies, so every spelling it treats as equal shares a cache entry.
+    /// </summary>
+    private static string LookupCacheKey(string seriesName)
+        => new(seriesName.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+    private string MissCacheKey(string lookupKey) => $"{CacheKeyPrefix}-miss:{lookupKey}";
 
     private protected HttpClient CreateClient() => _httpClientFactory.CreateClient(HttpClientName);
 
@@ -243,12 +279,14 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         AppSettings config,
         string query,
         int limit,
+        TimeSpan? maxPermitWait,
         CancellationToken cancellationToken)
         => await SendAsync(
                config,
                () => CreateSearchRequest(config, query, limit),
                query,
                ParseSearchResults,
+               maxPermitWait,
                cancellationToken)
            ?? Array.Empty<ExternalSeriesMetadata>();
 
@@ -259,6 +297,10 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     /// counters and thrown as <see cref="ExternalMetadataUnavailableException"/>.
     /// Only the caller's own cancellation is rethrown as is.
     /// </summary>
+    /// <param name="maxPermitWait">
+    /// Longest wait for a client-side permit; null for the limiter's default,
+    /// which covers its whole window.
+    /// </param>
     /// <param name="notFoundIsEmpty">
     /// True when HTTP 404 means "no such entry" (a by-id fetch): it then
     /// returns null instead of failing.
@@ -268,6 +310,7 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         Func<HttpRequestMessage> requestFactory,
         string subject,
         Func<JsonElement, T?> parse,
+        TimeSpan? maxPermitWait,
         CancellationToken cancellationToken,
         bool notFoundIsEmpty = false)
         where T : class
@@ -285,7 +328,8 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
                 HttpCompletionOption.ResponseContentRead,
                 RequestTimeout(config),
                 cancellationToken,
-                IsRateLimitStatus);
+                IsRateLimitStatus,
+                maxPermitWait);
 
             if (notFoundIsEmpty && response.StatusCode == HttpStatusCode.NotFound)
             {
@@ -391,6 +435,18 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
 
     private void RecordFailure(ExternalMetadataUnavailableException failure, string subject)
     {
+        if (failure.Kind == ExternalMetadataFailureKind.Paced)
+        {
+            // Our own request pacing: nothing was sent, so the provider's
+            // health is unaffected.
+            Logger.LogDebug(
+                "{Provider} lookup for {SeriesName} not sent: {Reason}",
+                ProviderName,
+                LoggingHelper.SanitizeForLog(subject),
+                LoggingHelper.SanitizeForLog(failure.Message));
+            return;
+        }
+
         Logger.LogWarning(
             failure.InnerException,
             "{Provider} lookup failed for {SeriesName}: {Reason}",
@@ -412,9 +468,10 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     /// <summary>
     /// Sends a reachability probe (bounded by <see cref="ProbeTimeout"/>) and
     /// describes the outcome for the health panel. Probe failures are not
-    /// recorded as failed lookups.
+    /// recorded as failed lookups. Reachability is unknown (null) when our own
+    /// request pacing left no room to send the probe.
     /// </summary>
-    private protected async Task<(bool Reachable, string Message)> ProbeAsync(
+    private protected async Task<(bool? Reachable, string Message)> ProbeAsync(
         Func<HttpRequestMessage> requestFactory,
         CancellationToken cancellationToken)
     {
@@ -433,7 +490,8 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
                 HttpCompletionOption.ResponseHeadersRead,
                 ProbeTimeout,
                 cts.Token,
-                IsRateLimitStatus);
+                IsRateLimitStatus,
+                ProbePermitWait);
             if (response.IsSuccessStatusCode)
             {
                 return (true, "Reachable");
@@ -461,6 +519,10 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         catch (ExternalMetadataUnavailableException ex) when (ex.Kind == ExternalMetadataFailureKind.RateLimited)
         {
             return (false, "Rate limited");
+        }
+        catch (ExternalMetadataUnavailableException ex) when (ex.Kind == ExternalMetadataFailureKind.Paced)
+        {
+            return (null, "Not checked: requests are at the local pace limit");
         }
         catch (HttpRequestException ex)
         {
@@ -493,7 +555,10 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         var (reachable, message) = await ProbeAsync(probeRequestFactory, cancellationToken);
         snapshot.Reachable = reachable;
         snapshot.StatusMessage = message;
-        Cache.Set(probeCacheKey, (reachable, message), cacheDuration);
+        if (reachable is { } known)
+        {
+            Cache.Set(probeCacheKey, (known, message), cacheDuration);
+        }
     }
 
     /// <summary>Reads a string or integer JSON id as a string; null when absent.</summary>

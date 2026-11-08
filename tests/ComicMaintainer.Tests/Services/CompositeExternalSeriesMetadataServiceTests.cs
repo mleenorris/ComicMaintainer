@@ -254,6 +254,86 @@ public class CompositeExternalSeriesMetadataServiceTests
     }
 
     [Fact]
+    public async Task LookupSeriesAsync_OurOwnPacing_IsNotHeldAgainstTheProvider()
+    {
+        var paced = FailingProvider("AniListManga", new ExternalMetadataUnavailableException(
+            "AniListManga", ExternalMetadataFailureKind.Paced, "AniListManga is at its request pace limit"));
+        var service = CreateService(paced.Object);
+
+        // The series may exist there, so this is not "not found"...
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.LookupSeriesAsync("Batman"));
+        Assert.Equal(ExternalMetadataFailureKind.Paced, failure.Kind);
+
+        // ...but the provider is asked again at once: no cooldown was started.
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
+        VerifyLookups(paced, 2);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_OurOwnPacing_DoesNotClearAnExistingCooldown()
+    {
+        var calls = 0;
+        var provider = Provider("AniListManga");
+        provider.Setup(p => p.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(() => ++calls == 2
+                ? Task.FromException<ExternalSeriesMetadata?>(new ExternalMetadataUnavailableException(
+                    "AniListManga", ExternalMetadataFailureKind.Paced, "at its request pace limit"))
+                : Task.FromException<ExternalSeriesMetadata?>(new HttpRequestException("boom")));
+        var service = CreateService(provider.Object);
+
+        // First failure: 30 s cooldown. Past it, a paced call says nothing
+        // about recovery, so it must leave the failure count alone.
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
+        _clock.Advance(TimeSpan.FromSeconds(31));
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
+        VerifyLookups(provider, 2);
+
+        // The next real failure is the second in a row: the wait doubles to 60 s.
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
+        VerifyLookups(provider, 3);
+        _clock.Advance(TimeSpan.FromSeconds(31));
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
+        VerifyLookups(provider, 3);
+    }
+
+    [Fact]
+    public async Task SearchSeriesAsync_ProviderThatExceedsTheSearchBudget_FailsWithinIt()
+    {
+        var stalled = Provider("Stalled");
+        stalled.Setup(p => p.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, int _, CancellationToken token) =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return Array.Empty<ExternalSeriesMetadata>();
+            });
+        var service = new CompositeExternalSeriesMetadataService(
+            [stalled.Object],
+            Mock.Of<ILogger<CompositeExternalSeriesMetadataService>>(),
+            _clock,
+            TimeSpan.FromSeconds(30),
+            TimeSpan.FromHours(1),
+            searchCallTimeout: TimeSpan.FromMilliseconds(100));
+
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.SearchSeriesAsync("Batman"));
+
+        Assert.Equal(ExternalMetadataFailureKind.Timeout, failure.Kind);
+    }
+
+    [Fact]
+    public void ForgetNoMatch_ReachesEveryProvider()
+    {
+        var first = Provider("First");
+        var second = Provider("Second");
+
+        CreateService(first.Object, second.Object).ForgetNoMatch("Batman");
+
+        first.Verify(p => p.ForgetNoMatch("Batman"), Times.Once);
+        second.Verify(p => p.ForgetNoMatch("Batman"), Times.Once);
+    }
+
+    [Fact]
     public async Task LookupSeriesAsync_ResetsBackoff_AfterAnAnswer()
     {
         var sequence = new Queue<Func<ExternalSeriesMetadata?>>();

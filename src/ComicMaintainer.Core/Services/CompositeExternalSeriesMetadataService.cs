@@ -15,7 +15,8 @@ namespace ComicMaintainer.Core.Services;
 /// <remarks>
 /// <para>
 /// Each provider call runs concurrently with the others and is bounded by
-/// <see cref="ProviderCallTimeout"/>. A lookup only accepts a candidate that
+/// <see cref="ProviderCallTimeout"/> (<see cref="SearchCallTimeout"/> for a
+/// search, which a user is waiting on). A lookup only accepts a candidate that
 /// scores at least <see cref="SeriesMatchScorer.AutomaticMatchThreshold"/>
 /// against the requested name (an exact or alias match); among those the
 /// highest score wins, and on a tie the provider listed first.
@@ -28,11 +29,14 @@ namespace ComicMaintainer.Core.Services;
 /// processing is never held up waiting on a known-bad upstream. Each
 /// successive failure doubles the wait (capped at <see cref="MaxBackoff"/>),
 /// and a provider that asked for a longer wait (Retry-After) gets that; an
-/// answer from the provider, with or without results, clears the state.
+/// answer from the provider, with or without results, clears the state. A
+/// request held back by our own pacing
+/// (<see cref="ExternalMetadataFailureKind.Paced"/>) never reached the provider,
+/// so it neither starts nor clears a cooldown.
 /// </para>
 /// <para>
 /// A lookup or search that produced nothing while at least one provider
-/// failed or was cooling down throws an aggregate
+/// failed, was paced or was cooling down throws an aggregate
 /// <see cref="ExternalMetadataUnavailableException"/>: the series may well
 /// exist at the provider that could not answer, so callers must not record
 /// "not found".
@@ -47,12 +51,21 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
     public static readonly TimeSpan MaxBackoff = TimeSpan.FromHours(1);
 
     /// <summary>
-    /// Overall time one provider may take to answer one call, including its
+    /// Overall time one provider may take to answer one lookup, including its
     /// rate-limit queueing and retry. Providers bound each attempt themselves
     /// (<see cref="Configuration.AppSettings.MetadataProviderTimeoutSeconds"/>);
-    /// this is the backstop so a lookup never waits on a provider longer.
+    /// this is the backstop so a lookup never waits on a provider longer. It
+    /// leaves room for a full client-side pace window (AniList's is a minute)
+    /// plus one attempt at the longest configurable timeout.
     /// </summary>
-    public static readonly TimeSpan ProviderCallTimeout = TimeSpan.FromSeconds(60);
+    public static readonly TimeSpan ProviderCallTimeout = TimeSpan.FromSeconds(100);
+
+    /// <summary>
+    /// Overall time one provider may take to answer one search. Searches back
+    /// the manual-match and cover pickers, so this stays below the API's
+    /// 30-second default request timeout and the picker shows what answered.
+    /// </summary>
+    public static readonly TimeSpan SearchCallTimeout = TimeSpan.FromSeconds(25);
 
     private readonly IReadOnlyList<IExternalSeriesMetadataService> _providers;
     private readonly ILogger<CompositeExternalSeriesMetadataService> _logger;
@@ -60,6 +73,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
     private readonly TimeSpan _initialBackoff;
     private readonly TimeSpan _maxBackoff;
     private readonly TimeSpan _providerCallTimeout;
+    private readonly TimeSpan _searchCallTimeout;
     private readonly ConcurrentDictionary<IExternalSeriesMetadataService, ProviderBackoffState> _backoff = new();
 
     public CompositeExternalSeriesMetadataService(
@@ -71,7 +85,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
 
     /// <summary>
     /// Test-only constructor that allows overriding the clock, the backoff
-    /// schedule and the per-provider call budget. Production callers should
+    /// schedule and the per-provider call budgets. Production callers should
     /// use the simpler overload.
     /// </summary>
     public CompositeExternalSeriesMetadataService(
@@ -80,7 +94,8 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
         TimeProvider timeProvider,
         TimeSpan initialBackoff,
         TimeSpan maxBackoff,
-        TimeSpan? providerCallTimeout = null)
+        TimeSpan? providerCallTimeout = null,
+        TimeSpan? searchCallTimeout = null)
     {
         _providers = providers;
         _logger = logger;
@@ -88,6 +103,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
         _initialBackoff = initialBackoff;
         _maxBackoff = maxBackoff;
         _providerCallTimeout = providerCallTimeout ?? ProviderCallTimeout;
+        _searchCallTimeout = searchCallTimeout ?? SearchCallTimeout;
     }
 
     public string ProviderName => "Composite";
@@ -105,6 +121,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
         var (outcomes, failures) = await QueryAllAsync(
             seriesName,
             (provider, token) => provider.LookupSeriesAsync(seriesName, token),
+            _providerCallTimeout,
             cancellationToken);
 
         ExternalSeriesMetadata? best = null;
@@ -168,6 +185,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
         var (outcomes, failures) = await QueryAllAsync(
             query,
             (provider, token) => provider.SearchSeriesAsync(query, limit, token),
+            _searchCallTimeout,
             cancellationToken);
 
         var lists = outcomes
@@ -222,8 +240,18 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             provider,
             title,
             (candidate, token) => candidate.LookupMatchAsync(source, sourceId, title, token),
+            _providerCallTimeout,
             cancellationToken);
         return outcome.Failure is { } failure ? throw failure : outcome.Result;
+    }
+
+    /// <inheritdoc />
+    public void ForgetNoMatch(string seriesName)
+    {
+        foreach (var provider in _providers)
+        {
+            provider.ForgetNoMatch(seriesName);
+        }
     }
 
     /// <summary>Returns a health snapshot for every chained provider, in order.</summary>
@@ -278,6 +306,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
         QueryAllAsync<T>(
             string subject,
             Func<IExternalSeriesMetadataService, CancellationToken, Task<T>> call,
+            TimeSpan callTimeout,
             CancellationToken cancellationToken)
         where T : class?
     {
@@ -297,7 +326,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
                 continue;
             }
 
-            calls.Add(InvokeAsync(provider, subject, call, cancellationToken));
+            calls.Add(InvokeAsync(provider, subject, call, callTimeout, cancellationToken));
         }
 
         var completed = await Task.WhenAll(calls);
@@ -318,22 +347,24 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
     }
 
     /// <summary>
-    /// Calls one provider within <see cref="ProviderCallTimeout"/>. An answer
+    /// Calls one provider within <paramref name="callTimeout"/>. An answer
     /// clears the provider's backoff; a failure (any exception other than the
     /// caller's cancellation, or running out of time) starts or extends it and
-    /// is returned rather than thrown.
+    /// is returned rather than thrown. A request held back by our own pacing
+    /// is also returned, but leaves the backoff alone.
     /// </summary>
     private async Task<ProviderOutcome<T>> InvokeAsync<T>(
         IExternalSeriesMetadataService provider,
         string subject,
         Func<IExternalSeriesMetadataService, CancellationToken, Task<T>> call,
+        TimeSpan callTimeout,
         CancellationToken cancellationToken)
         where T : class?
     {
         ExternalMetadataUnavailableException failure;
         using (var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
-            budget.CancelAfter(_providerCallTimeout);
+            budget.CancelAfter(callTimeout);
             try
             {
                 var result = await call(provider, budget.Token);
@@ -351,7 +382,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
                 failure = new ExternalMetadataUnavailableException(
                     NameOf(provider),
                     ExternalMetadataFailureKind.Timeout,
-                    $"{NameOf(provider)} did not answer within {_providerCallTimeout.TotalSeconds:F0}s",
+                    $"{NameOf(provider)} did not answer within {callTimeout.TotalSeconds:F0}s",
                     innerException: ex);
             }
             catch (ExternalMetadataUnavailableException ex)
@@ -366,6 +397,16 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
                     $"{NameOf(provider)} failed: {ex.Message}",
                     innerException: ex);
             }
+        }
+
+        if (failure.Kind == ExternalMetadataFailureKind.Paced)
+        {
+            _logger.LogDebug(
+                "Provider {ProviderType} not asked for {Subject}: {Reason}",
+                provider.GetType().Name,
+                LoggingHelper.SanitizeForLog(subject),
+                LoggingHelper.SanitizeForLog(failure.Message));
+            return new ProviderOutcome<T>(provider, default, failure);
         }
 
         var nextRetry = RecordFailure(provider, failure.RetryAfter);

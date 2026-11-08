@@ -28,7 +28,15 @@ public enum ExternalMetadataFailureKind
     /// The provider rejected the request because of the configuration, for
     /// example an invalid API key (HTTP 401/403).
     /// </summary>
-    Configuration
+    Configuration,
+
+    /// <summary>
+    /// The application's own request pacing for the provider had no room
+    /// within the time the caller could wait, so nothing was sent. This says
+    /// nothing about the provider: it is neither backed off from nor reported
+    /// as unhealthy, and the lookup can simply be tried again.
+    /// </summary>
+    Paced
 }
 
 /// <summary>

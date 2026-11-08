@@ -443,6 +443,110 @@ test('waiting for a reload asked for during a burst waits for one that started a
     assert.ok(card(page, 6));
 });
 
+test('the reload after a user\'s action does not wait out the cool-down', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    const loads = () => callsTo(page, ISSUES_PATH).length;
+    fileProcessed(page, 'Elsewhere/Other #001.cbz');
+    await page.settle();
+    assert.equal(loads(), 2);
+
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    let reloaded = false;
+    page.run('refreshAfterReadStatusChange()').then(() => { reloaded = true; });
+    await page.settle();
+
+    assert.equal(reloaded, true);
+    assert.equal(loads(), 3);
+    assert.ok(card(page, 6));
+});
+
+test('a user\'s action during a burst starts the queued reload at once, and everyone waiting gets it', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    const loads = () => callsTo(page, ISSUES_PATH).length;
+    fileProcessed(page, 'Elsewhere/Other #001.cbz');
+    await page.settle();
+    let burstDone = false;
+    page.run("loadSeriesIssues('series-1', true)").then(() => { burstDone = true; });
+    await page.settle();
+    assert.equal(loads(), 2);
+    assert.equal(burstDone, false);
+
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    let actionDone = false;
+    page.run('refreshAfterReadStatusChange()').then(() => { actionDone = true; });
+    await page.settle();
+
+    assert.equal(loads(), 3, 'one reload serves both');
+    assert.equal(actionDone, true);
+    assert.equal(burstDone, true);
+    assert.ok(card(page, 6));
+
+    // The queue is empty and the cool-down of that reload is back in force.
+    fileProcessed(page, 'Elsewhere/Other #002.cbz');
+    await page.settle();
+    assert.equal(loads(), 3);
+    t.mock.timers.tick(SERIES_REFRESH_MAX_COOLDOWN_MS);
+    await page.settle();
+    assert.equal(loads(), 4);
+});
+
+test('a user\'s action while a reload is in flight follows its answer without a cool-down', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    const loads = () => callsTo(page, ISSUES_PATH).length;
+    const first = deferred();
+    page.route(`GET ${ISSUES_PATH}`, () => first.promise);
+    fileProcessed(page, 'Elsewhere/Other #001.cbz');
+    await page.settle();
+    assert.equal(loads(), 2);
+    page.route(`GET ${ISSUES_PATH}`, () => issuesResponse(server.issues));
+
+    let reloaded = false;
+    page.run('refreshAfterReadStatusChange()').then(() => { reloaded = true; });
+    await page.settle();
+    assert.equal(loads(), 2, 'nothing goes out beside the request in flight');
+
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    first.resolve(issuesResponse([1, 2, 4, 5].map(n => makeIssue(n))));
+    await page.settle();
+    t.mock.timers.tick(0);
+    await page.settle();
+
+    assert.equal(loads(), 3);
+    assert.equal(reloaded, true);
+    assert.ok(card(page, 6));
+});
+
+test('the reload that shows a finished job does not wait out the cool-down; later file events do', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+    const { page, server } = await bootSeriesPage();
+    const loads = () => callsTo(page, ISSUES_PATH).length;
+    page.run("hasActiveJob = true; currentJobId = 'job-1';");
+    toggleIssue(page, 2);
+    fileProcessed(page, filePath(1));
+    await page.settle();
+    assert.equal(loads(), 2);
+
+    server.issues = [1, 2, 4, 5, 6].map(n => makeIssue(n));
+    page.eventSources.at(-1).emit('message', {
+        type: 'job_updated',
+        data: { job_id: 'job-1', status: 'completed', progress: { processed: 1, total: 1, success: 1, errors: 0, percentage: 100 } }
+    });
+    // The job's end is handled half a second on, inside the one-second cool-down.
+    t.mock.timers.tick(500);
+    await page.settle();
+
+    assert.equal(loads(), 3);
+    assert.ok(card(page, 6));
+    assert.deepEqual(checkedBoxes(page), [], 'the finished job\'s selection is cleared on screen');
+
+    fileProcessed(page, filePath(1));
+    await page.settle();
+    assert.equal(loads(), 3, 'bursts are coalesced again');
+});
+
 test('a reload that changes nothing leaves the cards and an open issue menu as they are', async () => {
     const { page } = await bootSeriesPage();
     const before = issueCardElements(page);

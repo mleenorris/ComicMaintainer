@@ -122,14 +122,21 @@
         // the last reload took (a big series costs more to list and render),
         // so a long job keeps the list current while spending no more than
         // about a tenth of its time reloading it.
+        //
+        // The cool-down is there for the burst, not for someone waiting on the
+        // result: the reload after a user's action (`immediate`) and the one
+        // that shows the end of the job the page is following skip it. They
+        // still wait for a request in flight, whose answer predates them.
         const SERIES_ISSUES_REFRESH_MIN_COOLDOWN_MS = 1000;
         const SERIES_ISSUES_REFRESH_MAX_COOLDOWN_MS = 10000;
         const SERIES_ISSUES_REFRESH_LOAD_FACTOR = 10;
-        // Per series id: whether a refresh is running or cooling down, and the
-        // trailing refresh queued meanwhile ({ promise, resolve }), if any.
+        // Per series id: whether a refresh is running or cooling down (and the
+        // timer ending the cool-down), the trailing refresh queued meanwhile
+        // ({ promise, resolve, urgent }), if any, and whether the last refresh
+        // was asked for during the page's job.
         const seriesIssuesRefreshes = new Map();
 
-        async function loadSeriesIssues(seriesId, force = false) {
+        async function loadSeriesIssues(seriesId, force = false, { immediate = false } = {}) {
             if (!seriesId) return;
             const cached = seriesIssuesCache.get(seriesId);
             // A forced reload of the list already shown (or being loaded) for
@@ -137,37 +144,53 @@
             // a retry or a filter change, which must not wait.
             if (force && cached && !cached.error && cached.filter === filterMode
                 && (cached.loaded || cached.loading)) {
-                return refreshSeriesIssues(seriesId);
+                return refreshSeriesIssues(seriesId, immediate);
             }
             return fetchSeriesIssues(seriesId, force);
         }
 
-        function refreshSeriesIssues(seriesId) {
+        function refreshSeriesIssues(seriesId, immediate) {
             let state = seriesIssuesRefreshes.get(seriesId);
             if (!state) {
-                state = { busy: false, trailing: null };
+                state = { busy: false, cooldownTimer: null, trailing: null, duringJob: false };
                 seriesIssuesRefreshes.set(seriesId, state);
             }
-            if (!state.trailing) {
-                const cached = seriesIssuesCache.get(seriesId);
-                const loading = Boolean(cached && cached.loading);
-                if (!state.busy && !loading) {
-                    return startSeriesIssuesRefresh(seriesId, state);
-                }
-                let resolve;
-                const promise = new Promise(done => { resolve = done; });
-                state.trailing = { promise, resolve };
-                if (loading) {
-                    // The answer in flight predates this call; see fetchSeriesIssues.
-                    cached.stale = true;
-                }
-                if (!state.busy) {
-                    // Another load of the list (opening the series, a filter
-                    // change) is in flight: go once it has answered.
-                    Promise.resolve(cached.settled).then(() => startTrailingSeriesIssuesRefresh(seriesId, state));
-                }
+            // events.js reloads the same way per processed file and when the
+            // job ends, but by then it has cleared hasActiveJob.
+            const jobEnded = state.duringJob && !hasActiveJob;
+            state.duringJob = hasActiveJob;
+            const urgent = immediate || jobEnded;
+            if (urgent && state.cooldownTimer !== null) {
+                clearTimeout(state.cooldownTimer);
+                state.cooldownTimer = null;
+                state.busy = false;
             }
-            return state.trailing.promise;
+            if (state.trailing) {
+                const { promise } = state.trailing;
+                if (urgent) {
+                    state.trailing.urgent = true;
+                    startTrailingSeriesIssuesRefresh(seriesId, state);
+                }
+                return promise;
+            }
+            const cached = seriesIssuesCache.get(seriesId);
+            const loading = Boolean(cached && cached.loading);
+            if (!state.busy && !loading) {
+                return startSeriesIssuesRefresh(seriesId, state);
+            }
+            let resolve;
+            const promise = new Promise(done => { resolve = done; });
+            state.trailing = { promise, resolve, urgent };
+            if (loading) {
+                // The answer in flight predates this call; see fetchSeriesIssues.
+                cached.stale = true;
+            }
+            if (!state.busy) {
+                // Another load of the list (opening the series, a filter
+                // change) is in flight: go once it has answered.
+                Promise.resolve(cached.settled).then(() => startTrailingSeriesIssuesRefresh(seriesId, state));
+            }
+            return promise;
         }
 
         // Starts the queued refresh, if any, unless something still holds it back.
@@ -189,10 +212,11 @@
             try {
                 await fetchSeriesIssues(seriesId, true);
             } finally {
-                const cooldown = Math.min(
+                const cooldown = state.trailing && state.trailing.urgent ? 0 : Math.min(
                     SERIES_ISSUES_REFRESH_MAX_COOLDOWN_MS,
                     Math.max(SERIES_ISSUES_REFRESH_MIN_COOLDOWN_MS, (Date.now() - startedAt) * SERIES_ISSUES_REFRESH_LOAD_FACTOR));
-                setTimeout(() => {
+                state.cooldownTimer = setTimeout(() => {
+                    state.cooldownTimer = null;
                     state.busy = false;
                     startTrailingSeriesIssuesRefresh(seriesId, state);
                 }, cooldown);

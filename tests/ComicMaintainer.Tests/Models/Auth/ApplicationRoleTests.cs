@@ -62,7 +62,7 @@ public class ApplicationUserTests
             Email = "test@example.com",
             FullName = "Test User",
             IsActive = true,
-            ApiKey = "test-api-key"
+            ApiKeyHash = "0123abcd"
         };
 
         // Assert
@@ -71,7 +71,7 @@ public class ApplicationUserTests
         Assert.Equal("test@example.com", user.Email);
         Assert.Equal("Test User", user.FullName);
         Assert.True(user.IsActive);
-        Assert.Equal("test-api-key", user.ApiKey);
+        Assert.Equal("0123abcd", user.ApiKeyHash);
     }
 
     [Fact]
@@ -85,12 +85,14 @@ public class ApplicationUserTests
     }
 
     [Fact]
-    public void ApplicationUser_ApiKeyCanBeNull()
+    public void ApplicationUser_HasNoApiKeyByDefault()
     {
         // Act
         var user = new ApplicationUser();
 
         // Assert
-        Assert.Null(user.ApiKey);
+        Assert.Null(user.ApiKeyHash);
+        Assert.Null(user.ApiKeyCreatedAt);
+        Assert.Null(user.ApiKeyLastUsedAt);
     }
 }

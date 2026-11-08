@@ -1,8 +1,10 @@
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
-using ComicMaintainer.WebApi.Hubs;
+using ComicMaintainer.Core.Services.Auth;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Identity;
@@ -50,33 +52,141 @@ internal static class WebApplicationExtensions
                 await EnsureRoleExistsAsync(roleManager, db, roleName);
             }
             
-            // Check if admin user should be seeded from environment variables (for backward compatibility).
-            // ADMIN_PASSWORD_FILE can name a file holding the password instead, such as a Docker secret.
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-            var adminUsername = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
-            var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out _);
-            
-            // Only create default admin if both ADMIN_USERNAME and ADMIN_PASSWORD are explicitly set
-            if (!string.IsNullOrEmpty(adminUsername) && !string.IsNullOrEmpty(adminPassword)
-                && await userManager.FindByNameAsync(adminUsername) == null)
-            {
-                var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? $"{adminUsername}@comicmaintainer.local";
-                var adminUser = new ApplicationUser
-                {
-                    UserName = adminUsername,
-                    Email = adminEmail,
-                    FullName = "Administrator",
-                    IsActive = true,
-                    EmailConfirmed = true
-                };
+            await SeedAdminFromEnvironmentAsync(userManager, logger);
 
-                var result = await userManager.CreateAsync(adminUser, adminPassword);
-                if (result.Succeeded)
-                {
-                    await userManager.AddToRoleAsync(adminUser, "Admin");
-                    logger.LogInformation("Admin user '{Username}' created from environment variables", adminUsername);
-                }
+            var autheliaSettings = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ComicMaintainer.Core.Configuration.AutheliaSettings>>().Value;
+            if (await FirstRunSetup.IsAvailableAsync(userManager, autheliaSettings))
+            {
+                LogFirstRunSetupCode(scope.ServiceProvider.GetRequiredService<ISetupTokenProvider>(), logger);
             }
+        }
+    }
+
+    // First-run setup requires a one-time code, so that whoever reaches a fresh, exposed instance first cannot claim
+    // it: only someone who can read this log (docker logs) or set SETUP_TOKEN can create the first administrator.
+    private static void LogFirstRunSetupCode(ISetupTokenProvider setupToken, Microsoft.Extensions.Logging.ILogger logger)
+    {
+        if (setupToken.IsConfigured)
+        {
+            logger.LogWarning(
+                "No account exists yet. Open ComicMaintainer in a browser and enter the setup code set in SETUP_TOKEN " +
+                "to create the first administrator.");
+        }
+        else
+        {
+            logger.LogWarning(
+                "No account exists yet. Open ComicMaintainer in a browser and enter the setup code {SetupCode} to create " +
+                "the first administrator. A new code is generated on every start until then; set SETUP_TOKEN to choose your own.",
+                setupToken.Token);
+        }
+    }
+
+    /// <summary>
+    /// Creates the administrator named by <c>ADMIN_USERNAME</c> with the password in <c>ADMIN_PASSWORD</c> (or the
+    /// file <c>ADMIN_PASSWORD_FILE</c> names, such as a Docker secret) when both are set and no account has that name.
+    /// A password published with ComicMaintainer (see <see cref="PublishedPasswords"/>) is refused, so that the
+    /// first-run setup runs instead. An existing account with that name is left alone, unless it still has a
+    /// published password: that is replaced by <c>ADMIN_PASSWORD</c> when it is a password of the operator's own.
+    /// </summary>
+    private static async Task SeedAdminFromEnvironmentAsync(UserManager<ApplicationUser> userManager, Microsoft.Extensions.Logging.ILogger logger)
+    {
+        var adminUsername = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
+        var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out var passwordSource);
+        if (string.IsNullOrEmpty(adminUsername))
+        {
+            return;
+        }
+
+        // Everything logged below is about the operator's ADMIN_* settings: they need to see it, but it is not a
+        // defect to file an issue for.
+        using var errorReportExclusion = logger.BeginScope(ErrorReportLogProperties.Exclude("operator configuration: admin account settings"));
+
+        var safeUsername = LoggingHelper.SanitizeForLog(adminUsername);
+        var existing = await userManager.FindByNameAsync(adminUsername);
+        if (existing is not null)
+        {
+            await ReplacePublishedAdminPasswordAsync(userManager, existing, adminPassword, passwordSource, safeUsername, logger);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(adminPassword))
+        {
+            return;
+        }
+
+        if (PublishedPasswords.IsPublished(adminPassword))
+        {
+            logger.LogError(
+                "Not creating the administrator '{Username}': {PasswordSource} is set to a password that was published " +
+                "with ComicMaintainer, so anyone could sign in with it. Open the web UI to create the first administrator " +
+                "with first-run setup, or set {PasswordSource} to a password of your own and restart.",
+                safeUsername, passwordSource, passwordSource);
+            return;
+        }
+
+        var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? $"{adminUsername}@comicmaintainer.local";
+        var adminUser = new ApplicationUser
+        {
+            UserName = adminUsername,
+            Email = adminEmail,
+            FullName = "Administrator",
+            IsActive = true,
+            EmailConfirmed = true
+        };
+
+        var result = await userManager.CreateAsync(adminUser, adminPassword);
+        if (!result.Succeeded)
+        {
+            logger.LogError(
+                "Not creating the administrator '{Username}' from {PasswordSource}: {Errors}",
+                safeUsername, passwordSource, string.Join(" ", result.Errors.Select(e => e.Description)));
+            return;
+        }
+
+        await userManager.AddToRoleAsync(adminUser, "Admin");
+        logger.LogInformation("Admin user '{Username}' created from environment variables", safeUsername);
+    }
+
+    // Before 3.0.0 the shipped docker-compose.dotnet.yml and .env.example seeded admin / Admin123!. Sign-in with a
+    // published password is refused (AuthService), so give the operator a way back in: setting ADMIN_PASSWORD to a
+    // password of their own replaces it on the next start.
+    private static async Task ReplacePublishedAdminPasswordAsync(
+        UserManager<ApplicationUser> userManager,
+        ApplicationUser admin,
+        string? adminPassword,
+        string? passwordSource,
+        string safeUsername,
+        Microsoft.Extensions.Logging.ILogger logger)
+    {
+        if (!PublishedPasswords.MatchesUser(userManager.PasswordHasher, admin))
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(adminPassword) || PublishedPasswords.IsPublished(adminPassword))
+        {
+            logger.LogError(
+                "The account '{Username}' still has a password that was published with ComicMaintainer, so signing in " +
+                "with it is refused. Set ADMIN_PASSWORD (or ADMIN_PASSWORD_FILE) to a password of your own and restart " +
+                "to replace it.",
+                safeUsername);
+            return;
+        }
+
+        var resetToken = await userManager.GeneratePasswordResetTokenAsync(admin);
+        var result = await userManager.ResetPasswordAsync(admin, resetToken, adminPassword);
+        if (result.Succeeded)
+        {
+            logger.LogWarning(
+                "Replaced the published password of the account '{Username}' with the one in {PasswordSource}",
+                safeUsername, passwordSource);
+        }
+        else
+        {
+            logger.LogError(
+                "Could not replace the published password of the account '{Username}' with the one in {PasswordSource}: {Errors}",
+                safeUsername, passwordSource, string.Join(" ", result.Errors.Select(e => e.Description)));
         }
     }
 
@@ -152,13 +262,16 @@ internal static class WebApplicationExtensions
             // <style> blocks and style attributes, so script-src and style-src must
             // allow 'unsafe-inline' until those are removed as well. The
             // remaining directives still provide meaningful protection: injected
-            // markup cannot load an attacker-hosted script, exfiltrate data to a
-            // third-party origin, embed plugins, rewrite <base>, or post forms
-            // off-origin.
+            // markup cannot load an attacker-hosted script, open a fetch, XHR,
+            // EventSource or WebSocket connection to another origin (connect-src
+            // is same-origin only; the app's only stream is the same-origin SSE
+            // endpoint), embed plugins, rewrite <base>, or post forms off-origin.
             //
-            // img-src allows https: because series covers may be fetched directly from
-            // external metadata providers, and blob:/data: because covers and comic
-            // pages are rendered from object URLs.
+            // img-src allows https: because series cover candidates are previewed
+            // straight from external metadata providers, and blob:/data: because
+            // covers and comic pages are rendered from object URLs. That means an
+            // injected script could still leak data in the URL of an image request,
+            // so the CSP limits the damage of an XSS but does not prevent it.
             const string baseCspDirectives =
                 "default-src 'self'; " +
                 "script-src 'self' 'unsafe-inline'; " +
@@ -166,7 +279,7 @@ internal static class WebApplicationExtensions
                 "img-src 'self' data: blob: https:; " +
                 "font-src 'self' data:; " +
                 "media-src 'self' blob:; " +
-                "connect-src 'self' ws: wss:; " +
+                "connect-src 'self'; " +
                 "worker-src 'self'; " +
                 "manifest-src 'self'; " +
                 "object-src 'none'; " +
@@ -304,9 +417,6 @@ internal static class WebApplicationExtensions
         app.UseRateLimiter();
 
         app.MapControllers();
-        // A hub connection is open for as long as the page is, so it must never be
-        // subject to the default request timeout.
-        app.MapHub<ProgressHub>("/hubs/progress").DisableRequestTimeout();
 
         // Map health check endpoints. Both are anonymous so probes do not need credentials.
         app.MapHealthChecks("/health", new HealthCheckOptions

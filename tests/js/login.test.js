@@ -276,6 +276,28 @@ test('a rejected sign-in shows the reason and lets the user try again', async t 
     }
 });
 
+test('too many attempts are explained, whoever said so', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const fromProxy = 'Too many attempts. Please wait a few minutes and try again.';
+    for (const [answer, expected] of [
+        [respond(429, { error: 'Too many requests. Please try again in 4 minutes.' }, { 'Retry-After': '240' }), 'Too many requests. Please try again in 4 minutes.'],
+        [respond(429, '<html><body>429 Too Many Requests</body></html>', { 'Content-Type': 'text/html' }), fromProxy],
+        [respond(429, {}), fromProxy],
+        [429, fromProxy]
+    ]) {
+        const page = openLogin({ routes: { 'POST /api/auth/login': answer } });
+        await page.settle();
+
+        signIn(page, 'alice', 'secret');
+        await page.settle();
+
+        assert.equal(page.$('#errorMessage').textContent, expected);
+        assertButtonReady(page);
+        assert.deepEqual(page.navigations, []);
+        page.close();
+    }
+});
+
 test('a network failure or an unreadable answer shows a generic error', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     for (const answer of [networkError, badGateway]) {

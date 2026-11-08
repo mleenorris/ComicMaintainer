@@ -1,4 +1,7 @@
+using System.Reflection;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.WebApi.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -28,6 +31,20 @@ public class LogsControllerTests : IDisposable
 
         _mockLogger = new Mock<ILogger<LogsController>>();
         _controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
+    }
+
+    // The logs name every user and role, failed sign-ins and client addresses, host paths and exception details.
+    [Fact]
+    public void Controller_IsAdminOnlyIncludingReads()
+    {
+        var attribute = typeof(LogsController).GetCustomAttribute<AuthorizeAttribute>();
+
+        Assert.NotNull(attribute);
+        Assert.Equal(AuthorizationPolicies.CanAdminister, attribute!.Policy);
+        Assert.DoesNotContain(
+            typeof(LogsController).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly),
+            m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null
+                || m.GetCustomAttribute<AuthorizeAttribute>() is { } a && a.Policy != AuthorizationPolicies.CanAdminister);
     }
 
     [Fact]

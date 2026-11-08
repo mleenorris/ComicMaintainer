@@ -27,7 +27,8 @@ const consoleLines = (page, type) => page.consoleMessages.filter(message => mess
 const setupCalls = page => page.fetchCalls.filter(call => call.path === '/api/auth/setup');
 const theme = page => page.document.documentElement.getAttribute('data-theme');
 
-function submit(page, { username = 'admin', password = 'Sup3r$ecret!', confirm = password } = {}) {
+function submit(page, { setupToken = '  ABCDE-FGHJK-MNPQR-STVWX ', username = 'admin', password = 'Sup3r$ecret!', confirm = password } = {}) {
+    page.input('#setupToken', setupToken);
     page.input('#username', username);
     page.input('#password', password);
     page.input('#confirmPassword', confirm);
@@ -110,6 +111,7 @@ test('invalid details are explained and never sent', async t => {
     const page = openSetup();
     await page.settle();
     const cases = [
+        [{ setupToken: '   ' }, 'Please fill in all fields'],
         [{ username: '   ' }, 'Please fill in all fields'],
         [{ username: '  ab  ' }, 'Username must be at least 3 characters'],
         [{ password: 'Ab1!xyz' }, 'Password must be at least 8 characters'],
@@ -139,6 +141,7 @@ test('the page itself also refuses an empty password confirmation', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const page = openSetup();
     await page.settle();
+    page.input('#setupToken', 'ABCDE-FGHJK-MNPQR-STVWX');
     page.input('#username', 'admin');
     page.input('#password', 'Sup3r$ecret!');
 
@@ -167,7 +170,7 @@ test('creating the administrator sends the details, confirms and goes to sign in
     const [call] = setupCalls(page);
     assert.equal(call.method, 'POST');
     assert.equal(call.headers['content-type'], 'application/json');
-    assert.deepEqual(call.body, { username: 'admin', password: 'Sup3r$ecret!', email: null });
+    assert.deepEqual(call.body, { username: 'admin', password: 'Sup3r$ecret!', email: null, setupToken: 'ABCDE-FGHJK-MNPQR-STVWX' });
 
     gate.resolve({ message: 'Admin user created successfully' });
     await page.settle();
@@ -190,6 +193,8 @@ test('a rejected setup shows the reason and lets the user try again', async t =>
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const cases = [
         [respond(400, { error: 'Admin user already exists' }), 'Admin user already exists'],
+        [respond(403, { error: 'The setup code is missing or wrong.' }), 'The setup code is missing or wrong.'],
+        [respond(403, { error: 'The setup code is missing or wrong.' }), 'The setup code is missing or wrong.'],
         [respond(500, { title: 'Internal Server Error' }), 'Setup failed. Please try again.']
     ];
     for (const [answer, message] of cases) {
@@ -207,6 +212,28 @@ test('a rejected setup shows the reason and lets the user try again', async t =>
         t.mock.timers.tick(5000);
         assert.equal(error.textContent, '', message);
         assert.equal(error.classList.contains('show'), false, message);
+        page.close();
+    }
+});
+
+test('too many attempts are explained, whoever said so', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const fromProxy = 'Too many attempts. Please wait a few minutes and try again.';
+    for (const [answer, expected] of [
+        [respond(429, { error: 'Too many requests. Please try again in 4 minutes.' }, { 'Retry-After': '240' }), 'Too many requests. Please try again in 4 minutes.'],
+        [respond(429, '<html><body>429 Too Many Requests</body></html>', { 'Content-Type': 'text/html' }), fromProxy],
+        [respond(429, {}), fromProxy],
+        [429, fromProxy]
+    ]) {
+        const page = openSetup({ routes: { 'POST /api/auth/setup': answer } });
+        await page.settle();
+
+        submit(page);
+        await page.settle();
+
+        assert.equal(page.$('#errorMessage').textContent, expected);
+        assertButtonReady(page);
+        assert.deepEqual(page.navigations, []);
         page.close();
     }
 });

@@ -164,10 +164,12 @@ test('Save and Run now ignore a job that is not on the page', async (t) => {
     // Reachable only by calling the page's functions directly: every card's
     // buttons name a job the page lists.
     const { page } = await openJobsPage(t, [h.scheduledJob()]);
+    // Booting POSTs for the event stream's token; only what the two calls send counts.
+    const since = page.fetchCalls.length;
     await page.run("saveScheduledJob('no-such-job')");
     await page.run("runScheduledJob('no-such-job')");
     await page.settle();
-    assert.deepEqual(page.fetchCalls.filter(call => call.method !== 'GET').map(call => call.url), []);
+    assert.deepEqual(page.fetchCalls.slice(since).filter(call => call.method !== 'GET').map(call => call.url), []);
     assert.deepEqual(h.messages(page), []);
     assert.deepEqual(page.errors, []);
     h.assertJobCard(page, 'library-scan', { run: 'Run now', runDisabled: false, saveDisabled: false });

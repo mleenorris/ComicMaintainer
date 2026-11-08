@@ -206,21 +206,26 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
     }
 
     [Fact]
-    public async Task SseToken_IssuedToAnAutheliaSession_IsAcceptedWithoutTheForwardedHeaders()
+    public async Task StreamToken_IssuedToAnAutheliaSession_OpensTheEventStreamWithoutTheForwardedHeaders()
     {
         var user = await _host.CreateUserAsync();
 
-        var (tokenStatus, tokenBody) = await GetAsync("/api/auth/sse-token", Forwarded(user, "users"));
-        Assert.Equal(HttpStatusCode.OK, tokenStatus);
-        var token = tokenBody.GetProperty("token").GetString();
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/stream-token");
+        Forwarded(user, "users")(tokenRequest.Headers);
+        using var tokenResponse = await _host.Client.SendAsync(tokenRequest);
+        Assert.Equal(HttpStatusCode.OK, tokenResponse.StatusCode);
+        using var tokenBody = JsonDocument.Parse(await tokenResponse.Content.ReadAsStringAsync());
+        var token = tokenBody.RootElement.GetProperty("token").GetString();
 
-        // EventSource connections cannot send the forwarded headers, so the JWT scheme must still be accepted.
-        var (status, body) = await GetAsync("/api/auth/user", headers => headers.Authorization = new AuthenticationHeaderValue("Bearer", token));
+        // EventSource connections cannot send headers, so the stream token travels in the URL of the stream...
+        using var stream = new HttpRequestMessage(HttpMethod.Get, "/api/events/stream?access_token=" + token);
+        using var streamResponse = await _host.Client.SendAsync(stream, HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(HttpStatusCode.OK, streamResponse.StatusCode);
+        Assert.Equal("text/event-stream", streamResponse.Content.Headers.ContentType?.MediaType);
 
-        Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(user.UserName, body.GetProperty("username").GetString());
-        Assert.Equal("jwt", body.GetProperty("authMethod").GetString());
-        Assert.Equal(["User"], Roles(body));
+        // ...and opens nothing else: it is not a session token.
+        var (status, _) = await GetAsync("/api/auth/user", headers => headers.Authorization = new AuthenticationHeaderValue("Bearer", token));
+        Assert.Equal(HttpStatusCode.Unauthorized, status);
     }
 
     private async Task<(HttpStatusCode Status, JsonElement Body)> GetAsync(string path, Action<HttpRequestHeaders>? headers = null)

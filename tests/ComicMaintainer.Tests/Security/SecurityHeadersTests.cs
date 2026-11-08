@@ -79,6 +79,39 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Contains(directive, response.Headers.GetValues("Content-Security-Policy").First());
     }
 
+    // 'ws:' and 'wss:' in connect-src allowed WebSocket connections to any host, which an injected script
+    // could use to send data off-origin. The app's only stream is the same-origin SSE endpoint.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SecurityHeaders_CspConnectSrc_IsSameOriginOnly(bool behindHttpsProxy)
+    {
+        var client = behindHttpsProxy
+            ? _factory.CreateDefaultClient(new ForwardedProtoHandler())
+            : _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/version");
+
+        var connectSrc = response.Headers.GetValues("Content-Security-Policy").First()
+            .Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Single(directive => directive.StartsWith("connect-src ", StringComparison.Ordinal));
+        Assert.Equal("connect-src 'self'", connectSrc);
+    }
+
+    // The unused SignalR hub accepted anonymous connections and let any of them join any job's group.
+    [Theory]
+    [InlineData("GET", "/hubs/progress")]
+    [InlineData("POST", "/hubs/progress/negotiate?negotiateVersion=1")]
+    public async Task TheSignalRProgressHubIsNotMapped(string method, string path)
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.SendAsync(new HttpRequestMessage(new HttpMethod(method), path));
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? string.Empty);
+    }
+
     [Fact]
     public async Task SecurityHeaders_NoDeprecatedHeaders()
     {

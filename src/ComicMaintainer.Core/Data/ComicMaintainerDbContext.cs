@@ -34,17 +34,22 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<SeriesEmailSubscriptionEntity> SeriesEmailSubscriptions { get; set; } = null!;
     public DbSet<ComicEmailDeliveryEntity> ComicEmailDeliveries { get; set; } = null!;
     public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
+    public DbSet<RevokedTokenEntity> RevokedTokens { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        // Index ApiKey for fast lookup in AuthService.GetUserByApiKeyAsync.
-        // ApiKey is nullable, so this is a sparse index on a low-cardinality
-        // column (one entry per user with an API key).
+        // Signed-out session tokens (AuthSessionValidator).
+        modelBuilder.ApplyConfiguration(new RevokedTokenEntityConfiguration());
+
+        // API keys are looked up by their hash on every request that sends one
+        // (AuthService.GetUserByApiKeyAsync). The hash is unique: one key per account,
+        // and accounts without a key (NULL) do not collide.
         modelBuilder.Entity<ApplicationUser>(entity =>
         {
-            entity.HasIndex(e => e.ApiKey);
+            entity.Property(e => e.ApiKeyHash).HasMaxLength(64);
+            entity.HasIndex(e => e.ApiKeyHash).IsUnique();
         });
 
         // Configure ComicFileEntity

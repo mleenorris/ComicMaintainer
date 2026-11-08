@@ -3,9 +3,13 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
+using ComicMaintainer.Core.Services.Auth;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
@@ -16,41 +20,151 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public class AuthService : IAuthService
 {
+    /// <summary>
+    /// The one error of a failed sign-in, whether the account does not exist, is locked out or disabled, or the
+    /// password is wrong, so that the answer does not tell which accounts exist.
+    /// </summary>
+    public const string InvalidCredentialsError = "Invalid username or password";
+
+    /// <summary>The error of a sign-in with the right password when that password is a <see cref="PublishedPasswords"/> one.</summary>
+    public const string PublishedPasswordError =
+        "This password was published as an example with ComicMaintainer, so it can no longer be used to sign in. " +
+        "If this is the administrator created from ADMIN_PASSWORD, set ADMIN_PASSWORD to a password of your own and " +
+        "restart ComicMaintainer to replace it.";
+
+    /// <summary>The error when the current password confirming a sensitive action is missing or wrong.</summary>
+    public const string WrongCurrentPasswordError = "The current password is missing or wrong.";
+
+    /// <summary>The error of an action that needs the password while the account is locked out by wrong passwords.</summary>
+    public const string AccountLockedOutError = "Too many wrong passwords. Try again later.";
+
+    // A failed sign-in for an account that does not exist or is locked out still checks a password against a hash,
+    // with the cost of the app's own hasher, so that the response time does not tell those cases apart.
+    private static readonly PasswordHasher<ApplicationUser> TimingHasher = new();
+    private static readonly ApplicationUser TimingUser = new();
+    private static readonly Lazy<string> TimingHash =
+        new(() => TimingHasher.HashPassword(TimingUser, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))));
+
+    /// <summary>The error of a first-run setup attempt once setup is no longer available.</summary>
+    public const string SetupNotAvailableError =
+        "First-run setup is not available: it only creates the first account of a new instance, and not when Authelia is enabled.";
+
+    /// <summary>The error of a first-run setup attempt without the right setup code.</summary>
+    public const string InvalidSetupTokenError =
+        "The setup code is missing or wrong. ComicMaintainer writes it to its log when it starts (docker logs), unless SETUP_TOKEN sets it.";
+
+    // Serializes first-run setup, so that two requests racing on a fresh instance cannot both create an administrator.
+    private static readonly SemaphoreSlim SetupLock = new(1, 1);
+
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly JwtSettings _jwtSettings;
+    private readonly AutheliaSettings _autheliaSettings;
+    private readonly ISetupTokenProvider _setupToken;
+    private readonly IAuthSessionValidator _sessions;
+    private readonly ILogger<AuthService> _logger;
 
-    public AuthService(UserManager<ApplicationUser> userManager, IOptions<JwtSettings> jwtSettings)
+    public AuthService(
+        UserManager<ApplicationUser> userManager,
+        IOptions<JwtSettings> jwtSettings,
+        IOptions<AutheliaSettings> autheliaSettings,
+        ISetupTokenProvider setupToken,
+        IAuthSessionValidator sessions,
+        ILogger<AuthService> logger)
     {
+        _sessions = sessions;
         _userManager = userManager;
         _jwtSettings = jwtSettings.Value;
+        _autheliaSettings = autheliaSettings.Value;
+        _setupToken = setupToken;
+        _logger = logger;
     }
 
-    public async Task<(bool Success, string Token, string? Error)> LoginAsync(string username, string password)
+    /// <summary>
+    /// Signs in with a password. Every failed attempt is logged to the auth log with the client's address; after
+    /// <c>MaxFailedAccessAttempts</c> wrong passwords in a row the account is locked out for
+    /// <c>DefaultLockoutTimeSpan</c> (Identity's lockout options). The caller only ever sees
+    /// <see cref="InvalidCredentialsError"/>, so it cannot tell unknown, locked-out and disabled accounts apart.
+    /// </summary>
+    public async Task<(bool Success, string Token, string? Error)> LoginAsync(string username, string password, string? clientAddress = null)
     {
-        var user = await _userManager.FindByNameAsync(username);
-        if (user == null)
+        var safeUsername = LoggingHelper.SanitizeForLog(username);
+        var client = DescribeClient(clientAddress);
+
+        var user = string.IsNullOrEmpty(username) ? null : await _userManager.FindByNameAsync(username);
+        if (user is null)
         {
-            return (false, string.Empty, "Invalid username or password");
+            SpendAPasswordCheck(password);
+            return FailedSignIn(safeUsername, client, "there is no such account");
+        }
+
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            SpendAPasswordCheck(password);
+            return FailedSignIn(safeUsername, client, "the account is locked out after too many failed sign-ins");
+        }
+
+        if (!await _userManager.CheckPasswordAsync(user, password))
+        {
+            await RecordFailedAttemptAsync(user, safeUsername, client);
+            return FailedSignIn(safeUsername, client, "wrong password");
         }
 
         if (!user.IsActive)
         {
-            return (false, string.Empty, "Account is disabled");
+            return FailedSignIn(safeUsername, client, "the account is disabled");
         }
 
-        var result = await _userManager.CheckPasswordAsync(user, password);
-        if (!result)
+        if (PublishedPasswords.IsPublished(password))
         {
-            return (false, string.Empty, "Invalid username or password");
+            // An operator has to act on this, but it is their configuration, not a defect to report.
+            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("operator configuration: published password")))
+            {
+                _logger.LogError(
+                    "Refused the sign-in of {Username} from {ClientAddress}: the account's password was published with " +
+                    "ComicMaintainer. Set ADMIN_PASSWORD to a password of your own and restart to replace it.",
+                    safeUsername, client);
+            }
+
+            return (false, string.Empty, PublishedPasswordError);
         }
 
-        // Update last login
+        await _userManager.ResetAccessFailedCountAsync(user);
         user.LastLoginAt = DateTime.UtcNow;
         await _userManager.UpdateAsync(user);
 
+        _logger.LogInformation("{Username} signed in from {ClientAddress}", safeUsername, client);
         var token = await GenerateJwtTokenAsync(user);
         return (true, token, null);
     }
+
+    private (bool Success, string Token, string? Error) FailedSignIn(string safeUsername, string client, string reason)
+    {
+        _logger.LogWarning("Failed sign-in for {Username} from {ClientAddress}: {Reason}", safeUsername, client, reason);
+        return (false, string.Empty, InvalidCredentialsError);
+    }
+
+    private async Task RecordFailedAttemptAsync(ApplicationUser user, string safeUsername, string client)
+    {
+        // Accounts created with lockout disabled (Identity's per-account LockoutEnabled flag) would never lock out.
+        if (!await _userManager.GetLockoutEnabledAsync(user))
+        {
+            await _userManager.SetLockoutEnabledAsync(user, true);
+        }
+
+        await _userManager.AccessFailedAsync(user);
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            _logger.LogWarning(
+                "Locked out {Username} until {LockoutEnd:u} after {MaxAttempts} failed sign-ins, the last from {ClientAddress}",
+                safeUsername, await _userManager.GetLockoutEndDateAsync(user), _userManager.Options.Lockout.MaxFailedAccessAttempts, client);
+        }
+    }
+
+    private static void SpendAPasswordCheck(string? password) =>
+        TimingHasher.VerifyHashedPassword(TimingUser, TimingHash.Value, password ?? string.Empty);
+
+    private static string DescribeClient(string? clientAddress) =>
+        LoggingHelper.SanitizeForLog(string.IsNullOrEmpty(clientAddress) ? "unknown" : clientAddress);
 
     public async Task<(bool Success, string? Error)> RegisterAsync(string username, string password, string email, string? fullName = null)
     {
@@ -74,7 +188,12 @@ public class AuthService : IAuthService
         return (true, null);
     }
 
-    public async Task<(bool Success, string? Error)> ChangePasswordAsync(string userId, string currentPassword, string newPassword)
+    /// <summary>
+    /// Changes the password. A wrong current password counts towards the account's lockout, as it does at sign-in,
+    /// and a locked-out account cannot change its password. A password change is what someone does about a
+    /// compromised account, so it signs out every session and revokes the API key.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> ChangePasswordAsync(string userId, string currentPassword, string newPassword, string? clientAddress = null)
     {
         var user = await _userManager.FindByIdAsync(userId);
         if (user == null)
@@ -82,57 +201,109 @@ public class AuthService : IAuthService
             return (false, "User not found");
         }
 
+        var safeUsername = LoggingHelper.SanitizeForLog(user.UserName);
+        var client = DescribeClient(clientAddress);
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            _logger.LogWarning("Refused a password change of {Username} from {ClientAddress}: the account is locked out", safeUsername, client);
+            return (false, AccountLockedOutError);
+        }
+
+        // The key goes in the same write as the new password, so that a change can never leave it behind.
+        var previousKey = ClearApiKey(user);
         var result = await _userManager.ChangePasswordAsync(user, currentPassword, newPassword);
         if (!result.Succeeded)
         {
+            RestoreApiKey(user, previousKey);
+            if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.PasswordMismatch)))
+            {
+                await RecordFailedAttemptAsync(user, safeUsername, client);
+                _logger.LogWarning("Failed password change for {Username} from {ClientAddress}: wrong current password", safeUsername, client);
+            }
+
             return (false, string.Join(", ", result.Errors.Select(e => e.Description)));
         }
+
+        await _userManager.ResetAccessFailedCountAsync(user);
+
+        // Identity changed the security stamp, which ends every session token of the account.
+        _sessions.Invalidate(user.Id);
+        _logger.LogInformation("{Username} changed their password; their other sessions are signed out and their API key is revoked", safeUsername);
 
         return (true, null);
     }
 
-    public async Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey)
+    /// <summary>
+    /// Confirms that the caller of a sensitive action, already signed in, knows the account's password, so that a
+    /// stolen session token alone is not enough for it. A wrong password counts towards the account's lockout.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> ConfirmPasswordAsync(string userId, string? password, string? clientAddress = null)
     {
-        if (string.IsNullOrEmpty(apiKey))
-        {
-            return null;
-        }
-
-        // Query directly on the backing IQueryable instead of pulling every user
-        // in the "User" role into memory and filtering client-side. EF Core
-        // translates this into a single indexed SELECT (IX_AspNetUsers_ApiKey).
-        // We use the synchronous LINQ overload so that the call works against
-        // both real EF Core providers and mocked IQueryable<T> instances in
-        // unit tests; for SQLite this is a fast in-process round-trip.
-        var user = _userManager.Users
-            .FirstOrDefault(u => u.ApiKey == apiKey && u.IsActive);
-
+        var user = await _userManager.FindByIdAsync(userId);
         if (user is null)
         {
-            return null;
+            return (false, WrongCurrentPasswordError);
         }
 
-        // Preserve original semantics: API keys are only valid for users in the
-        // "User" role.
-        if (!await _userManager.IsInRoleAsync(user, "User"))
+        var safeUsername = LoggingHelper.SanitizeForLog(user.UserName);
+        var client = DescribeClient(clientAddress);
+        if (await _userManager.IsLockedOutAsync(user))
         {
-            return null;
+            _logger.LogWarning("Refused to confirm the password of {Username} from {ClientAddress}: the account is locked out", safeUsername, client);
+            return (false, AccountLockedOutError);
         }
 
-        return user;
+        if (string.IsNullOrEmpty(password))
+        {
+            return (false, WrongCurrentPasswordError);
+        }
+
+        if (!await _userManager.CheckPasswordAsync(user, password))
+        {
+            await RecordFailedAttemptAsync(user, safeUsername, client);
+            _logger.LogWarning("Failed password confirmation for {Username} from {ClientAddress}: wrong password", safeUsername, client);
+            return (false, WrongCurrentPasswordError);
+        }
+
+        await _userManager.ResetAccessFailedCountAsync(user);
+        return (true, null);
     }
 
+    /// <summary>
+    /// The active account whose API key is <paramref name="apiKey"/>, found by the key's hash
+    /// (<see cref="ApiKeys.Hash"/>, indexed), whatever its roles: the key acts as that account.
+    /// </summary>
+    public Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey)
+    {
+        if (string.IsNullOrEmpty(apiKey) || apiKey.Length > ApiKeys.MaxLength)
+        {
+            return Task.FromResult<ApplicationUser?>(null);
+        }
+
+        var hash = ApiKeys.Hash(apiKey);
+        // The synchronous LINQ overload works against both EF Core and the mocked IQueryable<T> of unit tests;
+        // for SQLite it is one indexed, in-process lookup.
+        var user = _userManager.Users.FirstOrDefault(u => u.ApiKeyHash == hash && u.IsActive);
+        return Task.FromResult(user);
+    }
+
+    /// <summary>
+    /// Creates a new API key for the account: only its hash is stored, and it replaces (so revokes) the previous
+    /// key. The key is returned once, here.
+    /// </summary>
     public async Task<(bool Success, string? ApiKey, string? Error)> GenerateApiKeyAsync(string userId)
     {
         var user = await _userManager.FindByIdAsync(userId);
-        if (user == null)
+        if (user == null || !user.IsActive)
         {
             return (false, null, "User not found");
         }
 
-        // Generate a secure API key
-        var apiKey = GenerateSecureApiKey();
-        user.ApiKey = apiKey;
+        var replaced = user.ApiKeyHash is not null;
+        var apiKey = ApiKeys.Generate();
+        user.ApiKeyHash = ApiKeys.Hash(apiKey);
+        user.ApiKeyCreatedAt = DateTime.UtcNow;
+        user.ApiKeyLastUsedAt = null;
 
         var result = await _userManager.UpdateAsync(user);
         if (!result.Succeeded)
@@ -140,13 +311,58 @@ public class AuthService : IAuthService
             return (false, null, "Failed to update user");
         }
 
+        _logger.LogInformation(
+            replaced ? "{Username} created a new API key, revoking the previous one" : "{Username} created an API key",
+            LoggingHelper.SanitizeForLog(user.UserName));
         return (true, apiKey, null);
     }
 
-    public async Task<bool> ValidateApiKeyAsync(string apiKey)
+    /// <summary>Revokes the account's API key: requests sending it are refused from now on.</summary>
+    public async Task<bool> RevokeApiKeyAsync(string userId)
     {
-        var user = await GetUserByApiKeyAsync(apiKey);
-        return user != null;
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user?.ApiKeyHash is null)
+        {
+            return false;
+        }
+
+        ClearApiKey(user);
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            return false;
+        }
+
+        _logger.LogInformation("{Username} revoked their API key", LoggingHelper.SanitizeForLog(user.UserName));
+        return true;
+    }
+
+    // Takes the API key off the account (the caller saves it) and returns what it was.
+    private static StoredApiKey ClearApiKey(ApplicationUser user)
+    {
+        var previous = new StoredApiKey(user.ApiKeyHash, user.ApiKeyCreatedAt, user.ApiKeyLastUsedAt);
+        user.ApiKeyHash = null;
+        user.ApiKeyCreatedAt = null;
+        user.ApiKeyLastUsedAt = null;
+        return previous;
+    }
+
+    private static void RestoreApiKey(ApplicationUser user, StoredApiKey key)
+    {
+        user.ApiKeyHash = key.Hash;
+        user.ApiKeyCreatedAt = key.CreatedAt;
+        user.ApiKeyLastUsedAt = key.LastUsedAt;
+    }
+
+    private readonly record struct StoredApiKey(string? Hash, DateTime? CreatedAt, DateTime? LastUsedAt);
+
+    /// <inheritdoc />
+    public async Task<ApiKeyStatus> GetApiKeyStatusAsync(string userId)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        return user?.ApiKeyHash is null
+            ? ApiKeyStatus.None
+            : new ApiKeyStatus(true, user.ApiKeyCreatedAt, user.ApiKeyLastUsedAt);
     }
 
     private async Task<string> GenerateJwtTokenAsync(ApplicationUser user)
@@ -156,21 +372,93 @@ public class AuthService : IAuthService
             new Claim(ClaimTypes.NameIdentifier, user.Id),
             new Claim(ClaimTypes.Name, user.UserName ?? string.Empty),
             new Claim(ClaimTypes.Email, user.Email ?? string.Empty),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim(AuthTokens.SecurityStampClaim, await GetStampFingerprintAsync(user))
         };
 
         // Add roles
         var roles = await _userManager.GetRolesAsync(user);
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
 
+        return WriteToken(claims, _jwtSettings.Audience, DateTime.UtcNow.AddMinutes(_jwtSettings.ExpirationMinutes));
+    }
+
+    /// <summary>
+    /// Issues a stream token for <paramref name="userId"/>: valid for <see cref="AuthTokens.StreamTokenLifetime"/>, once,
+    /// and only for opening the event stream (its audience is <see cref="AuthTokens.StreamAudience"/>). It carries no
+    /// roles; it only says who is listening.
+    /// </summary>
+    public async Task<(bool Success, string Token, string? Error)> GenerateStreamTokenAsync(string userId)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null || !user.IsActive)
+        {
+            return (false, string.Empty, "User not found");
+        }
+
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id),
+            new(ClaimTypes.Name, user.UserName ?? string.Empty),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new(AuthTokens.SecurityStampClaim, await GetStampFingerprintAsync(user)),
+            new(AuthTokens.TokenUseClaim, AuthTokens.StreamTokenUse),
+        };
+
+        var token = WriteToken(claims, AuthTokens.StreamAudience(_jwtSettings.Audience), DateTime.UtcNow.Add(AuthTokens.StreamTokenLifetime));
+        return (true, token, null);
+    }
+
+    /// <summary>
+    /// Signs out: revokes the session token <paramref name="tokenId"/> (valid until <paramref name="expiresAtUtc"/>),
+    /// or, with <paramref name="allSessions"/>, every token of the account, by changing its security stamp, and its
+    /// API key: signing out everywhere is what someone does about a compromised account, and a key must not survive it.
+    /// </summary>
+    public async Task LogoutAsync(string userId, string? tokenId, DateTime expiresAtUtc, bool allSessions)
+    {
+        if (allSessions)
+        {
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user is not null)
+            {
+                // UpdateSecurityStampAsync saves the account, so the key goes in the same write.
+                ClearApiKey(user);
+                await _userManager.UpdateSecurityStampAsync(user);
+                _sessions.Invalidate(userId);
+                _logger.LogInformation("{Username} signed out of every session and revoked their API key", LoggingHelper.SanitizeForLog(user.UserName));
+            }
+
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(tokenId))
+        {
+            await _sessions.RevokeTokenAsync(tokenId, userId, expiresAtUtc);
+            _logger.LogInformation("Signed out session {TokenId} of {UserId}", LoggingHelper.SanitizeForLog(tokenId), LoggingHelper.SanitizeForLog(userId));
+        }
+    }
+
+    // Accounts always get a security stamp when Identity creates them; one written into the database without it gets
+    // one here, so that its tokens can be revoked.
+    private async Task<string> GetStampFingerprintAsync(ApplicationUser user)
+    {
+        if (string.IsNullOrEmpty(user.SecurityStamp))
+        {
+            await _userManager.UpdateSecurityStampAsync(user);
+        }
+
+        return AuthTokens.Fingerprint(user.SecurityStamp);
+    }
+
+    private string WriteToken(IEnumerable<Claim> claims, string audience, DateTime expires)
+    {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        var expires = DateTime.UtcNow.AddMinutes(_jwtSettings.ExpirationMinutes);
-
         var token = new JwtSecurityToken(
             issuer: _jwtSettings.Issuer,
-            audience: _jwtSettings.Audience,
+            audience: audience,
             claims: claims,
+            notBefore: DateTime.UtcNow,
             expires: expires,
             signingCredentials: creds
         );
@@ -178,43 +466,58 @@ public class AuthService : IAuthService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public async Task<bool> IsSetupRequiredAsync()
+    /// <summary>Whether the anonymous first-run setup may create the first administrator (see <see cref="FirstRunSetup"/>).</summary>
+    public Task<bool> IsSetupRequiredAsync() => FirstRunSetup.IsAvailableAsync(_userManager, _autheliaSettings);
+
+    /// <summary>
+    /// Creates the first administrator, when <see cref="FirstRunSetup"/> allows it and <paramref name="setupToken"/>
+    /// is the setup code (<see cref="ISetupTokenProvider"/>). Attempts are serialized, so two requests racing on a
+    /// fresh instance cannot both create an administrator.
+    /// </summary>
+    public async Task<(SetupOutcome Outcome, string? Error)> SetupAdminAsync(
+        string username, string password, string? email, string? setupToken, string? clientAddress = null)
     {
-        // Check if any admin users exist
-        var adminUsers = await _userManager.GetUsersInRoleAsync("Admin");
-        return adminUsers.Count == 0;
-    }
+        var safeUsername = LoggingHelper.SanitizeForLog(username);
+        var client = DescribeClient(clientAddress);
 
-    public async Task<(bool Success, string? Error)> SetupAdminAsync(string username, string password, string? email = null)
-    {
-        // Check if setup is still required
-        // Note: This check provides basic protection against concurrent setup attempts.
-        // The database's unique constraints on username and email provide additional protection.
-        if (!await IsSetupRequiredAsync())
+        await SetupLock.WaitAsync();
+        try
         {
-            return (false, "Admin user already exists");
+            if (!await IsSetupRequiredAsync())
+            {
+                _logger.LogWarning("Refused first-run setup from {ClientAddress}: setup is no longer available", client);
+                return (SetupOutcome.NotAvailable, SetupNotAvailableError);
+            }
+
+            if (!_setupToken.Matches(setupToken))
+            {
+                _logger.LogWarning("Refused first-run setup from {ClientAddress}: the setup code is missing or wrong", client);
+                return (SetupOutcome.InvalidSetupToken, InvalidSetupTokenError);
+            }
+
+            var adminUser = new ApplicationUser
+            {
+                UserName = username,
+                Email = email ?? $"{username}@comicmaintainer.local",
+                FullName = "Administrator",
+                IsActive = true,
+                EmailConfirmed = true
+            };
+
+            var result = await _userManager.CreateAsync(adminUser, password);
+            if (!result.Succeeded)
+            {
+                return (SetupOutcome.Rejected, string.Join(", ", result.Errors.Select(e => e.Description)));
+            }
+
+            await _userManager.AddToRoleAsync(adminUser, "Admin");
+            _logger.LogInformation("First-run setup created the administrator {Username} from {ClientAddress}", safeUsername, client);
+            return (SetupOutcome.Created, null);
         }
-
-        // Create the admin user
-        var adminUser = new ApplicationUser
+        finally
         {
-            UserName = username,
-            Email = email ?? $"{username}@comicmaintainer.local",
-            FullName = "Administrator",
-            IsActive = true,
-            EmailConfirmed = true
-        };
-
-        var result = await _userManager.CreateAsync(adminUser, password);
-        if (!result.Succeeded)
-        {
-            return (false, string.Join(", ", result.Errors.Select(e => e.Description)));
+            SetupLock.Release();
         }
-
-        // Assign admin role
-        await _userManager.AddToRoleAsync(adminUser, "Admin");
-
-        return (true, null);
     }
 
     public async Task<(bool Success, string Token, string? Error)> GenerateTokenForUserAsync(string userId)
@@ -232,13 +535,5 @@ public class AuthService : IAuthService
 
         var token = await GenerateJwtTokenAsync(user);
         return (true, token, null);
-    }
-
-    private static string GenerateSecureApiKey()
-    {
-        var randomBytes = new byte[32];
-        using var rng = RandomNumberGenerator.Create();
-        rng.GetBytes(randomBytes);
-        return Convert.ToBase64String(randomBytes).Replace("+", "-").Replace("/", "_").TrimEnd('=');
     }
 }

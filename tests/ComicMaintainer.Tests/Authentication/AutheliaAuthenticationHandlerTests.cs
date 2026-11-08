@@ -619,7 +619,8 @@ public class AutheliaAuthenticationHandlerTests
             Options.Create(settings),
             _userManager.Object,
             _roleManager.Object,
-            Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>());
+            Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>(),
+            Mock.Of<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator>());
 
         await handler.InitializeAsync(
             new AuthenticationScheme(SchemeName, displayName: null, typeof(AutheliaAuthenticationHandler)),

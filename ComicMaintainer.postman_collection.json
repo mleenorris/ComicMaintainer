@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "comic-maintainer-api",
 		"name": "ComicMaintainer API",
-		"description": "Complete API collection for ComicMaintainer .NET WebAPI. This collection covers all endpoints for managing comic files, processing jobs, authentication, and settings.\n\n## Setup\n1. Import this collection into Postman\n2. Set up the environment variables (base_url, jwt_token)\n3. Use the Auth endpoints to login and get a JWT token\n4. Most endpoints require authentication\n\n## Environment Variables\n- base_url: http://localhost:5000 (or your API base URL)\n- jwt_token: Your JWT token from login (will be set automatically after login)",
+		"description": "Complete API collection for ComicMaintainer .NET WebAPI. This collection covers all endpoints for managing comic files, processing jobs, authentication, and settings.\n\n## Setup\n1. Import this collection into Postman\n2. Set up the environment variables (base_url, jwt_token)\n3. Use the Auth endpoints to login and get a JWT token\n4. Most endpoints require authentication\n5. Scripts can use an API key instead (Auth > Generate API Key), sent in the X-API-Key header\n\n## Environment Variables\n- base_url: http://localhost:5000 (or your API base URL)\n- admin_username / admin_password: the account to sign in with\n- setup_token: the one-time setup code from the server log (first-run setup only)\n- jwt_token: Your JWT token from login (will be set automatically after login)\n- api_key: Your API key (set automatically by Generate API Key)",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"auth": {
@@ -65,14 +65,14 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin123!\",\n  \"email\": \"admin@example.com\"\n}"
+							"raw": "{\n  \"username\": \"{{admin_username}}\",\n  \"password\": \"{{admin_password}}\",\n  \"email\": \"admin@example.com\",\n  \"setupToken\": \"{{setup_token}}\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/setup",
 							"host": ["{{base_url}}"],
 							"path": ["api", "auth", "setup"]
 						},
-						"description": "Create the first admin user. Only works if no users exist yet."
+						"description": "Create the first admin user of a new instance. Only works while no account exists at all (and not with Authelia), and requires the one-time setup code: set setup_token to the code ComicMaintainer writes to its log at startup (docker logs), or to SETUP_TOKEN if you set it. Answers 403 when setup is not available or the code is wrong."
 					},
 					"response": []
 				},
@@ -109,7 +109,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin123!\"\n}"
+							"raw": "{\n  \"username\": \"{{admin_username}}\",\n  \"password\": \"{{admin_password}}\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/login",
@@ -145,6 +145,23 @@
 				},
 				{
 					"name": "Change Password",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Changing the password signs every session out, this one too; keep the new token it returns",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.token) {",
+									"        pm.environment.set('jwt_token', jsonData.token);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "POST",
 						"header": [
@@ -162,21 +179,143 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "auth", "change-password"]
 						},
-						"description": "Change the current user's password"
+						"description": "Change the current user's password. This signs every session of the account out and revokes its API key; the response carries a new session token (saved to jwt_token). An API key cannot change the password."
+					},
+					"response": []
+				},
+				{
+					"name": "Sign Out",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"allSessions\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/logout",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "logout"]
+						},
+						"description": "Revoke the session token this request is made with (204). With allSessions: true, every session token and the API key of the account are revoked."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Stream Token",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/stream-token",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "stream-token"]
+						},
+						"description": "A single-use token, valid for 60 seconds, that only opens the event stream: GET /api/events/stream?access_token=<token>. No other endpoint accepts a token in its URL, and the event stream accepts no other token there. Fetch a new one for every connection."
 					},
 					"response": []
 				},
 				{
 					"name": "Generate API Key",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// The key is only shown in this response",
+									"if (pm.response.code === 200) {",
+									"    pm.environment.set('api_key', pm.response.json().apiKey);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"currentPassword\": \"{{admin_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/api-key",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "api-key"]
+						},
+						"description": "Create an API key for the current user, replacing (and revoking) any previous one. Send it in the X-API-Key header (never in a URL): it acts as this user with their current roles. It is shown only in this response (saved to api_key) and stored as a hash. Must be called with a session token and the account's current password (accounts signed in through Authelia need none): an API key cannot create one, and a stolen session token alone cannot either. Changing the password or signing out of all sessions revokes the key."
+					},
+					"response": []
+				},
+				{
+					"name": "Get API Key Status",
+					"request": {
+						"method": "GET",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/auth/api-key",
 							"host": ["{{base_url}}"],
 							"path": ["api", "auth", "api-key"]
 						},
-						"description": "Generate an API key for the current user"
+						"description": "Whether the current user has an API key, and when it was created and last used."
+					},
+					"response": []
+				},
+				{
+					"name": "Revoke API Key",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/api-key",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "api-key"]
+						},
+						"description": "Revoke the current user's API key (204), or 404 when there is none."
+					},
+					"response": []
+				},
+				{
+					"name": "Current User (with API Key)",
+					"request": {
+						"auth": {
+							"type": "apikey",
+							"apikey": [
+								{
+									"key": "key",
+									"value": "X-API-Key",
+									"type": "string"
+								},
+								{
+									"key": "value",
+									"value": "{{api_key}}",
+									"type": "string"
+								},
+								{
+									"key": "in",
+									"value": "header",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/user",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "user"]
+						},
+						"description": "Any endpoint can be called with an API key in the X-API-Key header instead of a session token; authMethod is then api_key."
 					},
 					"response": []
 				}
@@ -1114,6 +1253,11 @@
 		},
 		{
 			"key": "jwt_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "api_key",
 			"value": "",
 			"type": "string"
 		}

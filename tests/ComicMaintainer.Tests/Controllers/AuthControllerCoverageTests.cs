@@ -1,9 +1,12 @@
 using System.Security.Claims;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -14,7 +17,7 @@ using Moq;
 namespace ComicMaintainer.Tests.Controllers;
 
 /// <summary>
-/// Covers the registration gate, first-run admin setup, SSE token issuance and
+/// Covers the registration gate, first-run admin setup, stream token issuance and
 /// the anonymous / Authelia branches of the status endpoints in <see cref="AuthController"/>.
 /// </summary>
 public class AuthControllerCoverageTests
@@ -41,7 +44,8 @@ public class AuthControllerCoverageTests
             NullLogger<AuthController>.Instance,
             Options.Create(_autheliaSettings),
             _authorization.Object,
-            new TestOptionsMonitor<AppSettings>(_appSettings))
+            new TestOptionsMonitor<AppSettings>(_appSettings),
+            ClientAddressResolver.Direct)
         {
             ControllerContext = new ControllerContext
             {
@@ -166,7 +170,7 @@ public class AuthControllerCoverageTests
 
     private void VerifyNoAdminCreated() =>
         _authService.Verify(
-            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
 
     [Theory]
     [InlineData(null)]
@@ -178,7 +182,7 @@ public class AuthControllerCoverageTests
         SetupRequired(true);
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest(username!, "LongEnough1", null));
+        var result = await controller.SetupAdmin(new SetupRequest(username!, "LongEnough1", null, "code"));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Username must be at least 3 characters", Prop<string>(badRequest.Value, "error"));
@@ -195,7 +199,7 @@ public class AuthControllerCoverageTests
         SetupRequired(true);
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", password!, null));
+        var result = await controller.SetupAdmin(new SetupRequest("admin", password!, null, "code"));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Password must be at least 8 characters", Prop<string>(badRequest.Value, "error"));
@@ -206,56 +210,44 @@ public class AuthControllerCoverageTests
     public async Task SetupAdmin_WithValidInput_CreatesFirstAdministrator()
     {
         SetupRequired(true);
-        _authService.Setup(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com")).ReturnsAsync((true, null));
+        _authService.Setup(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com", "code", "unknown"))
+            .ReturnsAsync((SetupOutcome.Created, null));
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", "admin@example.com"));
+        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", "admin@example.com", "code"));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal("Admin user created successfully", Prop<string>(ok.Value, "message"));
-        _authService.Verify(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com"), Times.Once);
+        _authService.Verify(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com", "code", "unknown"), Times.Once);
     }
 
     [Fact]
-    public async Task SetupAdmin_WhenAConcurrentRequestCreatesTheAdminFirst_ReturnsBadRequestWithServiceError()
+    public async Task SetupAdmin_WhenAConcurrentRequestCreatesTheAdminFirst_Returns403WithServiceError()
     {
-        // Setup was still required when checked; the service then finds an admin.
+        // Setup was still available when checked; the service then finds an account.
         SetupRequired(true);
-        _authService.Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
-            .ReturnsAsync((false, "Admin user already exists"));
+        _authService.Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .ReturnsAsync((SetupOutcome.NotAvailable, AuthService.SetupNotAvailableError));
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null));
+        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null, "code"));
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal("Admin user already exists", Prop<string>(badRequest.Value, "error"));
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
+        Assert.Equal(AuthService.SetupNotAvailableError, Prop<string>(forbidden.Value, "error"));
     }
 
     [Fact]
-    public async Task SetupAdmin_AfterSetup_LetsAnAdministratorThroughToTheService()
+    public async Task SetupAdmin_AfterSetup_RefusesAnAdministratorToo()
     {
         SetupRequired(false);
         GrantPolicy(AuthorizationPolicies.CanAdminister);
-        _authService.Setup(s => s.SetupAdminAsync("admin2", "12345678", null))
-            .ReturnsAsync((false, "Admin user already exists"));
         var controller = CreateController(SignedIn("admin-1", "admin"));
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin2", "12345678", null));
+        var result = await controller.SetupAdmin(new SetupRequest("admin2", "12345678", null, "code"));
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal("Admin user already exists", Prop<string>(badRequest.Value, "error"));
-        _authService.Verify(s => s.SetupAdminAsync("admin2", "12345678", null), Times.Once);
-    }
-
-    [Fact]
-    public async Task SetupAdmin_AfterSetup_ChallengesAPrincipalWithoutAnIdentity()
-    {
-        SetupRequired(false);
-        var controller = CreateController(new ClaimsPrincipal());
-
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null));
-
-        Assert.IsType<ChallengeResult>(result);
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
         VerifyNoAdminCreated();
     }
 
@@ -303,53 +295,53 @@ public class AuthControllerCoverageTests
         Assert.True(Prop<bool>(ok.Value, "requiresLogin"));
     }
 
-    // ----- GetSseToken ----------------------------------------------------
+    // ----- GetStreamToken -------------------------------------------------
 
-    public static TheoryData<string> IncompleteUsers => new() { "no-identity", "no-user-id", "no-name" };
+    public static TheoryData<string> IncompleteUsers => new() { "no-identity", "no-user-id" };
 
     [Theory]
     [MemberData(nameof(IncompleteUsers))]
-    public async Task GetSseToken_WithoutUserIdOrName_ReturnsUnauthorized(string kind)
+    public async Task GetStreamToken_WithoutUserId_ReturnsUnauthorized(string kind)
     {
         var user = kind switch
         {
             "no-identity" => new ClaimsPrincipal(),
-            "no-user-id" => SignedIn(userId: null, name: "reader"),
-            _ => SignedIn(userId: "user-1", name: null),
+            _ => SignedIn(userId: null, name: "reader"),
         };
         var controller = CreateController(user);
 
-        var result = await controller.GetSseToken();
+        var result = await controller.GetStreamToken();
 
         Assert.IsType<UnauthorizedResult>(result);
         _authService.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task GetSseToken_ForSignedInUser_ReturnsFreshToken()
+    public async Task GetStreamToken_ForSignedInUser_ReturnsAStreamTokenAndItsLifetime()
     {
-        _authService.Setup(s => s.GenerateTokenForUserAsync("user-1")).ReturnsAsync((true, "sse-jwt", null));
+        _authService.Setup(s => s.GenerateStreamTokenAsync("user-1")).ReturnsAsync((true, "stream-jwt", null));
         var controller = CreateController(SignedIn(extra: new Claim("auth_method", "authelia")));
 
-        var result = await controller.GetSseToken();
+        var result = await controller.GetStreamToken();
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.Equal("sse-jwt", Prop<string>(ok.Value, "token"));
-        _authService.Verify(s => s.GenerateTokenForUserAsync("user-1"), Times.Once);
+        Assert.Equal("stream-jwt", Prop<string>(ok.Value, "token"));
+        Assert.Equal(60, Prop<int>(ok.Value, "expiresIn"));
+        // Never a session token: the stream token is the only token that may travel in a URL.
+        _authService.Verify(s => s.GenerateStreamTokenAsync("user-1"), Times.Once);
+        _authService.Verify(s => s.GenerateTokenForUserAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
-    public async Task GetSseToken_WhenTokenGenerationFails_Returns500WithGenericError()
+    public async Task GetStreamToken_ForADisabledOrDeletedAccount_ReturnsUnauthorized()
     {
-        _authService.Setup(s => s.GenerateTokenForUserAsync("user-1"))
-            .ReturnsAsync((false, string.Empty, "User not found in database"));
+        _authService.Setup(s => s.GenerateStreamTokenAsync("user-1"))
+            .ReturnsAsync((false, string.Empty, "User not found"));
         var controller = CreateController(SignedIn());
 
-        var result = await controller.GetSseToken();
+        var result = await controller.GetStreamToken();
 
-        var error = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status500InternalServerError, error.StatusCode);
-        Assert.Equal("Failed to generate token", Prop<string>(error.Value, "error"));
+        Assert.IsType<UnauthorizedResult>(result);
     }
 
     // ----- GetCurrentUser -------------------------------------------------

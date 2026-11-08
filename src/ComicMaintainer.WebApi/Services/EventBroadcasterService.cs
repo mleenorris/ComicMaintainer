@@ -2,14 +2,12 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
-using Microsoft.AspNetCore.SignalR;
-using ComicMaintainer.WebApi.Hubs;
 
 namespace ComicMaintainer.WebApi.Services;
 
 /// <summary>
 /// Service for broadcasting events to connected SSE clients
-/// (<c>GET /api/events/stream</c>) and SignalR hubs (<see cref="ProgressHub"/>).
+/// (<c>GET /api/events/stream</c>).
 ///
 /// <para>
 /// SSE event contract — every event is a JSON object with a <c>type</c>
@@ -58,17 +56,14 @@ public class EventBroadcasterService : IEventBroadcaster
     public static readonly TimeSpan DefaultSseSendTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ILogger<EventBroadcasterService> _logger;
-    private readonly IHubContext<ProgressHub> _hubContext;
     private readonly ConcurrentDictionary<string, SseClient> _sseClients = new();
     private readonly TimeSpan _sseSendTimeout;
 
     public EventBroadcasterService(
         ILogger<EventBroadcasterService> logger,
-        IHubContext<ProgressHub> hubContext,
         TimeSpan? sseSendTimeout = null)
     {
         _logger = logger;
-        _hubContext = hubContext;
         _sseSendTimeout = sseSendTimeout ?? DefaultSseSendTimeout;
     }
 
@@ -121,9 +116,6 @@ public class EventBroadcasterService : IEventBroadcaster
         };
 
         await BroadcastEventAsync(eventData);
-        
-        // Also broadcast via SignalR to job-specific group
-        await _hubContext.Clients.Group($"job-{jobId}").SendAsync("JobUpdate", eventData.data);
         
         _logger.LogDebug("Broadcasted job update: {JobId} - {Status} ({Processed}/{Total})", 
             jobId, status, processed, total);

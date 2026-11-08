@@ -1,5 +1,6 @@
 using System.Reflection;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Models.Auth;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Identity;
@@ -46,7 +47,7 @@ public sealed class WebApplicationExtensionsTests : IDisposable
     private readonly string _configDirectory = Path.Join(Path.GetTempPath(), "cm-dbinit-" + Guid.NewGuid().ToString("N"));
 
     private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
-        new("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "ADMIN_EMAIL", "JWT_SECRET", "JWT_SECRET_FILE", "AUTHELIA_ENABLED", "EFCORE_QUERY_LOGGING");
+        new("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "ADMIN_EMAIL", "JWT_SECRET", "JWT_SECRET_FILE", "AUTHELIA_ENABLED", "EFCORE_QUERY_LOGGING", "SETUP_TOKEN", "SETUP_TOKEN_FILE");
 
     public WebApplicationExtensionsTests()
     {
@@ -161,6 +162,190 @@ public sealed class WebApplicationExtensionsTests : IDisposable
         var db = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
         Assert.Empty(await db.Users.ToListAsync());
         Assert.Equal(3, await db.Roles.CountAsync());
+    }
+
+    // docker-compose.dotnet.yml and .env.example seeded admin / Admin123! before 3.0.0: anyone could look it up.
+    [Theory]
+    [InlineData("Admin123!")]
+    [InlineData(" Admin123! ")]
+    [InlineData("YourStrongPassword123!")]
+    public async Task RefusesToSeedAnAdminWithAPublishedPasswordSoThatFirstRunSetupRuns(string password)
+    {
+        _environment.Set("ADMIN_USERNAME", "admin");
+        _environment.Set("ADMIN_PASSWORD", password);
+        await using var app = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(app, logger);
+
+        using var scope = app.Services.CreateScope();
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>().Users.ToListAsync());
+        var error = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
+        Assert.Contains("published with ComicMaintainer", error.Message);
+        Assert.Contains("first-run setup", error.Message);
+        Assert.True(error.ExcludedFromErrorReports, "the operator's configuration is not a bug to report");
+    }
+
+    [Fact]
+    public async Task ReplacesThePublishedPasswordOfAnExistingAdminWithTheOneInAdminPassword()
+    {
+        await using (var firstStart = BuildApp())
+        {
+            await InitializeDatabase(firstStart, NullLogger.Instance);
+            await CreateUserWithPublishedPasswordAsync(firstStart, "admin");
+        }
+
+        _environment.Set("ADMIN_USERNAME", "admin");
+        _environment.Set("ADMIN_PASSWORD", AdminPassword);
+        await using var secondStart = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(secondStart, logger);
+
+        using var scope = secondStart.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var admin = Assert.Single(await users.Users.ToListAsync());
+        Assert.True(await users.CheckPasswordAsync(admin, AdminPassword));
+        Assert.False(await users.CheckPasswordAsync(admin, "Admin123!"));
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Warning && entry.Message.Contains("Replaced the published password"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Admin123!")]
+    public async Task ReportsAnExistingAdminThatStillHasAPublishedPassword(string? adminPassword)
+    {
+        await using (var firstStart = BuildApp())
+        {
+            await InitializeDatabase(firstStart, NullLogger.Instance);
+            await CreateUserWithPublishedPasswordAsync(firstStart, "admin");
+        }
+
+        _environment.Set("ADMIN_USERNAME", "admin");
+        _environment.Set("ADMIN_PASSWORD", adminPassword);
+        await using var secondStart = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(secondStart, logger);
+
+        using var scope = secondStart.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var admin = Assert.Single(await users.Users.ToListAsync());
+        Assert.True(await users.CheckPasswordAsync(admin, "Admin123!"));
+        var error = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
+        Assert.Contains("still has a password that was published", error.Message);
+        Assert.True(error.ExcludedFromErrorReports, "the operator's configuration is not a bug to report");
+    }
+
+    [Fact]
+    public async Task IdentityRejectsPublishedPasswordsForNewAccounts()
+    {
+        await using var app = BuildApp();
+        await InitializeDatabase(app, NullLogger.Instance);
+
+        using var scope = app.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var result = await users.CreateAsync(new ApplicationUser { UserName = "someone", Email = "someone@example.com" }, "Admin123!");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Errors, error => error.Code == ComicMaintainer.Core.Services.Auth.PublishedPasswordValidator.ErrorCode);
+    }
+
+    // SEC-2: first-run setup requires a code that only someone who can read the server's log knows.
+    [Fact]
+    public async Task LogsTheGeneratedSetupCodeWhileNoAccountExists()
+    {
+        await using var app = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(app, logger);
+
+        var code = app.Services.GetRequiredService<ComicMaintainer.Core.Services.Auth.ISetupTokenProvider>().Token;
+        var notice = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        Assert.Contains($"enter the setup code {code} to create the first administrator", notice.Message);
+    }
+
+    [Fact]
+    public async Task NamesSetupTokenInsteadOfLoggingAConfiguredSetupCode()
+    {
+        _environment.Set("SETUP_TOKEN", "my-own-setup-code");
+        await using var app = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(app, logger);
+
+        var notice = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        Assert.Contains("enter the setup code set in SETUP_TOKEN", notice.Message);
+        Assert.DoesNotContain("my-own-setup-code", notice.Message);
+        Assert.True(app.Services.GetRequiredService<ComicMaintainer.Core.Services.Auth.ISetupTokenProvider>().Matches("my-own-setup-code"));
+    }
+
+    [Fact]
+    public async Task DoesNotLogASetupCodeOnceAnAccountExists()
+    {
+        _environment.Set("ADMIN_USERNAME", "root-admin");
+        _environment.Set("ADMIN_PASSWORD", AdminPassword);
+        await using var app = BuildApp();
+        var logger = new CapturingLogger();
+
+        await InitializeDatabase(app, logger);
+
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("setup code", StringComparison.Ordinal));
+    }
+
+    // An account created by an earlier version, whose password validators did not reject published passwords.
+    private static async Task CreateUserWithPublishedPasswordAsync(WebApplication app, string username)
+    {
+        using var scope = app.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = new ApplicationUser { UserName = username, Email = $"{username}@comicmaintainer.local", IsActive = true };
+        user.PasswordHash = users.PasswordHasher.HashPassword(user, "Admin123!");
+        Assert.True((await users.CreateAsync(user)).Succeeded);
+        Assert.True((await users.AddToRoleAsync(user, "Admin")).Succeeded);
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        private readonly List<(LogLevel Level, string Message, bool ExcludedFromErrorReports)> _entries = [];
+        private readonly AsyncLocal<int> _excludeScopes = new();
+
+        public IReadOnlyList<(LogLevel Level, string Message, bool ExcludedFromErrorReports)> Entries
+        {
+            get
+            {
+                lock (_entries)
+                {
+                    return _entries.ToList();
+                }
+            }
+        }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+        {
+            if (state is not IReadOnlyDictionary<string, object> properties
+                || !properties.ContainsKey(ErrorReportLogProperties.ExcludeFromErrorReports))
+            {
+                return null;
+            }
+
+            _excludeScopes.Value++;
+            return new ExcludeScope(this);
+        }
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (_entries)
+            {
+                _entries.Add((logLevel, formatter(state, exception), _excludeScopes.Value > 0));
+            }
+        }
+
+        private sealed class ExcludeScope(CapturingLogger logger) : IDisposable
+        {
+            public void Dispose() => logger._excludeScopes.Value--;
+        }
     }
 
     [Theory]

@@ -40,10 +40,13 @@ function currentUser(overrides = {}) {
 }
 
 function bootRoutes(user = {}) {
+    let streamTokens = 0;
     return {
         'GET /api/auth/status': { autheliaEnabled: false, isAuthenticated: false },
         'GET /api/auth/user': currentUser(user),
-        'GET /api/suwayomi/status': { enabled: false, configured: false, connected: false }
+        'GET /api/suwayomi/status': { enabled: false, configured: false, connected: false },
+        // AuthController.GetStreamToken: a new single-use token for every event stream connection.
+        'POST /api/auth/stream-token': () => ({ token: `stream-token-${++streamTokens}`, expiresIn: 60 })
     };
 }
 

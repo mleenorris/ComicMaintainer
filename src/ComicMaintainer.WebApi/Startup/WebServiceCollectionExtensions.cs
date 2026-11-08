@@ -12,7 +12,7 @@ using Serilog;
 namespace ComicMaintainer.WebApi.Startup;
 
 /// <summary>
-/// Registers MVC, Swagger, compression, request timeouts, rate limiting, output caching, SignalR, health checks, problem details and CORS.
+/// Registers MVC, Swagger, compression, request timeouts, rate limiting, output caching, health checks, problem details and CORS.
 /// </summary>
 public static class WebServiceCollectionExtensions
 {
@@ -84,6 +84,7 @@ public static class WebServiceCollectionExtensions
         // exhaust the anonymous limit for every visitor, and lock them all out of signing in.
         var trustedProxies = LoadRateLimiterTrustedProxies(configuration);
         var forwardedHopLimit = LoadRateLimiterForwardedHopLimit(configuration);
+        services.AddSingleton(new ClientAddressResolver(trustedProxies, forwardedHopLimit));
         if (trustedProxies.Networks.Count > 0)
         {
             services.AddSingleton<IStartupFilter>(serviceProvider =>
@@ -114,7 +115,21 @@ public static class WebServiceCollectionExtensions
                         QueueLimit = isAuthenticated ? 100 : 10
                     });
             });
+
+            // Everything that checks a password or a setup code (sign-in, registration, first-run setup,
+            // change password, create API key): few attempts per client address, whether or not the
+            // request is authenticated, so one client cannot guess passwords for many accounts.
+            options.AddPolicy(AuthenticationRateLimit.PolicyName, context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"ip:{ForwardedClientAddress.Resolve(context, trustedProxies, forwardedHopLimit)?.ToString() ?? "unknown"}",
+                    factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = AuthenticationRateLimit.PermitLimit,
+                        Window = AuthenticationRateLimit.Window,
+                        QueueLimit = 0
+                    }));
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.OnRejected = new RateLimitRejection(trustedProxies).WriteAsync;
         });
 
         // Add output caching for better performance  
@@ -128,8 +143,6 @@ public static class WebServiceCollectionExtensions
                 .SetVaryByQuery("filePath", "page"));
         });
 
-        // Add SignalR
-        services.AddSignalR();
         services.AddMemoryCache();
 
         // Add health checks.

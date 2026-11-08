@@ -107,15 +107,32 @@
             }
         }
         
+        // What to tell a client that made too many attempts: the app explains in
+        // JSON, but a limit set on a proxy in front of it may answer with anything.
+        async function rateLimitMessage(response) {
+            try {
+                const data = await response.json();
+                if (data && data.error) {
+                    return data.error;
+                }
+            } catch (error) {
+                console.warn('Rate limit response was not JSON:', error);
+            }
+            return 'Too many attempts. Please wait a few minutes and try again.';
+        }
+
         // Handle setup form submission
         document.getElementById('setupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            // The one-time code the server logs at startup (or SETUP_TOKEN), so
+            // that whoever reaches a fresh instance first cannot claim it.
+            const setupToken = document.getElementById('setupToken').value.trim();
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
             
-            if (!username || !password || !confirmPassword) {
+            if (!setupToken || !username || !password || !confirmPassword) {
                 showError('Please fill in all fields');
                 return;
             }
@@ -153,12 +170,15 @@
                     body: JSON.stringify({ 
                         username, 
                         password,
-                        email: null
+                        email: null,
+                        setupToken
                     })
                 });
                 
-                const data = await response.json();
-                
+                const data = response.status === 429
+                    ? { error: await rateLimitMessage(response) }
+                    : await response.json();
+
                 if (response.ok) {
                     // Show success and redirect to login
                     showSuccess('Administrator account created successfully! Redirecting to login...');

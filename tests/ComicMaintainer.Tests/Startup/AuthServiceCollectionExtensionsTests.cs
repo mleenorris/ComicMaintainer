@@ -568,9 +568,11 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         Assert.Equal(JwtBearerDefaults.AuthenticationScheme, (await schemes.GetDefaultAuthenticateSchemeAsync())?.Name);
         Assert.Equal(JwtBearerDefaults.AuthenticationScheme, (await schemes.GetDefaultChallengeSchemeAsync())?.Name);
         Assert.Null(await schemes.GetSchemeAsync("Authelia"));
+        Assert.Equal(typeof(ApiKeyAuthenticationHandler), (await schemes.GetSchemeAsync(ApiKeyAuthenticationHandler.SchemeName))?.HandlerType);
 
         var authorization = provider.GetRequiredService<IOptions<AuthorizationOptions>>().Value;
-        string[] expectedSchemes = [JwtBearerDefaults.AuthenticationScheme];
+        // Session tokens and API keys.
+        string[] expectedSchemes = [JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationHandler.SchemeName];
         Assert.Equal(expectedSchemes, authorization.DefaultPolicy.AuthenticationSchemes);
         Assert.Equal(expectedSchemes, authorization.GetPolicy(AuthorizationPolicies.CanModifyLibrary)!.AuthenticationSchemes);
         Assert.Equal(expectedSchemes, authorization.GetPolicy(AuthorizationPolicies.CanAdminister)!.AuthenticationSchemes);
@@ -585,7 +587,7 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         Assert.NotNull(await schemes.GetSchemeAsync(JwtBearerDefaults.AuthenticationScheme));
 
         var authorization = provider.GetRequiredService<IOptions<AuthorizationOptions>>().Value;
-        string[] expectedSchemes = ["Authelia", JwtBearerDefaults.AuthenticationScheme];
+        string[] expectedSchemes = ["Authelia", JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationHandler.SchemeName];
         Assert.Equal(expectedSchemes, authorization.DefaultPolicy.AuthenticationSchemes);
         Assert.Equal(expectedSchemes, authorization.GetPolicy(AuthorizationPolicies.CanModifyLibrary)!.AuthenticationSchemes);
         Assert.Equal(expectedSchemes, authorization.GetPolicy(AuthorizationPolicies.CanAdminister)!.AuthenticationSchemes);

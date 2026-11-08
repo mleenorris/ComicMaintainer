@@ -6,6 +6,7 @@ using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Services;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Logging;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.DataProtection;
@@ -261,7 +262,10 @@ internal static class CoreServiceCollectionExtensions
                 // User-Agent with HTTP 400, which previously caused intermittent
                 // "image download failed: HTTP 400" errors for certain series.
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
-            });
+            })
+            // Cover URLs come from users and provider responses: follow no redirects (SeriesImageStore checks and
+            // follows them itself) and connect only to public addresses, checked when connecting (DNS rebinding).
+            .ConfigurePrimaryHttpMessageHandler(() => PublicNetworkGuard.CreateHandler());
         services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
         services.AddHttpClient(nameof(MangaDexSeriesMetadataService))
             .ConfigureHttpClient(client =>

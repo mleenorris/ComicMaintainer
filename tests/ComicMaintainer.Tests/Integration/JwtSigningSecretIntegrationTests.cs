@@ -168,7 +168,9 @@ public sealed class JwtSigningSecretIntegrationTests : IAsyncLifetime
 
         AssertSignedWith(token, FileSecret);
         Assert.Equal(HttpStatusCode.OK, await ListBackupsAsync(client, token));
-        Assert.Equal(HttpStatusCode.OK, await ListBackupsAsync(client, ForgeAdminToken(FileSecret)));
+        // The issued token is signed and validated with the file's secret; yet even with that secret, a token that does
+        // not stand for a session of the app (no security-stamp fingerprint, no id) is refused.
+        Assert.Equal(HttpStatusCode.Unauthorized, await ListBackupsAsync(client, ForgeAdminToken(FileSecret)));
         var source = Assert.Single(_logs.ProgramEntries(SecretSourceTemplate));
         Assert.Equal($"JWT_SECRET_FILE ({jwtSecretFile})", source.Values["JwtSecretSource"]);
         Assert.False(File.Exists(KeyFile));

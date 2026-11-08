@@ -281,6 +281,18 @@ public sealed class WorkflowTests
         Assert.DoesNotContain("SharpCompress", ignored);
     }
 
+    [Fact]
+    public void StrictWarnings_LeaveNuGetAuditWarningsToTheSecurityScan()
+    {
+        // Restore warnings are replayed by the build, so an advisory in a transitive package, or a NuGet audit source
+        // that cannot be reached, would otherwise fail unrelated pull requests. security-scan.yml gates those instead.
+        var repositoryRoot = Path.GetDirectoryName(Path.GetDirectoryName(WorkflowDirectory))!;
+        var props = File.ReadAllText(Path.Join(repositoryRoot, "src", "Directory.Build.props"));
+        var exempt = Regex.Match(props, "<WarningsNotAsErrors>(.*?)</WarningsNotAsErrors>").Groups[1].Value.Split(';');
+
+        Assert.All(new[] { "NU1900", "NU1901", "NU1902", "NU1903", "NU1904", "NU1905" }, code => Assert.Contains(code, exempt));
+    }
+
     private static string WorkflowDirectory
     {
         get

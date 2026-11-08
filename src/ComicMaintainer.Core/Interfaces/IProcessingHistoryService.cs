@@ -18,9 +18,10 @@ public interface IProcessingHistoryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Add a processing history entry. A successful entry that records a no-op (it carries a
-    /// note such as "File already normalized" and its before and after values are identical)
-    /// is not stored: the history records changes and failures, not every visit to a file.
+    /// Add a processing history entry. A successful normalize or rename that records a no-op
+    /// (it carries a note such as "File already normalized" or "Normalize disabled" and its
+    /// before and after values are identical) is not stored: the history records changes and
+    /// failures, not every visit to a file.
     /// </summary>
     Task AddHistoryEntryAsync(
         ProcessingHistoryEntry entry, 
@@ -33,4 +34,11 @@ public interface IProcessingHistoryService
     /// database write lock for long. Returns the number of entries deleted.
     /// </summary>
     Task<int> PruneAsync(int retentionDays, int maxEntries, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Forget the counted total. For code that deletes history rows without going through
+    /// this service (the factory reset), so the history page does not report entries that
+    /// are gone.
+    /// </summary>
+    void InvalidateTotalCount();
 }

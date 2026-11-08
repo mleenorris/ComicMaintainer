@@ -44,6 +44,7 @@ public class SettingsControllerCoverageTests
     private readonly Mock<IHostApplicationLifetime> _lifetime = new();
     private readonly Mock<ISeriesLanguagePreferenceRetagService> _retag = new();
     private readonly Mock<IEventBroadcaster> _broadcaster = new();
+    private readonly Mock<IProcessingHistoryService> _history = new();
 
     private SettingsController CreateController(
         bool withRetag = false,
@@ -58,7 +59,8 @@ public class SettingsControllerCoverageTests
             _settingsService.Object,
             _lifetime.Object,
             withRetag ? _retag.Object : null,
-            withBroadcaster ? _broadcaster.Object : null);
+            withBroadcaster ? _broadcaster.Object : null,
+            _history.Object);
 
     private static JsonElement OkJson(ActionResult<object> result) =>
         JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(result.Result).Value);
@@ -968,6 +970,8 @@ public class SettingsControllerCoverageTests
             {
                 using var check = db.Factory.CreateDbContext();
                 filesLeftWhenCancelled.Add(jobId, check.ComicFiles.Count());
+        // The history page must not keep reporting the entries that were just deleted.
+        _history.Verify(h => h.InvalidateTotalCount(), Times.Once());
                 return jobId != finishedMeanwhile.JobId;
             });
 

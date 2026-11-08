@@ -13,8 +13,9 @@ namespace ComicMaintainer.Core.Services;
 /// <remarks>
 /// Registered as a singleton, so it keeps the number of stored entries once counted and
 /// adjusts it as entries are added or pruned; the history pages then do not count the whole
-/// table each time. The count is refreshed after <see cref="TotalCountLifetime"/> so a
-/// deletion made outside this service (the factory reset) is reflected soon after.
+/// table each time. Code that deletes rows itself (the factory reset) calls
+/// <see cref="InvalidateTotalCount"/>; the count is also refreshed after
+/// <see cref="TotalCountLifetime"/>, which bounds the drift from any other change to the table.
 /// </remarks>
 public class ProcessingHistoryService : IProcessingHistoryService
 {
@@ -213,15 +214,20 @@ public class ProcessingHistoryService : IProcessingHistoryService
         }
     }
 
+    /// <inheritdoc />
+    public void InvalidateTotalCount() => InvalidateCachedTotal();
+
     /// <summary>
-    /// A successful entry that carries a note (why nothing was done, for example "File
-    /// already normalized") and whose before and after values are all the same. Entries that
-    /// record a change pass no note, and failures are always kept.
+    /// A successful normalize or rename that carries a note (why nothing was done, for
+    /// example "File already normalized" or "Normalize disabled") and whose before and after
+    /// values are all the same. Entries that record a change pass no note, failures are
+    /// always kept, and a note on any other action records something that happened (such as
+    /// a duplicate being detected).
     /// </summary>
     internal static bool IsNoOp(ProcessingHistoryEntry entry) =>
         entry.Success
         && !string.IsNullOrEmpty(entry.ErrorMessage)
-        && entry.BeforeFilename is not null
+        && entry.Action is "Normalize" or "Rename"
         && string.Equals(entry.BeforeFilename, entry.AfterFilename, StringComparison.Ordinal)
         && string.Equals(entry.BeforeTitle, entry.AfterTitle, StringComparison.Ordinal)
         && string.Equals(entry.BeforeSeries, entry.AfterSeries, StringComparison.Ordinal)

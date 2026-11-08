@@ -774,7 +774,8 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(expectInfoLog,
             _logger.Has(LogLevel.Information, "Queued {Count} automatic ereader delivery/deliveries for {FilePath}"));
         Assert.Contains(_historyEntries, e => e.Action == "Rename" && e.Success && e.ErrorMessage == "Rename disabled");
-        Assert.Contains(_historyEntries, e => e.Action == "Process" && e.Success);
+        // Nothing about the file changed, so the run leaves no summary row.
+        Assert.DoesNotContain(_historyEntries, e => e.Action == "Process");
     }
 
     [Fact]

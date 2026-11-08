@@ -108,6 +108,7 @@ public partial class ComicProcessorService
             // Track rename and normalize separately
             bool renameSuccess = false;
             bool normalizeSuccess = false;
+            var fileChanged = false;
 
             _logger.LogDebug("ProcessFileAsync: Starting normalize phase - WatcherEnableNormalize: {NormalizeEnabled}, Has Metadata: {HasMetadata}",
                 _settings.WatcherEnableNormalize, metadata != null);
@@ -144,6 +145,7 @@ public partial class ComicProcessorService
                         // Use the normalized metadata for the rename phase so the new filename
                         // reflects the resolved series name and any populated issue/title.
                         metadata = normalizedMetadata;
+                        fileChanged = true;
                     }
                     else
                     {
@@ -262,6 +264,7 @@ public partial class ComicProcessorService
 
                             filePath = newFilePath;
                             renameSuccess = true;
+                            fileChanged = true;
                         }
                     }
                     catch (IOException ex) when (TargetFileExists(newResolvedPath, resolvedPath))
@@ -315,9 +318,14 @@ public partial class ComicProcessorService
             _logger.LogInformation("ProcessFileAsync: File processing completed: {FilePath} (Renamed: {Renamed}, Normalized: {Normalized}, Fully Processed: {FullyProcessed})", 
                 LoggingHelper.SanitizePathForLog(filePath), renameSuccess, normalizeSuccess, isFullyProcessed);
 
-            await LogHistoryAsync(filePath, "Process", isFullyProcessed, 
-                isFullyProcessed ? null : "File not fully processed (rename or normalize incomplete)", 
-                cancellationToken);
+            // A run that changed nothing leaves no summary row, so a forced reprocess of an
+            // already processed library does not fill the history.
+            if (fileChanged || !isFullyProcessed)
+            {
+                await LogHistoryAsync(filePath, "Process", isFullyProcessed,
+                    isFullyProcessed ? null : "File not fully processed (rename or normalize incomplete)",
+                    cancellationToken);
+            }
 
             // Series marked for automatic ereader delivery get the freshly
             // processed issue queued for email. Queueing is cheap (a database

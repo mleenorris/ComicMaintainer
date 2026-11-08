@@ -62,6 +62,43 @@ public sealed class ProcessingHistoryRetentionTests : IAsyncLifetime
         Assert.Equal(0, await CountRowsAsync());
     }
 
+    [Theory]
+    [InlineData("Normalize", "Normalize disabled")]
+    [InlineData("Rename", "Rename disabled")]
+    public async Task AddHistoryEntryAsync_DoesNotRecordAPhaseThatIsTurnedOff(string action, string note)
+    {
+        await _service.AddHistoryEntryAsync(Entry(action, success: true, note, before: null, after: null));
+
+        Assert.Equal(0, await CountRowsAsync());
+    }
+
+    [Fact]
+    public async Task AddHistoryEntryAsync_KeepsADetectedDuplicate()
+    {
+        // Successful, with a note and no before/after, yet it records something that happened.
+        await _service.AddHistoryEntryAsync(Entry("Duplicate Detection", success: true, "Target file already exists", before: null, after: null));
+
+        Assert.Equal(1, await CountRowsAsync());
+    }
+
+    [Fact]
+    public async Task InvalidateTotalCount_DropsATotalLeftBehindByADeletionOutsideTheService()
+    {
+        await _service.AddHistoryEntryAsync(Entry("Process", success: true, note: null, before: null, after: null));
+        Assert.Equal(1, (await _service.GetHistoryAsync()).total);
+
+        // The factory reset deletes the table directly.
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            await db.ProcessingHistory.ExecuteDeleteAsync();
+        }
+        Assert.Equal(1, (await _service.GetHistoryAsync()).total);
+
+        _service.InvalidateTotalCount();
+
+        Assert.Equal(0, (await _service.GetHistoryAsync()).total);
+    }
+
     [Fact]
     public async Task AddHistoryEntryAsync_RecordsChangesFailuresAndPlainOutcomes()
     {

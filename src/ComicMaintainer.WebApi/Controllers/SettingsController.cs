@@ -28,6 +28,7 @@ public class SettingsController : ControllerBase
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ISeriesLanguagePreferenceRetagService? _languageRetag;
     private readonly IEventBroadcaster? _eventBroadcaster;
+    private readonly IProcessingHistoryService? _processingHistory;
 
     public SettingsController(
         IOptionsMonitor<AppSettings> appSettings, 
@@ -38,7 +39,8 @@ public class SettingsController : ControllerBase
         ISettingsService settingsService,
         IHostApplicationLifetime applicationLifetime,
         ISeriesLanguagePreferenceRetagService? languageRetag = null,
-        IEventBroadcaster? eventBroadcaster = null)
+        IEventBroadcaster? eventBroadcaster = null,
+        IProcessingHistoryService? processingHistory = null)
     {
         _appSettings = appSettings;
         _logger = logger;
@@ -49,6 +51,7 @@ public class SettingsController : ControllerBase
         _applicationLifetime = applicationLifetime;
         _languageRetag = languageRetag;
         _eventBroadcaster = eventBroadcaster;
+        _processingHistory = processingHistory;
     }
 
     // RESTful endpoint: GET /api/settings - Get all settings
@@ -484,22 +487,25 @@ public class SettingsController : ControllerBase
             return BadRequest(new { error = "Request body is required" });
         }
 
+        // A field the request leaves out keeps its current value, so a script changing one
+        // setting cannot silently clear the sentinel file or reset another guard.
+        var current = _appSettings.CurrentValue;
+        var settings = new DatabaseCleanupSettings(
+            request.IntervalHours ?? current.DatabaseCleanupIntervalHours,
+            request.StaleCleanupMaxRemovalPercent ?? current.StaleCleanupMaxRemovalPercent,
+            request.StaleCleanupMissingGraceHours ?? current.StaleCleanupMissingGraceHours,
+            request.StaleCleanupSentinelFile ?? current.StaleCleanupSentinelFile,
+            request.ProcessingHistoryRetentionDays ?? current.ProcessingHistoryRetentionDays,
+            request.ProcessingHistoryMaxEntries ?? current.ProcessingHistoryMaxEntries);
+
         _logger.LogInformation(
             "Database cleanup settings update requested: IntervalHours={IntervalHours}, MaxRemovalPercent={Percent}, MissingGraceHours={GraceHours}, HistoryRetentionDays={Days}, HistoryMaxEntries={MaxEntries}",
-            request.IntervalHours, request.StaleCleanupMaxRemovalPercent, request.StaleCleanupMissingGraceHours,
-            request.ProcessingHistoryRetentionDays, request.ProcessingHistoryMaxEntries);
+            settings.IntervalHours, settings.StaleCleanupMaxRemovalPercent, settings.StaleCleanupMissingGraceHours,
+            settings.ProcessingHistoryRetentionDays, settings.ProcessingHistoryMaxEntries);
 
         try
         {
-            await _settingsService.UpdateDatabaseCleanupSettingsAsync(
-                new DatabaseCleanupSettings(
-                    request.IntervalHours,
-                    request.StaleCleanupMaxRemovalPercent,
-                    request.StaleCleanupMissingGraceHours,
-                    request.StaleCleanupSentinelFile,
-                    request.ProcessingHistoryRetentionDays,
-                    request.ProcessingHistoryMaxEntries),
-                cancellationToken);
+            await _settingsService.UpdateDatabaseCleanupSettingsAsync(settings, cancellationToken);
             return Ok(new { message = "Database cleanup settings updated successfully" });
         }
         catch (ArgumentException ex)
@@ -714,6 +720,7 @@ public class SettingsController : ControllerBase
 
             _logger.LogInformation("Deleting processing history...");
             await dbContext.ProcessingHistory.ExecuteDeleteAsync(cancellationToken);
+            _processingHistory?.InvalidateTotalCount();
 
             _logger.LogInformation("Deleting comic files...");
             await dbContext.ComicFiles.ExecuteDeleteAsync(cancellationToken);
@@ -857,10 +864,10 @@ public class SettingsController : ControllerBase
         public string? StaleCleanupSentinelFile { get; set; }
 
         /// <summary>Processing-history entries older than this many days are pruned; 0 keeps them regardless of age.</summary>
-        public int ProcessingHistoryRetentionDays { get; set; } = 90;
+        public int? ProcessingHistoryRetentionDays { get; set; }
 
         /// <summary>Only the newest this many processing-history entries are kept; 0 disables the cap.</summary>
-        public int ProcessingHistoryMaxEntries { get; set; } = 50000;
+        public int? ProcessingHistoryMaxEntries { get; set; }
     }
 
     public class DefaultLibraryViewRequest

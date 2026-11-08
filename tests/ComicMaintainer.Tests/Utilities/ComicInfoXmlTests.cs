@@ -172,4 +172,19 @@ public class ComicInfoXmlTests
         Assert.False(bytes.Take(3).SequenceEqual(new byte[] { 0xEF, 0xBB, 0xBF }), "no byte order mark");
         Assert.True(XNode.DeepEquals(merged.Root, XDocument.Parse(text).Root));
     }
+
+    [Fact]
+    public void ToUtf8Bytes_KeepsCommentsAndProcessingInstructionsOutsideTheRoot()
+    {
+        var document = ComicInfoXml.Parse("<!-- tagged by ComicTagger --><?app keep?><ComicInfo><Title>Old</Title></ComicInfo><!-- end -->");
+        var merged = ComicInfoXml.Merge(document, new ComicMetadata { Title = "New" }, ComicMetadataFieldFlags.Title);
+
+        var text = Encoding.UTF8.GetString(ComicInfoXml.ToUtf8Bytes(merged));
+
+        Assert.Contains("<!-- tagged by ComicTagger -->", text);
+        Assert.Contains("<?app keep?>", text);
+        Assert.Contains("<!-- end -->", text);
+        Assert.Contains("<Title>New</Title>", text);
+        Assert.StartsWith("<?xml version=\"1.0\" encoding=\"utf-8\"?>", text);
+    }
 }

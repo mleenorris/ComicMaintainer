@@ -116,7 +116,10 @@ public static class ComicInfoXml
         return original?.Root is not null && XNode.DeepEquals(original.Root, updated.Root);
     }
 
-    /// <summary>Serializes <paramref name="document"/> as indented UTF-8 with an XML declaration.</summary>
+    /// <summary>
+    /// Serializes <paramref name="document"/> as indented UTF-8 with an XML declaration. Comments
+    /// and processing instructions outside the root element are kept.
+    /// </summary>
     public static byte[] ToUtf8Bytes(XDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -124,7 +127,7 @@ public static class ComicInfoXml
         var settings = new XmlWriterSettings { Encoding = new UTF8Encoding(false), Indent = true };
         using (var writer = XmlWriter.Create(stream, settings))
         {
-            new XDocument(new XDeclaration("1.0", "utf-8", null), document.Root).Save(writer);
+            new XDocument(new XDeclaration("1.0", "utf-8", null), document.Nodes()).Save(writer);
         }
 
         return stream.ToArray();

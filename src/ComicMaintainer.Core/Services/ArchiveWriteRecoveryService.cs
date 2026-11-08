@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -12,11 +14,24 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 /// <param name="TempFilesDeleted">Unfinished rewritten archives that were deleted.</param>
 /// <param name="BackupsRestored">Archives that were missing or unreadable and were put back from their backup.</param>
-/// <param name="BackupsRemoved">Leftover backups of archives that are intact, which were deleted.</param>
-/// <param name="BackupsKept">Backups left in place because neither they nor their archive could be read.</param>
-public sealed record ArchiveWriteRecoveryResult(int TempFilesDeleted, int BackupsRestored, int BackupsRemoved, int BackupsKept)
+/// <param name="BackupsLeftInPlace">
+/// Backups next to an intact archive. They are reported but never deleted: this version makes no
+/// backups, so such a file may be the user's own copy.
+/// </param>
+/// <param name="BackupsUnreadable">Backups left in place because neither they nor their archive could be read.</param>
+/// <param name="UpgradeCleanupRan">
+/// True when the sweep also cleaned up after versions before 3.0, which it does only until that
+/// cleanup has completed once.
+/// </param>
+public sealed record ArchiveWriteRecoveryResult(
+    int TempFilesDeleted,
+    int BackupsRestored,
+    int BackupsLeftInPlace,
+    int BackupsUnreadable,
+    bool UpgradeCleanupRan)
 {
-    public bool DidAnything => TempFilesDeleted + BackupsRestored + BackupsRemoved + BackupsKept > 0;
+    /// <summary>True when the sweep deleted, restored or reported at least one file.</summary>
+    public bool DidAnything => TempFilesDeleted + BackupsRestored + BackupsLeftInPlace + BackupsUnreadable > 0;
 }
 
 /// <summary>
@@ -26,20 +41,33 @@ public sealed record ArchiveWriteRecoveryResult(int TempFilesDeleted, int Backup
 /// <para>A metadata write builds the new archive next to the original under a name that the file
 /// watcher, the library scan and this sweep recognise (<see cref="CreateTempPath"/>) and then
 /// renames it over the original, so an interrupted write leaves the original intact plus an
-/// unfinished temp file. The sweep deletes those temp files.</para>
-/// <para>Versions before 3.0 instead wrote the temp archive to <c>TempFileDirectory</c> and, when that
-/// was on another mount (the default Docker layout), copied the original to
-/// <c>&lt;archive&gt;.backup</c> and overwrote the original in place. A stop during that copy left a
-/// truncated archive with the good copy in the backup. For every such backup the sweep keeps the
-/// archive when it can be read and removes the redundant backup; restores the backup when the
-/// archive is missing or unreadable and the backup can be read; and otherwise leaves both alone
-/// and logs an error. It also deletes the old version's orphaned temp archives, including the
-/// <c>&lt;archive&gt;.cover.tmp</c> files its series cover writer built next to an archive.</para>
+/// unfinished temp file. Every startup sweep deletes those temp files. They can sit next to any
+/// archive, so the sweep walks the watched and duplicate directories.</para>
+/// <para>Versions before 3.0 wrote differently, and the first sweep after an upgrade also cleans
+/// up after them. They built the temp archive in <c>TempFileDirectory</c> and, when that was on
+/// another mount (the default Docker layout), copied the original to <c>&lt;archive&gt;.backup</c>
+/// and overwrote the original in place; their <c>File.Replace</c> could also leave the original
+/// renamed to the backup. For every <c>&lt;archive&gt;.backup</c>, the sweep restores the backup when
+/// the archive is missing or unreadable and the backup can be read. A backup next to an intact
+/// archive is reported and left in place, because it may be the user's own copy. When neither
+/// file can be read, both are left alone and an error is logged. The sweep also deletes the old
+/// version's orphaned temp archives in <c>TempFileDirectory</c> and the
+/// <c>&lt;archive&gt;.cover.tmp</c> files its series cover writer built next to an archive.
+/// Once that cleanup has covered the library, a marker file in <c>ConfigDirectory</c>
+/// (<see cref="UpgradeMarkerFileName"/>) records it, and later sweeps leave <c>.backup</c> files and
+/// those legacy temp files alone. This version never creates any of them, so from then on they
+/// are the user's own files.</para>
 /// <para>Only files last written before the sweep started are touched, so it can run while new
 /// writes are already happening.</para>
 /// </remarks>
 public sealed class ArchiveWriteRecoveryService
 {
+    /// <summary>
+    /// File in <c>ConfigDirectory</c> recording that the cleanup after versions before 3.0 has
+    /// run. Deleting it makes the next startup run that cleanup again.
+    /// </summary>
+    public const string UpgradeMarkerFileName = "archive-write-recovery-v3.done";
+
     /// <summary>Prefix the file watcher and the library scan already ignore.</summary>
     private const string TempPrefix = ".tmp_";
 
@@ -89,14 +117,17 @@ public sealed class ArchiveWriteRecoveryService
     public static bool IsTempPath(string path) => TempNamePattern.IsMatch(Path.GetFileName(path));
 
     /// <summary>
-    /// Sweeps the watched and duplicate directories (recursively) and the temp directory, and
-    /// logs what it did. Never throws for a file it cannot handle; that file is logged and skipped.
+    /// Sweeps the watched and duplicate directories (recursively), and the temp directory while
+    /// the cleanup after an upgrade is due, and logs what it did. Never throws for a file it
+    /// cannot handle; that file is logged and skipped.
     /// </summary>
     public Task<ArchiveWriteRecoveryResult> RecoverAsync(CancellationToken cancellationToken = default)
     {
         var settings = _settings.CurrentValue;
         var startedAt = _timeProvider.GetUtcNow().UtcDateTime;
-        int tempFilesDeleted = 0, restored = 0, removed = 0, kept = 0;
+        var markerPath = GetUpgradeMarkerPath(settings);
+        var upgradeCleanup = markerPath is null || !File.Exists(markerPath);
+        int tempFilesDeleted = 0, restored = 0, leftInPlace = 0, unreadable = 0;
 
         foreach (var root in new[] { settings.WatchedDirectory, settings.DuplicateDirectory }
                      .Where(root => !string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
@@ -106,7 +137,18 @@ public sealed class ArchiveWriteRecoveryService
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var name = Path.GetFileName(path);
-                if (TempNamePattern.IsMatch(name) || IsLegacyCoverTempName(name))
+                if (TempNamePattern.IsMatch(name))
+                {
+                    if (TryDeleteStale(path, startedAt))
+                    {
+                        tempFilesDeleted++;
+                    }
+                }
+                else if (!upgradeCleanup)
+                {
+                    continue;
+                }
+                else if (IsLegacyCoverTempName(name))
                 {
                     if (TryDeleteStale(path, startedAt))
                     {
@@ -119,31 +161,36 @@ public sealed class ArchiveWriteRecoveryService
                     switch (RecoverBackup(path, startedAt))
                     {
                         case BackupOutcome.Restored: restored++; break;
-                        case BackupOutcome.Removed: removed++; break;
-                        case BackupOutcome.Kept: kept++; break;
+                        case BackupOutcome.LeftInPlace: leftInPlace++; break;
+                        case BackupOutcome.Unreadable: unreadable++; break;
                     }
                 }
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(settings.TempFileDirectory) && Directory.Exists(settings.TempFileDirectory))
+        if (upgradeCleanup)
         {
-            foreach (var path in EnumerateFiles(settings.TempFileDirectory, recurse: false))
+            if (!string.IsNullOrWhiteSpace(settings.TempFileDirectory) && Directory.Exists(settings.TempFileDirectory))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (LegacyTempNamePattern.IsMatch(Path.GetFileName(path)) && TryDeleteStale(path, startedAt))
+                foreach (var path in EnumerateFiles(settings.TempFileDirectory, recurse: false))
                 {
-                    tempFilesDeleted++;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (LegacyTempNamePattern.IsMatch(Path.GetFileName(path)) && TryDeleteStale(path, startedAt))
+                    {
+                        tempFilesDeleted++;
+                    }
                 }
             }
+
+            RecordUpgradeCleanupDone(settings, markerPath);
         }
 
-        var result = new ArchiveWriteRecoveryResult(tempFilesDeleted, restored, removed, kept);
+        var result = new ArchiveWriteRecoveryResult(tempFilesDeleted, restored, leftInPlace, unreadable, upgradeCleanup);
         if (result.DidAnything)
         {
             _logger.LogInformation(
-                "Interrupted archive writes recovered: {TempFiles} unfinished temp file(s) deleted, {Restored} archive(s) restored from backup, {Removed} leftover backup(s) removed, {Kept} backup(s) kept",
-                tempFilesDeleted, restored, removed, kept);
+                "Interrupted archive writes recovered: {TempFiles} unfinished temp file(s) deleted, {Restored} archive(s) restored from backup, {LeftInPlace} backup(s) next to an intact archive left in place, {Unreadable} unreadable backup(s) left in place",
+                tempFilesDeleted, restored, leftInPlace, unreadable);
         }
         else
         {
@@ -153,11 +200,46 @@ public sealed class ArchiveWriteRecoveryService
         return Task.FromResult(result);
     }
 
+    private static string? GetUpgradeMarkerPath(AppSettings settings) =>
+        string.IsNullOrWhiteSpace(settings.ConfigDirectory)
+            ? null
+            : Path.Join(settings.ConfigDirectory, UpgradeMarkerFileName);
+
+    /// <summary>
+    /// Writes the marker that ends the cleanup after an upgrade, once that cleanup has covered the
+    /// library. A missing library (an unmounted share, say) leaves it due for the next startup.
+    /// </summary>
+    private void RecordUpgradeCleanupDone(AppSettings settings, string? markerPath)
+    {
+        if (markerPath is null ||
+            string.IsNullOrWhiteSpace(settings.WatchedDirectory) || !Directory.Exists(settings.WatchedDirectory) ||
+            !Directory.Exists(settings.ConfigDirectory))
+        {
+            _logger.LogDebug("The cleanup after archive writes of versions before 3.0 runs again at the next startup");
+            return;
+        }
+
+        try
+        {
+            File.WriteAllText(
+                markerPath,
+                "Leftover backup and temp files of archive writes by versions before 3.0 were cleaned up on " +
+                _timeProvider.GetUtcNow().ToString("u", CultureInfo.InvariantCulture) +
+                ". Delete this file to run that cleanup again at the next startup." + Environment.NewLine);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not record that the cleanup after archive writes of versions before 3.0 has run; it runs again at the next startup");
+        }
+    }
+
     private static bool IsLegacyCoverTempName(string name) =>
         name.EndsWith(LegacyCoverTempSuffix, StringComparison.OrdinalIgnoreCase) &&
         ComicFileExtensions.IsComicArchive(name[..^LegacyCoverTempSuffix.Length]);
 
-    private enum BackupOutcome { None, Restored, Removed, Kept }
+    private enum BackupOutcome { None, Restored, LeftInPlace, Unreadable }
 
     private BackupOutcome RecoverBackup(string backupPath, DateTime startedAt)
     {
@@ -171,20 +253,24 @@ public sealed class ArchiveWriteRecoveryService
             var archivePath = backupPath[..^BackupExtension.Length];
             if (File.Exists(archivePath) && IsReadableArchive(archivePath))
             {
-                File.Delete(backupPath);
-                _logger.LogInformation(
-                    "Removed leftover backup {Backup}: the archive it was made for is intact",
+                _logger.LogWarning(
+                    "Found {Backup} next to the intact archive it was made for. Versions before 3.0 could leave such a backup after an interrupted metadata write; it is left in place, so delete it if you do not need it",
                     LoggingHelper.SanitizePathForLog(backupPath));
-                return BackupOutcome.Removed;
+                return BackupOutcome.LeftInPlace;
             }
 
             if (!IsReadableArchive(backupPath))
             {
-                _logger.LogError(
-                    "Neither {Archive} nor its backup {Backup} can be read; both are left as they are",
-                    LoggingHelper.SanitizePathForLog(archivePath),
-                    LoggingHelper.SanitizePathForLog(backupPath));
-                return BackupOutcome.Kept;
+                // A damaged file in the library is not a defect of the application.
+                using (_logger.BeginScope(ErrorReportLogProperties.Exclude("damaged archive and backup in the library")))
+                {
+                    _logger.LogError(
+                        "Neither {Archive} nor its backup {Backup} can be read; both are left as they are",
+                        LoggingHelper.SanitizePathForLog(archivePath),
+                        LoggingHelper.SanitizePathForLog(backupPath));
+                }
+
+                return BackupOutcome.Unreadable;
             }
 
             // Same directory, so the restore is a single atomic rename over the damaged archive.
@@ -197,7 +283,7 @@ public sealed class ArchiveWriteRecoveryService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.LogWarning(ex, "Could not recover the leftover backup {Backup}", LoggingHelper.SanitizePathForLog(backupPath));
-            return BackupOutcome.Kept;
+            return BackupOutcome.Unreadable;
         }
     }
 

@@ -114,4 +114,50 @@ public class DatabaseCleanupHostedServiceCoverageTests
         VerifyLog(LogLevel.Information, "Database cleanup completed, removed 4 stale entries", Times.Once());
         await service.StopAsync(CancellationToken.None);
     }
+
+    [Fact]
+    public async Task StartAsync_WhileTheWatcherHoldsOffCleanup_DoesNotWaitForTheCleanup()
+    {
+        var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fileStore.SetupGet(f => f.IsStaleCleanupSuspended).Returns(true);
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
+            .Returns(release.Task);
+        var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings { DatabaseCleanupIntervalHours = 0 });
+        using var service = new DatabaseCleanupHostedService(_fileStore.Object, monitor, _logger.Object);
+
+        // Application start must not wait for the watcher's catch-up.
+        await service.StartAsync(CancellationToken.None).WaitAsync(Timeout);
+        VerifyLog(LogLevel.Information, "Database cleanup is set to run only on startup (interval = 0)", Times.Once());
+        _fileStore.Verify(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        VerifyLog(LogLevel.Information, "Database cleanup completed, removed 2 stale entries", Times.Never());
+
+        release.SetResult(2);
+        await service.StopAsync(CancellationToken.None).WaitAsync(Timeout);
+
+        VerifyLog(LogLevel.Information, "Database cleanup completed, removed 2 stale entries", Times.Once());
+    }
+
+    [Fact]
+    public async Task StopAsync_EndsAStartupCleanupStillWaitingForTheWatcher()
+    {
+        CancellationToken observed = default;
+        _fileStore.SetupGet(f => f.IsStaleCleanupSuspended).Returns(true);
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
+            .Returns<CancellationToken>(async token =>
+            {
+                observed = token;
+                await Task.Delay(System.Threading.Timeout.Infinite, token);
+                return 0;
+            });
+        var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings { DatabaseCleanupIntervalHours = 0 });
+        using var service = new DatabaseCleanupHostedService(_fileStore.Object, monitor, _logger.Object);
+        await service.StartAsync(CancellationToken.None).WaitAsync(Timeout);
+
+        await service.StopAsync(CancellationToken.None).WaitAsync(Timeout);
+
+        Assert.True(observed.IsCancellationRequested);
+        VerifyLog(LogLevel.Information, "Database cleanup was cancelled", Times.Once());
+    }
 }

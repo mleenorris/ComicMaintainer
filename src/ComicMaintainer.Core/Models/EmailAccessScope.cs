@@ -59,19 +59,4 @@ public sealed class EmailAccessScope
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
         return new EmailAccessScope(userId, isAdministrator, isAdministrator && listEveryone);
     }
-
-    /// <summary>Whether a row owned by <paramref name="ownerUserId"/> may be read or changed by id.</summary>
-    public bool CanAccess(string? ownerUserId) =>
-        IsAdministrator || (ownerUserId is not null && string.Equals(ownerUserId, UserId, StringComparison.Ordinal));
-
-    /// <summary>
-    /// Whether a row owned by <paramref name="ownerUserId"/> appears in listings
-    /// and bulk operations: the caller's own rows, unowned legacy rows for an
-    /// administrator, and everything when <see cref="ListsEveryone"/>.
-    /// </summary>
-    public bool Lists(string? ownerUserId) =>
-        ListsEveryone
-        || (ownerUserId is null
-            ? IsAdministrator
-            : string.Equals(ownerUserId, UserId, StringComparison.Ordinal));
 }

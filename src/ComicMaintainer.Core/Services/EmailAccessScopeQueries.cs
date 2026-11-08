@@ -4,9 +4,8 @@ using ComicMaintainer.Core.Models;
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Database filters that apply an <see cref="EmailAccessScope"/>, the query
-/// counterparts of <see cref="EmailAccessScope.CanAccess"/> and
-/// <see cref="EmailAccessScope.Lists"/>.
+/// Database filters that apply an <see cref="EmailAccessScope"/>: the one
+/// definition of which rows a scope reaches by id and which it lists.
 /// </summary>
 internal static class EmailAccessScopeQueries
 {

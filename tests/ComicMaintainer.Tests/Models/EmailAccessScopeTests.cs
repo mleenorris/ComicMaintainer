@@ -1,9 +1,17 @@
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Services;
 
 namespace ComicMaintainer.Tests.Models;
 
+/// <summary>
+/// The access rules as they are enforced: through the query filters the
+/// delivery services apply to devices and deliveries.
+/// </summary>
 public class EmailAccessScopeTests
 {
+    private static readonly string?[] Owners = { "alice", "admin", "bob", null };
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -20,12 +28,7 @@ public class EmailAccessScopeTests
 
         Assert.False(scope.IsAdministrator);
         Assert.False(scope.ListsEveryone);
-        Assert.True(scope.CanAccess("alice"));
-        Assert.True(scope.Lists("alice"));
-        Assert.False(scope.CanAccess("bob"));
-        Assert.False(scope.Lists("bob"));
-        Assert.False(scope.CanAccess(null));
-        Assert.False(scope.Lists(null));
+        AssertCoverage(scope, reachedById: new[] { "alice" }, listed: new[] { "alice" });
     }
 
     [Fact]
@@ -33,11 +36,7 @@ public class EmailAccessScopeTests
     {
         var scope = EmailAccessScope.ForUser("admin", isAdministrator: true);
 
-        Assert.True(scope.CanAccess("bob"));
-        Assert.True(scope.CanAccess(null));
-        Assert.True(scope.Lists("admin"));
-        Assert.True(scope.Lists(null));
-        Assert.False(scope.Lists("bob"));
+        AssertCoverage(scope, reachedById: Owners, listed: new[] { "admin", null });
     }
 
     [Fact]
@@ -46,15 +45,24 @@ public class EmailAccessScopeTests
         var scope = EmailAccessScope.ForUser("admin", isAdministrator: true, listEveryone: true);
 
         Assert.True(scope.ListsEveryone);
-        Assert.True(scope.Lists("bob"));
-        Assert.True(scope.Lists(null));
+        AssertCoverage(scope, reachedById: Owners, listed: Owners);
     }
 
     [Fact]
     public void TheSystemScope_ActsForEveryOwnerButOwnsNothing()
     {
         Assert.Null(EmailAccessScope.System.UserId);
-        Assert.True(EmailAccessScope.System.CanAccess("bob"));
-        Assert.True(EmailAccessScope.System.Lists("bob"));
+        AssertCoverage(EmailAccessScope.System, reachedById: Owners, listed: Owners);
+    }
+
+    private static void AssertCoverage(EmailAccessScope scope, string?[] reachedById, string?[] listed)
+    {
+        var devices = Owners.Select(owner => new EreaderDeviceEntity { OwnerUserId = owner }).AsQueryable();
+        var deliveries = Owners.Select(owner => new ComicEmailDeliveryEntity { OwnerUserId = owner }).AsQueryable();
+
+        Assert.Equal(reachedById, devices.AccessibleTo(scope).Select(d => d.OwnerUserId));
+        Assert.Equal(reachedById, deliveries.AccessibleTo(scope).Select(d => d.OwnerUserId));
+        Assert.Equal(listed, devices.ListedFor(scope).Select(d => d.OwnerUserId));
+        Assert.Equal(listed, deliveries.ListedFor(scope).Select(d => d.OwnerUserId));
     }
 }

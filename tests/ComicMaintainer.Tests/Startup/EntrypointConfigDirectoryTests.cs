@@ -54,22 +54,26 @@ public class EntrypointConfigDirectoryTests
     }
 
     [Fact]
-    public void Entrypoint_WidensLibraryPermissionsOnlyThroughTheFindThatSkipsSecretFiles()
+    public void Entrypoint_ChangesTheLibraryOnlyThroughTheOptInFindThatSkipsSecretFiles()
     {
         var script = ReadEntrypoint();
         var gosu = script.IndexOf("exec gosu", StringComparison.Ordinal);
 
         // A recursive chmod cannot skip the JWT signing key or the files named by JWT_SECRET_FILE and
-        // ADMIN_PASSWORD_FILE, and the find that skips them does not make them private again, so a recursive
-        // chmod may only add owner access.
+        // ADMIN_PASSWORD_FILE, so a recursive chmod may only add owner access, and only to the config directories.
         Assert.All(Regex.Matches(script, @"\bchmod\s+-R\s+(\S+)"), chmod => Assert.Equal("u+rwX", chmod.Groups[1].Value));
 
-        // /watched_dir and /duplicates are opened up in one place: that find, after the JWT signing key is made private.
-        Assert.Single(Regex.Matches(script, @"\bchmod\s+755\b"));
+        // The library is changed in one place: the find that FIX_LIBRARY_PERMISSIONS opts in to, after the JWT signing
+        // key is made private. It only adds owner and group access, never a fixed mode.
         var privatized = script.IndexOf("-exec chmod 600 {} +", StringComparison.Ordinal);
-        var widened = script.IndexOf("\"${SECRET_FILE_EXCLUSIONS[@]}\" -exec chmod 755 {} +", StringComparison.Ordinal);
+        var optIn = script.IndexOf("if [ \"$FIX_LIBRARY_PERMISSIONS\" = true ]; then", StringComparison.Ordinal);
+        var widened = script.IndexOf(
+            "\"${SECRET_FILE_EXCLUSIONS[@]}\" -exec chown \"$PUID:$PGID\" {} + -exec chmod u+rwX,g+rwX {} +", StringComparison.Ordinal);
         Assert.InRange(privatized, 0, gosu);
-        Assert.InRange(widened, privatized, gosu);
+        Assert.InRange(optIn, privatized, gosu);
+        Assert.InRange(widened, optIn, gosu);
+        Assert.Single(Regex.Matches(script, @"-exec chmod u\+rwX,g\+rwX"));
+        Assert.DoesNotMatch(@"\bchmod\s+(-R\s+)?755\b", script);
     }
 
     [Fact]
@@ -77,12 +81,12 @@ public class EntrypointConfigDirectoryTests
     {
         var script = ReadEntrypoint();
 
-        // A config directory may be inside /watched_dir or /duplicates, so the find that opens them up prunes both
-        // /Config and CONFIG_DIR; otherwise every restart would make the database and DataProtection keys readable.
+        // A config directory may be inside the library or the duplicates folder, so the find that repairs them prunes both
+        // /Config and CONFIG_DIR; otherwise the database and DataProtection keys would become group-writable.
         var listed = script.IndexOf("for config_dir in /Config \"$CONFIG_DIR\"; do", StringComparison.Ordinal);
         var excluded = script.IndexOf("CONFIG_DIR_EXCLUSIONS+=(-samefile \"$config_dir\" -prune -o)", StringComparison.Ordinal);
-        var widening = script.IndexOf("find /watched_dir /duplicates \"${CONFIG_DIR_EXCLUSIONS[@]}\" ", StringComparison.Ordinal);
-        var widened = script.IndexOf("-exec chmod 755 {} +", StringComparison.Ordinal);
+        var widening = script.IndexOf("find \"$library_dir\" \"${CONFIG_DIR_EXCLUSIONS[@]}\" ", StringComparison.Ordinal);
+        var widened = script.IndexOf("-exec chmod u+rwX,g+rwX {} +", StringComparison.Ordinal);
         Assert.InRange(listed, 0, excluded);
         Assert.InRange(excluded, listed, widening);
         Assert.InRange(widening, excluded, widened);

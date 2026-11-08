@@ -56,15 +56,13 @@ else
     useradd -r -u "$PUID" -g "$GROUP_NAME" comicmaintainer
 fi
 
-# Ensure directories exist and have correct permissions. /Config holds credentials and keys, so it only gains owner
-# access. Only the last find below opens up /watched_dir and /duplicates, as it leaves secret files and the config
-# directories out: a recursive chmod would expose them, and that find would not make them private again.
-mkdir -p /watched_dir /duplicates /Config
-chown -R "$PUID:$PGID" /app /Config /watched_dir /duplicates 2>/dev/null || true
+# /Config, and a custom CONFIG_DIR, hold the database, DataProtection keys, logs and settings, so the app user must
+# own them. They hold credentials and keys, so only owner access is added. (/Config is prepared either way: it is the
+# default temp file location.)
+mkdir -p /Config
+chown -R "$PUID:$PGID" /Config 2>/dev/null || true
 chmod -R u+rwX /Config 2>/dev/null || true
 
-# CONFIG_DIR holds the database, DataProtection keys, logs and settings, so a custom one must be
-# writable by PUID too. (/Config is prepared above either way: it is the default temp file location.)
 CONFIG_DIR="${CONFIG_DIR:-/Config}"
 if [ "$CONFIG_DIR" != "/Config" ]; then
     # Best effort: root may be refused (e.g. NFS root_squash); the app then creates it as PUID.
@@ -74,19 +72,39 @@ if [ "$CONFIG_DIR" != "/Config" ]; then
 fi
 
 # The JWT signing key the app generates when JWT_SECRET is not set (and its temporary files) must stay private to
-# its user, wherever it is kept, so it is left out of the permission change below. Keys made readable by earlier
-# versions of this script are made private again first.
-find /watched_dir /duplicates /Config "$CONFIG_DIR" -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \
+# its user. Keys made readable by earlier versions of this script are made private again.
+find /Config "$CONFIG_DIR" -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \
     -exec chmod 600 {} + 2>/dev/null || true
-# Secret files named by JWT_SECRET_FILE or ADMIN_PASSWORD_FILE keep the permissions they were given. When the
-# named path is a symlink, the file it points to is excluded too. find -path takes a glob pattern, so glob
-# metacharacters in the paths are escaped to match them literally.
+
+# The comic library and the duplicates folder belong to the user and are left alone. Changing the owner or mode of
+# everything in them at every start would strip the group write access other containers (Suwayomi, Komga, Kavita)
+# rely on, expose libraries kept private, and walk the whole library, which takes minutes on NFS/SMB, before the
+# app starts. Only the top folders are checked; a folder that does not exist yet is created for PUID.
+LIBRARY_DIRS=("${WATCHED_DIR:-/watched_dir}")
+if [ "${DUPLICATE_DIR:-/duplicates}" != "${LIBRARY_DIRS[0]}" ]; then
+    LIBRARY_DIRS+=("${DUPLICATE_DIR:-/duplicates}")
+fi
+
+# FIX_LIBRARY_PERMISSIONS=true opts in to repairing the library once: everything in it is given to PUID:PGID with
+# owner and group read/write access added (u+rwX,g+rwX: other bits are kept, and files gain no execute bit).
+case "${FIX_LIBRARY_PERMISSIONS:-false}" in
+    [Tt][Rr][Uu][Ee] | 1 | [Yy][Ee][Ss]) FIX_LIBRARY_PERMISSIONS=true ;;
+    [Ff][Aa][Ll][Ss][Ee] | 0 | [Nn][Oo] | "") FIX_LIBRARY_PERMISSIONS=false ;;
+    *)
+        echo "Warning: FIX_LIBRARY_PERMISSIONS must be true or false, got: $FIX_LIBRARY_PERMISSIONS; the library is left alone."
+        FIX_LIBRARY_PERMISSIONS=false
+        ;;
+esac
+
+# Secret files named by JWT_SECRET_FILE or ADMIN_PASSWORD_FILE keep the permissions they were given, even inside the
+# library. When the named path is a symlink, the file it points to is excluded too. find -path takes a glob pattern,
+# so glob metacharacters in the paths are escaped to match them literally.
 escape_find_glob() {
     local value=$1
-    value=${value//\\/\\\\}
-    value=${value//\*/\\*}
-    value=${value//\?/\\?}
-    value=${value//\[/\\[}
+    value=${value//\/\\}
+    value=${value//\*/\*}
+    value=${value//\?/\?}
+    value=${value//\[/\[}
     printf '%s' "$value"
 }
 SECRET_FILE_EXCLUSIONS=()
@@ -96,19 +114,45 @@ for secret_file in "${JWT_SECRET_FILE:-}" "${ADMIN_PASSWORD_FILE:-}"; do
         SECRET_FILE_EXCLUSIONS+=(! -path "$(escape_find_glob "$(realpath -m -- "$secret_file")")")
     fi
 done
-# The config directories hold the database, DataProtection keys and settings, so they keep their permissions even when
-# one is inside /watched_dir or /duplicates. They are matched by inode, which also catches a host folder nested in a
-# library folder and mounted on its own. find -samefile fails on a missing file, so only existing ones are listed.
+# The config directories keep their own permissions even when one is inside a library folder. They are matched by
+# inode, which also catches a host folder nested in a library folder and mounted on its own. find -samefile fails on
+# a missing file, so only existing ones are listed.
 CONFIG_DIR_EXCLUSIONS=()
 for config_dir in /Config "$CONFIG_DIR"; do
     if config_dir=$(realpath -e -- "$config_dir" 2>/dev/null); then
         CONFIG_DIR_EXCLUSIONS+=(-samefile "$config_dir" -prune -o)
     fi
 done
-find /watched_dir /duplicates "${CONFIG_DIR_EXCLUSIONS[@]}" ! -type l \
-    ! \( -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \) \
-    "${SECRET_FILE_EXCLUSIONS[@]}" -exec chmod 755 {} + 2>/dev/null || true
 
-# Switch to the specified user and run the application
+# Whether the app user can list, read and create files in the directory $1.
+app_user_can_write() {
+    gosu "$USER_NAME" sh -c '[ -r "$1" ] && [ -w "$1" ] && [ -x "$1" ]' sh "$1"
+}
+
+for library_dir in "${LIBRARY_DIRS[@]}"; do
+    if [ ! -d "$library_dir" ]; then
+        if mkdir -p -- "$library_dir" 2>/dev/null; then
+            chown "$PUID:$PGID" -- "$library_dir" 2>/dev/null || true
+        else
+            echo "Warning: $library_dir does not exist and could not be created."
+            continue
+        fi
+    fi
+
+    if [ "$FIX_LIBRARY_PERMISSIONS" = true ]; then
+        echo "FIX_LIBRARY_PERMISSIONS=true: giving everything in $library_dir to UID $PUID and GID $PGID with owner and group read/write access. This walks the whole folder at every start; remove the variable once it has run."
+        find "$library_dir" "${CONFIG_DIR_EXCLUSIONS[@]}" ! -type l \
+            ! \( -type f \( -name 'jwt-secret.key' -o -name 'jwt-secret.key.*.tmp' \) \) \
+            "${SECRET_FILE_EXCLUSIONS[@]}" -exec chown "$PUID:$PGID" {} + -exec chmod u+rwX,g+rwX {} + 2>/dev/null || true
+    fi
+
+    if ! app_user_can_write "$library_dir"; then
+        echo "Warning: $USER_NAME (UID=$PUID, GID=$PGID) cannot write to $library_dir, so comics there cannot be tagged, renamed or moved."
+        echo "         Give UID $PUID or GID $PGID write access to the host folder, set PUID/PGID to its owner, or set FIX_LIBRARY_PERMISSIONS=true once."
+    fi
+done
+
+# Switch to the specified user and run the application. /app is left owned by root, so the app user cannot rewrite
+# its own binaries.
 echo "Switching to user $USER_NAME (UID=$PUID, GID=$PGID)"
 exec gosu "$USER_NAME" dotnet ComicMaintainer.WebApi.dll

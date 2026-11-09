@@ -7,6 +7,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -35,10 +36,7 @@ public sealed class FileStoreServiceFileIdsTests : IAsyncLifetime
             await db.Database.EnsureCreatedAsync();
         }
 
-        _store = TestServices.CreateFileStore(
-            new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = Library, DuplicateDirectory = string.Empty }),
-            NullLogger<FileStoreService>.Instance,
-            _factory);
+        _store = CreateStore(_factory);
     }
 
     public async Task DisposeAsync()
@@ -64,9 +62,12 @@ public sealed class FileStoreServiceFileIdsTests : IAsyncLifetime
     [Fact]
     public async Task GetFileIdsAsync_WithNoPaths_IsEmptyWithoutAQuery()
     {
-        var ids = await _store.GetFileIdsAsync([]);
+        var factory = new Mock<IDbContextFactory<ComicMaintainerDbContext>>();
+
+        var ids = await CreateStore(factory.Object).GetFileIdsAsync([]);
 
         Assert.Empty(ids);
+        factory.Verify(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // Keys are compared exactly: on the database the two paths are different files.
@@ -97,6 +98,12 @@ public sealed class FileStoreServiceFileIdsTests : IAsyncLifetime
 
         Assert.Null(await _store.GetFilePathAsync(int.MaxValue));
     }
+
+    private static FileStoreService CreateStore(IDbContextFactory<ComicMaintainerDbContext> factory) =>
+        TestServices.CreateFileStore(
+            new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = Library, DuplicateDirectory = string.Empty }),
+            NullLogger<FileStoreService>.Instance,
+            factory);
 
     private async Task<(string Path, int Id)> TrackAsync(string name)
     {

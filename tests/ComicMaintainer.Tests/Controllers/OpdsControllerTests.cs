@@ -23,7 +23,10 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Controllers;
 
-/// <summary>The branches of the OPDS controller the real pipeline does not reach naturally.</summary>
+/// <summary>
+/// The OPDS controller on faked services: what each feed lists and links to, searches, how pages, covers and downloads
+/// are served and recorded, and every refusal, including the branches the real pipeline does not reach naturally.
+/// </summary>
 public sealed class OpdsControllerTests : IDisposable
 {
     private const int Id = 7;

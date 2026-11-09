@@ -438,10 +438,16 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
     {
         var user = await SeedOwnerAsync();
         _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync(user);
+        // The account itself is fine, so a key wrongly remembered as a password would pass the password recheck.
+        _userManager.Setup(u => u.FindByNameAsync(Username)).ReturnsAsync(user);
         var credentials = Basic($"{Username}:{Key}");
         Assert.True((await AuthenticateAsync(CreateContext(credentials))).Succeeded);
-        Assert.True((await AuthenticateAsync(CreateContext(credentials))).Succeeded);
+
+        var remembered = await AuthenticateAsync(CreateContext(credentials));
+
+        Assert.True(remembered.Succeeded);
         _authService.Verify(a => a.GetUserByApiKeyAsync(Key), Times.Exactly(2));
+        Assert.Equal(ApiKeys.AuthMethod, remembered.Principal!.FindFirstValue("auth_method"));
 
         _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync((ApplicationUser?)null);
 
@@ -450,6 +456,25 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
         Assert.Equal("Invalid credentials", result.Failure!.Message);
         VerifyNoPasswordCheck();
         Assert.Equal(0, _cache.Count);
+    }
+
+    // The last-used time shown for a key has to keep moving while the key is being remembered.
+    [Fact]
+    public async Task Authenticate_ARememberedKey_StillRecordsTheUse()
+    {
+        var user = await SeedOwnerAsync();
+        _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync(user);
+        _userManager.Setup(u => u.FindByNameAsync(Username)).ReturnsAsync(user);
+        var credentials = Basic($"{Username}:{Key}");
+        Assert.True((await AuthenticateAsync(CreateContext(credentials))).Succeeded);
+        await BackdateLastUseAsync(user.Id, TimeSpan.FromHours(1));
+        var before = DateTime.UtcNow.AddSeconds(-5);
+
+        Assert.True((await AuthenticateAsync(CreateContext(credentials))).Succeeded);
+
+        var recorded = await ReadLastUsedAsync(user.Id);
+        Assert.NotNull(recorded);
+        Assert.InRange(recorded!.Value, before, DateTime.UtcNow.AddSeconds(5));
     }
 
     [Fact]
@@ -581,6 +606,13 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
         return await db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => u.ApiKeyLastUsedAt).SingleAsync();
     }
 
+    private async Task BackdateLastUseAsync(string userId, TimeSpan by)
+    {
+        var earlier = DateTime.UtcNow - by;
+        await using var db = await _factory.CreateDbContextAsync();
+        await db.Users.Where(u => u.Id == userId).ExecuteUpdateAsync(set => set.SetProperty(u => u.ApiKeyLastUsedAt, earlier));
+    }
+
     private void AcceptPassword(ApplicationUser user)
     {
         _authService.Setup(a => a.VerifyPasswordAsync(Username, Password, It.IsAny<string?>())).ReturnsAsync(user);
@@ -604,7 +636,10 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
         }
     }
 
-    /// <summary>How many attempts the client can still make, found by taking them from a copy of its budget.</summary>
+    /// <summary>
+    /// How many attempts the client can still make, found by drawing its real budget down until it refuses. That spends
+    /// the budget, so this can only be the last step of a test.
+    /// </summary>
     private Task<int> CountRemainingAttemptsAsync()
     {
         var address = System.Net.IPAddress.Parse(ClientAddress);

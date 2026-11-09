@@ -393,7 +393,8 @@ namespace ComicMaintainer.Tests.AndroidApp
 
         // Thrown from the page's startup, a FormatException here would crash the app at every launch.
         [Theory]
-        [InlineData(CredentialKind.Session, "not a valid bearer token")]
+        [InlineData(CredentialKind.Session, "damaged
+token")]
         [InlineData(CredentialKind.ApiKey, "damaged\nkey")]
         public async Task ADamagedStoredCredential_IsDiscardedInsteadOfCrashing(CredentialKind kind, string value)
         {

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -33,7 +34,13 @@ public class SettingsService : ISettingsService
         "ComicVineApiKey",
         "ErrorReportingGitHubToken",
         "SuwayomiPassword",
-        "GitHubToken"
+        "GitHubToken",
+        "NotifyNtfyToken",
+        "NotifyGotifyToken",
+        "NotifyDiscordWebhookUrl",
+        "NotifyWebhookUrl",
+        "NotifyKomgaApiKey",
+        "NotifyKavitaApiKey"
     };
 
     public SettingsService(
@@ -456,10 +463,170 @@ public class SettingsService : ISettingsService
             StageErrorReporting(values, errorReporting, current);
         }
 
+        if (update.Notifications is { } notifications)
+        {
+            StageNotifications(values, notifications, current);
+        }
+
         await SaveValuesAsync(values, cancellationToken);
     }
 
     private static Dictionary<string, object?> NewValues() => new(StringComparer.Ordinal);
+
+    /// <summary>The setting names of one notification target, and which of its fields it requires.</summary>
+    private sealed record NotificationFields(
+        string Target,
+        string EnabledSetting,
+        string UrlSetting,
+        bool UrlIsSecret,
+        string? TokenSetting,
+        bool TokenRequired,
+        string? TopicSetting,
+        string? LibrarySetting,
+        string EventsSetting);
+
+    private static readonly NotificationFields[] NotificationTargetFields =
+    [
+        new(NotificationTarget.Ntfy, "NotifyNtfyEnabled", "NotifyNtfyUrl", false, "NotifyNtfyToken", false, "NotifyNtfyTopic", null, "NotifyNtfyEvents"),
+        new(NotificationTarget.Gotify, "NotifyGotifyEnabled", "NotifyGotifyUrl", false, "NotifyGotifyToken", true, null, null, "NotifyGotifyEvents"),
+        new(NotificationTarget.Discord, "NotifyDiscordEnabled", "NotifyDiscordWebhookUrl", true, null, false, null, null, "NotifyDiscordEvents"),
+        new(NotificationTarget.Webhook, "NotifyWebhookEnabled", "NotifyWebhookUrl", true, null, false, null, null, "NotifyWebhookEvents"),
+        new(NotificationTarget.Komga, "NotifyKomgaEnabled", "NotifyKomgaUrl", false, "NotifyKomgaApiKey", true, null, "NotifyKomgaLibraryId", "NotifyKomgaEvents"),
+        new(NotificationTarget.Kavita, "NotifyKavitaEnabled", "NotifyKavitaUrl", false, "NotifyKavitaApiKey", true, null, "NotifyKavitaLibraryId", "NotifyKavitaEvents"),
+    ];
+
+    private static void StageNotifications(Dictionary<string, object?> values, NotificationsUpdate notifications, AppSettings current)
+    {
+        var updates = new[]
+        {
+            notifications.Ntfy, notifications.Gotify, notifications.Discord,
+            notifications.Webhook, notifications.Komga, notifications.Kavita,
+        };
+
+        for (var i = 0; i < updates.Length; i++)
+        {
+            if (updates[i] is { } update)
+            {
+                StageNotificationTarget(values, NotificationTargetFields[i], update, current);
+            }
+        }
+    }
+
+    private static void StageNotificationTarget(
+        Dictionary<string, object?> values,
+        NotificationFields fields,
+        NotificationTargetUpdate update,
+        AppSettings current)
+    {
+        // A secret URL is left as it is: comparing it would let a caller test guesses at a pinned one.
+        update = update with
+        {
+            Url = fields.UrlIsSecret ? update.Url : ExceptThePinnedValue(fields.UrlSetting, update.Url),
+            Topic = fields.TopicSetting is null ? null : ExceptThePinnedValue(fields.TopicSetting, update.Topic),
+            LibraryId = fields.LibrarySetting is null ? null : ExceptThePinnedValue(fields.LibrarySetting, update.LibraryId),
+            Events = ExceptThePinnedValue(fields.EventsSetting, update.Events),
+        };
+
+        var stored = NotificationTargetOptions.For(current, fields.Target);
+        var name = NotificationTarget.DisplayName(fields.Target);
+        var url = Normalize(update.Url);
+        if (url is not null && !fields.UrlIsSecret)
+        {
+            url = url.TrimEnd('/');
+        }
+
+        if (url is not null && !NotificationUrl.TryParse(url, out _))
+        {
+            // The value of a secret URL is not repeated back.
+            throw new SettingsValidationException(
+                fields.UrlIsSecret
+                    ? $"The URL for {name} must be an absolute http(s) URL without a user name or password"
+                    : $"'{url}' is not an absolute http(s) URL without a user name or password",
+                "url");
+        }
+
+        var topic = Normalize(update.Topic);
+        if (topic is not null && (topic.Length > 128 || topic.Any(c => char.IsControl(c) || char.IsWhiteSpace(c))))
+        {
+            throw new SettingsValidationException("The ntfy topic must be at most 128 characters with no spaces", "topic");
+        }
+
+        var libraryId = Normalize(update.LibraryId);
+        if (libraryId is not null)
+        {
+            var valid = fields.Target == NotificationTarget.Kavita
+                ? int.TryParse(libraryId, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) && id > 0
+                : libraryId.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+            if (!valid)
+            {
+                throw new SettingsValidationException($"'{libraryId}' is not a valid library id for {name}", "libraryId");
+            }
+        }
+
+        // Checked against what will be in effect after this save, so a pinned value the page
+        // left out still counts. A save that touches none of these is not asked to prove it.
+        var enabling = update.Enabled
+            ?? (stored.Enabled && (update.Url is not null || update.Token is not null || update.Topic is not null));
+        if (enabling)
+        {
+            if (string.IsNullOrWhiteSpace(update.Url is null ? stored.Url : url))
+            {
+                throw new SettingsValidationException($"A URL is required to enable {name}", "url");
+            }
+
+            if (fields.TopicSetting is not null && string.IsNullOrWhiteSpace(update.Topic is null ? stored.Topic : topic))
+            {
+                throw new SettingsValidationException($"A topic is required to enable {name}", "topic");
+            }
+
+            if (fields.TokenRequired && string.IsNullOrWhiteSpace(update.Token is null ? stored.Token : update.Token))
+            {
+                throw new SettingsValidationException($"A token or API key is required to enable {name}", "token");
+            }
+        }
+
+        StageIfSet(values, fields.EnabledSetting, update.Enabled);
+        if (update.Url is not null)
+        {
+            values[fields.UrlSetting] = url;
+        }
+
+        if (fields.TokenSetting is not null)
+        {
+            // A null token means "keep the stored secret"; an empty string clears it.
+            StageSecretIfSet(values, fields.TokenSetting, update.Token);
+        }
+
+        if (fields.TopicSetting is not null)
+        {
+            StageTextIfSet(values, fields.TopicSetting, update.Topic);
+        }
+
+        if (fields.LibrarySetting is not null)
+        {
+            StageTextIfSet(values, fields.LibrarySetting, update.LibraryId);
+        }
+
+        if (update.Events is not null)
+        {
+            values[fields.EventsSetting] = NormalizeNotificationEvents(fields.Target, update.Events);
+        }
+    }
+
+    /// <summary>The events in a fixed order, so a resave of the same choice changes nothing.</summary>
+    private static string NormalizeNotificationEvents(string target, string events)
+    {
+        var allowed = NotificationEventType.AllowedFor(target);
+        var requested = NotificationEventType.Split(events).ToList();
+        if (requested.FirstOrDefault(e => !allowed.Contains(e)) is { } unknown)
+        {
+            throw new SettingsValidationException(
+                $"'{unknown}' is not an event {NotificationTarget.DisplayName(target)} can receive. Allowed values: {string.Join(", ", allowed)}.",
+                "events");
+        }
+
+        return string.Join(',', allowed.Where(requested.Contains));
+    }
 
     private static void ValidateFilenameFormat(string format)
     {

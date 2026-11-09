@@ -130,6 +130,33 @@ public class SettingsController : ControllerBase
             error_reporting_max_issues_per_day = _appSettings.CurrentValue.ErrorReportingMaxIssuesPerDay,
             error_reporting_dedupe_window_hours = _appSettings.CurrentValue.ErrorReportingDedupeWindowHours,
             error_reporting_comment_on_recurrence = _appSettings.CurrentValue.ErrorReportingCommentOnRecurrence,
+            // Notification targets. As with the SMTP password, tokens, API keys and webhook
+            // URLs (which carry a token) are never returned; only whether one is stored.
+            notify_ntfy_enabled = _appSettings.CurrentValue.NotifyNtfyEnabled,
+            notify_ntfy_url = _appSettings.CurrentValue.NotifyNtfyUrl,
+            notify_ntfy_topic = _appSettings.CurrentValue.NotifyNtfyTopic,
+            notify_ntfy_token_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.NotifyNtfyToken),
+            notify_ntfy_events = _appSettings.CurrentValue.NotifyNtfyEvents,
+            notify_gotify_enabled = _appSettings.CurrentValue.NotifyGotifyEnabled,
+            notify_gotify_url = _appSettings.CurrentValue.NotifyGotifyUrl,
+            notify_gotify_token_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.NotifyGotifyToken),
+            notify_gotify_events = _appSettings.CurrentValue.NotifyGotifyEvents,
+            notify_discord_enabled = _appSettings.CurrentValue.NotifyDiscordEnabled,
+            notify_discord_webhook_url_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.NotifyDiscordWebhookUrl),
+            notify_discord_events = _appSettings.CurrentValue.NotifyDiscordEvents,
+            notify_webhook_enabled = _appSettings.CurrentValue.NotifyWebhookEnabled,
+            notify_webhook_url_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.NotifyWebhookUrl),
+            notify_webhook_events = _appSettings.CurrentValue.NotifyWebhookEvents,
+            notify_komga_enabled = _appSettings.CurrentValue.NotifyKomgaEnabled,
+            notify_komga_url = _appSettings.CurrentValue.NotifyKomgaUrl,
+            notify_komga_api_key_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.NotifyKomgaApiKey),
+            notify_komga_library_id = _appSettings.CurrentValue.NotifyKomgaLibraryId,
+            notify_komga_events = _appSettings.CurrentValue.NotifyKomgaEvents,
+            notify_kavita_enabled = _appSettings.CurrentValue.NotifyKavitaEnabled,
+            notify_kavita_url = _appSettings.CurrentValue.NotifyKavitaUrl,
+            notify_kavita_api_key_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.NotifyKavitaApiKey),
+            notify_kavita_library_id = _appSettings.CurrentValue.NotifyKavitaLibraryId,
+            notify_kavita_events = _appSettings.CurrentValue.NotifyKavitaEvents,
             // The settings the environment pins: one entry per field above, naming the variable.
             env_locked = EnvLockEntries(AppSettingsEnvironmentOverrides.Active())
         };
@@ -167,7 +194,8 @@ public class SettingsController : ControllerBase
             Email = request.Email,
             EmailRateLimit = request.EmailRateLimit,
             Suwayomi = request.Suwayomi,
-            ErrorReporting = request.ErrorReporting
+            ErrorReporting = request.ErrorReporting,
+            Notifications = request.Notifications
         };
 
         return await SaveAsync(
@@ -682,6 +710,7 @@ public class SettingsController : ControllerBase
         public EmailRateLimitUpdate? EmailRateLimit { get; set; }
         public SuwayomiUpdate? Suwayomi { get; set; }
         public ErrorReportingUpdate? ErrorReporting { get; set; }
+        public NotificationsUpdate? Notifications { get; set; }
     }
 
     /// <summary>The series cover image limits of <see cref="AllSettingsRequest"/>, with sizes in megabytes.</summary>

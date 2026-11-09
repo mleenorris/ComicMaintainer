@@ -424,6 +424,34 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
         _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
     }
 
+    // A stop can also cut off the move in flight: that one did not happen, but the one before it did.
+    [Fact]
+    public async Task Startup_StoppedDuringATrackedFileMove_StillTellsClientsAboutTheOneBefore()
+    {
+        TrackTwoFilesMovedWhileDown();
+        var service = TestServices.CreateFileWatcher(
+            new TestOptionsMonitor<AppSettings>(Settings()), new QueueLogger(_logs, () => null), _store.Object, _processor.Object, _broadcaster.Object);
+        _services.Add(service);
+        var moves = 0;
+        _store.Setup(s => s.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .Returns<string, string, CancellationToken, bool>(async (_, _, token, _) =>
+            {
+                if (Interlocked.Increment(ref moves) == 2)
+                {
+                    await service.StopAsync();
+                    throw new OperationCanceledException(token);
+                }
+            });
+
+        await service.StartAsync();
+
+        await WaitForLogAsync("Incremental scan completed");
+        Assert.Equal(2, moves);
+        Assert.Contains(_logs, message => message.Contains("Followed 1 tracked file(s) moved while their move was not seen", StringComparison.Ordinal));
+        Assert.DoesNotContain(_logs, message => message.Contains("Error moving tracked file", StringComparison.Ordinal));
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+    }
+
     // The rows have moved by then; a client that cannot be told must not cost the rest of the scan.
     [Fact]
     public async Task Startup_TellingClientsAboutMovedFilesFails_StillFinishesTheScan()

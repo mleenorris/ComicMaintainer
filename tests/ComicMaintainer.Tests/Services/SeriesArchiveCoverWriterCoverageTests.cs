@@ -415,6 +415,29 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoveAsync_ArchiveRefusedByTheLimits_LogsWhyAndLeavesItAlone()
+    {
+        var cbz = Path.Join(_root, "refused.cbz");
+        var refused = ComicMaintainer.Tests.Utilities.ComicArchiveReaderTests.Rar5(dictionaryPower: 13);
+        File.WriteAllBytes(cbz, refused);
+        SetupFirstArchive(cbz);
+        var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
+
+        await CreateWriter(logger: logger.Object).RemoveAsync(Key);
+
+        Assert.Equal(refused, File.ReadAllBytes(cbz));
+        Assert.Single(Directory.GetFiles(_root, "*.tmp", SearchOption.AllDirectories).Where(f => f.StartsWith(cbz, StringComparison.Ordinal)).DefaultIfEmpty("none"));
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("decompression dictionary")),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task RemoveAsync_LibraryThrows_IsSwallowed()
     {
         _library
@@ -459,7 +482,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
 
     // ---- helpers -----------------------------------------------------------------------
 
-    private SeriesArchiveCoverWriter CreateWriter(bool registerWatcher = true)
+    private SeriesArchiveCoverWriter CreateWriter(bool registerWatcher = true, ILogger<SeriesArchiveCoverWriter>? logger = null)
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => _library.Object);
@@ -470,7 +493,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(_settings);
-        return new SeriesArchiveCoverWriter(scopeFactory, options.Object, Mock.Of<ILogger<SeriesArchiveCoverWriter>>());
+        return new SeriesArchiveCoverWriter(scopeFactory, options.Object, logger ?? Mock.Of<ILogger<SeriesArchiveCoverWriter>>());
     }
 
     private void SetupFirstArchive(string? path)

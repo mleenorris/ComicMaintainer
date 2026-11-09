@@ -197,6 +197,14 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         {
             throw;
         }
+        catch (ArchiveLimitExceededException ex)
+        {
+            _logger.LogWarning(
+                "Left the embedded series cover in {Path} for {Key}, the archive was refused: {Reason}",
+                LoggingHelper.SanitizePathForLog(archivePath),
+                LoggingHelper.SanitizeForLog(normalizedKey),
+                LoggingHelper.SanitizeForLog(ex.Message));
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogDebug(ex,

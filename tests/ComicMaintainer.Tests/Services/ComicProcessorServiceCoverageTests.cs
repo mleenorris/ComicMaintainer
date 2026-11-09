@@ -2301,7 +2301,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     /// A valid archive whose "unreadable.bin" entry declares the reserved compression method 11
     /// in its local and central directory headers, so no reader can decompress it.
     /// </summary>
-    private string WriteCbzWithUnreadableEntry(string relativePath, string? comicInfo = null)
+    private string WriteCbzWithUnreadableEntry(string relativePath, string? comicInfo = null, string unreadableEntry = "unreadable.bin")
     {
         var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -2313,7 +2313,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         }
 
         var bytes = File.ReadAllBytes(path);
-        var name = Encoding.UTF8.GetBytes("unreadable.bin");
+        var name = Encoding.UTF8.GetBytes(unreadableEntry);
         var patched = 0;
         for (var i = 0; i + 46 + name.Length <= bytes.Length; i++)
         {

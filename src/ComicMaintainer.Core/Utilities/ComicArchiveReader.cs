@@ -142,9 +142,7 @@ public sealed class ComicArchiveReader : IDisposable
                     ArchiveEntryReader.EnsureRarDictionariesWithinLimit(stream, archiveName, rarFileHeadersToCheck);
                 }
 
-                stream.Dispose();
-                // Opened by path, so the following volumes of a multi-part archive are found.
-                return new ComicArchiveReader(archiveName, archiveBytes, zip: null, OpenRarArchive(filePath));
+                return new ComicArchiveReader(archiveName, archiveBytes, zip: null, OpenRarArchive(filePath, stream));
             }
 
             stream.Position = 0;
@@ -163,29 +161,43 @@ public sealed class ComicArchiveReader : IDisposable
     }
 
     /// <summary>
-    /// Opens the RAR archive and checks the dictionaries of the volumes after the first one,
-    /// which SharpCompress reads too; the first was checked before it was opened.
+    /// Opens the RAR archive in <paramref name="firstFile"/>, whose dictionaries the caller has
+    /// checked, so that SharpCompress only ever parses headers that have been checked too.
     /// </summary>
-    private static IArchive OpenRarArchive(string filePath)
+    /// <remarks>
+    /// Opened by path, SharpCompress looks for the parts that follow by name. When the next part
+    /// starts with a RAR signature each part is a volume of its own, and those volumes are
+    /// checked here. When it does not, SharpCompress reads all the parts as one continuous file,
+    /// headers included, past the end of the file that was checked. Real volumes always have the
+    /// signature, so that case gets only the file that was asked for: it is opened from its
+    /// already checked stream, which SharpCompress cannot follow to another file.
+    /// </remarks>
+    private static IArchive OpenRarArchive(string filePath, FileStream firstFile)
     {
-        var archive = RarArchive.OpenArchive(filePath, RarReaderOptions);
+        var set = RarArchive.OpenArchive(filePath, RarReaderOptions);
         try
         {
-            foreach (var volume in ((IArchive)archive).Volumes.Skip(1))
+            var volumes = ((IArchive)set).Volumes.ToList();
+            if (volumes.Count > 1)
             {
-                if (volume.FileName is { } volumePath)
+                foreach (var volume in volumes.Skip(1))
                 {
-                    EnsureRar5VolumeWithinLimits(volumePath);
+                    EnsureRar5VolumeWithinLimits(volume.FileName!);
                 }
-            }
 
-            return archive;
+                firstFile.Dispose();
+                return set;
+            }
         }
         catch
         {
-            archive.Dispose();
+            set.Dispose();
             throw;
         }
+
+        set.Dispose();
+        firstFile.Position = 0;
+        return RarArchive.OpenArchive(firstFile, RarReaderOptions);
     }
 
     private static void EnsureRar5VolumeWithinLimits(string volumePath)
@@ -323,12 +335,15 @@ public sealed class ComicArchiveReader : IDisposable
         ArgumentNullException.ThrowIfNull(include);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        // A solid archive is decompressed from the start, the entries left out included.
+        var solid = _rar is { IsSolid: true };
+
         // Refused from the headers alone when they already give the archive away, before a
         // byte is written. The streams below catch headers that understate their sizes.
         var declaredTotal = 0L;
         foreach (var entry in EnumerateEntries())
         {
-            if (entry.IsDirectory || !include(entry.Name))
+            if (entry.IsDirectory || (!solid && !include(entry.Name)))
             {
                 continue;
             }
@@ -344,19 +359,26 @@ public sealed class ComicArchiveReader : IDisposable
         EnsureWithinTotalBudget(declaredTotal, totalBudgetBytes);
 
         var budget = new RewriteBudget(_archiveName, totalBudgetBytes);
-        if (_rar is { IsSolid: true })
+        if (solid)
         {
-            using var reader = _rar.ExtractAllEntries();
+            using var reader = _rar!.ExtractAllEntries();
             while (reader.MoveToNextEntry())
             {
                 var entry = reader.Entry;
                 var name = entry.Key ?? string.Empty;
-                if (entry.IsDirectory || !include(name))
+                if (entry.IsDirectory)
                 {
                     continue;
                 }
 
-                CopyEntry(writer, name, entry.Size, entry.LastModifiedTime, reader.OpenEntryStream, budget, maxEntryBytes);
+                if (include(name))
+                {
+                    CopyEntry(writer, name, entry.Size, entry.LastModifiedTime, reader.OpenEntryStream, budget, maxEntryBytes);
+                }
+                else
+                {
+                    DiscardEntry(name, entry.Size, reader.OpenEntryStream, budget, maxEntryBytes);
+                }
             }
 
             return;
@@ -395,6 +417,17 @@ public sealed class ComicArchiveReader : IDisposable
         using var source = open();
         using var bounded = new LimitedRewriteStream(source, name, declaredSize, maxEntryBytes, budget);
         writer.Write(targetName, bounded, lastModified);
+    }
+
+    /// <summary>
+    /// Decompresses a solid archive's entry that is left out of the copy, which the entries after
+    /// it depend on, under the same limits as one that is copied.
+    /// </summary>
+    private static void DiscardEntry(string name, long declaredSize, Func<Stream> open, RewriteBudget budget, long maxEntryBytes)
+    {
+        using var source = open();
+        using var bounded = new LimitedRewriteStream(source, name, declaredSize, maxEntryBytes, budget);
+        bounded.CopyTo(Stream.Null);
     }
 
     /// <inheritdoc />

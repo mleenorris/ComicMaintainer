@@ -121,6 +121,24 @@ public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RecoverAsync_BackupNextToAnArchiveTheLimitsRefuse_IsNotRestoredOverIt()
+    {
+        // Refused by the read limits, but intact: not the interrupted write a backup is for.
+        var archive = Path.Join(_library, "Series", "refused.cbz");
+        Directory.CreateDirectory(Path.GetDirectoryName(archive)!);
+        var refused = ComicMaintainer.Tests.Utilities.ComicArchiveReaderTests.Rar5(dictionaryPower: 13);
+        File.WriteAllBytes(archive, refused);
+        var backup = WriteArchive("Series/refused.cbz.backup", "old");
+
+        var result = await CreateService().RecoverAsync();
+
+        Assert.Equal(1, result.BackupsLeftInPlace);
+        Assert.Equal(0, result.BackupsRestored);
+        Assert.Equal(refused, File.ReadAllBytes(archive));
+        Assert.Equal("old", PageOf(backup));
+    }
+
+    [Fact]
     public async Task RecoverAsync_TruncatedArchive_IsRestoredFromItsBackup()
     {
         // A stop during the old in-place overwrite left a truncated archive and the good copy

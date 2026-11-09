@@ -257,6 +257,35 @@ public partial class ComicProcessorServiceCoverageTests
     }
 
     [Fact]
+    public async Task NormalizeFilesAsync_ComicInfoInAnUnsupportedMethod_ReportsThat()
+    {
+        var service = CreateService();
+        var path = WriteCbzWithUnreadableEntry("Series/method.cbz", unreadableEntry: "ComicInfo.xml");
+
+        var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { path }));
+
+        Assert.Equal(1, job.FailedFiles);
+        Assert.Contains("unsupported compression method", job.Errors[path]);
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == job.Errors[path]);
+    }
+
+    [Fact]
+    public async Task NormalizeFilesAsync_RarMissingAVolume_ReportsThat()
+    {
+        // ComicInfo.xml goes on in a next volume that is not there, which SharpCompress reports.
+        var service = CreateService();
+        var path = Path.GetFullPath(Path.Join(_library, "Series/lone.cbr"));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, ComicMaintainer.Tests.Utilities.ComicArchiveReaderTests.Rar5(0, name: "ComicInfo.xml", splitAfter: true));
+
+        var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { path }));
+
+        Assert.Equal(1, job.FailedFiles);
+        Assert.Contains("incomplete", job.Errors[path]);
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == job.Errors[path]);
+    }
+
+    [Fact]
     public async Task UpdateMetadataAsync_MalformedComicInfo_ReportsWhyItWasLeftAlone()
     {
         var service = CreateService();

@@ -46,7 +46,8 @@ public enum MetadataWriteOutcome
 /// </param>
 /// <param name="FailureReason">
 /// Why the write failed, when that can be told to users: the read limits refused the archive, or
-/// it is not a readable ZIP or RAR. Null for any other failure and when the write succeeded.
+/// the archive itself is at fault (not a ZIP or RAR, damaged, encrypted, an unsupported compression
+/// method). Null for any other failure and when the write succeeded.
 /// </param>
 public sealed record MetadataWriteResult(MetadataWriteOutcome Outcome, string FilePath, string? FailureReason = null)
 {

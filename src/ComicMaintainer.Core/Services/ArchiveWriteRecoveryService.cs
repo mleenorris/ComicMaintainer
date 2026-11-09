@@ -5,7 +5,6 @@ using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using SharpCompress.Archives;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -309,15 +308,20 @@ public sealed class ArchiveWriteRecoveryService
     }
 
     /// <summary>
-    /// True when the archive opens and lists at least one entry. An archive whose in-place
-    /// overwrite was interrupted has no central directory and fails to open.
+    /// True when the archive opens and lists at least one file. An archive whose in-place
+    /// overwrite was interrupted has no central directory and fails to open. An archive the read
+    /// limits refuse is intact, so a backup must not replace it.
     /// </summary>
     private static bool IsReadableArchive(string path)
     {
         try
         {
-            using var archive = ArchiveFactory.OpenArchive(path);
-            return archive.Entries.Any(entry => !entry.IsDirectory);
+            using var archive = ComicArchiveReader.Open(path);
+            return archive.EnumerateEntries().Any(entry => !entry.IsDirectory);
+        }
+        catch (ArchiveLimitExceededException)
+        {
+            return true;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

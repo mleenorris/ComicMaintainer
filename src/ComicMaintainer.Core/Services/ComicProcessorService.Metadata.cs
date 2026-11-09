@@ -90,7 +90,7 @@ public partial class ComicProcessorService
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(fallbackFilePath));
-            return new ArchiveMetadataRead(null, (ex as ComicArchiveFormatException)?.Message);
+            return new ArchiveMetadataRead(null, DescribeArchiveFailure(ex));
         }
     }
 
@@ -347,16 +347,17 @@ public partial class ComicProcessorService
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return MetadataWriteResult.Failed(filePath, DescribeWriteFailure(ex));
+            return MetadataWriteResult.Failed(filePath, DescribeArchiveFailure(ex));
         }
     }
 
     /// <summary>
-    /// The reason a write failed that is safe to show users, or null. A malformed or unreadable
-    /// archive is reported in the terms of the archive; messages of other failures can hold paths.
+    /// The reason an archive could not be read or rewritten that is safe to show users, or null.
+    /// These exceptions describe the archive itself (not a ZIP or RAR, damaged, encrypted, an
+    /// unsupported compression method); the messages of other failures can hold paths.
     /// </summary>
-    private static string? DescribeWriteFailure(Exception failure) =>
-        failure is ComicArchiveFormatException or InvalidDataException ? failure.Message : null;
+    private static string? DescribeArchiveFailure(Exception failure) =>
+        failure is ComicArchiveFormatException or InvalidDataException or SharpCompressException ? failure.Message : null;
 
     /// <summary>
     /// True when the CBR, RAR or ZIP at <paramref name="filePath"/> may be converted to CBZ: the
@@ -503,7 +504,7 @@ public partial class ComicProcessorService
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error removing metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return MetadataWriteResult.Failed(filePath, DescribeWriteFailure(ex));
+            return MetadataWriteResult.Failed(filePath, DescribeArchiveFailure(ex));
         }
     }
 

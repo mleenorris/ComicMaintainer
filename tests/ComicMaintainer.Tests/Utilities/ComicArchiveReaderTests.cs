@@ -252,7 +252,13 @@ public sealed class ComicArchiveReaderTests : IDisposable
     /// 128 KiB &lt;&lt; <paramref name="dictionaryPower"/>, which is what makes SharpCompress
     /// allocate the unpack window. Its data does not need to be valid.
     /// </summary>
-    private static byte[] Rar5(int dictionaryPower, int method = 3, bool directory = false, int fileHeaders = 1)
+    /// <param name="dictionaryPower">Size of the dictionary, as a power of two over 128 KiB.</param>
+    /// <param name="method">Compression method; 0 stores the data.</param>
+    /// <param name="directory">Whether the entries are folders.</param>
+    /// <param name="fileHeaders">How many file entries to write.</param>
+    /// <param name="name">Name for the entries, instead of "p0.jpg", "p1.jpg", ...</param>
+    /// <param name="splitAfter">Marks the entries as continuing in a next volume.</param>
+    internal static byte[] Rar5(int dictionaryPower, int method = 3, bool directory = false, int fileHeaders = 1, string? name = null, bool splitAfter = false)
     {
         using var output = new MemoryStream();
         output.Write(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 });
@@ -266,19 +272,19 @@ public sealed class ComicArchiveReaderTests : IDisposable
 
         for (var i = 0; i < fileHeaders; i++)
         {
-            var name = Encoding.UTF8.GetBytes($"p{i}.jpg");
+            var nameBytes = Encoding.UTF8.GetBytes(name ?? $"p{i}.jpg");
             var data = new byte[16];
             using var file = new MemoryStream();
             WriteVInt(file, 2); // file header
-            WriteVInt(file, 2); // flags: a data area follows
+            WriteVInt(file, splitAfter ? 0x12UL : 0x02UL); // flags: a data area follows, continued in the next volume
             WriteVInt(file, (ulong)data.Length);
             WriteVInt(file, directory ? 1UL : 0UL); // file flags
             WriteVInt(file, 5_000_000); // unpacked size
             WriteVInt(file, 0x20);
             WriteVInt(file, ((ulong)(uint)method << 7) | ((ulong)(uint)dictionaryPower << 10));
             WriteVInt(file, 1); // host OS
-            WriteVInt(file, (ulong)name.Length);
-            file.Write(name);
+            WriteVInt(file, (ulong)nameBytes.Length);
+            file.Write(nameBytes);
             WriteBlock(output, file.ToArray());
             output.Write(data);
         }
@@ -592,6 +598,47 @@ public sealed class ComicArchiveReaderTests : IDisposable
         Assert.Contains("set.part2.rar", ex.Message);
     }
 
+    [Fact]
+    public void Open_Rar5FollowedByARawSplitPart_ReadsOnlyTheFileItWasAskedFor()
+    {
+        // A next part without a RAR signature is not a volume. Opened by path, SharpCompress
+        // reads it as more of this file, headers included, where a header the dictionary check
+        // never saw could ask for a 1 GiB window. The check has to see what gets parsed.
+        var whole = Rar5(0);
+        var (start, length) = FileBlockRange(whole);
+        var cut = start + length - 6;
+        var bomb = Rar5(13);
+        var (bombStart, bombLength) = FileBlockRange(bomb);
+
+        var first = Path.Join(_dir, "split.part1.rar");
+        File.WriteAllBytes(first, whole[..cut]);
+        using (var rest = new MemoryStream())
+        {
+            rest.Write(whole.AsSpan(cut, 6));
+            rest.Write(bomb.AsSpan(bombStart, bombLength));
+            File.WriteAllBytes(Path.Join(_dir, "split.part2.rar"), rest.ToArray());
+        }
+
+        using var archive = ComicArchiveReader.Open(first);
+
+        Assert.Equal(new[] { "p0.jpg" }, archive.EnumerateEntries().Select(e => e.Name));
+    }
+
+    [Fact]
+    public void Dispose_ReleasesTheFileOfARar5()
+    {
+        var path = Path.Join(_dir, "single.cbr");
+        File.WriteAllBytes(path, Rar5(0));
+
+        using (var archive = ComicArchiveReader.Open(path))
+        {
+            Assert.Equal("p0.jpg", archive.GetEntryAt(0)!.Name);
+        }
+
+        File.Delete(path);
+        Assert.False(File.Exists(path));
+    }
+
     /// <summary>Concatenates the file blocks of two single-file RAR 5 archives.</summary>
     private static byte[] MergeRar5Headers(byte[] first, byte[] second)
     {
@@ -727,11 +774,10 @@ public sealed class ComicArchiveReaderTests : IDisposable
         Assert.Contains("book.cbz", ex.Message);
     }
 
-    [Fact]
-    public void CopyFileEntriesTo_SolidRar_IsReadInOrder()
+    /// <summary>A RAR 4 archive with the solid flag set in its main archive header.</summary>
+    private string SolidRar(string name, params (string Name, byte[]? Data)[] entries)
     {
-        // The solid flag is set in the main archive header (see the conversion tests).
-        var path = Rar("book.cbr", ("folder", null), ("p1.jpg", Bytes("one")), ("p2.jpg", Bytes("two")));
+        var path = Rar(name, entries);
         var bytes = File.ReadAllBytes(path);
         var flags = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(10));
         BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(10), (ushort)(flags | 0x0008));
@@ -739,6 +785,26 @@ public sealed class ComicArchiveReaderTests : IDisposable
             bytes.AsSpan(7),
             (ushort)(ComicReaderServiceCoverageTests.StoredRar4.Crc32(bytes.AsSpan(9, 11)) & 0xFFFF));
         File.WriteAllBytes(path, bytes);
+        return path;
+    }
+
+    [Fact]
+    public void CopyFileEntriesTo_SolidRar_EntriesLeftOutAreDecompressedUnderTheLimitsToo()
+    {
+        // The rest of a solid archive depends on them, so they cost as much as what is copied.
+        var path = SolidRar("book.cbr", ("skip.bin", new byte[600]), ("p1.jpg", new byte[100]));
+        using var output = new MemoryStream();
+        using var archive = ComicArchiveReader.Open(path);
+        using var writer = Writer(output);
+
+        Assert.Throws<ArchiveLimitExceededException>(() =>
+            archive.CopyFileEntriesTo(writer, name => name == "p1.jpg", totalBudgetBytes: 1024, maxEntryBytes: 500));
+    }
+
+    [Fact]
+    public void CopyFileEntriesTo_SolidRar_IsReadInOrder()
+    {
+        var path = SolidRar("book.cbr", ("folder", null), ("p1.jpg", Bytes("one")), ("p2.jpg", Bytes("two")));
         using var output = new MemoryStream();
 
         using (var archive = ComicArchiveReader.Open(path))

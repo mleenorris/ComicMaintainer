@@ -37,7 +37,7 @@ Email is disabled until an SMTP host and a from-address are configured. Set them
 | `SMTP_ALLOW_INSECURE` | `SmtpAllowInsecure` | `false` | Allow the connection to stay plaintext when the server does not advertise STARTTLS. Only enable for a trusted local relay. |
 | `EMAIL_FROM_ADDRESS` | `EmailFromAddress` | *(empty)* | Envelope sender. Must be an address your e-reader service accepts. |
 | `EMAIL_FROM_NAME` | `EmailFromName` | `ComicMaintainer` | Display name on outgoing mail. |
-| `EMAIL_MAX_ATTACHMENT_MB` | `EmailMaxAttachmentMegabytes` | `25` | Deliveries larger than this fail instead of being sent. |
+| `EMAIL_MAX_ATTACHMENT_MB` | `EmailMaxAttachmentMegabytes` | `25` | Largest whole email, in MB, including the attachment's encoding. At `25` a book can be about 18 MB. Deliveries over it fail instead of being sent. Raise it if your mail server accepts larger messages. |
 | `EMAIL_MAX_SENDS_PER_HOUR` | `EmailMaxSendsPerHour` | `0` | Most comic emails in any rolling 60 minutes (`0`–`10000`; `0` = no limit). See [Rate limiting](#rate-limiting). |
 | `EMAIL_MAX_SENDS_PER_DAY` | `EmailMaxSendsPerDay` | `0` | Most comic emails in any rolling 24 hours (`0`–`100000`; `0` = no limit). |
 | `EMAIL_MIN_SECONDS_BETWEEN_SENDS` | `EmailMinSecondsBetweenSends` | `0` | Minimum gap between two comic emails, in seconds (`0`–`86400`; `0` = no gap). |
@@ -47,7 +47,12 @@ STARTTLS is *required*: a server that does not offer it is refused rather than b
 handed credentials and attachments in the clear.
 
 Environment variables take precedence over values saved in `user-settings.json`, exactly
-as for the rest of the application settings.
+as for the rest of the application settings. A field pinned by a variable is read-only in
+Settings, with a hint naming the variable.
+
+Mail servers enforce their size limits on the encoded message, and base64 encoding makes
+an attachment about 37% larger, so `EMAIL_MAX_ATTACHMENT_MB` limits the whole email rather
+than the file. The sender also checks the server's advertised size limit before uploading.
 
 > **Kindle users:** add `EMAIL_FROM_ADDRESS` to your Amazon "Approved Personal Document
 > E-mail List", otherwise Amazon silently drops the message even though the SMTP send
@@ -55,7 +60,8 @@ as for the rest of the application settings.
 
 Settings are updated through `PUT /api/settings/email` (administrators only). Omit
 `smtpPassword` from the request to keep the stored password; send an empty string to
-clear it.
+clear it. A change to a value pinned by an environment variable is refused with 409 and
+saves nothing; a field left out of the request never touches a pinned setting.
 
 ## Rate limiting
 
@@ -98,6 +104,7 @@ the saved values, as for the SMTP settings.
 
 ```sh
 curl -X PUT http://localhost:5000/api/settings/email-rate-limit \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"maxSendsPerHour":20,"maxSendsPerDay":100,"minSecondsBetweenSends":60}'
 ```
@@ -108,7 +115,8 @@ A device is a saved name, email address and default delivery format.
 
 - **Name** – free text, shown in the send menus (e.g. "Paperwhite").
 - **Email address** – a single bare mailbox (`user@example.com`). Display-name forms
-  (`Name <user@example.com>`) and lists are rejected, and addresses must be unique.
+  (`Name <user@example.com>`) and lists are rejected, and each user can save an address
+  only once. Different users may save the same address.
 - **Delivery format** – `original` (send the archive untouched), `epub`, or `azw3`
   (convert before sending).
 
@@ -118,7 +126,25 @@ the `CanModifyLibrary` policy, so it is deliberately *not* inside the Settings m
 Settings for convenience.
 
 Use **Send test email** after adding a device: it sends a short message with no
-attachment and reports the SMTP error verbatim if the server rejects it.
+attachment. If that fails it gives a fixed reason, such as "The mail server rejected the
+login. Check the SMTP username and password in Settings." or "The mail server refused the
+message (SMTP 550)."; the server's own reply is in the log.
+
+### Who can see what
+
+Devices, series subscriptions and delivery history belong to the user who created them,
+and a device's subscriptions and deliveries follow its owner:
+
+- A user sees and manages only their own. Another user's id returns 404, the same as an
+  id that does not exist.
+- An administrator can act on anyone's by id. In the API, administrators add `?all=true`
+  to `GET /api/email/devices`, `/subscriptions` and `/deliveries` and to
+  `POST /api/email/deliveries/cancel-pending` to cover every user. In the web interface,
+  **Show the deliveries of all users** in Email Delivery History does the same for
+  deliveries.
+- With Authelia enabled and `AUTHELIA_ADMIN_GROUPS` empty, every user who is not ReadOnly
+  counts as an administrator, and can read and change everyone's devices and deliveries.
+  Set `AUTHELIA_ADMIN_GROUPS` to keep them private to their owners.
 
 ## Sending comics
 
@@ -166,7 +192,11 @@ book, so a device receives "Batman 001-005" rather than five separate books.
 - **Combine every N issues into one book** – the issues are put in reading order and
   grouped into books of N: issues 1-5, then 6-10, and so on. N is between 2 and 500.
 - **Combine all issues into one book** – the whole selection (or the whole series)
-  becomes a single book.
+  becomes a single book, up to 500 issues.
+
+Any condensed book is limited to 500 issues and to an estimated 2 GiB. A book over either
+limit is refused with an error; condense by count to split it. The issue limit applies to
+each book, so a selection spanning several series folders can hold more than 500 in total.
 
 A book never mixes series: a selection spanning several series is grouped by series first
 and each group is chunked on its own. A send-series request is condensed in the issue
@@ -194,18 +224,21 @@ spans a range, no single issue number is written to the series position metadata
 
 ### Size check and the download fallback
 
-Mailboxes cap attachment size (`EMAIL_MAX_ATTACHMENT_MB`, 25 MB by default), and a book
-made of dozens of issues will not fit. Before anything is queued the send dialog asks
-`POST /api/email/condense-plan`, which reports each book, how many issues it holds and
-its estimated size — the pages keep their original compression, so the sum of the source
-archives plus the container overhead is a close approximation.
+Mailboxes cap message size (`EMAIL_MAX_ATTACHMENT_MB`, 25 MB by default, which is about
+an 18 MB book), and a book made of dozens of issues will not fit. Before anything is
+queued the send dialog asks `POST /api/email/condense-plan`, which reports each book, how
+many issues it holds and its estimated size — the pages keep their original compression,
+so the sum of the source archives plus the container overhead is a close approximation.
+The response also gives `max_book_bytes`, and each book has `exceeds_attachment_limit`
+and `exceeds_book_size_limit`.
 
-Books over the limit are flagged, **Send** is disabled, and each book can be downloaded
-instead (with no size budget, so the pages keep full quality). The dialog lists ten books
-at a time with a **Show more** control, so every book — including an oversized one far
-down a long plan — has its own Download button. Reducing the issues per book is the other
-way out. `POST /api/email/send` and `/send-series` apply the same size check, so an
-oversized book is rejected with an error rather than queued.
+Books over the attachment limit are flagged, **Send** is disabled, and each book can be
+downloaded instead (with no size budget, so the pages keep full quality). The dialog lists
+ten books at a time with a **Show more** control, so every book — including an oversized
+one far down a long plan — has its own Download button. A book over the 2 GiB limit is
+named as too large to build and offers no download. Reducing the issues per book is the
+other way out. `POST /api/email/send` and `/send-series` apply the same size checks, so
+an oversized book is rejected with an error rather than queued.
 
 ### Tracking a download build
 
@@ -349,12 +382,29 @@ first and that book is rewritten as KF8, exactly as a single issue is.
    was [cancelled](#delivery-history-and-cancelling) before it was sent, and any temporary
    file is removed.
 
-Deliveries still queued when the application stops — including one waiting for the rate
-limit — stay `pending` in the database and are **not** resumed when it starts again.
-Because `skipAlreadyDelivered` treats `pending` rows as already handled, simply re-sending
-would skip them; use **Cancel All Pending** in Email Delivery History first (after a
-restart nothing is in progress, so they are cancelled immediately), then send again —
-cancelled deliveries do not count as delivered.
+Delivery rows are stored in the database. When the application starts, and every 15
+minutes while it runs, a sweep puts every `pending` delivery the queue is not holding back
+on the queue, so a restart or a crash does not lose them.
+
+- A message interrupted while it was being sent, for example by a crash, may be sent
+  twice.
+- A delivery interrupted 3 times without a result, for example because the process is
+  killed during conversion each time, is marked `failed` and must be sent again by hand.
+
+### Temporary failures
+
+A temporary failure is retried automatically, 5 attempts in all, after 1 minute, 5
+minutes, 30 minutes and 2 hours, so a delivery can stay `pending` for about 2 h 35 min
+before it shows as `failed`.
+
+| Temporary, retried | Permanent, fails at once |
+|---|---|
+| A 4xx SMTP reply | A 5xx SMTP reply |
+| A login refused with a 4xx reply, such as 454 login throttling | Rejected credentials (535) |
+| Network errors and timeouts | TLS failures |
+
+`GET /api/email/deliveries` reports `attemptCount` and `nextAttemptAt`, and Email Delivery
+History shows them as "2 attempts · next attempt ...".
 
 Deliveries — including failures and their error text — are listed by
 `GET /api/email/deliveries`, and are shown in the UI under
@@ -362,10 +412,12 @@ Deliveries — including failures and their error text — are listed by
 
 ## Delivery history and cancelling
 
-**⋮ menu → 📨 Email Delivery History** lists every delivery, newest first, 50 to a page.
+**⋮ menu → 📨 Email Delivery History** lists your deliveries, newest first, 50 to a page.
 **Previous** and **Next** page through the whole history, and the page counter shows the
 total. Each entry shows its status — ⏳ Pending, ✅ Sent, ❌ Failed or 🚫 Cancelled —
-along with the device, the format and, for failures, the error.
+along with the device, the format, the attempts and next attempt and, for failures, the
+error. Administrators can tick **Show the deliveries of all users** to list everyone's;
+**Cancel All Pending** then covers everyone's too.
 
 A delivery can be cancelled until its message is handed to the mail server:
 
@@ -392,16 +444,18 @@ again if the watcher processes the file again.
 ## API reference
 
 All routes are under `/api/email`. Write operations require the `CanModifyLibrary`
-policy; the SMTP and rate-limit settings endpoints require `CanAdminister`.
+policy; the SMTP and rate-limit settings endpoints require `CanAdminister`. Listings and
+bulk operations cover the caller's own rows; see [Who can see what](#who-can-see-what)
+for `?all=true`. A request with no user id gets 403.
 
 | Method | Route | Description |
 |---|---|---|
 | `GET` | `/api/email/status` | Whether email is configured and usable. |
 | `GET` | `/api/email/devices` | List saved devices. |
-| `POST` | `/api/email/devices` | Create a device. |
+| `POST` | `/api/email/devices` | Create a device owned by the caller. |
 | `PUT` | `/api/email/devices/{id}` | Update a device; omitted fields are unchanged. |
 | `DELETE` | `/api/email/devices/{id}` | Delete a device and its subscriptions. |
-| `POST` | `/api/email/devices/{id}/test` | Send a test message. |
+| `POST` | `/api/email/devices/{id}/test` | Send a test message. `502` `{error}` with a fixed reason when the server refuses it. |
 | `POST` | `/api/email/send` | Queue specific files. |
 | `POST` | `/api/email/send-series` | Queue every issue of a series. |
 | `POST` | `/api/email/condense-plan` | Describe the condensed books a selection or series would produce, with size estimates. |
@@ -415,22 +469,27 @@ policy; the SMTP and rate-limit settings endpoints require `CanAdminister`.
 | `GET` | `/api/email/subscriptions` | List subscriptions, optionally filtered by series. |
 | `PUT` | `/api/email/subscriptions` | Create or update a series subscription. |
 | `DELETE` | `/api/email/subscriptions/{id}` | Remove a subscription. |
-| `GET` | `/api/email/deliveries` | One page of the delivery history, newest first. `limit` (default 50, clamped to 1–500) and `offset` (default 0) select the page. Returns `deliveries`, `total`, `offset`, `limit`, `pending_count` (pending deliveries on every page) and `rate_limited_until` (UTC time the rate limit is holding the next delivery until, otherwise `null`). |
+| `GET` | `/api/email/deliveries` | One page of the delivery history, newest first. `limit` (default 50, clamped to 1–500) and `offset` (default 0) select the page. Returns `deliveries` (each with `attemptCount` and `nextAttemptAt`), `total`, `offset`, `limit`, `pending_count` (pending deliveries on every page) and `rate_limited_until` (UTC time the rate limit is holding the next delivery until, otherwise `null`). |
 | `POST` | `/api/email/deliveries/{id}/cancel` | Cancel a delivery that has not been sent. `200` `{cancelled: true, delivery}` once cancelled; `202` `{cancelled: false, stopping: true, delivery}` while a delivery being prepared is still stopping; `404` for an unknown id; `409` `{error, delivery}` when it is already being sent or has finished. |
-| `POST` | `/api/email/deliveries/cancel-pending` | Cancel every pending delivery. Returns the counts `{cancelled, stopping, sending}`. |
+| `POST` | `/api/email/deliveries/cancel-pending` | Cancel every pending delivery of the caller, or of everyone with `?all=true` for an administrator. Returns the counts `{cancelled, stopping, sending}`. |
 | `PUT` | `/api/settings/email` | Update SMTP settings. |
 | `PUT` | `/api/settings/email-rate-limit` | Update the [rate limit](#rate-limiting): `maxSendsPerHour`, `maxSendsPerDay`, `minSecondsBetweenSends` (`0` = no limit). |
 
-Example — queue two issues as EPUB:
+Every example needs a session token (`POST /api/auth/login`) or an API key in the
+`X-API-Key` header.
+
+Example — subscribe to a series and queue an issue as EPUB:
 
 ```sh
 curl -X PUT http://localhost:5000/api/email/subscriptions \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"seriesTitle":"Batman","deviceId":1,"deliveryFormat":"epub","enabled":true}'
 
 curl -X POST http://localhost:5000/api/email/send \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"files":["/comics/Batman/Batman - Chapter 0001.cbz"],"deviceId":1,"deliveryFormat":"epub"}'
+  -d '{"files":["/watched_dir/Batman/Batman - Chapter 0001.cbz"],"deviceId":1,"deliveryFormat":"epub"}'
 ```
 
 Example — check what condensing a series into books of five issues would produce, then
@@ -438,10 +497,12 @@ queue it:
 
 ```sh
 curl -X POST http://localhost:5000/api/email/condense-plan \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"seriesId":"batman","deviceId":1,"skipAlreadyDelivered":true,"condenseMode":"count","issuesPerBook":5}'
 
 curl -X POST http://localhost:5000/api/email/send-series \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"seriesId":"batman","deviceId":1,"condenseMode":"count","issuesPerBook":5,"deliveryFormat":"azw3"}'
 ```
@@ -452,12 +513,16 @@ curl -X POST http://localhost:5000/api/email/send-series \
 |---|---|
 | "Email is not configured" | `SmtpHost` or `EmailFromAddress` is empty. |
 | Test email succeeds but nothing arrives | The receiving service is filtering the sender; for Kindle, approve the from-address. |
-| Delivery fails with a size error | The attachment exceeds `EMAIL_MAX_ATTACHMENT_MB`, or the receiving service has a lower limit of its own. |
+| Delivery fails with a size error | The whole encoded email exceeds `EMAIL_MAX_ATTACHMENT_MB`, or the receiving service has a lower limit of its own. At the default of 25, a book can be about 18 MB. |
 | Nothing is sent automatically | The subscription is disabled, the series name does not match the folder or metadata series, or the file was already delivered to that device. |
 | Authentication errors | Providers with 2FA usually require an app-specific password rather than the account password. |
 | "The SMTP server does not support the STARTTLS extension" | The server offers no TLS. Use implicit TLS (`SMTP_USE_SSL=true`, port 465) or, for a trusted local relay only, set `SMTP_ALLOW_INSECURE=true`. |
 | "Series has N issues, which exceeds the ... limit" | A whole-series send is capped at 1000 issues; select the issues to send instead. |
 | Send is disabled with "larger than the ... attachment limit" | The condensed book(s) exceed `EMAIL_MAX_ATTACHMENT_MB`. Download them instead, or condense fewer issues per book. |
 | Deliveries stay ⏳ Pending and the history says the rate limit is holding them back | The configured [rate limit](#rate-limiting) has been reached. They are sent automatically as it allows; raise or clear the limit in Settings (applied within 30 seconds), or cancel the ones you no longer want. |
-| Deliveries stay ⏳ Pending after a restart | Queued deliveries are not resumed when the application starts. Use **Cancel All Pending**, then send them again. |
+| A delivery stays ⏳ Pending for hours | A temporary failure is being retried, for up to about 2 h 35 min. The history shows the attempts and the next attempt. |
+| A delivery failed with "Gave up after 3 attempts to prepare or send this delivery" | The process was interrupted each time, most likely by a crash or running out of memory. Send it again after fixing the cause. |
+| An issue arrived twice | A message interrupted mid-send by a crash can be sent again when the application restarts. |
+| "At most 500 issues can be condensed into a single book" | Condense by count to split the selection into several books. |
+| A condensed book is reported as too large to build | It is estimated at over 2 GiB. Condense fewer issues per book. |
 | Cancel reports "already being sent" | The message was already being handed to the mail server and cannot be recalled; it finishes as sent or failed. |

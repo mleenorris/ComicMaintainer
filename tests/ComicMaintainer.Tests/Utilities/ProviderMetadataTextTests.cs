@@ -54,6 +54,14 @@ public class ProviderMetadataTextTests
     }
 
     [Fact]
+    public void Genres_SkipsAValueWithFarTooMuchMarkup()
+    {
+        var genres = ProviderMetadataText.Genres(new[] { string.Concat(Enumerable.Repeat("<b>", 1000)) + "Action" });
+
+        Assert.Empty(genres);
+    }
+
+    [Fact]
     public void Genres_CleansAValueWhoseMarkupMakesItLong()
     {
         var genres = ProviderMetadataText.Genres(new[] { $"<span class=\"{new string('x', 400)}\">Action</span>" });

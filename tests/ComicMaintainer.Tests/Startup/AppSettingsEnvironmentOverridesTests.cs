@@ -281,6 +281,21 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveAll_APinnedFillComicInfoChange_IsRefused()
+    {
+        _environment.Set("FILL_COMICINFO_FROM_PROVIDERS", "false");
+
+        var ex = await Assert.ThrowsAsync<SettingsLockedException>(() => _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(FillComicInfoFromProviders: true)
+        }));
+
+        var pinned = Assert.Single(ex.Overrides);
+        Assert.Equal("FILL_COMICINFO_FROM_PROVIDERS", pinned.Variable);
+        Assert.Equal("fill_comicinfo_from_providers", pinned.ApiField);
+    }
+
+    [Fact]
     public async Task SingleSetting_APinnedChange_IsRefused()
     {
         _environment.Set("DOWNLOAD_EXTERNAL_SERIES_IMAGES", "false");

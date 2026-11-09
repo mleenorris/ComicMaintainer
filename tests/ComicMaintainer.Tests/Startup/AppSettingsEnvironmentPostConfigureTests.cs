@@ -27,6 +27,7 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
         ("ENABLE_ANILIST_METADATA", o => o.EnableAniListMetadata, (o, v) => o.EnableAniListMetadata = v),
         ("ENABLE_SUWAYOMI", o => o.EnableSuwayomi, (o, v) => o.EnableSuwayomi = v),
         ("DOWNLOAD_EXTERNAL_SERIES_IMAGES", o => o.DownloadExternalSeriesImages, (o, v) => o.DownloadExternalSeriesImages = v),
+        ("FILL_COMICINFO_FROM_PROVIDERS", o => o.FillComicInfoFromProviders, (o, v) => o.FillComicInfoFromProviders = v),
         ("SMTP_USE_SSL", o => o.SmtpUseSsl, (o, v) => o.SmtpUseSsl = v),
         ("SMTP_ALLOW_INSECURE", o => o.SmtpAllowInsecure, (o, v) => o.SmtpAllowInsecure = v),
         ("ERROR_REPORTING_ENABLED", o => o.ErrorReportingEnabled, (o, v) => o.ErrorReportingEnabled = v),

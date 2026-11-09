@@ -1,414 +1,228 @@
 # Performance Tuning Guide
 
-This guide provides recommendations for optimizing ComicMaintainer's performance based on your specific use case and system resources.
+This guide covers the settings that affect ComicMaintainer's performance, and the limits on what it will read. Start with the defaults and change one thing at a time.
 
-## Table of Contents
-- [Settings](#settings)
-- [Database Performance](#database-performance)
-- [File Processing Performance](#file-processing-performance)
-- [Web Interface Performance](#web-interface-performance)
-- [System Resource Optimization](#system-resource-optimization)
-- [Monitoring Performance](#monitoring-performance)
+## Contents
 
-## Settings
+- [Processing Files](#processing-files)
+- [Database](#database)
+- [Web Interface](#web-interface)
+- [Comic Pages and Covers](#comic-pages-and-covers)
+- [Archive Limits](#archive-limits)
+- [Resources](#resources)
+- [Monitoring](#monitoring)
+- [Troubleshooting](#troubleshooting)
 
-The Python version's `MAX_WORKERS`, `GUNICORN_WORKERS`, `DB_CACHE_SIZE_MB` and `LOG_MAX_BYTES` environment variables are not read by the .NET version. Use the settings below instead.
+## Processing Files
 
-### Core Performance Settings
+### `MaxWorkers`
 
-#### `MaxWorkers`
-Maximum number of files processed at the same time.
+The number of archives processed at the same time. **Default: 4.**
 
-**Default:** `4`
+This is one shared limit for the watcher, API metadata edits and every running batch job, so several jobs running together share these slots rather than each getting their own. One archive is never processed by two operations at once.
 
-**Recommendations:**
-- **CPU-bound systems:** 2-4 workers
-- **Systems with fast storage (SSD/NVMe):** 4-8 workers
-- **Systems with slow storage (HDD/Network):** 2-4 workers
-- **Low memory systems:** 2-3 workers
+Set it with the `AppSettings__MaxWorkers` environment variable. It is read at startup.
 
-It is not on the Settings page: set the `AppSettings__MaxWorkers` environment variable. The value is read at startup.
-
-**Example:**
 ```bash
 docker run -e AppSettings__MaxWorkers=6 ...
 ```
 
-#### Web server workers
-The .NET version serves the web interface from a single process, so there is no web worker count to tune.
+| Storage | Suggested |
+|---|---|
+| SSD or NVMe | 4-8 |
+| Hard disk | 2-4 |
+| Network storage | 2-3 |
 
-#### Database cache
-The SQLite page cache is fixed at 64MB per connection and cannot be changed.
+Lower it on a machine that is short of memory or CPU.
 
-### Log Settings
+### File Stability Delay
 
-#### Maximum log file size
-Size a log file reaches before it is rotated. Set it under **Settings → Log Rotation**; it is applied when the service restarts.
+The watcher waits until a new file has stopped changing before it processes it. **Default: 30 seconds** (`AppSettings__WatcherFileStabilityDelaySeconds`). A slow network copy may need longer. A shorter delay makes new files appear sooner.
 
-**Default:** 10MB
+### Large Batches
 
-**Recommendations:**
-- **Production systems:** 5-10MB
-- **Debug/troubleshooting:** 10-20MB
-- **Storage-constrained systems:** 1-5MB
+Use the batch actions in the web interface. Batch jobs keep running if you close the page, and report progress over real-time updates.
 
-## Database Performance
+Files that are already correct are left alone, so running a job twice costs little.
 
-### SQLite Optimizations
+### Library Scan
 
-The application automatically configures SQLite with optimal settings:
-
-1. **WAL Mode:** Enabled for better concurrent access
-2. **Synchronous Mode:** NORMAL (balanced performance/safety with WAL)
-3. **Memory-Mapped I/O:** 256MB for faster reads
-4. **Temp Store:** In-memory for temporary tables
-5. **Cache Size:** 64MB page cache per connection (fixed)
-
-### Database Maintenance
-
-For optimal performance, occasionally vacuum the database:
-
-```bash
-# Access the container
-docker exec -it comictagger-watcher sh
-
-# Vacuum the database
-sqlite3 /Config/store/comicmaintainer.db "VACUUM;"
-```
-
-**When to vacuum:**
-- After removing large numbers of files
-- After significant marker data cleanup
-- Monthly for large libraries
-
-## File Processing Performance
-
-### Optimization Strategies
-
-1. **Early Exit for Normalized Files**
-   - Files already in correct format are skipped without modification
-   - Reduces unnecessary I/O and metadata updates
-
-2. **Regex Pattern Caching**
-   - Chapter number patterns are pre-compiled
-   - Improves parsing performance for large batches
-
-3. **File Stability Detection**
-   - Optimized to 2 checks (4 seconds) instead of 3 (6 seconds)
-   - Still reliable for most file transfer scenarios
-   - Reduces latency for file processing
-
-### Processing Large Batches
-
-For processing thousands of files:
-
-1. **Increase worker count:**
-   ```bash
-   docker run -e AppSettings__MaxWorkers=8 ...
-   ```
-
-2. **Use async job processing:**
-   - Use the web interface "Process All Files" button
-   - Jobs are persistent and survive page refreshes
-   - Real-time progress updates via SSE
-
-### Incremental Library Scans
-
-The **Library Scan** scheduled job (`library-scan`) loads the tracked file
-list once per run and reuses it for the additions, deletions and
-modified-file passes, so a scan costs one directory walk plus one in-memory
-lookup per file. Its options (JSON, editable via
-`PUT /api/scheduled-jobs/library-scan`) are:
+The **Library Scan** scheduled job (`library-scan`) loads the tracked file list once per run and reuses it for the additions, deletions and modified-file passes, so a scan costs one directory walk plus one in-memory lookup per file. Its options (JSON, editable with `PUT /api/scheduled-jobs/library-scan`) are:
 
 | Option | Default | Effect |
-|--------|---------|--------|
+|---|---|---|
 | `scanForNew` | `true` | Add and fully process files present on disk but not tracked. |
 | `reconcileDeletions` | `true` | Drop tracked rows whose files no longer exist. |
 | `retagStale` | `true` | Re-normalize files whose series-metadata stamp is older than the cache record. |
 | `reprocessModified` | `false` | Re-normalize tracked files whose on-disk size or last-write time differs from the stored values (±2 s tolerance for coarse filesystem timestamps). |
 
-`reprocessModified` is useful when other tools replace or edit archives in
-place. Stored size/mtime are refreshed after every in-place metadata write by
-ComicMaintainer and, once the re-normalize job completes, for each file it
-normalized successfully, so the app's own writes never re-trigger the pass. A
-changed file whose re-normalize failed or could not be queued, or that a
-failed or cancelled job didn't rewrite, keeps its old values and is retried
-by the next scan. Leave it off for very large libraries on
-slow network storage if the extra `stat` per file is noticeable.
+`reprocessModified` is useful when other tools replace or edit archives in place. Stored size and modification time are refreshed after every metadata write the app makes and, once the re-normalize job completes, for each file it normalized successfully, so the app's own writes never re-trigger the pass. A changed file whose re-normalize failed or could not be queued keeps its old values and is retried by the next scan. Leave it off for very large libraries on slow network storage if the extra `stat` per file is noticeable.
 
-## Web Interface Performance
+### Metadata Providers
 
-### Frontend Optimizations
+Every enabled provider is asked at the same time for each lookup. The two AniList providers share a limit of 28 requests a minute, so large Refresh All or Match Unmatched jobs run at about 14 series a minute while AniList is enabled. Disable AniList for faster bulk runs, or raise `ANILIST_REQUESTS_PER_MINUTE` only within AniList's published limit.
 
-The web interface includes several performance optimizations:
+## Database
 
-1. **Pagination:** 100 files per page (configurable)
-2. **Search Debouncing:** 300ms delay reduces API calls by 87%
-3. **Server-Side Processing:** Filtering, sorting, and searching on backend
-4. **Real-time Updates:** Server-Sent Events (SSE) instead of polling
+SQLite is configured at each connection:
+
+- WAL mode, so writers do not block readers
+- `synchronous=NORMAL`, which is safe with WAL and much faster than `FULL`
+- Temporary tables in memory
+- A 64 MB page cache per connection (fixed)
+- 256 MB of memory-mapped I/O
+
+`PRAGMA optimize` runs after each scheduled database cleanup, so the query planner's statistics stay current without any action from you.
+
+### Reclaiming Disk Space
+
+SQLite does not shrink its file when rows are deleted. A database backup is written with `VACUUM INTO`, so a backup is already compacted. To compact the live database after removing a large part of the library:
+
+1. Stop the container.
+2. Copy `comicmaintainer.db` somewhere safe.
+3. On the host, run `sqlite3 /path/to/config/comicmaintainer.db "VACUUM;"`
+4. Start the container.
+
+Keep the database on local block storage. SQLite over NFS or SMB risks corruption.
+
+## Web Interface
+
+- The library loads series 60 at a time as you scroll.
+- Filtering, sorting and search run on the server.
+- Real-time updates use Server-Sent Events rather than polling.
+- Responses are compressed with Brotli or gzip.
+- Read and unread views are cached per user, so marking comics read affects only that user.
+
+## Comic Pages and Covers
+
+### Pages
+
+The reader keeps a 16 MiB in-memory cache of each archive's sorted page list, so turning a page or counting pages does not list the archive again. There is no server-side cache of page images: browsers and the service worker already keep them.
+
+Pages are sent with `Cache-Control: private, max-age=3600`, a strong `ETag` and `Last-Modified`, taken from the archive's size and modification time. A revalidation answers 304 after a `stat`, without opening the archive.
+
+### Solid RAR Archives
+
+The pages of a solid RAR can only be decompressed from the start of the archive, so page turns in a large solid CBR are slower than in a CBZ. If that matters, convert such files to CBZ.
 
 ### Cover Thumbnails
 
-File-list covers (`/api/comicreader/cover`) are served from an on-disk cache
-of downscaled thumbnails rather than full-size page 1 images, which typically
-shrinks each cover from several hundred KB to a few tens of KB. Settings
-(set via environment, e.g. `AppSettings__FileCoverThumbnailMaxWidth=360`):
+Library covers (`/api/comicreader/cover`) are served from an on-disk cache of downscaled thumbnails rather than full-size first pages. Set these with environment variables, for example `AppSettings__FileCoverThumbnailMaxWidth=360`:
 
 | Setting | Default | Description |
-|---------|---------|-------------|
-| `FileCoverThumbnailMaxWidth` | `480` | Max thumbnail width in px. Images are never upscaled. `0` serves the original page bytes without re-encoding. |
+|---|---|---|
+| `FileCoverThumbnailMaxWidth` | `480` | Maximum thumbnail width in pixels. Images are never enlarged. `0` serves the original page without re-encoding. |
 | `FileCoverThumbnailFormat` | `webp` | `webp` or `jpeg`. |
-| `FileCoverThumbnailQuality` | `80` | Encoder quality (1–100). |
-| `FileCoverCacheEnabled` | `true` | Persist thumbnails under `FileCoverCacheDirectory` (default `{ConfigDirectory}/file-covers`). |
-| `FileCoverCacheMaxMegabytes` | `512` | Soft cap; least-recently-used entries are pruned. |
+| `FileCoverThumbnailQuality` | `80` | Encoder quality, 1 to 100. |
+| `FileCoverCacheEnabled` | `true` | Keep thumbnails on disk under `FileCoverCacheDirectory` (default `{ConfigDirectory}/file-covers`). |
+| `FileCoverCacheMaxMegabytes` | `512` | Soft cap. The least recently used entries are removed; a thumbnail's last-used time is refreshed at most once a day. |
 
-The thumbnail variant (format + width + quality) is recorded with each cache
-entry and included in the cover `ETag`, so changing any of these settings
-regenerates entries on next request and browsers revalidate (304 responses
-are still returned for unchanged covers). If a page cannot be decoded, the
-original bytes are served instead.
+Covers are sent with `Cache-Control: private, max-age=3600` and a strong `ETag` that includes the source file's size and modification time and the thumbnail variant, so changing any of these settings regenerates entries on the next request. A revalidation answers 304 without reading the thumbnail or the archive. If a page cannot be decoded, the original image is served.
 
-### Response Optimization
+## Archive Limits
 
-The application automatically:
-- Disables JSON pretty-printing (smaller responses)
-- Skips JSON key sorting (faster serialization)
-- Adds cache control headers
-- Uses WAL mode for faster database reads
+These limits stop a crafted or broken archive from using up the server's memory or disk. They are far above what real comics need.
 
-### Browser Performance
+### Reading
 
-For best performance:
-1. Use modern browsers (Chrome, Firefox, Safari, Edge)
-2. Enable hardware acceleration
-3. Close unused tabs when processing large libraries
-4. Use dark mode to reduce GPU load (optional)
+| Limit | Value |
+|---|---|
+| One page, uncompressed | 100 MiB |
+| `ComicInfo.xml`, uncompressed | 8 MiB |
+| Entries in an archive | 20,000 |
+| Compression ratio, for an entry over 16 MiB | 100:1 |
+| RAR 5 decompression dictionary | 256 MiB |
+| RAR 5 archive comment | 1 MiB |
 
-## System Resource Optimization
+An archive over a limit gets `422` with a reason naming the entry and the limit. It is logged as a warning, `Refused to read <file>: <reason>`, once per file version.
 
-### Memory Usage
+The ratio check can also refuse a genuine, nearly blank uncompressed page, such as a BMP over 16 MiB. The error says so; repack that page as JPEG, PNG or WebP.
 
-**Typical memory usage:**
-- Base application: ~100-200MB
-- Per worker thread: ~50-100MB
-- Database cache: up to 64MB per database connection
+### Rewriting
 
-**Total RAM recommendation:**
-- Minimum: 512MB
-- Recommended: 1GB+
-- Optimal: 2GB+ for large libraries
+These apply when tagging, converting to CBZ or embedding a cover:
 
-### CPU Usage
+| Limit | Value |
+|---|---|
+| One entry, uncompressed | 1 GiB |
+| Compression ratio, for an entry over 16 MiB | 100:1 |
+| Total written | 20 times the archive's size (all volumes of a multi-volume set), at least 2 GiB, at most 64 GiB |
 
-**CPU recommendations:**
-- Minimum: 1 core
-- Recommended: 2+ cores
-- Optimal: 4+ cores for concurrent processing
+A refused archive is left untouched, and the job result names the reason.
 
-### Storage Performance
+### Formats
 
-**Storage recommendations:**
-- **SSD/NVMe:** Optimal performance, use higher `MaxWorkers` (6-8)
-- **HDD:** Lower `MaxWorkers` (2-4) to avoid disk thrashing
-- **Network storage:** Lower `MaxWorkers` (2-3), increase stability checks if needed
+Archives are recognised from their content, whatever the extension: ZIP (Store, Deflate, Deflate64) and RAR 1.5 to 5.x. Encrypted archives, 7z, tar and gzip are not supported, and a following part with no RAR signature is not joined to the file. Repack such files as CBZ.
 
-### Docker Resource Limits
+## Resources
 
-Example docker-compose configuration:
+ComicMaintainer runs as one process, so there is no web-worker count to tune. Each SQLite connection can use up to 64 MB for its page cache.
+
+Set a memory limit for the container so a large batch cannot affect the rest of the host:
 
 ```yaml
 services:
-  comictagger-watcher:
+  comicmaintainer:
     # ... other settings ...
     deploy:
       resources:
         limits:
-          cpus: '4'      # Limit CPU usage
-          memory: 2G     # Limit memory usage
-        reservations:
-          cpus: '1'      # Reserve minimum CPU
-          memory: 512M   # Reserve minimum memory
+          cpus: '4'
+          memory: 2G
 ```
 
-## Monitoring Performance
+Use `docker stats comicmaintainer` to see what it uses in practice.
 
-### Log Analysis
+## Monitoring
 
-Check logs for performance insights:
+### Logs
 
 ```bash
-# View recent log entries
-docker logs comictagger-watcher --tail 100
-
-# View logs in real-time
-docker logs -f comictagger-watcher
-
-# Access log file directly
-docker exec -it comictagger-watcher cat /Config/Log/ComicMaintainer.log
+docker logs --tail 100 comicmaintainer
+docker logs -f comicmaintainer
 ```
 
-### Health Checks
+Log files are in the config folder: `app.log`, `debug.log`, `watcher.log`, `metadata.log` and `auth.log`. Set the size at which they rotate under **Settings > Log Rotation**. The change applies when the app restarts. The default is 10 MB.
 
-Use the health endpoint to monitor application status:
+### Health
 
 ```bash
-# Check health
+# The app is up: answers "Healthy" with 200
 curl http://localhost:5000/health
 
-# Example response:
-{
-  "status": "healthy",
-  "watched_dir": "/watched_dir",
-  "watched_dir_accessible": true,
-  "database_accessible": true,
-  "watcher_running": true,
-  "file_count": 1234,
-  "version": "1.0.0"
-}
+# The database is reachable too
+curl http://localhost:5000/health/ready
 ```
 
-### Performance Metrics
+### Metrics
 
-ComicMaintainer publishes OpenTelemetry metrics. Enable Prometheus scraping
-with `TELEMETRY__PROMETHEUSENABLED=true` (optionally protected by
-`TELEMETRY__METRICSTOKEN`) or push via OTLP with `OTEL_EXPORTER_OTLP_ENDPOINT`.
-Useful series (Prometheus names):
+ComicMaintainer publishes OpenTelemetry metrics. Enable Prometheus scraping with `TELEMETRY__PROMETHEUSENABLED=true` (optionally protected by `TELEMETRY__METRICSTOKEN`), or push them with `OTEL_EXPORTER_OTLP_ENDPOINT`. Useful series, with their Prometheus names:
 
 | Metric | What it tells you |
-| --- | --- |
+|---|---|
 | `comicmaintainer_files_processed_total{operation,outcome}` | Processing throughput and failure rate |
-| `comicmaintainer_processing_job_duration_seconds{operation,status}` | Batch job duration — compare against `MaxWorkers` changes |
+| `comicmaintainer_processing_job_duration_seconds{operation,status}` | Batch job duration, to compare against `MaxWorkers` changes |
 | `comicmaintainer_scheduled_job_runs_total{job,outcome}` / `comicmaintainer_scheduled_job_duration_seconds` | Scheduled job health (library scan, audits, backups) |
 | `comicmaintainer_metadata_provider_requests_total{provider,outcome}` | External metadata lookups |
-| `comicmaintainer_metadata_provider_rate_limit_waits_total{provider,kind}` | Time lost to provider throttling (`kind=client` local limiter, `kind=server` HTTP 429) — lower `MANGADEX_REQUESTS_PER_SECOND` / `ANILIST_REQUESTS_PER_MINUTE` if `server` waits climb |
-| `comicmaintainer_email_queue_depth` / `comicmaintainer_email_sends_total{outcome}` | Ereader email backlog |
-| `http_server_request_duration_seconds` | API latency (ASP.NET Core instrumentation) |
-| `process_runtime_dotnet_gc_*`, `dotnet_*` | GC / memory pressure (runtime instrumentation) |
+| `comicmaintainer_metadata_provider_rate_limit_waits_total{provider,kind}` | Time lost to provider throttling (`kind=client` is the local limiter, `kind=server` is HTTP 429). Lower `MANGADEX_REQUESTS_PER_SECOND` or `ANILIST_REQUESTS_PER_MINUTE` if `server` waits climb |
+| `comicmaintainer_email_queue_depth` / `comicmaintainer_email_sends_total{outcome}` | E-reader email backlog |
+| `http_server_request_duration_seconds` | API latency |
 
-Exact names can vary slightly with the exporter version (unit suffixes); check
-`/metrics` for the list.
+Exact names can vary slightly with the exporter version (unit suffixes). `/metrics` shows the current list.
 
-Other things to watch:
+## Troubleshooting
 
-1. **File processing time:** Check logs for individual file processing duration
-2. **Batch job completion time:** Monitor job progress in web interface
-3. **Database query time:** Enable debug logging to see query performance
-4. **Memory usage:** Use `docker stats comictagger-watcher`
-5. **CPU usage:** Use `docker stats comictagger-watcher`
+| Symptom | Things to try |
+|---|---|
+| Files take a long time to process | Check whether the storage is slow; lower `MaxWorkers` if the CPU or disk is saturated |
+| The web interface is sluggish | Check the browser console for errors; clear the browser's cache |
+| High memory use | Lower `MaxWorkers`; set a container memory limit |
+| High CPU use | Lower `MaxWorkers`; check for a stuck job and cancel it |
+| Page turns are slow in one comic | It may be a large solid CBR; convert it to CBZ |
+| A comic will not open | Check the [Archive Limits](#archive-limits); the log says which one was hit |
 
-### Debug Mode
+## See Also
 
-Enable detailed logging for performance analysis:
-
-```bash
-docker run -e DEBUG_MODE=true ...
-```
-
-**Warning:** Debug mode generates verbose logs and may impact performance. Use only for troubleshooting.
-
-## Performance Benchmarks
-
-### Typical Performance (SSD, 4 workers)
-
-| Library Size | Initial Scan | Batch Processing | Web UI Load |
-|--------------|--------------|------------------|-------------|
-| 100 files    | <1 second    | ~30 seconds      | <100ms      |
-| 1,000 files  | 1-2 seconds  | ~5 minutes       | <300ms      |
-| 5,000 files  | 3-5 seconds  | ~20 minutes      | <500ms      |
-| 10,000 files | 5-10 seconds | ~40 minutes      | <1 second   |
-
-**Note:** Processing times vary based on:
-- File sizes (larger archives take longer)
-- Metadata complexity
-- Storage speed
-- System resources
-- Number of files already normalized
-
-## Troubleshooting Performance Issues
-
-### Slow File Processing
-
-**Symptoms:** Files take a long time to process
-
-**Solutions:**
-1. Check storage speed (HDD vs SSD)
-2. Reduce `MaxWorkers` if CPU/disk is saturated
-3. Check if files are actually being modified or skipped (normalized)
-4. Enable debug logging to identify bottlenecks
-
-### Slow Web Interface
-
-**Symptoms:** Web UI is sluggish or unresponsive
-
-**Solutions:**
-1. Reduce pagination size (if customized)
-2. Check browser console for JavaScript errors
-3. Clear browser cache
-
-### High Memory Usage
-
-**Symptoms:** Container uses excessive RAM
-
-**Solutions:**
-1. Reduce `MaxWorkers`
-2. Set Docker memory limits
-3. Vacuum database to reclaim space
-
-### High CPU Usage
-
-**Symptoms:** CPU constantly at 100%
-
-**Solutions:**
-1. Reduce `MaxWorkers`
-2. Check for stuck jobs (cancel and retry)
-3. Ensure watcher is not processing same files repeatedly
-4. Check if files are already normalized (should skip processing)
-
-## Best Practices
-
-### For Small Libraries (<1000 files)
-```bash
-docker run \
-  -e AppSettings__MaxWorkers=2 \
-  ...
-```
-
-### For Medium Libraries (1000-5000 files)
-```bash
-docker run \
-  -e AppSettings__MaxWorkers=4 \
-  ...
-```
-
-### For Large Libraries (>5000 files)
-```bash
-docker run \
-  -e AppSettings__MaxWorkers=6 \
-  ...
-```
-
-### For Production Systems
-```bash
-docker run \
-  -e AppSettings__MaxWorkers=4 \
-  --memory=2g \
-  --cpus=4 \
-  ...
-```
-
-Set the maximum log file size (for example 10MB) under **Settings → Log Rotation**.
-
-## Summary
-
-Performance tuning is about finding the right balance for your specific use case. Start with the defaults and adjust based on:
-- Your library size
-- Available system resources
-- Expected usage patterns
-- Storage performance
-
-Monitor the application using logs and health checks, and adjust settings incrementally to find the optimal configuration for your setup.
-
-For additional help, see:
-- [README.md](../README.md) - General usage documentation
-- [DEBUG_LOGGING_GUIDE.md](DEBUG_LOGGING_GUIDE.md) - Debugging guide
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - Development guide
+- [README](../README.md)
+- [Reverse Proxy Guide](REVERSE_PROXY.md)
+- [Docker Deployment Guide](DOCKER_DEPLOYMENT_DOTNET.md)

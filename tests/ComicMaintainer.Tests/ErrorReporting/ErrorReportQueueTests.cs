@@ -73,7 +73,8 @@ public class ErrorReportQueueTests
     [InlineData(nameof(AppSettings.NotifyWebhookUrl), "https://hook.example/p/Zx9Yw8Vu7Ts", "Zx9Yw8Vu7Ts")]
     [InlineData(nameof(AppSettings.NotifyKomgaApiKey), "Mnbvcx0987Lkjh", "Mnbvcx0987Lkjh")]
     [InlineData(nameof(AppSettings.NotifyKavitaApiKey), "Poiuyt6543Rewq", "Poiuyt6543Rewq")]
-    public void ErrorReportFactory_MasksEachNotificationSecret(string setting, string value, string mustNotAppear)
+    [InlineData(nameof(AppSettings.SuwayomiPassword), "Lkjhgf4321Bvcx", "Lkjhgf4321Bvcx")]
+    public void ErrorReportFactory_MasksEachConfiguredSecret(string setting, string value, string mustNotAppear)
     {
         var settings = new AppSettings();
         typeof(AppSettings).GetProperty(setting)!.SetValue(settings, value);

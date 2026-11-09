@@ -191,9 +191,10 @@ public sealed class ErrorReportFactory : IErrorReportFactory
     private IReadOnlyCollection<string> CollectLiteralSecrets()
     {
         var settings = _appSettings.CurrentValue;
-        var secrets = new List<string>(9);
+        var secrets = new List<string>(10);
 
         AddIfPresent(secrets, settings.SmtpPassword);
+        AddIfPresent(secrets, settings.SuwayomiPassword);
         AddIfPresent(secrets, settings.ComicVineApiKey);
         AddIfPresent(secrets, settings.ErrorReportingGitHubToken);
         AddIfPresent(secrets, settings.NotifyNtfyToken);

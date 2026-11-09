@@ -23,14 +23,14 @@ const widgetText = page => page.$('#providerHealthWidget').textContent.trim();
 
 test('Scan Unmarked reports how many files are marked and unmarked', async () => {
     const page = await bootLibrary({
-        routes: { 'POST /api/scan-unmarked': { total_count: 10, unmarked_count: 3, marked_count: 7 } }
+        routes: { 'GET /api/files/scan-unmarked': { total_count: 10, unmarked_count: 3, marked_count: 7 } }
     });
 
     page.click(SCAN_BUTTON);
     assert.deepEqual(messages(page), [{ type: 'info', text: 'Scanning for unmarked files...' }]);
     await page.settle();
 
-    const [call] = callsTo(page, '/api/scan-unmarked', 'POST');
+    const [call] = callsTo(page, '/api/files/scan-unmarked');
     assert.match(call.headers.authorization, /^Bearer /);
     assert.deepEqual(messages(page).at(-1), {
         type: 'success',
@@ -40,7 +40,7 @@ test('Scan Unmarked reports how many files are marked and unmarked', async () =>
 
 test('Scan Unmarked from the settings menu closes the menu', async () => {
     const page = await bootLibrary({
-        routes: { 'POST /api/scan-unmarked': { total_count: 0, unmarked_count: 0, marked_count: 0 } }
+        routes: { 'GET /api/files/scan-unmarked': { total_count: 0, unmarked_count: 0, marked_count: 0 } }
     });
     page.click('#settingsMenuToggle');
     assert.ok(page.$('#settingsDropdownMenu').classList.contains('show'));
@@ -53,7 +53,7 @@ test('Scan Unmarked from the settings menu closes the menu', async () => {
 });
 
 test('a failed scan is reported', async () => {
-    const page = await bootLibrary({ routes: { 'POST /api/scan-unmarked': respond(500, 'Error scanning files') } });
+    const page = await bootLibrary({ routes: { 'GET /api/files/scan-unmarked': respond(500, 'Error scanning files') } });
 
     page.click(SCAN_BUTTON);
     await page.settle();
@@ -62,7 +62,7 @@ test('a failed scan is reported', async () => {
 });
 
 test('a scan with an expired session goes to the login page', async () => {
-    const page = await bootLibrary({ routes: { 'POST /api/scan-unmarked': 401 } });
+    const page = await bootLibrary({ routes: { 'GET /api/files/scan-unmarked': 401 } });
 
     page.click(SCAN_BUTTON);
     await page.settle();

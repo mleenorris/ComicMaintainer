@@ -109,6 +109,7 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
     [InlineData("/api/rename-selected")]
     [InlineData("/api/normalize-selected")]
     [InlineData("/api/process-file")]
+    [InlineData("/api/scan-unmarked")]
     [InlineData("/api/jobs/delete-all")]
     [InlineData("/api/jobs/update-metadata-all")]
     public async Task RemovedAndNeverOfferedRoutesAreNotServed(string url)

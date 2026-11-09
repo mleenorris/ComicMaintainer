@@ -50,7 +50,6 @@ public class FailureMessageAttributeTests
     [InlineData(typeof(FilesController), nameof(FilesController.RenameFileByEncodedPath), "Error renaming file")]
     [InlineData(typeof(FilesController), nameof(FilesController.RenameSingleFile), "Error renaming file")]
     [InlineData(typeof(FilesController), nameof(FilesController.ScanUnmarked), "Error scanning files")]
-    [InlineData(typeof(FilesController), nameof(FilesController.ScanUnmarkedLegacy), "Error scanning files")]
     [InlineData(typeof(FilesController), nameof(FilesController.UpdateFileTags), "Error updating tags")]
     [InlineData(typeof(FilesController), nameof(FilesController.UpdateMetadata), "Error updating metadata")]
     [InlineData(typeof(FilesController), nameof(FilesController.UpdateTags), "Error updating tags")]

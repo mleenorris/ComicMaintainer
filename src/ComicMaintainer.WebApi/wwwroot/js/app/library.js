@@ -480,7 +480,7 @@
         async function scanUnmarkedFiles() {
             try {
                 showMessage('Scanning for unmarked files...', 'info');
-                const data = await apiFetch('/api/scan-unmarked', { method: 'POST' });
+                const data = await apiFetch('/api/files/scan-unmarked');
                 
                 showMessage(`Found ${data.unmarked_count} unmarked file(s) and ${data.marked_count} marked file(s) out of ${data.total_count} total files.`, 'success');
             } catch (error) {

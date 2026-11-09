@@ -683,9 +683,11 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Null(ReadComicInfo(physical));
         Assert.Contains("page001.jpg", EntryNames(physical));
         Assert.NotNull(new DirectoryInfo(alias).LinkTarget);
+        // The physical file is rewritten, but records stay under the path that was requested.
+        var requested = Path.Join(alias, "book.cbz");
         _fileStore.Verify(
             f => f.RefreshFileStatsAsync(
-                It.Is<IEnumerable<string>>(paths => paths.Single() == physical),
+                It.Is<IEnumerable<string>>(paths => paths.Single() == requested),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }

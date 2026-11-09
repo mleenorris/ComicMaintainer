@@ -99,6 +99,7 @@ public static class AppSettingsEnvironmentOverrides
         Whole("COMICVINE_REQUESTS_PER_HOUR", o => o.ComicVineRequestsPerHour, 1, int.MaxValue),
         Whole("METADATA_PROVIDER_TIMEOUT_SECONDS", o => o.MetadataProviderTimeoutSeconds, 1, int.MaxValue),
 
+        Flag("FILL_COMICINFO_FROM_PROVIDERS", o => o.FillComicInfoFromProviders, "fill_comicinfo_from_providers"),
         Flag("DOWNLOAD_EXTERNAL_SERIES_IMAGES", o => o.DownloadExternalSeriesImages, "download_external_series_images"),
         Text("SERIES_IMAGE_CACHE_DIR", o => o.SeriesImageCacheDirectory),
         Whole("SERIES_IMAGE_MAX_BYTES", o => o.SeriesImageMaxBytes, 1, int.MaxValue, "series_image_max_bytes"),

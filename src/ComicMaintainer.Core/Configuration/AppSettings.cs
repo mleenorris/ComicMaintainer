@@ -213,6 +213,14 @@ public class AppSettings
     public bool DownloadExternalSeriesImages { get; set; } = true;
 
     /// <summary>
+    /// When true (the default), processing a file also fills its empty ComicInfo fields
+    /// (Summary, Genre, Web, Count, Manga) from the series' provider match. A value already in
+    /// the file or a Summary locked by a user is never changed, and files are not rewritten
+    /// until they are next processed.
+    /// </summary>
+    public bool FillComicInfoFromProviders { get; set; } = true;
+
+    /// <summary>
     /// Directory where downloaded and user-uploaded series cover images are
     /// stored. When empty, defaults to <c>{ConfigDirectory}/series-images</c>.
     /// Filenames inside this directory are derived from the normalized series

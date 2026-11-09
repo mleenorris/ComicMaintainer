@@ -95,6 +95,11 @@ public partial class ComicProcessorService
             {
                 _logger.LogInformation("NormalizeFileAsync: File already has normalized metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
+                if (await FillFromProviderAsync(filePath, metadata, cancellationToken) is { Succeeded: true } filled)
+                {
+                    filePath = filled.FilePath;
+                }
+
                 await StampSeriesMetadataVersionAsync(filePath, metadata.Series, cancellationToken);
                 var filename = Path.GetFileName(filePath);
                 await LogHistoryWithChangesAsync(filePath, "Normalize", true, "File already normalized",
@@ -108,8 +113,10 @@ public partial class ComicProcessorService
             var beforeMetadata = metadata.Clone();
             var normalizedMetadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
 
-            // Write only the fields normalize owns into ComicInfo.xml; every other element stays.
-            var write = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken);
+            // Write only the fields normalize owns into ComicInfo.xml, plus any provider details
+            // that fill an empty element, so the archive is rewritten once; every other element stays.
+            var providerFill = await ResolveProviderFillAsync(filePath, normalizedMetadata.Series, cancellationToken);
+            var write = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken, providerFill: providerFill);
             if (write.Outcome == MetadataWriteOutcome.NotWritable)
             {
                 await DeferUnwritableNormalizeAsync(filePath, normalizedMetadata.Series, cancellationToken);

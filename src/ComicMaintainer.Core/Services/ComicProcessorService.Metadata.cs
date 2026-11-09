@@ -257,12 +257,17 @@ public partial class ComicProcessorService
     /// the CBZ it is converted to: a user edit's own fields take precedence over them, an automatic
     /// write's (normalize, backfill) do not.
     /// </remarks>
+    /// <param name="providerFill">
+    /// Provider values to put into elements that are still empty, in the same write (see
+    /// <see cref="ComicInfoXml.FillEmptyFields"/>).
+    /// </param>
     private async Task<MetadataWriteResult> UpdateMetadataCoreAsync(
         string filePath,
         ComicMetadata metadata,
         ComicMetadataFieldFlags fields,
         CancellationToken cancellationToken,
-        bool userEdit = false)
+        bool userEdit = false,
+        ProviderComicInfoFields? providerFill = null)
     {
         try
         {
@@ -290,7 +295,7 @@ public partial class ComicProcessorService
                 return MetadataWriteResult.Failed(filePath);
             }
 
-            if (fields == ComicMetadataFieldFlags.None)
+            if (fields == ComicMetadataFieldFlags.None && providerFill is null)
             {
                 _logger.LogDebug("No metadata fields to write for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 return new MetadataWriteResult(MetadataWriteOutcome.Unchanged, filePath);
@@ -324,6 +329,11 @@ public partial class ComicProcessorService
 
             var existing = ReadComicInfoDocument(physicalPath);
             var updated = ComicInfoXml.Merge(existing, values, writeFields);
+            if (providerFill is not null)
+            {
+                updated = ComicInfoXml.FillEmptyFields(updated, providerFill);
+            }
+
             if (ComicInfoXml.AreEquivalent(existing, updated) ||
                 (existing is null && !updated.Root!.HasElements))
             {

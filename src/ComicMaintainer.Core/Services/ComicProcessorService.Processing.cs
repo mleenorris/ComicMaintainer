@@ -143,6 +143,12 @@ public partial class ComicProcessorService
                 {
                     _logger.LogDebug("File already has normalized metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
+                    if (await FillFromProviderAsync(filePath, metadata, cancellationToken) is { Succeeded: true } filled
+                        && FollowMovedFile(filled.FilePath, ref filePath, ref resolvedPath))
+                    {
+                        fileChanged = filled.Outcome is MetadataWriteOutcome.Written or MetadataWriteOutcome.ConvertedToCbz;
+                    }
+
                     var filename = Path.GetFileName(filePath);
                     await LogHistoryWithChangesAsync(filePath, "Normalize", true, "File already normalized",
                         filename, filename, metadata, metadata, cancellationToken);
@@ -153,8 +159,10 @@ public partial class ComicProcessorService
                     var beforeMetadata = metadata.Clone();
                     var normalizedMetadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
 
-                    // Only the fields normalize owns are written; a CBR/RAR may come back as a new CBZ.
-                    var normalizeWrite = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken);
+                    // Only the fields normalize owns are written, plus any provider details that
+                    // fill an empty element; a CBR/RAR may come back as a new CBZ.
+                    var providerFill = await ResolveProviderFillAsync(filePath, normalizedMetadata.Series, cancellationToken);
+                    var normalizeWrite = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken, providerFill: providerFill);
                     normalizeSuccess = normalizeWrite.Succeeded;
                     var beforeFilename = Path.GetFileName(filePath);
                     if (!FollowMovedFile(normalizeWrite.FilePath, ref filePath, ref resolvedPath))

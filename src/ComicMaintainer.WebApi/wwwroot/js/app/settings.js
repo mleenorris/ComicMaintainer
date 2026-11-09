@@ -213,6 +213,7 @@ showMessage('Default preferred language updated', 'success');
             mangadex_base_url: ['mangaDexBaseUrl'],
             enable_anilist_metadata: ['enableAniListMetadata'],
             anilist_base_url: ['aniListBaseUrl'],
+            fill_comicinfo_from_providers: ['fillComicInfoFromProvidersCheckbox'],
             enable_suwayomi: ['enableSuwayomiCheckbox'],
             suwayomi_base_url: ['suwayomiBaseUrl'],
             suwayomi_username: ['suwayomiUsername'],
@@ -380,6 +381,7 @@ showMessage('Default preferred language updated', 'success');
                 document.getElementById('mangaDexBaseUrl').value = settingsData.mangadex_base_url || 'https://api.mangadex.org';
                 document.getElementById('enableAniListMetadata').checked = !!settingsData.enable_anilist_metadata;
                 document.getElementById('aniListBaseUrl').value = settingsData.anilist_base_url || 'https://graphql.anilist.co';
+                document.getElementById('fillComicInfoFromProvidersCheckbox').checked = !!settingsData.fill_comicinfo_from_providers;
 
                 // Load Suwayomi download-server settings
                 const enableSuwayomi = document.getElementById('enableSuwayomiCheckbox');
@@ -1276,6 +1278,7 @@ errorEl.textContent = 'An error occurred. Please try again.';
             const mangaDexBaseUrl = document.getElementById('mangaDexBaseUrl').value.trim();
             const enableAniListMetadata = document.getElementById('enableAniListMetadata').checked;
             const aniListBaseUrl = document.getElementById('aniListBaseUrl').value.trim();
+            const fillComicInfoFromProviders = document.getElementById('fillComicInfoFromProvidersCheckbox').checked;
             const seriesImageMaxMB = parseFloat(document.getElementById('seriesImageMaxMB').value);
             const seriesImageMaxDownloadMB = parseFloat(document.getElementById('seriesImageMaxDownloadMB').value);
             const seriesImageMaxDimension = parseInt(document.getElementById('seriesImageMaxDimension').value);
@@ -1382,7 +1385,8 @@ errorEl.textContent = 'An error occurred. Please try again.';
                     enableMangaDex: unlessPinned('enable_mangadex_metadata', enableMangaDexMetadata),
                     mangaDexBaseUrl: unlessPinned('mangadex_base_url', mangaDexBaseUrl || 'https://api.mangadex.org'),
                     enableAniList: unlessPinned('enable_anilist_metadata', enableAniListMetadata),
-                    aniListBaseUrl: unlessPinned('anilist_base_url', aniListBaseUrl || 'https://graphql.anilist.co')
+                    aniListBaseUrl: unlessPinned('anilist_base_url', aniListBaseUrl || 'https://graphql.anilist.co'),
+                    fillComicInfoFromProviders: unlessPinned('fill_comicinfo_from_providers', fillComicInfoFromProviders)
                 },
                 seriesImageLimits: {
                     maxMB: unlessPinned('series_image_max_bytes', seriesImageMaxMB),

@@ -132,6 +132,13 @@
                 });
         }
 
+        /** Reports a cover update the server would not start, with its reason and reference. */
+        async function reportSeriesCoverFailure(response, action) {
+            const error = apiResponseError(response, await apiErrorMessage(response));
+            closeProgressModal();
+            showMessage(`${action}: ${error.message}`, 'error', { reference: error });
+        }
+
         async function updateAllSeriesCovers() {
             if (!jobProgress.canStartJob()) return;
             if (!confirm('Re-apply the current cached series image to cover sidecars and first-issue archives for ALL series in the library? This may rewrite archive files and can take a while.')) {
@@ -141,9 +148,7 @@
             try {
                 const response = await apiFetch('/api/series-images/apply-current/all', { method: 'POST', json: false });
                 if (!response.ok) {
-                    const error = await response.text();
-                    closeProgressModal();
-                    showMessage('Failed to update series covers: ' + error, 'error');
+                    await reportSeriesCoverFailure(response, 'Failed to update series covers');
                     return;
                 }
                 const data = await response.json();
@@ -197,9 +202,7 @@
             try {
                 const response = await apiFetch('/api/series-images/apply-current/selected', { method: 'POST', body: { series }, json: false });
                 if (!response.ok) {
-                    const error = await response.text();
-                    closeProgressModal();
-                    showMessage('Failed to update selected series covers: ' + error, 'error');
+                    await reportSeriesCoverFailure(response, 'Failed to update selected series covers');
                     return;
                 }
                 const data = await response.json();
@@ -224,9 +227,7 @@
             try {
                 const response = await apiFetch('/api/series-images/apply-current/selected', { method: 'POST', body: { series: [seriesTitle] }, json: false });
                 if (!response.ok) {
-                    const error = await response.text();
-                    closeProgressModal();
-                    showMessage('Failed to update series covers: ' + error, 'error');
+                    await reportSeriesCoverFailure(response, 'Failed to update series covers');
                     return;
                 }
                 const data = await response.json();

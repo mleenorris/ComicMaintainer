@@ -95,6 +95,7 @@ test('saving sends every group in one request with the edited values', async () 
         // The saved settings are then reloaded from the server.
         'GET /api/backups',
         'GET /api/settings',
+        'GET /api/auth/api-key',
         'GET /api/email/status'
     ]);
     assert.deepEqual(saveBody(page, since), {

@@ -1032,7 +1032,7 @@ if (result.success) {
             document.getElementById('opdsApiKeyResult').hidden = !apiKey;
         }
 
-        async function loadOpdsApiKeyStatus(keepCreatedKey = false) {
+        async function loadOpdsApiKeyStatus(keepCreatedKey) {
             if (!keepCreatedKey) showCreatedApiKey('');
             // An Authelia session has no password of its own here, and the server does not ask it for one.
             document.getElementById('opdsApiKeyPasswordGroup').hidden = isAutheliaAuthenticated();

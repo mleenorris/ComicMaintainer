@@ -26,6 +26,7 @@ namespace ComicMaintainer.WebApi.Authentication;
 /// clients send a username and either the account's password or its API key. A password is checked by the rules of a
 /// sign-in (lockout, disabled accounts, published passwords); both draw on the sign-in attempt budget
 /// (<see cref="AuthenticationAttemptLimiter"/>), because they are guessable credentials checked before any other limit.
+/// A refused API key takes one attempt from that budget and never counts against the account it names.
 /// </summary>
 /// <remarks>
 /// <para>While Authelia is enabled only API keys are accepted. An account Authelia created has only a random local
@@ -213,8 +214,7 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
     {
         var client = _clientAddresses.Describe(Context);
 
-        // Only a value that can be a key is looked up. Anything else goes on to the password check, as may a value
-        // with the key prefix that matches no key: a password can start that way too.
+        // Only a value that can be a key is looked up.
         if (secret.StartsWith(ApiKeys.Prefix, StringComparison.Ordinal) && secret.Length <= ApiKeys.MaxLength)
         {
             var keyOwner = await _authService.GetUserByApiKeyAsync(secret);
@@ -222,6 +222,18 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
             {
                 return (keyOwner, true);
             }
+        }
+
+        // A value in the exact form of a generated key that did not pass is a key, not a guessed password: revoked,
+        // replaced (a password change does that) or another account's. Sending it on to the password check would count
+        // it against the named account, so a device still holding the old key would lock its owner out.
+        if (ApiKeys.HasGeneratedForm(secret))
+        {
+            Logger.LogWarning(
+                "Refused an API key for {Username} from {ClientAddress} on the OPDS routes: it is not a current key of that account",
+                LoggingHelper.SanitizeForLog(username),
+                LoggingHelper.SanitizeForLog(client));
+            return (null, false);
         }
 
         if (_authelia.Enabled)

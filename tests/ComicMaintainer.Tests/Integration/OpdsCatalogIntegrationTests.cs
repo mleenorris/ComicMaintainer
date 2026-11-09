@@ -164,6 +164,96 @@ public sealed class OpdsCatalogIntegrationTests : IClassFixture<OpdsHostFixture>
         Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);
     }
 
+    private async Task AssertAccountUntouchedAsync(ApplicationUser user)
+    {
+        using var scope = _host.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var saved = (await users.FindByIdAsync(user.Id))!;
+        Assert.False(await users.IsLockedOutAsync(saved));
+        Assert.Equal(0, await users.GetAccessFailedCountAsync(saved));
+
+        using var login = await _host.GetAsync("/api/auth/login", method: HttpMethod.Post, configure: r => r.Content = JsonContent.Create(new { username = user.UserName, password = OpdsTestHost.Password }));
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+    }
+
+    [Fact]
+    public async Task ADeviceStillHoldingARevokedKeyDoesNotLockItsOwnerOut()
+    {
+        var user = await _host.CreateUserAsync();
+        var key = await _host.CreateApiKeyAsync(user.Id);
+        using (var scope = _host.Services.CreateScope())
+        {
+            Assert.True(await scope.ServiceProvider.GetRequiredService<IAuthService>().RevokeApiKeyAsync(user.Id));
+        }
+
+        // More than the five wrong passwords that lock an account; one view of a cover grid sends this many.
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            using var refused = await _host.GetAsync(Catalog, user.UserName, key);
+            Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        }
+
+        await AssertAccountUntouchedAsync(user);
+    }
+
+    [Fact]
+    public async Task AKeySentWithAnotherUsersNameDoesNotCountAgainstThatUser()
+    {
+        var owner = await _host.CreateUserAsync();
+        var named = await _host.CreateUserAsync();
+        var key = await _host.CreateApiKeyAsync(owner.Id);
+
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            using var refused = await _host.GetAsync(Catalog, named.UserName, key);
+            Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        }
+
+        await AssertAccountUntouchedAsync(named);
+    }
+
+    [Fact]
+    public async Task ARefusedKeyStillTakesAnAttemptFromTheBudget()
+    {
+        var user = await _host.CreateUserAsync();
+        var key = await _host.CreateApiKeyAsync(user.Id);
+        using (var scope = _host.Services.CreateScope())
+        {
+            Assert.True(await scope.ServiceProvider.GetRequiredService<IAuthService>().RevokeApiKeyAsync(user.Id));
+        }
+
+        const string client = "198.51.100.79";
+        for (var attempt = 1; attempt <= AuthenticationRateLimit.PermitLimit; attempt++)
+        {
+            using var refused = await _host.GetAsync(Catalog, user.UserName, key, client: client);
+            Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        }
+
+        using var limited = await _host.GetAsync(Catalog, user.UserName, key, client: client);
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+    }
+
+    [Fact]
+    public async Task APasswordThatMerelyStartsLikeAKeyIsStillAPassword()
+    {
+        const string password = "cm_Passw0rdOk";
+        var user = await _host.CreateUserAsync();
+        await _host.ChangeUserAsync(user.Id, async (users, account) =>
+            Assert.True((await users.ChangePasswordAsync(account, OpdsTestHost.Password, password)).Succeeded));
+
+        using (var signedIn = await _host.GetAsync(Catalog, user.UserName, password))
+        {
+            Assert.Equal(HttpStatusCode.OK, signedIn.StatusCode);
+        }
+
+        // A wrong one in that form is a wrong password like any other: it counts towards the lockout.
+        using var wrong = await _host.GetAsync(Catalog, user.UserName, "cm_Wr0ngPassword");
+        Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
+        using var scope = _host.Services.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        Assert.Equal(1, await manager.GetAccessFailedCountAsync((await manager.FindByIdAsync(user.Id))!));
+    }
+
     [Theory]
     [InlineData("ReadOnly")]
     [InlineData("User")]

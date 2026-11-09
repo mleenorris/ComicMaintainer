@@ -8,5 +8,6 @@ public partial class SettingsPage : ContentPage
     {
         InitializeComponent();
         BindingContext = viewModel;
+        VersionLabel.Text = $"Version {AppInfo.Current.VersionString}";
     }
 }

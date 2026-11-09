@@ -1,398 +1,82 @@
-# Migration Guide: Python to .NET Version
+# Migration Guide
 
-This guide helps you migrate from the Python version of ComicMaintainer to the .NET version.
+This guide covers moving between major versions of ComicMaintainer.
 
-## Overview
+- [From 2.x to 3.0](#from-2x-to-30)
+- [From the Python version to .NET](#from-the-python-version-to-net)
 
-The .NET version of ComicMaintainer provides the same core functionality as the Python version but with some architectural improvements and performance benefits. This guide covers:
+## From 2.x to 3.0
 
-- Differences between versions
-- Data migration
-- Configuration changes
-- Deployment strategies
-- Feature parity status
+Follow the [3.0 release notes](RELEASE_NOTES_V3.0.md). They list what to do before and after
+upgrading, what the upgrade does to your database and files, and how to go back. These points are
+the easiest to miss:
 
-## Key Differences
+- **Duplicates are re-checked once.** If watcher processing is on, the first 3.0 start gives every
+  unprocessed file flagged as a duplicate one more pass. Review the duplicate list before you use
+  **Delete All Duplicates**.
+- **Files that land during the upgrade are only added.** They are not processed, because the app has
+  no scan record yet. Process them from the file list. After that, files that land while the app is
+  stopped are processed at the next start.
+- **A watcher error no longer retries everything.** The recovery rescan queues only untracked files
+  and files still waiting. Use **Process Unmarked** to retry failed files.
+- **`BASE_PATH` now takes effect.** It used to be accepted and ignored. If you set it but serve the
+  app at the domain root, remove it. See [Reverse proxy setup](REVERSE_PROXY.md).
 
-### Technology Stack
+## From the Python version to .NET
 
-| Component | Python Version | .NET Version |
-|-----------|---------------|--------------|
-| Runtime | Python 3.11 | .NET 10.0 |
-| Web Framework | Flask | ASP.NET Core |
-| Dependency Injection | Manual | Built-in DI Container |
-| Storage | File-based markers | In-memory (extensible to DB) |
-| File Watching | watchdog | FileSystemWatcher |
-| Async | asyncio | async/await |
+The Python version used the image `iceburn1/comictagger-watcher`. Since 2.0 the application runs on
+.NET, from the image `iceburn1/comicmaintainer`. The two share no database or settings, so moving
+is a fresh start on the same library.
 
-### Architecture Improvements
+### What carries over
 
-1. **Separation of Concerns**: The .NET version separates core business logic (Core library) from web API concerns (WebApi project)
-2. **Dependency Injection**: Uses built-in .NET DI for better testability
-3. **Type Safety**: Strong typing catches errors at compile time
-4. **Performance**: Generally faster, especially for I/O operations
-5. **Mobile Support**: Foundation for Android/iOS apps via .NET MAUI
+- **Your comics.** Point the new container at the same folders.
+- **`WATCHED_DIR`, `DUPLICATE_DIR`, `PUID`, `PGID` and `BASE_PATH`.** These keep their names.
 
-## Feature Parity Status
+Nothing else is read: not the Python version's markers, its configuration file, or its processing
+history. The .NET version keeps its own database in `/Config`.
 
-### ✅ Implemented Features
+### Steps
 
-- File watching and change detection
-- File storage and tracking
-- Processing status management (processed/unprocessed/duplicate)
-- Batch processing jobs
-- RESTful API endpoints
-- Web interface (HTML/JS/CSS from Python version)
-- Docker support
-- Configuration via environment variables
-- Logging
+1. Stop the Python version. Do not run both on the same library, because both would rewrite and
+   rename the same files.
+2. Back up its configuration folder.
+3. Give the .NET version a new, empty configuration folder. Keep the old one for going back.
+4. Start the .NET version with [Docker](DOCKER_DEPLOYMENT_DOTNET.md), mounting your library at
+   `/watched_dir` and the new folder at `/Config`.
+5. Create the first administrator. Open the web interface and enter the setup code from
+   `docker logs`, or set `ADMIN_PASSWORD` before the first start.
+6. Check the settings, then process your library. The first scan adds existing files without
+   processing them, so nothing is renamed until you run **Process All** or **Process Unmarked**.
 
-### 🚧 Partially Implemented
-
-- Comic metadata extraction (framework in place, needs library integration)
-- File renaming based on templates (framework in place)
-- Duplicate file handling (detection logic ready, moving not fully implemented)
-
-### 📝 Not Yet Implemented
-
-- ComicTagger integration (Python-specific, needs C# equivalent)
-- Server-Sent Events for real-time updates (should use SignalR in .NET)
-- SQLite persistence (using in-memory storage currently)
-- Processing history tracking
-- Preferences storage
-- GitHub integration features
-- Debug logging configuration
-- HTTPS certificate generation
-
-## Data Migration
-
-### Option 1: Clean Start (Recommended)
-
-The simplest approach is to start fresh with the .NET version:
-
-1. **Backup your existing data**:
-   ```bash
-   # Backup Python configuration
-   cp -r /path/to/config /path/to/config.backup
-   
-   # Note which files are marked as processed
-   cp /path/to/config/.processed_files /path/to/processed_backup.txt
-   ```
-
-2. **Start .NET version with clean configuration**:
-   ```bash
-   docker-compose -f docker-compose.dotnet.yml up -d
-   ```
-
-3. **Manually mark previously processed files** (if needed):
-   Use the web interface to mark files that were already processed in the Python version.
-
-### Option 2: Data Migration Script
-
-If you want to preserve your processing history, you can create a migration script:
-
-```python
-# migrate_data.py
-import json
-import requests
-import os
-
-# Read Python markers
-processed_files = set()
-if os.path.exists('.processed_files'):
-    with open('.processed_files', 'r') as f:
-        processed_files = set(line.strip() for line in f)
-
-duplicate_files = set()
-if os.path.exists('.duplicate_files'):
-    with open('.duplicate_files', 'r') as f:
-        duplicate_files = set(line.strip() for line in f)
-
-# Send to .NET API
-api_base = "http://localhost:5000/api"
-
-for file in processed_files:
-    try:
-        response = requests.post(
-            f"{api_base}/files/{file}/mark-processed",
-            json=True
-        )
-        print(f"Marked as processed: {file}")
-    except Exception as e:
-        print(f"Error marking {file}: {e}")
-
-for file in duplicate_files:
-    # Similar logic for duplicates
-    pass
-```
-
-Run the migration:
-```bash
-python migrate_data.py
-```
-
-## Configuration Changes
-
-### Environment Variables
-
-Some environment variables remain the same; others are replaced by settings (see [Configuration](../README.md#configuration)):
+### Environment variables
 
 | Python | .NET | Notes |
 |--------|------|-------|
-| WATCHED_DIR | WATCHED_DIR | ✅ Same |
-| DUPLICATE_DIR | DUPLICATE_DIR | ✅ Same |
-| PROCESS_SCRIPT | N/A | Not needed in .NET |
-| WEB_PORT | N/A | Change the host side of the port mapping (`-p 8080:5000`), or set `ASPNETCORE_URLS` outside Docker (default 5000) |
-| FILENAME_FORMAT | `AppSettings__FilenameFormat` | Or **Settings → Filename Format** in the web UI |
-| ISSUE_NUMBER_PADDING | `AppSettings__IssueNumberPadding` | Or **Settings → Issue Number Padding** in the web UI |
-| WATCHER_ENABLED | `AppSettings__WatcherEnableRename`, `AppSettings__WatcherEnableNormalize` | Or **Settings → Watcher**; turn both off to stop automatic processing |
-| MAX_WORKERS | `AppSettings__MaxWorkers` | Read at startup |
-| GUNICORN_WORKERS | N/A | Single process, nothing to tune |
-| DB_CACHE_SIZE_MB | N/A | SQLite page cache fixed at 64 MB per connection |
-| PUID | PUID | ✅ Same |
-| PGID | PGID | ✅ Same |
-| BASE_PATH | BASE_PATH | ✅ Same |
-| DEBUG_MODE | N/A | Use ASP.NET logging instead |
+| `WATCHED_DIR` | `WATCHED_DIR` | Same |
+| `DUPLICATE_DIR` | `DUPLICATE_DIR` | Same |
+| `PUID` | `PUID` | Same |
+| `PGID` | `PGID` | Same |
+| `BASE_PATH` | `BASE_PATH` | Same |
+| `FILENAME_FORMAT` | `AppSettings__FilenameFormat` | Or **Settings > Filename Format** |
+| `ISSUE_NUMBER_PADDING` | `AppSettings__IssueNumberPadding` | Or **Settings > Issue Number Padding** |
+| `WATCHER_ENABLED` | `AppSettings__WatcherEnableRename`, `AppSettings__WatcherEnableNormalize` | Or **Settings > Watcher**; turn both off to stop automatic processing |
+| `MAX_WORKERS` | `AppSettings__MaxWorkers` | Read at startup |
+| `WEB_PORT` | None | Change the host side of the port mapping (`-p 8080:5000`), or set `ASPNETCORE_URLS` outside Docker |
+| `PROCESS_SCRIPT` | None | Not needed |
+| `GUNICORN_WORKERS` | None | Single process, nothing to tune |
+| `DB_CACHE_SIZE_MB` | None | The SQLite page cache is fixed at 64 MiB per connection |
+| `DEBUG_MODE` | None | Not used |
 
-### Configuration File
+See [Environment variables](ENVIRONMENT_VARIABLES.md) for everything the app reads now.
 
-Python version uses `config.json`, .NET version uses `appsettings.json`:
+### Scripts and the API
 
-**Python (config.json)**:
-```json
-{
-  "filename_format": "{series} - Chapter {issue}",
-  "watcher_enabled": true
-}
-```
+Routes and response shapes differ from the Python version, and most requests need authentication.
+See the [API reference](API.md).
 
-**NET (appsettings.json)**:
-```json
-{
-  "AppSettings": {
-    "FilenameFormat": "{series} - Chapter {issue}",
-    "WatcherEnableRename": true,
-    "WatcherEnableNormalize": true
-  }
-}
-```
+### Going back
 
-## Deployment Strategies
-
-### Strategy 1: Side-by-Side Testing
-
-Run both versions simultaneously on different ports to compare:
-
-```yaml
-# docker-compose.yml
-services:
-  python-version:
-    image: iceburn1/comictagger-watcher:latest
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./comics:/watched_dir
-    environment:
-      - WATCHED_DIR=/watched_dir
-  
-  dotnet-version:
-    build:
-      dockerfile: Dockerfile.dotnet
-    ports:
-      - "5001:5000"
-    volumes:
-      - ./comics:/watched_dir
-    environment:
-      - WATCHED_DIR=/watched_dir
-```
-
-### Strategy 2: Blue-Green Deployment
-
-1. Deploy .NET version alongside Python version
-2. Test .NET version thoroughly
-3. Switch traffic to .NET version
-4. Keep Python version as backup
-5. Decommission Python version after validation period
-
-### Strategy 3: Direct Replacement
-
-For production environments with backup:
-
-1. Stop Python version
-2. Backup all data
-3. Deploy .NET version with same configuration
-4. Restore data if needed
-5. Test thoroughly
-
-## Docker Deployment
-
-### Using Python Dockerfile
-```bash
-docker-compose up -d
-```
-
-### Using .NET Dockerfile
-```bash
-docker-compose -f docker-compose.dotnet.yml up -d
-```
-
-### Build Custom Image
-```bash
-docker build -f Dockerfile.dotnet -t comicmaintainer-dotnet:v1.0 .
-```
-
-## API Endpoint Changes
-
-Most endpoints remain compatible, with minor changes:
-
-### Files API
-
-| Python | .NET | Changes |
-|--------|------|---------|
-| `GET /api/files` | `GET /api/files` | ✅ Same |
-| `GET /api/files/counts` | `GET /api/files/counts` | ✅ Same |
-| `POST /api/files/process` | `POST /api/files/process-batch` | Different route |
-
-### Example API Usage
-
-**Python**:
-```bash
-curl -X POST http://localhost:5000/api/files/process \
-  -H "Content-Type: application/json" \
-  -d '{"files": ["/path/file1.cbz", "/path/file2.cbz"]}'
-```
-
-**NET**:
-```bash
-curl -X POST http://localhost:5000/api/files/process-batch \
-  -H "Content-Type: application/json" \
-  -d '["path/file1.cbz", "/path/file2.cbz"]'
-```
-
-## Testing Your Migration
-
-### 1. Verify File Detection
-```bash
-# Add a test file
-cp test.cbz /watched_dir/
-
-# Check logs
-docker logs comicmaintainer-dotnet
-
-# Verify via API
-curl http://localhost:5000/api/files
-```
-
-### 2. Test Batch Processing
-```bash
-# Via API
-curl -X POST http://localhost:5000/api/files/process-batch \
-  -H "Content-Type: application/json" \
-  -d '["file1.cbz"]'
-
-# Check job status
-curl http://localhost:5000/api/jobs/{jobId}
-```
-
-### 3. Verify Web Interface
-Open `http://localhost:5000` in your browser and test:
-- File listing
-- Filtering (processed/unprocessed)
-- Manual processing
-- Settings
-
-## Rollback Plan
-
-If you encounter issues:
-
-### Quick Rollback
-```bash
-# Stop .NET version
-docker-compose -f docker-compose.dotnet.yml down
-
-# Start Python version
-docker-compose up -d
-```
-
-### Data Recovery
-```bash
-# Restore Python configuration backup
-cp -r /path/to/config.backup/* /path/to/config/
-```
-
-## Performance Comparison
-
-Expected improvements in .NET version:
-
-| Metric | Python | .NET | Improvement |
-|--------|--------|------|-------------|
-| Startup Time | ~2-3s | ~1s | 50-66% faster |
-| Memory Usage | ~80-100MB | ~50-70MB | 20-40% less |
-| File Processing | Baseline | 1.5-2x faster | 50-100% faster |
-| API Response | Baseline | 1.2-1.5x faster | 20-50% faster |
-
-*Note: Actual performance depends on hardware and workload*
-
-## Troubleshooting
-
-### Issue: Files not being detected
-
-**Python version works, .NET doesn't**:
-1. Check file watcher status: `GET /api/watcher/status`
-2. Verify directory permissions
-3. Check logs for errors
-
-### Issue: API returns different results
-
-**Response format changed**:
-- Python returns snake_case: `is_processed`
-- .NET returns PascalCase: `IsProcessed`
-
-Update your client code:
-```javascript
-// Python
-const isProcessed = file.is_processed;
-
-// .NET
-const isProcessed = file.IsProcessed;
-```
-
-### Issue: Docker container won't start
-
-**Check for port conflicts**:
-```bash
-# Check if port 5000 is in use
-netstat -tuln | grep 5000
-
-# Use different port
-docker run -p 5001:5000 comicmaintainer-dotnet
-```
-
-## Future Enhancements
-
-### Planned for .NET Version
-
-1. **Entity Framework Core**: Replace in-memory storage with SQLite
-2. **SignalR**: Real-time updates instead of SSE
-3. **Comic Library Integration**: C# equivalent of ComicTagger
-4. **Mobile Apps**: Native Android/iOS apps via .NET MAUI
-5. **Authentication**: Built-in user management
-6. **Caching**: Redis/memory cache for better performance
-
-## Getting Help
-
-- **Documentation**: See [README.md](../README.md)
-- **Issues**: Report on GitHub Issues
-- **Questions**: Start a GitHub Discussion
-
-## Conclusion
-
-The .NET version provides a solid foundation for future enhancements while maintaining compatibility with the Python version's core functionality. The migration path is straightforward, and you can run both versions side-by-side during the transition period.
-
-For most users, we recommend:
-1. Start with a clean deployment of the .NET version
-2. Test thoroughly with a subset of your comic library
-3. Gradually transition your full library
-4. Keep the Python version as backup during initial deployment
-
-The .NET version is production-ready for basic file watching and management, with advanced features (like full ComicTagger integration) planned for future releases.
+Stop the .NET version and start the Python version with its original configuration folder. Comics the
+.NET version has already tagged or renamed stay that way, and any CBR, RAR or ZIP it converted stays
+a CBZ, so back up files you cannot replace before you process them.

@@ -1,11 +1,561 @@
 # Changelog
 
-All notable changes to ComicTagger Watcher Service will be documented in this file.
+All notable changes to ComicMaintainer are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Changes are written here by hand under [Unreleased], in the pull request that makes them. Releases
+no longer add entries of their own: each [GitHub
+release](https://github.com/mleenorris/ComicMaintainer/releases) lists the pull requests merged
+for it.
+
 ## [Unreleased]
+
+## [3.0.0] - 2026-11-09
+
+Upgrading an existing install? Start with the [3.0 release notes](docs/RELEASE_NOTES_V3.0.md).
+They put the steps in order and explain what the upgrade does to your database and files.
+
+### Breaking changes
+
+Each item ends with what you need to do. Coming from a release before 2.0.413? Also read the
+[2.0.413 breaking changes](#20413---2026-11-06): Authelia mode refuses to start without
+`AUTHELIA_TRUSTED_PROXIES`, and `JWT_SECRET_FILE` and `ADMIN_PASSWORD_FILE` are now read.
+
+#### Signing in and accounts
+
+- **Everyone must sign in again.** Session tokens now carry claims that let them be revoked, and
+  tokens issued by 2.x lack them, so they are refused. Logout, a password change, a role change
+  and disabling or deleting an account now end sessions. **What to do:** sign in again after
+  upgrading.
+- **The published example passwords no longer work.** `Admin123!`, `YourStrongPassword123!` and
+  `YourSecurePassword123!` are refused at startup seeding, setup, registration, password change
+  and sign-in, even on an existing account. **What to do:** set `ADMIN_USERNAME` to the affected
+  account and `ADMIN_PASSWORD` (or `ADMIN_PASSWORD_FILE`) to a password of your own, then restart;
+  the password is replaced at startup. Repeat for each affected account, because the app has no
+  administrator password-reset endpoint.
+- **`ADMIN_PASSWORD` has no default any more.** `docker-compose.dotnet.yml` and `.env.example` no
+  longer set it, so a new install without it goes through first-run setup instead of creating
+  `admin` / `Admin123!`. **What to do:** to create an administrator from the environment, set
+  `ADMIN_PASSWORD` yourself.
+- **First-run setup needs a setup code.** `POST /api/auth/setup` requires the value of
+  `SETUP_TOKEN` or `SETUP_TOKEN_FILE`. Without them a random code is written to the log at
+  startup. Setup works only while no account exists at all, and never with Authelia. **What to
+  do:** find the code with `docker logs`. Authelia deployments that used setup to create a local
+  administrator must set `ADMIN_PASSWORD` instead.
+- **Wrong passwords now lock accounts, and sign-in requests are rate limited.** Five wrong
+  passwords in a row lock an account for 15 minutes, whether at sign-in, password change or
+  API-key creation; the lockout ends on its own. Sign-in, registration, setup, password change and
+  API-key creation allow 10 requests per 5 minutes per client address, then answer 429 with a JSON
+  error and `Retry-After`. Every sign-in failure now reads "Invalid username or password",
+  including for disabled accounts. **What to do:** behind a reverse proxy, set `TRUSTED_PROXIES`,
+  or all clients share one limit.
+- **Old API keys are gone and new ones work differently.** The upgrade drops keys stored by
+  earlier versions; they never authenticated anyone. Keys now go in the `X-API-Key` header only
+  and act as the owning account with its current roles. Any role can create one. Creating one
+  needs the account's current password (Authelia sessions are exempt), is rate limited and cannot
+  be done with an API key. Changing the password or signing out of all sessions revokes the key.
+  **What to do:** create a new key at Settings > OPDS Catalog or with `POST /api/auth/api-key`,
+  and again after a password change.
+- **`POST /api/auth/change-password` refuses API keys (403).** **What to do:** sign in to change a
+  password.
+- **Session tokens are no longer accepted in URLs, and `GET /api/auth/sse-token` is removed.**
+  **What to do:** clients of `/api/events/stream` must call `POST /api/auth/stream-token` and pass
+  the single-use, 60-second token as `?access_token=`. Stream tokens work nowhere else.
+- **The SignalR hub `/hubs/progress` is removed**, and the Content Security Policy now allows
+  same-origin connections only (`connect-src 'self'`). **What to do:** move integrations to the
+  event stream `/api/events/stream`.
+- **Logs are for administrators only.** `GET /api/logs` and `GET /api/logs/files` answer 403 to
+  User and ReadOnly accounts, and the app hides View Logs from them. **What to do:** read logs
+  with an administrator account.
+
+#### Deployment and the Docker image
+
+- **A failed backup now stops the upgrade.** Before applying database migrations the app backs up
+  the database. If that fails (full disk, unwritable folder), startup stops without migrating.
+  **What to do:** fix the disk or permissions and restart.
+- **The container no longer changes ownership of your library.** It only prepares `/Config` (and a
+  custom `CONFIG_DIR`). An empty root-owned top folder is still given to `PUID`, not recursively,
+  and a folder `PUID` cannot write to gets a warning in the log. **What to do:** set `PUID` and
+  `PGID` to the folder owner, grant access on the host, or set `FIX_LIBRARY_PERMISSIONS=true` once
+  and then remove it.
+- **Library folders must allow creating files.** Archive rewrites now build a temporary file in
+  the archive's own folder and rename it into place. A library with writable files in read-only
+  folders now fails metadata writes. `TempFileDirectory` is no longer used for archive writes, and
+  the `<file>.backup` files and cross-device copy are gone. **What to do:** make the library
+  folders writable by `PUID`.
+- **`/app` in the image stays owned by root, and the image no longer contains `unrar-free`,
+  `p7zip-full` or apt's recommended packages.** **What to do:** write under `/Config` instead of
+  `/app`, and add any tools you used inside the container to your own image. The app reads
+  archives itself.
+- **Series cover downloads ignore `HTTP_PROXY` and `HTTPS_PROXY`.** The address guard must make
+  the connection itself to check where it connects. **What to do:** allow direct outbound HTTP(S)
+  from the container, or those downloads fail.
+- **`BASE_PATH` now takes effect.** It used to be accepted and ignored. An install that sets it
+  but is served at the domain root now generates every URL under that prefix and breaks. A value
+  that cannot be a URL path is logged as an error and ignored. **What to do:** remove `BASE_PATH`
+  unless the app really is served under that subfolder.
+- **`/manifest.json` must be reachable through your proxy.** `index.html` now links it with
+  credentials instead of using an inline copy. **What to do:** let the browser fetch
+  `/manifest.json`; a session cookie is sent with the request.
+- **The Kubernetes example changed.** `docs/kubernetes-deployment.yaml` now needs a
+  `comicmaintainer-secrets` Secret (`jwt-secret`, `admin-password`) and adds a duplicates volume
+  claim. The old manifest ran the Python image. **What to do:** create both before applying it.
+
+#### Comic files
+
+- **Writing tags converts CBR, RAR and ZIP files to CBZ.** This is on by default. Any tag write
+  (normalize, tag edit, batch update, remove metadata, backfill) to such a file saves it as
+  `<name>.cbz` and deletes the original. The library record, read status and progress move with
+  it. A file that is itself a symbolic link is never converted. **What to do:** to keep these
+  formats, turn off Settings > Watcher > "Convert CBR/RAR to CBZ when writing tags" or set
+  `AppSettings__ConvertRarToCbzOnWrite=false`.
+- **With that setting off, those archives are never rewritten.** Tag edits stay in the database
+  and appear in the app only. `DELETE /api/files/{path}/metadata` answers 400 for them. A file
+  normalize would change stays unprocessed: normalize jobs count it as failed, and processing
+  still renames it but reports failure. External readers such as Komga or Kavita do not see these
+  edits, and the Metadata Backfill job keeps such files queued and reports them as kept in the
+  database. **What to do:** after turning the setting on, process those files again.
+- **Files already processed can be rewritten and converted.** New and on by default: the next time
+  a file is processed or normalized, its empty Summary, Genre, Web, Count and Manga fields are
+  filled from the series' provider match. That rewrites the archive once and, under the setting
+  above, converts a CBR, RAR or ZIP to CBZ. Files that are already processed are only processed
+  again by a forced reprocess or normalize, a retag after a metadata refresh, or a scheduled job
+  you turned on. Nothing happens to them at the upgrade itself. **What to do:** to keep files as
+  they are, set `FILL_COMICINFO_FROM_PROVIDERS=false` or untick Settings > External Series
+  Metadata > "Fill empty ComicInfo fields from the matched provider". To keep the fill but never
+  change a file's format, turn the conversion setting off; such files then stay unfilled.
+- **Metadata writes now merge into `ComicInfo.xml`.** Every write keeps all existing elements.
+  Tags are written as one comma-separated `<Tags>` (legacy `<Tag>` elements are folded into it)
+  and authors as one comma-separated `<Writer>`. Normalize keeps a real chapter `<Title>`, and
+  files are no longer counted as un-normalized because the title differs from `Chapter N`. The
+  rename step no longer writes a recovered chapter number when normalize is off. A nested
+  `ComicInfo.xml` is now honoured by tagging as well: a write replaces it with one at the archive
+  root, and removing metadata drops every `ComicInfo.xml` at any depth. **What to do:** nothing,
+  unless a tool of yours reads legacy `<Tag>` elements.
+- **Startup cleans up after interrupted writes.** Every start deletes leftover `.tmp_<32
+  hex>.comicinfo-write` files in the library and duplicates folders. Until the cleanup has
+  completed once after upgrading, it also deletes `<archive>.cover.tmp` files and temporary
+  `.tmp_<guid>.cbz` files in `TempFileDirectory`, and restores `<archive>.backup` over a missing
+  or unreadable archive. A `.backup` next to an intact archive is only reported. Completion is
+  recorded in `<ConfigDirectory>/archive-write-recovery-v3.done`. **What to do:** nothing; delete
+  that file to run the cleanup again, and remove reported `.backup` files once you no longer need
+  them.
+- **File name parsing changed.** A marked number outside brackets wins. Otherwise a ` - ` part
+  that is only a number is the issue, else the last standalone number of the first numbered part,
+  ignoring brackets and volume tokens. For example, `Spider-Man 2099 012` gives 12 and `Series
+  (2023)` gives none. **What to do:** expect a forced reprocess to rename files named by the old
+  rules.
+- **Archives over the safety limits are refused.** Reading refuses more than 20,000 entries, a
+  page over 100 MiB uncompressed, or an entry over 16 MiB that expands more than 100:1, and the
+  reader endpoints answer 422 with `{ error }`. Rewrites refuse an entry over 1 GiB, the same
+  100:1 ratio, and output past 20 times the archive size (at least 2 GiB, at most 64 GiB),
+  counting every volume of a set. RAR 5 archives that need a dictionary over 256 MiB or declare a
+  comment over 1 MiB are refused. A refused file is left unchanged. A genuine near-blank
+  uncompressed page, such as a BMP over 16 MiB, can trip the ratio check. **What to do:** repack
+  such files as CBZ, with pages as JPEG, PNG or WebP.
+- **Some archives that used to open no longer do.** This covers files named `.cbz`, `.cbr`, `.zip`
+  or `.rar` that are really 7z, tar or gzip; ZIP entries compressed with anything other than
+  Store, Deflate or Deflate64; encrypted ZIP entries; and a following part with no RAR signature
+  (a raw split). Real multi-volume RAR sets still work. **What to do:** repack as CBZ with
+  Deflate, remove the password, or rejoin raw-split files before adding them.
+- **The tag editor no longer shows Month and Notes, which were never saved.** Its Writer field now
+  shows and edits the file's authors. **What to do:** nothing.
+
+#### Library and processing
+
+- **Files that land while the app is stopped are now processed at the next start**: renamed,
+  normalized and queued for automatic email. That happens only once the directory has been scanned
+  to the end, so the first 3.0 start only adds files that arrived during the upgrade. Changing the
+  watched directory, or stopping and starting the watcher, now rescans it, and a newly chosen
+  directory is only added. If none of the tracked files are left under it, what is found is only
+  added. **What to do:** to avoid catch-up, turn off watcher rename and normalize. Process
+  anything that was only added from the file list.
+- **The recovery rescan no longer retries every unprocessed file.** After a watcher error or
+  buffer overflow it queues only untracked files and files still waiting. **What to do:** use
+  Process Unmarked to retry failed files.
+- **The first start re-checks unprocessed duplicates once.** If watcher processing is on, every
+  unprocessed file flagged as a duplicate gets one automatic pass. Files wrongly flagged by the
+  case-only and library-root bugs are renamed and unflagged; real duplicates are flagged again.
+  That pass can write and convert those files. **What to do:** review the duplicate list before
+  using Delete All Duplicates.
+- **Case-only name differences are no longer duplicates.** On case-insensitive file systems
+  (Windows, macOS, Docker Desktop, SMB) such files are renamed to the resolved casing. Comics
+  directly in the watched or duplicates root no longer take the root folder's name as their
+  series, and a loose file that names no series is neither tagged nor renamed. **What to do:**
+  give loose files a series in `ComicInfo.xml` or in the file name.
+- **Folder changes made outside the app are followed immediately.** Renaming, moving or deleting a
+  folder updates or removes its tracked rows at once. **What to do:** move folders within the
+  library if you want to keep read state; moving one out and back in loses it.
+- **Processing reports more failures.** Duplicates, unreadable archives, failed metadata writes or
+  renames, and files with no series are now failures. Process jobs count them in `FailedFiles`
+  with a reason in `Errors`, and the Prometheus processed-file metric counts them as failures. Job
+  errors and history show the specific reason instead of generic text such as "the archive could
+  not be read". **What to do:** expect failures where jobs used to report success, and update
+  anything that matches the old text.
+- **All work shares one pool of `MaxWorkers` archive slots**, across the watcher, API metadata
+  edits and every running job, and one archive is never processed by two of them at once. **What
+  to do:** nothing; jobs running together may finish later.
+- **Combine Folders no longer deletes a source folder that still holds anything else.** Only a
+  top-level `ComicInfo.xml`, `cover.*` or `folder.*` images, OS metadata files (`.DS_Store`,
+  `Thumbs.db`, `desktop.ini`) and empty subfolders are removed. Other folders and links are kept
+  and listed in the preview, the confirmation and the end of the job. The watched, duplicates and
+  Suwayomi folders are always kept. **What to do:** review the kept folders and move or delete the
+  leftovers by hand.
+- **Stale-entry cleanup now takes two runs and asks before removing much.** A run only stamps a
+  missing file; a later run at least `STALE_CLEANUP_MISSING_GRACE_HOURS` (default 6) after that
+  stamp deletes the row, and 0 still takes a second run. `POST /api/settings/cleanup-database` and
+  `POST /api/files/cleanup-stale` answer 409 instead of deleting when the watched directory or
+  sentinel file is missing. They answer 409 with `requiresConfirmation` when the watched directory
+  holds no comics, more than `STALE_CLEANUP_MAX_REMOVAL_PERCENT` (default 10) of rows would go, a
+  file has not been missing for the grace period, or a duplicate directory holds no comics while
+  files are tracked under it. The cleanup at startup now runs two minutes after start, and a
+  cleanup requested during a scan waits for it. **What to do:** scripts must handle 409 and repeat
+  with `?confirm=true` to delete everything missing right now.
+- **Metadata refreshes rewrite fewer archives.** A refresh retags only series whose match,
+  canonical title or metadata version changed, queues only files whose cached series differs from
+  the resolved name, and queues nothing when normalize is off. **What to do:** to force a rewrite
+  of files that already carry the right series, run Normalize on them.
+- **The processing history keeps less.** No-op outcomes ("File already normalized", "Normalize
+  disabled" and the like) and the summary of a run that changed nothing are not recorded. Entries
+  older than 90 days or beyond the newest 50,000 are pruned. **What to do:** to keep everything,
+  set `PROCESSING_HISTORY_RETENTION_DAYS=0` and `PROCESSING_HISTORY_MAX_ENTRIES=0`.
+- **Folder cover sidecars (`cover.<ext>`) are written by a background queue** shortly after a
+  metadata change, not before the API call returns. **What to do:** scripts that read them right
+  after a change may need to retry.
+- **Half-finished offline downloads from 2.x are deleted** the first time a 3.0 page lists saved
+  comics. Complete ones are kept. **What to do:** save those comics again.
+- **Series cards and list rows have new markup.** Each is a `role=listitem` container with a
+  select button and an open button, not one `<button>`. **What to do:** update custom CSS or
+  userscripts that target the old structure.
+
+#### Metadata providers
+
+- **Automatic matching accepts only an exact title or alias match.** A provider's top fuzzy hit is
+  no longer written into `ComicInfo.xml` or file names, so series that only had fuzzy hits stay
+  unmatched. Existing matches, including wrong ones from 2.x, are kept until refreshed; a 2.x
+  fuzzy match with no stored id becomes `not_found` if no exact match exists. **What to do:**
+  match those series by hand (Manage Series Names, search, Use This Match).
+- **Every enabled provider is asked at once and the best score wins**, where 2.x stopped at the
+  first provider in a fixed order. Manual-match and cover-picker results now alternate between
+  providers. **What to do:** nothing; new lookups can come from a different provider than before.
+- **A refresh stays with the series' match.** A manually matched series is refreshed only from the
+  provider that supplied it, by stored id when known; if that provider is disabled or the entry is
+  gone, the match is kept. An automatically matched series refreshed through another of its names
+  re-fetches its own match. **What to do:** to change a match, apply a new one by hand.
+- **Providers are paced and time out sooner.** ComicVine is limited to 1 request per second and
+  180 per hour (`COMICVINE_REQUESTS_PER_HOUR`), and is skipped once the hour's budget is spent.
+  Requests time out after 15 seconds per attempt (`METADATA_PROVIDER_TIMEOUT_SECONDS`, 1-30). A
+  lookup waits for pacing rather than failing (up to about 65 seconds for AniList), but a 429
+  asking to wait more than 10 seconds fails at once. Large Refresh All or Match Unmatched jobs run
+  at about 14 series per minute while AniList is on. **What to do:** raise the ComicVine variable
+  if you have a higher allowance, or disable AniList for faster bulk runs.
+- **Provider failures are no longer reported as "not found".** `POST
+  /api/metadata/refresh/{seriesTitle}` and `GET /api/metadata/search` answer 503 with `{error,
+  providers, retry_after_seconds}` when providers could not answer and nothing was found, and `GET
+  /api/series-images/candidates` answers 503 with a text reason. Refresh jobs count outages as
+  failures with the reason in `recentResults[].error`. Matched records are left unchanged, and
+  unmatched series get `lookup_status` `error`. The messages use fixed wording built from the
+  provider and kind of failure. **What to do:** API clients must handle 503 and must not parse
+  provider text.
+- **The series-language audit matches `<Series>` tags by series key** and includes the record's
+  folder key, so it can report and retag more. **What to do:** review its findings.
+
+#### E-reader delivery and Suwayomi
+
+- **E-reader devices, subscriptions and delivery history are private per user.** Existing rows go
+  to the first administrator, or stay administrator-only when there is none, and the same address
+  can now be saved by different users. `GET /api/email/devices`, `/subscriptions`, `/deliveries`
+  and `POST /api/email/deliveries/cancel-pending` cover only the caller's rows; administrators add
+  `?all=true`. Another user's id answers 404. **What to do:** other users must add their own
+  devices. With Authelia and an empty `AUTHELIA_ADMIN_GROUPS`, every non-ReadOnly user counts as
+  an administrator here, so set it to keep these rows private.
+- **Pending deliveries are now resumed.** On first start, every pending row left by earlier
+  versions is sent, including old stranded ones. A message interrupted mid-send by a crash may be
+  sent twice. A delivery interrupted three times with no result is marked Failed and must be sent
+  again by hand. A temporary failure stays pending through retries for about 2 hours 35 minutes
+  before it shows as Failed. **What to do:** use Cancel All Pending before upgrading if you no
+  longer want the old ones.
+- **`EMAIL_MAX_ATTACHMENT_MB` now limits the whole encoded email, not the raw file.** At the
+  default 25, a book can be about 18 MB. **What to do:** if your mail server accepts larger
+  messages, raise it; about 34 keeps the old 25 MB file allowance.
+- **Very large condensed books are refused.** That means more than 500 issues in one book in "all"
+  mode, or any condensed book estimated over 2 GiB. **What to do:** condense by count to split it.
+- **Suwayomi source discovery is bounded:** 3 result pages per title, 4 titles per source, 2
+  minutes per source and 10 minutes per series. A series beyond those limits may not be found;
+  truncation is reported in `cutShortSearches`, apart from `discoveryFailures`. **What to do:**
+  search for such a series directly.
+
+#### HTTP API
+
+- **Legacy routes are gone. What to do:** use the replacements.
+  - `POST /api/process-all`, `/api/process-selected`, `/api/rename-all`, `/api/rename-selected`,
+    `/api/normalize-all` and `/api/normalize-selected`: use the same names under `/api/jobs/`,
+    which return `job_id` and `total_items`.
+  - `POST /api/process-file`: use `POST /api/files/process` or `POST
+    /api/files/{encodedFilePath}/process`.
+  - `POST /api/scan-unmarked`: use `GET /api/files/scan-unmarked`, with no request body. The JSON
+    is unchanged.
+  - `PUT /api/watcher` and `POST /api/watcher/enable`, which did nothing: use `PUT
+    /api/settings/watcher-enable-rename` and `PUT /api/settings/watcher-enable-normalize`.
+  - The `POST` aliases of the settings under `/api/settings/`: use `PUT` on the same path with the
+    same body. The actions `cleanup-database`, `reset` and `restart` stay `POST`.
+- **Batch job selection is stricter.** `POST /api/jobs/process-all`, `rename-all`, `normalize-all`
+  and `remove-metadata-all` no longer include files marked as duplicates. The `-selected` routes
+  reject the whole request with 400 if any path, after resolving links, is outside the watched and
+  duplicate directories (`delete-selected` keeps its stricter rule). Blank entries are dropped,
+  and a list of only blanks is a 400 `No files specified`. **What to do:** name duplicates through
+  a `-selected` route and send only library paths.
+- **Bodies on the `-all` and `-unmarked` job routes are now read.** A non-JSON body answers 415,
+  and malformed JSON or an empty chunked JSON body answers 400. `ForceReprocess` is now honoured
+  as `?forceReprocess=true` on `process-unmarked`, `rename-unmarked` and the `-selected` routes,
+  and in the body on the `-all` and `-unmarked` routes. **What to do:** send no body or valid
+  JSON, and stop sending `ForceReprocess` if you relied on it being ignored.
+- **Single-file processing reports failure.** `POST /api/files/process` and `POST
+  /api/files/{encodedFilePath}/process` answer 400 when the file could not be fully processed.
+  **What to do:** handle 400.
+- **Metadata updates merge.** `PUT /api/files/{encodedFilePath}/tags` and `PUT
+  /api/files/metadata` keep fields that are omitted or null. `POST
+  /api/jobs/update-metadata-selected` and `POST /api/files/tags` accept an optional `Fields` list
+  and answer 400 for an unknown field name, or when no field is given or carries a value (`No
+  metadata fields specified`). `DELETE /api/files/{encodedFilePath}/metadata` also returns
+  `filePath`. **What to do:** to clear a field, use one of the two `POST` routes with that field
+  listed in `Fields` and an empty value.
+- **Failure and cancellation codes changed.** `POST /api/files/read-batch` answers 500 and saves
+  nothing when the bulk save fails, instead of writing one row at a time. The read endpoints
+  answer 499 when the request is cancelled, and the single-file `DELETE` endpoints answer 499 if
+  the client aborts while waiting for the file's lock. Requests that time out answer 504 instead
+  of 500, and a client abort no longer produces a 500. **What to do:** handle these codes.
+- **A setting pinned by an environment variable cannot be changed through the API.** A write that
+  would change one is refused with 409 and saves nothing; it used to report success and store a
+  value that never took effect. A field left out is not a write. **What to do:** remove or change
+  the variable and restart.
+- **Error bodies changed.** Unexpected failures are now `application/problem+json` with `status`,
+  `title`, `detail`, `instance`, `correlationId` and `error`, and contain no exception text.
+  Settings 400 and 409 answers are problem documents with an `error` string. `POST
+  /api/settings/reset` no longer returns `{success:false,error}`. `GET /api/logs` and `GET
+  /api/logs/files` no longer include their data fields on a 500. `POST
+  /api/email/devices/{id}/test` returns a fixed reason on 502 with no server text, and 500 for
+  unrecognised failures. **What to do:** check the HTTP status and read `error`; do not parse
+  plain text or `success: false`.
+- **Reader requests.** `POST /api/reader/session/end` answers 404 for another user's session.
+  `POST /api/comicreader/progress` answers 500 when the database write fails, where it used to log
+  and answer 200. Pages and covers are sent as `Cache-Control: private, max-age=3600`, and the
+  cover ETag format changed, so browsers refetch each cover once. **What to do:** end sessions as
+  the user who started them, retry on 500, and do not cache these responses in shared proxies or
+  CDNs.
+
+#### Android app
+
+- **The app needs Android 6.0 or later**, because its secure storage depends on the keystore.
+  **What to do:** update to Android 6.0 or later; Android 5 devices cannot install it.
+- **Sign-in is required.** **What to do:** enter the full server address, including `http://` or
+  `https://`, and a username and password or an API key. There is no default server URL.
+- **The app's data is excluded from Android backups.** **What to do:** sign in again after
+  restoring to a new device.
+
+#### Building and contributing
+
+- **`ComicMaintainer.MauiApp` is no longer in `ComicMaintainer.sln`.** **What to do:** open or
+  build `src/ComicMaintainer.Android.sln` to work on the app.
+- **The "Automatic Version Bump" workflow is now "Release"**, and `test-dotnet` and the E2E
+  workflow no longer have their own push trigger. Version bumps no longer add entries to this
+  file. **What to do:** update branch protection or automation that names the old runs.
+- **Pull requests into `dotnet` can now fail** on missing tests (add the `no-tests-needed` label
+  with a reason), on .NET line coverage below 97 or JS coverage below 99/97/99, on compiler
+  warnings in `src`, and on fixable critical or high image vulnerabilities. **What to do:** keep
+  to these gates; a new base-image CVE can hold up a merge until the image is updated.
+- **Internal interfaces changed.** Examples are `IFileStoreService.CleanupStaleEntriesAsync`,
+  `IReadingSessionService.EndSessionAsync`, `IComicProcessorService` (job methods moved to
+  `IBatchJobRegistry`), `IExternalSeriesMetadataService` (failures must throw
+  `ExternalMetadataUnavailableException`), and the static `SuwayomiImportSynchronization`,
+  replaced by `ILibraryMutationLock`. **What to do:** only code that implements or constructs
+  these must change.
+
+### Added
+
+- **OPDS 1.2 catalog with OPDS-PSE page streaming**, so comic apps can browse and read the
+  library. It is off by default (`OPDS_ENABLED`, or Settings > OPDS Catalog). It is served under
+  `/opds/v1.2/` with its own HTTP Basic sign-in, using a password or an API key as the password.
+  See [OPDS](docs/OPDS.md).
+- **Notifications.** ntfy, Gotify, Discord, a JSON webhook, and Komga and Kavita library rescans,
+  each with its own switch and event list. Messages go through a durable queue with retries, and
+  Settings has a Send Test for each target. `POST /api/notifications/{target}/test` does the same.
+  See [Notifications](docs/NOTIFICATIONS.md).
+- **Richer series details.** AniList, MangaDex and ComicVine now supply a site link, genres,
+  publication status, chapter count and origin. The library has Genre and Status filters (`GET
+  /api/files/series` takes `genre` and `status`; `GET /api/files/series/facets` lists the values).
+  Series cached before 3.0.0 show none of this until their metadata is next refreshed, and a
+  refresh now also updates the cached synopsis.
+- **Empty ComicInfo fields can be filled from the series' provider match**
+  (`FILL_COMICINFO_FROM_PROVIDERS`, on by default). A value already in the file, or a locked
+  Summary, is never changed. LanguageISO is never written from provider data.
+- **API keys that work.** They are stored hashed, with created and last-used times, and managed
+  with `GET`, `POST` and `DELETE /api/auth/api-key` or Settings > OPDS Catalog.
+- **Signing out can end every session.** `POST /api/auth/logout` with `allSessions` also revokes
+  the API key.
+- **New settings:** `ConvertRarToCbzOnWrite`, `SETUP_TOKEN`, `FIX_LIBRARY_PERMISSIONS`,
+  `STALE_CLEANUP_MAX_REMOVAL_PERCENT`, `STALE_CLEANUP_MISSING_GRACE_HOURS`,
+  `STALE_CLEANUP_SENTINEL_FILE`, `PROCESSING_HISTORY_RETENTION_DAYS`,
+  `PROCESSING_HISTORY_MAX_ENTRIES`, `COMICVINE_REQUESTS_PER_HOUR`,
+  `METADATA_PROVIDER_TIMEOUT_SECONDS`, `FILL_COMICINFO_FROM_PROVIDERS`, `OPDS_ENABLED` and the
+  `NOTIFY_*` variables. See [Environment variables](docs/ENVIRONMENT_VARIABLES.md).
+- **Database Cleanup settings** for the removal limit, grace period, sentinel file and history
+  retention, with `GET` and `PUT /api/settings/database-cleanup`.
+- **One request saves every setting.** `PUT /api/settings` applies all groups in one validated
+  write, and `GET /api/settings` lists pinned settings in `env_locked`. Pinned inputs are
+  read-only in Settings, with a hint naming the variable.
+- **An automatic database backup before migrations**, `comicmaintainer-<timestamp>-premigrate.db`,
+  the newest three of which are kept apart from the scheduled backups.
+- **Watcher catch-up at startup**, and live following of folder renames, moves and deletions made
+  outside the app. Rows, read status, reader progress, metadata edits and field locks move with
+  the folder, and files moved or renamed while the app was down keep their state when they can be
+  matched.
+- **Mark All Read and Unread now work on the library, a series or a folder** through `POST
+  /api/files/read-all`.
+- **Combine Folders shows what it will do.** Preview Merge and the confirmation list the folders
+  to be removed and kept. `POST /api/files/combine-folders/preview` returns the same, and `GET
+  /api/jobs/{job_id}` adds `reported_problems`.
+- **Resumable offline downloads.** A comic counts as Saved only when its download finished. An
+  interrupted one shows "Resume N/M" and fetches only the missing pages; one not resumed within 7
+  days is removed.
+- **Reader controls on touch devices.** A tap in the middle of the page, or anywhere on the stream
+  in webcomic mode, shows or hides the controls. Page turns and scrolling leave them as they are,
+  and webcomic mode shows the position in the top bar.
+- **Delivery History for administrators.** An all-users view, with attempt count and next attempt
+  time on each row. The condense plan names books too large to build.
+- **The Android app can sign in**, with a password or an API key kept in secure storage, and has
+  Test Connection on the sign-in page. It filters by all, unmarked, marked and duplicates, and can
+  process or delete a selection.
+- **API request logging in the browser**: `localStorage.setItem('debug_api', 'true')`.
+- **A `LICENSE` file** (MIT).
+
+### Security
+
+- Removed the published `Admin123!` default and refused every published example password,
+  including at sign-in.
+- First-run setup needs a one-time code and is possible only on an instance with no accounts,
+  never under Authelia.
+- Account lockout, a per-client limit on authentication requests, failed attempts logged to
+  `auth.log`, one uniform error for sign-in failures, and a dummy password check for unknown and
+  locked accounts so response time does not give them away.
+- Session tokens can be revoked, are checked against the account on each request (with a short
+  cache), and are never read from a URL. Event streams opened with an API key end once the key is
+  revoked.
+- API keys are stored as SHA-256 hashes. A stolen session token alone cannot create one.
+- Series image downloads are checked at connection time against private, loopback, link-local,
+  metadata, IPv4-mapped and NAT64 ranges, follow redirects only after re-checking each hop, and
+  refuse an HTTPS-to-HTTP downgrade.
+- Archive reads and rewrites are bounded, which limits what a crafted archive can do to memory and
+  disk. Solid RAR files no longer use a reader that could be steered past the header checks.
+- Logs are administrator-only.
+- E-reader devices, subscriptions and deliveries are private per user.
+- Comic pages and covers are never marked `public` for shared caches.
+- A reader session can only be ended by its owner.
+- The unauthenticated SignalR hub is gone, and CSP no longer allows WebSockets to any host.
+- Unexpected failures no longer return exception text to clients.
+- CI scans NuGet packages, the Docker image (Trivy) and code (CodeQL) for the .NET app, on pull
+  requests, pushes to `dotnet` and weekly.
+- `.dockerignore` secret patterns match at any depth, and the image no longer installs
+  `unrar-free`, `p7zip-full` or recommended packages.
+
+### Fixed
+
+- **Library safety.** A missing or empty mount can no longer empty the library: cleanup changes
+  nothing when the root is missing or the sentinel is absent. Case-only renames and loose files in
+  the library root are no longer flagged as duplicates, which could lead Delete All Duplicates to
+  remove the only copy. Combine Folders no longer deletes what it did not move.
+- **Archive writes are atomic.** The old in-place overwrite, and the restore that could replace an
+  intact original with a partial backup, are gone. A write that changes nothing leaves the archive
+  untouched, and a malformed `ComicInfo.xml` is never replaced. The first start after upgrading
+  restores a lost archive from a leftover `.backup` when it can.
+- **`ComicInfo.xml` keeps what it had.** Normalize and batch updates no longer drop credits,
+  Genre, Web, LanguageISO, Manga, Pages and Tags, and Batch Update no longer wipes blank fields.
+- **CBR and RAR files are no longer written as ZIP data under their old extension**, which broke
+  the reader and EPUB or AZW3 conversion. `.zip`, `.rar` and misnamed archives now work in the
+  reader, covers, tagging and conversion, because the format is detected from content.
+- **Concurrent work on one archive.** The watcher, batch jobs and metadata edits no longer rewrite
+  or rename the same archive at once. A cancelled job no longer leaves a row at the old path.
+- **Files and read state are not lost when things move.** Folder moves no longer leave rows stale
+  or lose read status and metadata edits. Email delivery history follows renamed files and
+  folders, and the file list refreshes after a catch-up scan follows moved files, even if the last
+  move failed or the scan was stopped.
+- **Processing results are honest.** A file left unprocessed, flagged as a duplicate or missing a
+  series is no longer reported as a success.
+- **Metadata lookups.** Fuzzy hits no longer rename series. Outages are no longer recorded as
+  `not_found`, and failing providers back off. Each provider request has its own timeout.
+  ComicVine has rate limiting, a User-Agent and status checks, and the manual-match picker shows
+  every provider.
+- **Email delivery.** Deliveries still pending at shutdown are resumed and no longer block later
+  sends. Temporary SMTP failures are retried (1, 5 and 30 minutes, then 2 hours; five attempts in
+  all). AZW3 conversion no longer holds the whole book in memory, and size checks use the encoded
+  message size.
+- **GitHub error reporting** looks up the fingerprint before repeating a request and honours
+  `Retry-After` and rate limits.
+- **Settings take effect at once**, instead of after an asynchronous file reload. A failed Save
+  says what happened and shows the failure reference.
+- **Reader.** Webcomic mode no longer keeps every page in memory or adds a scroll listener on each
+  mode switch. The open series page no longer refetches its whole list on every processed file.
+- **Offline.** Saved comics open offline after an app update. A failed update no longer replaces
+  the release in control. An interrupted download is no longer shown as Saved. The first install
+  no longer reloads the page.
+- **The web app manifest loads.** It was an inline `blob:` URL that the app's own Content Security
+  Policy blocked, so installing the app failed.
+- **The action menu can no longer act on a different file.** Two files could share one menu
+  because their ids collided.
+- **Job progress survives a lost connection.** The event stream reconnects with backoff and a
+  fresh token, has a 75-second watchdog, and polls the active job while it is down. Under Authelia
+  it returns to sign-in only on a definite signed-out answer.
+- **Series issue numbers** no longer pick up the year or volume, or markers inside brackets such
+  as `(c2c)`.
+- **Windows.** Startup no longer crashes when a staged restore can be neither read nor moved
+  aside, and the current log can be read while it is being written.
+- **Accessibility.** Series cards no longer nest a focusable control inside a button.
+
+### Changed
+
+- **Performance.** Page turns use a cached page list, so a page count needs only a stat. Pages and
+  covers revalidate with a strong ETag and answer 304 without opening the archive, and each page
+  turn writes both progress tables in one transaction. Series views read cached metadata and never
+  open archives, and a cached cover's access time is refreshed at most once a day. Read state
+  changes invalidate only that user's data. Series name lookups use an in-memory index. Database
+  indexes now match the queries, and `PRAGMA optimize` runs after each scheduled cleanup.
+- **Batch jobs have one API and one registry.** Every `/api/jobs/{operation}-{scope}` route is one
+  action with one selection rule, and job state, persistence and retention live in one place.
+- **Series names are compared the same way everywhere**, and "which files belong to a series" is
+  answered in one place, used by refreshes, retags and audits.
+- **Folder combine moved into a Core service.** Routes and response shapes are unchanged.
+- **Unexpected errors have one shape**, produced in one handler, and carry a correlation id that
+  matches the log.
+- **The web app makes every request through one function**, which handles credentials, 401 and
+  403, and errors.
+- **Release pipeline.** One "Release" workflow tests the commit (unit, integration, Windows and
+  container tests) before the version bump, tag, GitHub release, Docker image and Windows and
+  Android builds. Images are pushed by digest and tagged only after every platform passes its
+  smoke test. Pull requests build one amd64 image.
+- **The Kubernetes example** runs `iceburn1/comicmaintainer:dotnet` with one replica and the
+  Recreate strategy.
+
+### Removed
+
+- The endpoints listed under [Breaking changes](#http-api), and `GET /api/auth/sse-token`.
+- The SignalR hub and its package reference.
+- The server-side output cache, which never ran. Any `[OutputCache]` attribute now has no effect.
+- The `SeriesIssuesMaxArchiveUpgrades` setting. A stale value in `appsettings` is ignored.
+- The legacy `FileReadStatuses` table, whose data was copied to `UserFileReadStatuses` earlier.
+  Going back to a pre-3.0 release needs a database backup.
+- The plain-text `AspNetUsers.ApiKey` column.
+- Several database indexes that no query used. External SQL tooling that relied on them may be
+  slower.
+- The Python-era files `start.sh`, `test_https_integration.sh`, `scripts/create-stable-branch.sh`
+  and `.github/workflows/create-stable-branch.yml`, and the unreachable Files view of the web app.
+
+## [2.0.413] - 2026-11-06
+
+The changes below were collected under Unreleased while the 2.0 releases went out. They shipped in
+2.0.x releases up to and including 2.0.413. Which release carried each one was never recorded
+here; the GitHub release notes and the git history have that detail.
 
 ### Breaking changes
 - **⚠️ Upgrade note: Authelia mode now requires `AUTHELIA_TRUSTED_PROXIES`.** With
@@ -940,2737 +1490,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added development contribution guidelines
 - Improved README structure and navigation
 
-
-## [1.0.1] - 2025-10-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.2] - 2025-10-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.3] - 2025-10-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.4] - 2025-10-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.5] - 2025-10-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.6] - 2025-10-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.7] - 2025-10-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.8] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.9] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.10] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.11] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.12] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.13] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.14] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.15] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.16] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.17] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.18] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.19] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.20] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.21] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.22] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.23] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.24] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.25] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.26] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.27] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.28] - 2025-10-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.29] - 2025-10-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.30] - 2025-10-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.31] - 2025-10-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.32] - 2025-10-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.33] - 2025-10-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.34] - 2025-10-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.35] - 2025-10-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.36] - 2025-10-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.37] - 2025-10-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.38] - 2025-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.39] - 2025-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.40] - 2025-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.41] - 2025-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.42] - 2025-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.1] - 2025-11-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.2] - 2025-11-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.3] - 2025-11-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.4] - 2025-11-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.5] - 2025-11-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.6] - 2025-11-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.7] - 2025-11-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.8] - 2025-11-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.9] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.10] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.11] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.12] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.13] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.14] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.15] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.16] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.17] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.18] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.19] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.20] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.21] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.22] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.23] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.24] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.25] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.26] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.27] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.28] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.29] - 2025-11-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.30] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.31] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.32] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.33] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.34] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.35] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.36] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.37] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.38] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.39] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.40] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.41] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.42] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.43] - 2025-11-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.44] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.45] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.46] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.47] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.48] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.49] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.50] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.51] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.52] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.53] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.54] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.55] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.56] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.57] - 2025-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.58] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.59] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.60] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.61] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.62] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.63] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.64] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.65] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.66] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.67] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.68] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.69] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.70] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.71] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.72] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.73] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.74] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.75] - 2025-11-07
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.76] - 2025-11-08
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.77] - 2025-11-08
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.78] - 2025-11-08
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.79] - 2025-11-08
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.80] - 2025-11-10
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.81] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.82] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.83] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.84] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.85] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.86] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.87] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.88] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.89] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.90] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.91] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.92] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.93] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.94] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.95] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.96] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.97] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.98] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.99] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.100] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.101] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.102] - 2025-11-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.103] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.104] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.105] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.106] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.107] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.108] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.109] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.110] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.111] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.112] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.113] - 2025-11-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.114] - 2025-11-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.115] - 2025-11-17
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.116] - 2025-11-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.117] - 2025-11-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.118] - 2026-01-10
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.119] - 2026-03-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.120] - 2026-03-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.121] - 2026-03-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.122] - 2026-03-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.123] - 2026-03-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.124] - 2026-03-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.125] - 2026-03-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.126] - 2026-04-08
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.127] - 2026-04-08
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.128] - 2026-04-09
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.129] - 2026-04-09
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.130] - 2026-04-09
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.131] - 2026-04-09
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.132] - 2026-04-09
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.133] - 2026-05-11
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.134] - 2026-05-11
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.135] - 2026-05-11
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.136] - 2026-05-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.137] - 2026-05-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.138] - 2026-05-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.139] - 2026-05-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.140] - 2026-05-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.141] - 2026-05-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.142] - 2026-05-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.143] - 2026-05-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.144] - 2026-05-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.145] - 2026-05-15
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.146] - 2026-05-15
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.147] - 2026-05-15
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.148] - 2026-05-16
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.149] - 2026-05-16
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.150] - 2026-05-16
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.151] - 2026-05-16
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.152] - 2026-05-16
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.153] - 2026-05-16
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.154] - 2026-05-17
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.155] - 2026-05-17
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.156] - 2026-05-17
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.157] - 2026-05-17
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.158] - 2026-05-17
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.159] - 2026-05-17
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.160] - 2026-05-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.161] - 2026-05-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.162] - 2026-05-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.163] - 2026-05-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.164] - 2026-05-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.165] - 2026-05-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.166] - 2026-05-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.167] - 2026-05-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.168] - 2026-05-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.169] - 2026-05-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.170] - 2026-05-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.171] - 2026-05-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.172] - 2026-05-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.173] - 2026-05-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.174] - 2026-05-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.175] - 2026-05-20
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.176] - 2026-05-20
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.177] - 2026-05-20
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.178] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.179] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.180] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.181] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.182] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.183] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.184] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.185] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.186] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.187] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.188] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.189] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.190] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.191] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.192] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.193] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.194] - 2026-05-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.195] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.196] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.197] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.198] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.199] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.200] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.201] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.202] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.203] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.204] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.205] - 2026-05-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.206] - 2026-05-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.207] - 2026-05-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.208] - 2026-05-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.209] - 2026-05-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.210] - 2026-05-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.211] - 2026-05-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.212] - 2026-05-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.213] - 2026-05-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.214] - 2026-05-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.215] - 2026-05-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.216] - 2026-05-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.217] - 2026-05-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.218] - 2026-05-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.219] - 2026-05-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.220] - 2026-05-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.221] - 2026-05-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.222] - 2026-05-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.223] - 2026-05-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.224] - 2026-05-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.225] - 2026-05-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.226] - 2026-05-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.227] - 2026-05-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.228] - 2026-05-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.229] - 2026-05-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.230] - 2026-05-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.231] - 2026-05-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.232] - 2026-05-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.233] - 2026-05-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.234] - 2026-05-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.235] - 2026-05-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.236] - 2026-05-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.237] - 2026-05-30
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.238] - 2026-06-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.239] - 2026-06-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.240] - 2026-06-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.241] - 2026-06-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.242] - 2026-06-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.243] - 2026-06-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.244] - 2026-06-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.245] - 2026-06-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.246] - 2026-06-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.247] - 2026-06-03
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.248] - 2026-06-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.249] - 2026-06-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.250] - 2026-06-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.251] - 2026-06-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.252] - 2026-06-04
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.253] - 2026-06-05
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.254] - 2026-06-05
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.255] - 2026-06-16
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.256] - 2026-06-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.257] - 2026-06-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.258] - 2026-06-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.259] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.260] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.261] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.262] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.263] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.264] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.265] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.266] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.267] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.268] - 2026-06-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.269] - 2026-06-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.270] - 2026-06-30
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.271] - 2026-06-30
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.272] - 2026-07-11
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.273] - 2026-07-11
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.274] - 2026-07-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.275] - 2026-07-15
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.276] - 2026-07-21
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.277] - 2026-07-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.278] - 2026-07-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.279] - 2026-07-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.280] - 2026-07-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.281] - 2026-07-23
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.282] - 2026-07-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.283] - 2026-07-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.284] - 2026-07-24
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.285] - 2026-07-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.286] - 2026-09-10
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.287] - 2026-09-12
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.288] - 2026-09-13
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.289] - 2026-09-15
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.290] - 2026-09-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.291] - 2026-09-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.292] - 2026-09-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.293] - 2026-09-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.294] - 2026-09-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.295] - 2026-09-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.296] - 2026-09-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.297] - 2026-09-18
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.298] - 2026-09-20
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.299] - 2026-09-20
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.300] - 2026-09-22
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.301] - 2026-09-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.302] - 2026-09-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.303] - 2026-09-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.304] - 2026-09-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.305] - 2026-09-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.306] - 2026-09-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.307] - 2026-09-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.308] - 2026-09-25
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.309] - 2026-09-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.310] - 2026-09-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.311] - 2026-09-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.312] - 2026-09-30
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.313] - 2026-10-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.314] - 2026-10-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.315] - 2026-10-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.316] - 2026-10-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.317] - 2026-10-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.318] - 2026-10-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.319] - 2026-10-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.320] - 2026-10-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.321] - 2026-10-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.322] - 2026-10-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.323] - 2026-10-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.324] - 2026-10-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.325] - 2026-10-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.326] - 2026-10-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.327] - 2026-10-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.328] - 2026-10-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.329] - 2026-10-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.330] - 2026-10-14
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.331] - 2026-10-15
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.332] - 2026-10-15
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.333] - 2026-10-15
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.334] - 2026-10-15
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.335] - 2026-10-16
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.336] - 2026-10-16
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.337] - 2026-10-17
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.338] - 2026-10-17
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.339] - 2026-10-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.340] - 2026-10-19
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.341] - 2026-10-20
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.342] - 2026-10-20
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.343] - 2026-10-20
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.344] - 2026-10-20
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.345] - 2026-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.346] - 2026-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.347] - 2026-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.348] - 2026-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.349] - 2026-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.350] - 2026-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.351] - 2026-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.352] - 2026-10-26
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.353] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.354] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.355] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.356] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.357] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.358] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.359] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.360] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.361] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.362] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.363] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.364] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.365] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.366] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.367] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.368] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.369] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.370] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.371] - 2026-10-27
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.372] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.373] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.374] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.375] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.376] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.377] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.378] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.379] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.380] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.381] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.382] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.383] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.384] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.385] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.386] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.387] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.388] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.389] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.390] - 2026-10-28
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.391] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.392] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.393] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.394] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.395] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.396] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.397] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.398] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.399] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.400] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.401] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.402] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.403] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.404] - 2026-10-29
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.405] - 2026-10-31
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.406] - 2026-11-01
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.407] - 2026-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.408] - 2026-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.409] - 2026-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.410] - 2026-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.411] - 2026-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.412] - 2026-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [2.0.413] - 2026-11-06
-
-### Changed
-- Automatic version bump on merge to master
-
-## [1.0.0] - 2024
+## Releases 1.0.1 to 2.0.412
+
+These releases were automatic version bumps and recorded no changes of their own. The real changes
+of the 2.0 line are listed under [2.0.413](#20413---2026-11-06). Each release's commits are on its
+[GitHub release](https://github.com/mleenorris/ComicMaintainer/releases) and in the git tags.
+
+| Versions | Date |
+| --- | --- |
+| 2.0.407 to 2.0.412 | 2026-11-06 |
+| 2.0.406 | 2026-11-01 |
+| 2.0.405 | 2026-10-31 |
+| 2.0.391 to 2.0.404 | 2026-10-29 |
+| 2.0.372 to 2.0.390 | 2026-10-28 |
+| 2.0.353 to 2.0.371 | 2026-10-27 |
+| 2.0.345 to 2.0.352 | 2026-10-26 |
+| 2.0.341 to 2.0.344 | 2026-10-20 |
+| 2.0.339 to 2.0.340 | 2026-10-19 |
+| 2.0.337 to 2.0.338 | 2026-10-17 |
+| 2.0.335 to 2.0.336 | 2026-10-16 |
+| 2.0.331 to 2.0.334 | 2026-10-15 |
+| 2.0.322 to 2.0.330 | 2026-10-14 |
+| 2.0.313 to 2.0.321 | 2026-10-01 |
+| 2.0.312 | 2026-09-30 |
+| 2.0.310 to 2.0.311 | 2026-09-29 |
+| 2.0.309 | 2026-09-28 |
+| 2.0.301 to 2.0.308 | 2026-09-25 |
+| 2.0.300 | 2026-09-22 |
+| 2.0.298 to 2.0.299 | 2026-09-20 |
+| 2.0.290 to 2.0.297 | 2026-09-18 |
+| 2.0.289 | 2026-09-15 |
+| 2.0.288 | 2026-09-13 |
+| 2.0.287 | 2026-09-12 |
+| 2.0.286 | 2026-09-10 |
+| 2.0.285 | 2026-07-25 |
+| 2.0.282 to 2.0.284 | 2026-07-24 |
+| 2.0.277 to 2.0.281 | 2026-07-23 |
+| 2.0.276 | 2026-07-21 |
+| 2.0.275 | 2026-07-15 |
+| 2.0.274 | 2026-07-12 |
+| 2.0.272 to 2.0.273 | 2026-07-11 |
+| 2.0.270 to 2.0.271 | 2026-06-30 |
+| 2.0.269 | 2026-06-29 |
+| 2.0.259 to 2.0.268 | 2026-06-27 |
+| 2.0.257 to 2.0.258 | 2026-06-24 |
+| 2.0.256 | 2026-06-19 |
+| 2.0.255 | 2026-06-16 |
+| 2.0.253 to 2.0.254 | 2026-06-05 |
+| 2.0.248 to 2.0.252 | 2026-06-04 |
+| 2.0.246 to 2.0.247 | 2026-06-03 |
+| 2.0.239 to 2.0.245 | 2026-06-02 |
+| 2.0.238 | 2026-06-01 |
+| 2.0.237 | 2026-05-30 |
+| 2.0.228 to 2.0.236 | 2026-05-29 |
+| 2.0.219 to 2.0.227 | 2026-05-28 |
+| 2.0.218 | 2026-05-27 |
+| 2.0.216 to 2.0.217 | 2026-05-26 |
+| 2.0.209 to 2.0.215 | 2026-05-24 |
+| 2.0.206 to 2.0.208 | 2026-05-23 |
+| 2.0.195 to 2.0.205 | 2026-05-22 |
+| 2.0.178 to 2.0.194 | 2026-05-21 |
+| 2.0.175 to 2.0.177 | 2026-05-20 |
+| 2.0.169 to 2.0.174 | 2026-05-19 |
+| 2.0.160 to 2.0.168 | 2026-05-18 |
+| 2.0.154 to 2.0.159 | 2026-05-17 |
+| 2.0.148 to 2.0.153 | 2026-05-16 |
+| 2.0.145 to 2.0.147 | 2026-05-15 |
+| 2.0.142 to 2.0.144 | 2026-05-14 |
+| 2.0.140 to 2.0.141 | 2026-05-13 |
+| 2.0.136 to 2.0.139 | 2026-05-12 |
+| 2.0.133 to 2.0.135 | 2026-05-11 |
+| 2.0.128 to 2.0.132 | 2026-04-09 |
+| 2.0.126 to 2.0.127 | 2026-04-08 |
+| 2.0.125 | 2026-03-29 |
+| 2.0.123 to 2.0.124 | 2026-03-28 |
+| 2.0.121 to 2.0.122 | 2026-03-26 |
+| 2.0.119 to 2.0.120 | 2026-03-25 |
+| 2.0.118 | 2026-01-10 |
+| 2.0.117 | 2025-11-19 |
+| 2.0.116 | 2025-11-18 |
+| 2.0.115 | 2025-11-17 |
+| 2.0.114 | 2025-11-14 |
+| 2.0.103 to 2.0.113 | 2025-11-13 |
+| 2.0.81 to 2.0.102 | 2025-11-12 |
+| 2.0.80 | 2025-11-10 |
+| 2.0.76 to 2.0.79 | 2025-11-08 |
+| 2.0.58 to 2.0.75 | 2025-11-07 |
+| 2.0.44 to 2.0.57 | 2025-11-06 |
+| 2.0.30 to 2.0.43 | 2025-11-04 |
+| 2.0.9 to 2.0.29 | 2025-11-03 |
+| 2.0.1 to 2.0.8 | 2025-11-02 |
+| 1.0.38 to 1.0.42 | 2025-10-26 |
+| 1.0.29 to 1.0.37 | 2025-10-25 |
+| 1.0.8 to 1.0.28 | 2025-10-24 |
+| 1.0.1 to 1.0.7 | 2025-10-23 |
+
+## 1.0.0 - 2024
 
 ### Added
 - Python watcher service for automatic comic file processing
@@ -3711,5 +1626,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Proper error handling
 - PUID/PGID support for file permission management
 
-[Unreleased]: https://github.com/mleenorris/ComicMaintainer/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/mleenorris/ComicMaintainer/releases/tag/v1.0.0
+[Unreleased]: https://github.com/mleenorris/ComicMaintainer/compare/v3.0.0...dotnet
+[3.0.0]: https://github.com/mleenorris/ComicMaintainer/compare/v2.0.413...v3.0.0
+[2.0.413]: https://github.com/mleenorris/ComicMaintainer/releases/tag/v2.0.413

@@ -31,7 +31,7 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         response.EnsureSuccessStatusCode();
         var content = await response.Content.ReadAsStringAsync();
         Assert.Contains("version", content, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("2.0", content);
+        Assert.Contains("3.0", content);
     }
 
     [Fact]

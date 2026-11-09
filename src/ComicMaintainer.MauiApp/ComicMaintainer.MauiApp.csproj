@@ -16,8 +16,8 @@
     <ApplicationId>com.comicmaintainer.app</ApplicationId>
 
     <!-- Version -->
-    <ApplicationDisplayVersion>2.0.1</ApplicationDisplayVersion>
-    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>3.0.0</ApplicationDisplayVersion>
+    <ApplicationVersion>2</ApplicationVersion>
 
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">23.0</SupportedOSPlatformVersion>
   </PropertyGroup>

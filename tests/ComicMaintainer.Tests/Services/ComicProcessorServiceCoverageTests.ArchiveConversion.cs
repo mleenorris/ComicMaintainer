@@ -545,6 +545,21 @@ public partial class ComicProcessorServiceCoverageTests
     }
 
     [Fact]
+    public async Task GetMetadataAsync_CbrCancelledWhileReadingStoredEdits_IsCancelled()
+    {
+        var service = CreateService();
+        var cbr = WriteCbr("Series/book.cbr", Xml("Archive Series", "3", "Archive Title"));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        _fileStore.Setup(f => f.GetFileAsync(cbr, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.GetMetadataAsync(cbr, cts.Token));
+
+        Assert.False(_logger.Has(LogLevel.Error, "Error reading metadata from {FilePath}"));
+    }
+
+    [Fact]
     public async Task GetMetadataAsync_EditAlreadyWritten_ReadsTheArchive()
     {
         var service = CreateService();

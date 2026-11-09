@@ -43,6 +43,10 @@ public partial class ComicProcessorService
 
             return await ReadMetadataAtResolvedPathAsync(resolvedPath, filePath, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -86,6 +90,10 @@ public partial class ComicProcessorService
         {
             LogArchiveRefused(fallbackFilePath, ex);
             return new ArchiveMetadataRead(null, ex.Message);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

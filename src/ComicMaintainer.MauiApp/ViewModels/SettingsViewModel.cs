@@ -8,8 +8,12 @@ public partial class SettingsViewModel : ObservableObject
 {
     private readonly IApiService _apiService;
     private readonly ISettingsService _settingsService;
+    private readonly ISessionManager _session;
+    private readonly IUserDialogs _dialogs;
+    private readonly IThemeService _theme;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ServerWarning))]
     private string _serverUrl = string.Empty;
 
     [ObservableProperty]
@@ -21,42 +25,48 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _isDarkMode;
 
-    public SettingsViewModel(IApiService apiService, ISettingsService settingsService)
+    public SettingsViewModel(
+        IApiService apiService,
+        ISettingsService settingsService,
+        ISessionManager session,
+        IUserDialogs dialogs,
+        IThemeService theme)
     {
         _apiService = apiService;
         _settingsService = settingsService;
+        _session = session;
+        _dialogs = dialogs;
+        _theme = theme;
         ServerUrl = _settingsService.ServerUrl;
-        IsDarkMode = Application.Current?.UserAppTheme == AppTheme.Dark;
+        IsDarkMode = _theme.IsDarkMode;
     }
 
-    partial void OnIsDarkModeChanged(bool value)
+    /// <summary>Warns about an address that would send the password unencrypted; empty when there is nothing to warn about.</summary>
+    public string ServerWarning => ServerAddress.DescribeRisk(ServerUrl);
+
+    /// <summary>Who the app is signed in as, and how.</summary>
+    public string AccountDescription
     {
-        if (Application.Current != null)
+        get
         {
-            Application.Current.UserAppTheme = value ? AppTheme.Dark : AppTheme.Light;
+            var name = _session.Account?.Username;
+            var who = string.IsNullOrEmpty(name) ? "Signed in" : $"Signed in as {name}";
+            return _session.CurrentKind == CredentialKind.ApiKey ? $"{who} with an API key" : who;
         }
     }
+
+    partial void OnIsDarkModeChanged(bool value) => _theme.IsDarkMode = value;
 
     [RelayCommand]
     private async Task TestConnection()
     {
-        if (string.IsNullOrWhiteSpace(ServerUrl))
-        {
-            TestResult = "Please enter a server URL";
-            return;
-        }
-
         IsTesting = true;
         TestResult = "Testing connection...";
 
         try
         {
-            var isConnected = await _apiService.TestConnectionAsync(ServerUrl);
-            TestResult = isConnected ? "✓ Connection successful!" : "✗ Connection failed";
-        }
-        catch (Exception ex)
-        {
-            TestResult = $"✗ Error: {ex.Message}";
+            var result = await _apiService.TestConnectionAsync(ServerUrl);
+            TestResult = (result.Success ? "✓ " : "✗ ") + result.Message;
         }
         finally
         {
@@ -65,10 +75,32 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void SaveSettings()
+    private async Task SaveSettings()
     {
-        _settingsService.ServerUrl = ServerUrl;
-        _settingsService.SaveSettings();
+        if (!ServerAddress.TryParse(ServerUrl, out var normalized, out var error))
+        {
+            TestResult = "✗ " + error;
+            return;
+        }
+
+        var changed = !string.Equals(normalized, _settingsService.ServerUrl, StringComparison.Ordinal);
+        if (changed && _session.CurrentKind is not null)
+        {
+            // A credential only works on the server that issued it, and must never be sent to another one.
+            if (await _dialogs.ConfirmAsync("Change server", "Changing the server signs you out of this one.", "Change", "Cancel"))
+            {
+                _settingsService.ServerUrl = normalized;
+                await _session.SignOutAsync();
+            }
+
+            return;
+        }
+
+        _settingsService.ServerUrl = normalized;
+        ServerUrl = normalized;
         TestResult = "✓ Settings saved";
     }
+
+    [RelayCommand]
+    private Task SignOut() => _session.SignOutAsync();
 }

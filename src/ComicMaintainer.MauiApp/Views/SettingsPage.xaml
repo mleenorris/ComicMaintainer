@@ -37,6 +37,11 @@
                            FontSize="12"
                            TextColor="{AppThemeBinding Light=#95a5a6, Dark=#6b7280}" />
 
+                    <Label Text="{Binding ServerWarning}"
+                           IsVisible="{Binding ServerWarning, Converter={StaticResource StringNotEmptyConverter}}"
+                           FontSize="12"
+                           TextColor="#b8860b" />
+
                     <Button Text="🔗 Test Connection"
                             Command="{Binding TestConnectionCommand}"
                             IsEnabled="{Binding IsTesting, Converter={StaticResource InvertedBoolConverter}}"
@@ -57,6 +62,30 @@
                             TextColor="White"
                             HorizontalOptions="Fill"
                             Margin="0,5,0,0" />
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Account Card -->
+            <Frame BorderColor="{AppThemeBinding Light=#ecf0f1, Dark=#404040}"
+                   Padding="15"
+                   CornerRadius="8"
+                   BackgroundColor="{AppThemeBinding Light=White, Dark=#1a1a1a}"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="👤 Account"
+                           FontSize="18"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#2c3e50, Dark=#d1d5db}" />
+
+                    <Label Text="{Binding AccountDescription}"
+                           FontSize="14"
+                           TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}" />
+
+                    <Button Text="Sign out"
+                            Command="{Binding SignOutCommand}"
+                            BackgroundColor="#dc3545"
+                            TextColor="White"
+                            HorizontalOptions="Fill" />
                 </VerticalStackLayout>
             </Frame>
 

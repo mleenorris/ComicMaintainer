@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:ComicMaintainer.MauiApp.ViewModels"
+             x:Class="ComicMaintainer.MauiApp.Views.LoginPage"
+             x:DataType="viewmodels:LoginViewModel"
+             Shell.NavBarIsVisible="False"
+             BackgroundColor="{AppThemeBinding Light=#f5f5f5, Dark=#1a1a1a}">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="12" VerticalOptions="Center">
+
+            <Label Text="📚 ComicMaintainer"
+                   FontSize="24"
+                   FontAttributes="Bold"
+                   HorizontalOptions="Center"
+                   TextColor="{AppThemeBinding Light=#2c3e50, Dark=#d1d5db}" />
+
+            <!-- Why sign-in failed or the session ended. -->
+            <Label Text="{Binding StatusMessage}"
+                   IsVisible="{Binding StatusMessage, Converter={StaticResource StringNotEmptyConverter}}"
+                   TextColor="#dc3545"
+                   FontSize="14"
+                   HorizontalTextAlignment="Center" />
+
+            <Label Text="Server URL"
+                   FontSize="14"
+                   TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
+            <Entry Text="{Binding ServerUrl}"
+                   Placeholder="https://comics.example.com"
+                   Keyboard="Url"
+                   FontSize="14"
+                   BackgroundColor="{AppThemeBinding Light=White, Dark=#252525}"
+                   TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}" />
+            <Label Text="{Binding ServerWarning}"
+                   IsVisible="{Binding ServerWarning, Converter={StaticResource StringNotEmptyConverter}}"
+                   TextColor="#b8860b"
+                   FontSize="12" />
+
+            <HorizontalStackLayout Spacing="10">
+                <Switch IsToggled="{Binding UseApiKey}" OnColor="#28a745" VerticalOptions="Center" />
+                <Label Text="Sign in with an API key"
+                       VerticalOptions="Center"
+                       TextColor="{AppThemeBinding Light=#2c3e50, Dark=#d1d5db}" />
+            </HorizontalStackLayout>
+
+            <!-- Password sign-in -->
+            <VerticalStackLayout Spacing="12" IsVisible="{Binding UseApiKey, Converter={StaticResource InvertedBoolConverter}}">
+                <Entry Text="{Binding Username}"
+                       Placeholder="Username"
+                       IsTextPredictionEnabled="False"
+                       IsSpellCheckEnabled="False"
+                       FontSize="14"
+                       BackgroundColor="{AppThemeBinding Light=White, Dark=#252525}"
+                       TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}" />
+                <Entry Text="{Binding Password}"
+                       Placeholder="Password"
+                       IsPassword="True"
+                       FontSize="14"
+                       BackgroundColor="{AppThemeBinding Light=White, Dark=#252525}"
+                       TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}" />
+            </VerticalStackLayout>
+
+            <!-- API key sign-in -->
+            <Entry Text="{Binding ApiKey}"
+                   IsVisible="{Binding UseApiKey}"
+                   Placeholder="cm_..."
+                   IsPassword="True"
+                   FontSize="14"
+                   BackgroundColor="{AppThemeBinding Light=White, Dark=#252525}"
+                   TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}" />
+
+            <Button Text="Sign in"
+                    Command="{Binding SignInCommand}"
+                    IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}"
+                    BackgroundColor="{StaticResource Primary}"
+                    TextColor="White"
+                    HorizontalOptions="Fill" />
+
+            <ActivityIndicator IsRunning="{Binding IsBusy}" IsVisible="{Binding IsBusy}" />
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

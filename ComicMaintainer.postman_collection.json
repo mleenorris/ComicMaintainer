@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "comic-maintainer-api",
 		"name": "ComicMaintainer API",
-		"description": "Complete API collection for ComicMaintainer .NET WebAPI. This collection covers all endpoints for managing comic files, processing jobs, authentication, and settings.\n\n## Setup\n1. Import this collection into Postman\n2. Set up the environment variables (base_url, jwt_token)\n3. Use the Auth endpoints to login and get a JWT token\n4. Most endpoints require authentication\n5. Scripts can use an API key instead (Auth > Generate API Key), sent in the X-API-Key header\n\n## Environment Variables\n- base_url: http://localhost:5000 (or your API base URL)\n- admin_username / admin_password: the account to sign in with\n- setup_token: the one-time setup code from the server log (first-run setup only)\n- jwt_token: Your JWT token from login (will be set automatically after login)\n- api_key: Your API key (set automatically by Generate API Key)",
+		"description": "Requests for every route of the ComicMaintainer API. docs/API.md describes the routes and docs/POSTMAN_API_COLLECTION.md describes this collection.\n\nSign in with Auth > Login. It saves a session token to jwt_token, and the collection sends that as a bearer token. The OPDS folder uses HTTP Basic instead, and the event stream uses a single-use stream token.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"auth": {
@@ -22,40 +22,29 @@
 				{
 					"name": "Check Setup Required",
 					"request": {
-						"auth": {
-							"type": "noauth"
-						},
 						"method": "GET",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/auth/setup-required",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "setup-required"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"setup-required"
+							]
 						},
-						"description": "Check if initial admin setup is required (no users exist yet)"
+						"auth": {
+							"type": "noauth"
+						},
+						"description": "Whether first-run setup is available."
 					},
 					"response": []
 				},
 				{
 					"name": "Setup Admin User",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"// Note: This endpoint is typically only available when no users exist",
-									"if (pm.response.code === 200) {",
-									"    console.log('Admin user created successfully');",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
 					"request": {
-						"auth": {
-							"type": "noauth"
-						},
 						"method": "POST",
 						"header": [
 							{
@@ -63,43 +52,31 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/auth/setup",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"setup"
+							]
+						},
+						"auth": {
+							"type": "noauth"
+						},
 						"body": {
 							"mode": "raw",
 							"raw": "{\n  \"username\": \"{{admin_username}}\",\n  \"password\": \"{{admin_password}}\",\n  \"email\": \"admin@example.com\",\n  \"setupToken\": \"{{setup_token}}\"\n}"
 						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/setup",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "setup"]
-						},
-						"description": "Create the first admin user of a new instance. Only works while no account exists at all (and not with Authelia), and requires the one-time setup code: set setup_token to the code ComicMaintainer writes to its log at startup (docker logs), or to SETUP_TOKEN if you set it. Answers 403 when setup is not available or the code is wrong."
+						"description": "Creates the first administrator of a new instance. setup_token is the code printed in the server log at startup, or SETUP_TOKEN. Answers 403 when setup is not available or the code is wrong."
 					},
 					"response": []
 				},
 				{
 					"name": "Login",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"// Extract token from response and save to environment",
-									"if (pm.response.code === 200) {",
-									"    var jsonData = pm.response.json();",
-									"    if (jsonData.token) {",
-									"        pm.environment.set('jwt_token', jsonData.token);",
-									"        console.log('JWT token saved to environment');",
-									"    }",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
 					"request": {
-						"auth": {
-							"type": "noauth"
-						},
 						"method": "POST",
 						"header": [
 							{
@@ -107,16 +84,77 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/auth/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login"
+							]
+						},
+						"auth": {
+							"type": "noauth"
+						},
 						"body": {
 							"mode": "raw",
 							"raw": "{\n  \"username\": \"{{admin_username}}\",\n  \"password\": \"{{admin_password}}\"\n}"
 						},
+						"description": "Signs in and saves the session token to jwt_token. Limited to 10 attempts per 5 minutes per client address."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"if (pm.response.code === 200) { pm.environment.set('jwt_token', pm.response.json().token); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Current User",
+					"request": {
+						"method": "GET",
+						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/auth/login",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "login"]
+							"raw": "{{base_url}}/api/auth/user",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"user"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Auth Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/status",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"status"
+							]
 						},
-						"description": "Login to get a JWT token. Token is automatically saved to environment variable."
+						"auth": {
+							"type": "noauth"
+						}
 					},
 					"response": []
 				},
@@ -130,38 +168,30 @@
 								"value": "application/json"
 							}
 						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"username\": \"newuser\",\n  \"password\": \"Password123!\",\n  \"email\": \"user@example.com\",\n  \"fullName\": \"New User\"\n}"
-						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/register",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "register"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"register"
+							]
 						},
-						"description": "Register a new user account"
+						"auth": {
+							"type": "noauth"
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"reader\",\n  \"password\": \"A-strong-passw0rd\",\n  \"email\": \"reader@example.com\",\n  \"fullName\": \"A Reader\"\n}"
+						},
+						"description": "Creates an account. Only works when registration is allowed, or for an administrator (send the session token for that)."
 					},
 					"response": []
 				},
 				{
 					"name": "Change Password",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"// Changing the password signs every session out, this one too; keep the new token it returns",
-									"if (pm.response.code === 200) {",
-									"    var jsonData = pm.response.json();",
-									"    if (jsonData.token) {",
-									"        pm.environment.set('jwt_token', jsonData.token);",
-									"    }",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
 					"request": {
 						"method": "POST",
 						"header": [
@@ -170,72 +200,38 @@
 								"value": "application/json"
 							}
 						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"currentPassword\": \"OldPassword123!\",\n  \"newPassword\": \"NewPassword123!\"\n}"
-						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/change-password",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "change-password"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"change-password"
+							]
 						},
-						"description": "Change the current user's password. This signs every session of the account out and revokes its API key; the response carries a new session token (saved to jwt_token). An API key cannot change the password."
-					},
-					"response": []
-				},
-				{
-					"name": "Sign Out",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"allSessions\": false\n}"
+							"raw": "{\n  \"currentPassword\": \"{{admin_password}}\",\n  \"newPassword\": \"A-new-strong-passw0rd\"\n}"
 						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/logout",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "logout"]
-						},
-						"description": "Revoke the session token this request is made with (204). With allSessions: true, every session token and the API key of the account are revoked."
+						"description": "Changes the password, ends every session and revokes the API key. Saves the new session token."
 					},
-					"response": []
-				},
-				{
-					"name": "Get Stream Token",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/auth/stream-token",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "stream-token"]
-						},
-						"description": "A single-use token, valid for 60 seconds, that only opens the event stream: GET /api/events/stream?access_token=<token>. No other endpoint accepts a token in its URL, and the event stream accepts no other token there. Fetch a new one for every connection."
-					},
-					"response": []
-				},
-				{
-					"name": "Generate API Key",
+					"response": [],
 					"event": [
 						{
 							"listen": "test",
 							"script": {
+								"type": "text/javascript",
 								"exec": [
-									"// The key is only shown in this response",
-									"if (pm.response.code === 200) {",
-									"    pm.environment.set('api_key', pm.response.json().apiKey);",
-									"}"
-								],
-								"type": "text/javascript"
+									"if (pm.response.code === 200 && pm.response.json().token) { pm.environment.set('jwt_token', pm.response.json().token); }"
+								]
 							}
 						}
-					],
+					]
+				},
+				{
+					"name": "Create API Key",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -244,30 +240,52 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/auth/api-key",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"api-key"
+							]
+						},
 						"body": {
 							"mode": "raw",
 							"raw": "{\n  \"currentPassword\": \"{{admin_password}}\"\n}"
 						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/api-key",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "api-key"]
-						},
-						"description": "Create an API key for the current user, replacing (and revoking) any previous one. Send it in the X-API-Key header (never in a URL): it acts as this user with their current roles. It is shown only in this response (saved to api_key) and stored as a hash. Must be called with a session token and the account's current password (accounts signed in through Authelia need none): an API key cannot create one, and a stolen session token alone cannot either. Changing the password or signing out of all sessions revokes the key."
+						"description": "Creates or replaces the API key and saves it to api_key. It is shown only once. Needs the current password, except under Authelia."
 					},
-					"response": []
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"if (pm.response.code === 200) { pm.environment.set('api_key', pm.response.json().apiKey); }"
+								]
+							}
+						}
+					]
 				},
 				{
-					"name": "Get API Key Status",
+					"name": "API Key Status",
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/auth/api-key",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "api-key"]
-						},
-						"description": "Whether the current user has an API key, and when it was created and last used."
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"api-key"
+							]
+						}
 					},
 					"response": []
 				},
@@ -278,49 +296,80 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/auth/api-key",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "api-key"]
-						},
-						"description": "Revoke the current user's API key (204), or 404 when there is none."
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"api-key"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Current User (with API Key)",
+					"name": "Get Stream Token",
 					"request": {
-						"auth": {
-							"type": "apikey",
-							"apikey": [
-								{
-									"key": "key",
-									"value": "X-API-Key",
-									"type": "string"
-								},
-								{
-									"key": "value",
-									"value": "{{api_key}}",
-									"type": "string"
-								},
-								{
-									"key": "in",
-									"value": "header",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
+						"method": "POST",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/auth/user",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "user"]
+							"raw": "{{base_url}}/api/auth/stream-token",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"stream-token"
+							]
 						},
-						"description": "Any endpoint can be called with an API key in the X-API-Key header instead of a session token; authMethod is then api_key."
+						"description": "Gets a single-use, 60 second token for Events > Event Stream."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"if (pm.response.code === 200) { pm.environment.set('stream_token', pm.response.json().token); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/auth/logout",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"logout"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"allSessions\": false\n}"
+						},
+						"description": "Ends this session. With allSessions, ends every session and revokes the API key."
 					},
 					"response": []
 				}
 			],
-			"description": "Authentication endpoints for login, registration, and user management"
+			"description": "Sign-in, API keys and stream tokens."
 		},
 		{
 			"name": "Files",
@@ -331,44 +380,238 @@
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/files?filter=all&page=1&per_page=100&sort=name&direction=asc",
-							"host": ["{{base_url}}"],
-							"path": ["api", "files"],
+							"raw": "{{base_url}}/api/files?filter=&search=&page=1&per_page=100&sort=name&direction=asc",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files"
+							],
 							"query": [
 								{
 									"key": "filter",
-									"value": "all",
-									"description": "Filter: all, marked, unmarked, duplicates, renamed, normalized"
+									"value": ""
 								},
 								{
 									"key": "search",
-									"value": "",
-									"description": "Search term",
-									"disabled": true
+									"value": ""
 								},
 								{
 									"key": "page",
-									"value": "1",
-									"description": "Page number"
+									"value": "1"
 								},
 								{
 									"key": "per_page",
-									"value": "100",
-									"description": "Items per page (-1 for all)"
+									"value": "100"
 								},
 								{
 									"key": "sort",
-									"value": "name",
-									"description": "Sort by: name, date, size"
+									"value": "name"
 								},
 								{
 									"key": "direction",
-									"value": "asc",
-									"description": "Sort direction: asc, desc"
+									"value": "asc"
 								}
 							]
 						},
-						"description": "Get list of comic files with filtering, searching, and pagination"
+						"description": "filter: marked, unmarked, duplicates, renamed, normalized, read, unread. sort: name, date, size. per_page=-1 returns everything."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete File By Encoded Path",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/{{encoded_file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"{{encoded_file_path}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Remove File Metadata",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/{{encoded_file_path}}/metadata",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"{{encoded_file_path}}",
+								"metadata"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Process File By Encoded Path",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/{{encoded_file_path}}/process?forceReprocess=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"{{encoded_file_path}}",
+								"process"
+							],
+							"query": [
+								{
+									"key": "forceReprocess",
+									"value": "false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Mark File Read",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/files/{{encoded_file_path}}/read",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"{{encoded_file_path}}",
+								"read"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"read\": true\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Rename File By Encoded Path",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/{{encoded_file_path}}/rename?forceReprocess=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"{{encoded_file_path}}",
+								"rename"
+							],
+							"query": [
+								{
+									"key": "forceReprocess",
+									"value": "false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get File Tags",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/{{encoded_file_path}}/tags",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"{{encoded_file_path}}",
+								"tags"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update File Tags",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/files/{{encoded_file_path}}/tags",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"{{encoded_file_path}}",
+								"tags"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"publisher\": \"DC\"\n}"
+						},
+						"description": "Merges: fields left out or null keep their value."
+					},
+					"response": []
+				},
+				{
+					"name": "Cleanup Stale Entries",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/cleanup-stale?confirm=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"cleanup-stale"
+							],
+							"query": [
+								{
+									"key": "confirm",
+									"value": "false"
+								}
+							]
+						},
+						"description": "Answers 409 with requiresConfirmation when it needs ?confirm=true, or 409 without it when the library looks unmounted."
 					},
 					"response": []
 				},
@@ -379,50 +622,79 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/files/counts",
-							"host": ["{{base_url}}"],
-							"path": ["api", "files", "counts"]
-						},
-						"description": "Get count of total, processed, unprocessed, and duplicate files"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"counts"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Scan Unmarked Files",
+					"name": "Get Metadata",
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/files/scan-unmarked",
-							"host": ["{{base_url}}"],
-							"path": ["api", "files", "scan-unmarked"]
-						},
-						"description": "Scan and count unmarked (unprocessed) files"
-					},
-					"response": []
-				},
-				{
-					"name": "Get File Metadata",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/files/metadata?filePath=/watched_dir/example.cbz",
-							"host": ["{{base_url}}"],
-							"path": ["api", "files", "metadata"],
+							"raw": "{{base_url}}/api/files/metadata?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"metadata"
+							],
 							"query": [
 								{
 									"key": "filePath",
-									"value": "/watched_dir/example.cbz",
-									"description": "Full path to the file"
+									"value": "{{file_path}}"
 								}
 							]
-						},
-						"description": "Get metadata (title, series, issue, etc.) for a specific file"
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Update File Metadata",
+					"name": "Patch Metadata",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/files/metadata?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"metadata"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								}
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"metadata\": {\n    \"series\": \"Batman\"\n  },\n  \"lockFields\": [\n    \"series\"\n  ]\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Metadata",
 					"request": {
 						"method": "PUT",
 						"header": [
@@ -431,42 +703,53 @@
 								"value": "application/json"
 							}
 						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"title\": \"Batman Issue 1\",\n  \"series\": \"Batman\",\n  \"issue\": \"1\",\n  \"publisher\": \"DC Comics\",\n  \"year\": \"2023\",\n  \"volume\": \"1\"\n}"
-						},
 						"url": {
-							"raw": "{{base_url}}/api/files/metadata?filePath=/watched_dir/example.cbz",
-							"host": ["{{base_url}}"],
-							"path": ["api", "files", "metadata"],
+							"raw": "{{base_url}}/api/files/metadata?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"metadata"
+							],
 							"query": [
 								{
 									"key": "filePath",
-									"value": "/watched_dir/example.cbz"
+									"value": "{{file_path}}"
 								}
 							]
 						},
-						"description": "Update metadata for a specific file"
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"publisher\": \"DC\"\n}"
+						},
+						"description": "Merges: fields left out or null keep their value."
 					},
 					"response": []
 				},
 				{
-					"name": "Process Single File",
+					"name": "Process File",
 					"request": {
 						"method": "POST",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/files/process?filePath=/watched_dir/example.cbz",
-							"host": ["{{base_url}}"],
-							"path": ["api", "files", "process"],
+							"raw": "{{base_url}}/api/files/process?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"process"
+							],
 							"query": [
 								{
 									"key": "filePath",
-									"value": "/watched_dir/example.cbz"
+									"value": "{{file_path}}"
 								}
 							]
-						},
-						"description": "Process a single file (read and normalize metadata)"
+						}
 					},
 					"response": []
 				},
@@ -480,21 +763,27 @@
 								"value": "application/json"
 							}
 						],
-						"body": {
-							"mode": "raw",
-							"raw": "[\n  \"/watched_dir/file1.cbz\",\n  \"/watched_dir/file2.cbz\",\n  \"/watched_dir/file3.cbr\"\n]"
-						},
 						"url": {
 							"raw": "{{base_url}}/api/files/process-batch",
-							"host": ["{{base_url}}"],
-							"path": ["api", "files", "process-batch"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"process-batch"
+							]
 						},
-						"description": "Process multiple files in a batch job"
+						"body": {
+							"mode": "raw",
+							"raw": "[\n  \"{{file_path}}\"\n]"
+						},
+						"description": "The body is a JSON array of absolute paths."
 					},
 					"response": []
 				},
 				{
-					"name": "Update Tags (Batch)",
+					"name": "Mark Scope Read",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -503,58 +792,497 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/files/read-all",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"read-all"
+							]
+						},
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ],\n  \"metadata\": {\n    \"publisher\": \"DC Comics\",\n    \"year\": \"2023\"\n  }\n}"
+							"raw": "{\n  \"read\": true,\n  \"scope\": \"library\",\n  \"id\": null\n}"
 						},
-						"url": {
-							"raw": "{{base_url}}/api/files/tags",
-							"host": ["{{base_url}}"],
-							"path": ["api", "files", "tags"]
-						},
-						"description": "Update tags/metadata for multiple files at once"
+						"description": "scope is library, series or folder; the last two need id."
 					},
 					"response": []
 				},
 				{
-					"name": "Cleanup Stale Entries",
+					"name": "Mark Files Read Batch",
 					"request": {
 						"method": "POST",
-						"header": [],
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
 						"url": {
-							"raw": "{{base_url}}/api/files/cleanup-stale",
-							"host": ["{{base_url}}"],
-							"path": ["api", "files", "cleanup-stale"]
+							"raw": "{{base_url}}/api/files/read-batch",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"read-batch"
+							]
 						},
-						"description": "Remove database entries for files that no longer exist on disk"
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ],\n  \"read\": true\n}"
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Delete File",
+					"name": "Scan Unmarked",
 					"request": {
-						"method": "DELETE",
+						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/delete-file?filePath=/watched_dir/example.cbz",
-							"host": ["{{base_url}}"],
-							"path": ["api", "delete-file"],
+							"raw": "{{base_url}}/api/files/scan-unmarked",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"scan-unmarked"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Series Resolution",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/series-resolution?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"series-resolution"
+							],
 							"query": [
 								{
 									"key": "filePath",
-									"value": "/watched_dir/example.cbz"
+									"value": "{{file_path}}"
 								}
 							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Tags",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/files/tags",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"tags"
+							]
 						},
-						"description": "Delete a file from the watched directory"
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ],\n  \"metadata\": {\n    \"series\": \"Batman\"\n  },\n  \"fields\": [\n    \"series\"\n  ]\n}"
+						},
+						"description": "Optional fields lists what to apply; a listed field with no value is removed."
 					},
 					"response": []
 				}
 			],
-			"description": "Endpoints for managing comic files, metadata, and processing"
+			"description": "Single-file operations, tags, read state and stale cleanup."
 		},
 		{
-			"name": "Jobs",
+			"name": "Library Browsing",
+			"item": [
+				{
+					"name": "Get Folders",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/folders?filter=&search=&sort=name&direction=asc&offset=0&limit=100",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"folders"
+							],
+							"query": [
+								{
+									"key": "filter",
+									"value": ""
+								},
+								{
+									"key": "search",
+									"value": ""
+								},
+								{
+									"key": "sort",
+									"value": "name"
+								},
+								{
+									"key": "direction",
+									"value": "asc"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "limit",
+									"value": "100"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Folder Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/folders/{{encoded_folder_path}}/files?filter=&search=&sort=name&direction=asc",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"folders",
+								"{{encoded_folder_path}}",
+								"files"
+							],
+							"query": [
+								{
+									"key": "filter",
+									"value": ""
+								},
+								{
+									"key": "search",
+									"value": ""
+								},
+								{
+									"key": "sort",
+									"value": "name"
+								},
+								{
+									"key": "direction",
+									"value": "asc"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Root Folder Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/folders/files?filter=&search=&sort=name&direction=asc",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"folders",
+								"files"
+							],
+							"query": [
+								{
+									"key": "filter",
+									"value": ""
+								},
+								{
+									"key": "search",
+									"value": ""
+								},
+								{
+									"key": "sort",
+									"value": "name"
+								},
+								{
+									"key": "direction",
+									"value": "asc"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Series",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/series?filter=&search=&page=1&per_page=100&sort=name&direction=asc&include_issues=false&genre=&status=",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"series"
+							],
+							"query": [
+								{
+									"key": "filter",
+									"value": ""
+								},
+								{
+									"key": "search",
+									"value": ""
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "100"
+								},
+								{
+									"key": "sort",
+									"value": "name"
+								},
+								{
+									"key": "direction",
+									"value": "asc"
+								},
+								{
+									"key": "include_issues",
+									"value": "false"
+								},
+								{
+									"key": "genre",
+									"value": ""
+								},
+								{
+									"key": "status",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Series Folders",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/series/{{series_id}}/folders?filter=",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"series",
+								"{{series_id}}",
+								"folders"
+							],
+							"query": [
+								{
+									"key": "filter",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Series Issues",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/series/{{series_id}}/issues?filter=&page=1&per_page=100",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"series",
+								"{{series_id}}",
+								"issues"
+							],
+							"query": [
+								{
+									"key": "filter",
+									"value": ""
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "100"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Series Facets",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/series/facets",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"series",
+								"facets"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Overview",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/overview",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"overview"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Series, folders and the overview rows."
+		},
+		{
+			"name": "Folder Combine",
+			"item": [
+				{
+					"name": "Get Combinable Folders",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/combinable-folders",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"combinable-folders"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Combine Folders",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/files/combine-folders",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"combine-folders"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"groupKey\": \"\",\n  \"destinationDirectory\": \"/watched_dir/Batman\",\n  \"sourceDirectories\": [\n    \"/watched_dir/Batman (2016)\"\n  ]\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Preview Combine Folders",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/files/combine-folders/preview",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"files",
+								"combine-folders",
+								"preview"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"groupKey\": \"\",\n  \"destinationDirectory\": \"/watched_dir/Batman\",\n  \"sourceDirectories\": [\n    \"/watched_dir/Batman (2016)\"\n  ]\n}"
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Batch Jobs",
 			"item": [
 				{
 					"name": "Get Active Job",
@@ -563,65 +1291,32 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/active-job",
-							"host": ["{{base_url}}"],
-							"path": ["api", "active-job"]
-						},
-						"description": "Get currently running job (if any)"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"active-job"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "List All Jobs",
+					"name": "List Jobs",
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/jobs",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs"]
-						},
-						"description": "List all processing jobs (active and completed)"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Job Details",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/jobs/:jobId",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", ":jobId"],
-							"variable": [
-								{
-									"key": "jobId",
-									"value": "00000000-0000-0000-0000-000000000000",
-									"description": "Job ID (GUID)"
-								}
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs"
 							]
-						},
-						"description": "Get detailed information about a specific job"
-					},
-					"response": []
-				},
-				{
-					"name": "Cancel Job",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/jobs/:jobId/cancel",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", ":jobId", "cancel"],
-							"variable": [
-								{
-									"key": "jobId",
-									"value": "00000000-0000-0000-0000-000000000000"
-								}
-							]
-						},
-						"description": "Cancel a running job"
+						}
 					},
 					"response": []
 				},
@@ -631,50 +1326,126 @@
 						"method": "DELETE",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/jobs/:jobId",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", ":jobId"],
-							"variable": [
-								{
-									"key": "jobId",
-									"value": "00000000-0000-0000-0000-000000000000"
-								}
+							"raw": "{{base_url}}/api/jobs/{{job_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"{{job_id}}"
 							]
-						},
-						"description": "Delete a completed job"
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Process All Files",
+					"name": "Get Job",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/{{job_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"{{job_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Job",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/{{job_id}}/cancel",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"{{job_id}}",
+								"cancel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Process Selected",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/process-selected",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"process-selected"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ],\n  \"forceReprocess\": false\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Process All",
 					"request": {
 						"method": "POST",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/jobs/process-all",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "process-all"]
-						},
-						"description": "Start a job to process all files"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"process-all"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Process Unmarked Files",
+					"name": "Process Unmarked",
 					"request": {
 						"method": "POST",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/jobs/process-unmarked",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "process-unmarked"]
-						},
-						"description": "Start a job to process only unmarked (unprocessed) files"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"process-unmarked"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Process Selected Files",
+					"name": "Rename Selected",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -683,49 +1454,64 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/rename-selected",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"rename-selected"
+							]
+						},
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ]\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/jobs/process-selected",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "process-selected"]
-						},
-						"description": "Start a job to process selected files"
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ],\n  \"forceReprocess\": false\n}"
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Rename All Files",
+					"name": "Rename All",
 					"request": {
 						"method": "POST",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/jobs/rename-all",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "rename-all"]
-						},
-						"description": "Start a job to rename all files"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"rename-all"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Rename Unmarked Files",
+					"name": "Rename Unmarked",
 					"request": {
 						"method": "POST",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/jobs/rename-unmarked",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "rename-unmarked"]
-						},
-						"description": "Start a job to rename only unmarked files"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"rename-unmarked"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Rename Selected Files",
+					"name": "Normalize Selected",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -734,49 +1520,64 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/normalize-selected",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"normalize-selected"
+							]
+						},
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ]\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/jobs/rename-selected",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "rename-selected"]
-						},
-						"description": "Start a job to rename selected files"
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ],\n  \"forceReprocess\": false\n}"
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Normalize All Files",
+					"name": "Normalize All",
 					"request": {
 						"method": "POST",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/jobs/normalize-all",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "normalize-all"]
-						},
-						"description": "Start a job to normalize metadata for all files"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"normalize-all"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Normalize Unmarked Files",
+					"name": "Normalize Unmarked",
 					"request": {
 						"method": "POST",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/jobs/normalize-unmarked",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "normalize-unmarked"]
-						},
-						"description": "Start a job to normalize only unmarked files"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"normalize-unmarked"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Normalize Selected Files",
+					"name": "Remove Metadata Selected",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -785,21 +1586,45 @@
 								"value": "application/json"
 							}
 						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ]\n}"
-						},
 						"url": {
-							"raw": "{{base_url}}/api/jobs/normalize-selected",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "normalize-selected"]
+							"raw": "{{base_url}}/api/jobs/remove-metadata-selected",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"remove-metadata-selected"
+							]
 						},
-						"description": "Start a job to normalize selected files"
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ],\n  \"forceReprocess\": false\n}"
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Update Metadata for Selected Files",
+					"name": "Remove Metadata All",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/remove-metadata-all",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"remove-metadata-all"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Metadata Selected",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -808,21 +1633,1937 @@
 								"value": "application/json"
 							}
 						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ],\n  \"metadata\": {\n    \"publisher\": \"DC Comics\",\n    \"year\": \"2023\"\n  }\n}"
-						},
 						"url": {
 							"raw": "{{base_url}}/api/jobs/update-metadata-selected",
-							"host": ["{{base_url}}"],
-							"path": ["api", "jobs", "update-metadata-selected"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"update-metadata-selected"
+							]
 						},
-						"description": "Start a job to update metadata for selected files"
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ],\n  \"metadata\": {\n    \"publisher\": \"DC\"\n  },\n  \"fields\": [\n    \"publisher\"\n  ]\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Selected",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/delete-selected",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"jobs",
+								"delete-selected"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ],\n  \"forceReprocess\": false\n}"
+						}
 					},
 					"response": []
 				}
 			],
-			"description": "Endpoints for managing batch processing jobs"
+			"description": "Start, follow and cancel batch jobs."
+		},
+		{
+			"name": "Processed Status",
+			"item": [
+				{
+					"name": "Clear Folder",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/status/clear-folder",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"status",
+								"clear-folder"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"folder\": \"/watched_dir/Batman\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Clear Selected",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/status/clear-selected",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"status",
+								"clear-selected"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ]\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Clear Series",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/status/clear-series/{{series_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"status",
+								"clear-series",
+								"{{series_id}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Comic Reader",
+			"item": [
+				{
+					"name": "Get Adjacent File",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/comicreader/adjacent?filePath={{file_path}}&direction=next",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"comicreader",
+								"adjacent"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								},
+								{
+									"key": "direction",
+									"value": "next"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Cover",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/comicreader/cover?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"comicreader",
+								"cover"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Comic Info",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/comicreader/info?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"comicreader",
+								"info"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Mark As Read",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/comicreader/mark-read?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"comicreader",
+								"mark-read"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Page",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/comicreader/page?filePath={{file_path}}&page=1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"comicreader",
+								"page"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Pages",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/comicreader/pages?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"comicreader",
+								"pages"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Progress",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/comicreader/progress?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"comicreader",
+								"progress"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Save Progress",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/comicreader/progress?filePath={{file_path}}&page=1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"comicreader",
+								"progress"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Reader State",
+			"item": [
+				{
+					"name": "Get Preferences",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/reader/preferences",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"reader",
+								"preferences"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Put Preferences",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/reader/preferences",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"reader",
+								"preferences"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"defaultReaderMode\": 0,\n  \"readingDirection\": 0,\n  \"tapZonesEnabled\": true,\n  \"autoHideChrome\": true,\n  \"fitPreference\": \"width\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Progress",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/reader/progress/{{content_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"reader",
+								"progress",
+								"{{content_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Put Progress",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/reader/progress/{{content_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"reader",
+								"progress",
+								"{{content_id}}"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"currentPage\": 1,\n  \"totalPages\": 24,\n  \"readerMode\": 0,\n  \"readingDirection\": 0\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "End Session",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/reader/session/end",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"reader",
+								"session",
+								"end"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"sessionId\": \"00000000-0000-0000-0000-000000000000\",\n  \"endPage\": 24\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Start Session",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/reader/session/start",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"reader",
+								"session",
+								"start"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"contentId\": \"{{content_id}}\",\n  \"startPage\": 1,\n  \"incognito\": false\n}"
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Progress, preferences and sessions per user."
+		},
+		{
+			"name": "Metadata",
+			"item": [
+				{
+					"name": "Match Unmatched",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/match-unmatched",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"match-unmatched"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Providers",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/providers",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"providers"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh All",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/refresh-all",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"refresh-all"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Selected",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/refresh-selected",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"refresh-selected"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"series\": [\n    \"{{series_title}}\"\n  ]\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Series",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/refresh/{{series_title}}?queue=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"refresh",
+								"{{series_title}}"
+							],
+							"query": [
+								{
+									"key": "queue",
+									"value": "false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Folder",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/refresh/folder",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"refresh",
+								"folder"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seriesId\": \"{{series_id}}\",\n  \"titles\": []\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Refresh Job",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/refresh/job/{{job_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"refresh",
+								"job",
+								"{{job_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Search Providers",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/search?query={{series_title}}&limit=10",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"search"
+							],
+							"query": [
+								{
+									"key": "query",
+									"value": "{{series_title}}"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Series Record",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/series/{{series_title}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"series",
+								"{{series_title}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Set Aliases",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/series/{{series_title}}/aliases",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"series",
+								"{{series_title}}",
+								"aliases"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"aliases\": [\n    \"An alias\"\n  ]\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Alias",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/series/{{series_title}}/aliases/{{series_alias}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"series",
+								"{{series_title}}",
+								"aliases",
+								"{{series_alias}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Apply Match",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/series/{{series_title}}/apply-match",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"series",
+								"{{series_title}}",
+								"apply-match"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"canonicalTitle\": \"Batman\",\n  \"aliases\": [],\n  \"source\": \"AniList\",\n  \"sourceId\": \"12345\"\n}"
+						},
+						"description": "Send back the fields returned by Metadata > Search."
+					},
+					"response": []
+				},
+				{
+					"name": "Clear External",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/series/{{series_title}}/external",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"series",
+								"{{series_title}}",
+								"external"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Set Series Name",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/series/{{series_title}}/name",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"series",
+								"{{series_title}}",
+								"name"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Batman\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Set Preferred Language",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/metadata/series/{{series_title}}/preferred-language",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metadata",
+								"series",
+								"{{series_title}}",
+								"preferred-language"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"language\": \"en\"\n}"
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Provider search, refresh and series records."
+		},
+		{
+			"name": "Series Images",
+			"item": [
+				{
+					"name": "Clear Series Image",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/series-images/{{series_key}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"series-images",
+								"{{series_key}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Series Image",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/series-images/{{series_key}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"series-images",
+								"{{series_key}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Series Image",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/series-images/{{series_title}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"series-images",
+								"{{series_title}}"
+							]
+						},
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"description": "multipart/form-data with one field named file, up to 20 MiB."
+					},
+					"response": []
+				},
+				{
+					"name": "Apply From Provider",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/series-images/{{series_title}}/from-provider",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"series-images",
+								"{{series_title}}",
+								"from-provider"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"imageUrl\": \"https://example.com/cover.jpg\",\n  \"source\": \"AniList\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Apply Current To All",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/series-images/apply-current/all",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"series-images",
+								"apply-current",
+								"all"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Apply Current To Selected",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/series-images/apply-current/selected",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"series-images",
+								"apply-current",
+								"selected"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"series\": [\n    \"{{series_title}}\"\n  ]\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Search Candidates",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/series-images/candidates?query={{series_title}}&limit=10",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"series-images",
+								"candidates"
+							],
+							"query": [
+								{
+									"key": "query",
+									"value": "{{series_title}}"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Email",
+			"item": [
+				{
+					"name": "Get Condense Builds",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/condense-builds",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"condense-builds"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Start Condense Build",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/email/condense-builds",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"condense-builds"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seriesId\": \"{{series_id}}\",\n  \"condenseMode\": \"count\",\n  \"issuesPerBook\": 10,\n  \"bookIndex\": 0,\n  \"deliveryFormat\": \"epub\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Condense Build",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/condense-builds/{{build_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"condense-builds",
+								"{{build_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Condense Build",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/condense-builds/{{build_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"condense-builds",
+								"{{build_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Condense Build",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/condense-builds/{{build_id}}/cancel",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"condense-builds",
+								"{{build_id}}",
+								"cancel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Download Condense Build",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/condense-builds/{{build_id}}/download",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"condense-builds",
+								"{{build_id}}",
+								"download"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Download Condensed Book",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/email/condense-download",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"condense-download"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seriesId\": \"{{series_id}}\",\n  \"condenseMode\": \"count\",\n  \"issuesPerBook\": 10,\n  \"bookIndex\": 0,\n  \"deliveryFormat\": \"epub\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Plan Condense",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/email/condense-plan",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"condense-plan"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seriesId\": \"{{series_id}}\",\n  \"condenseMode\": \"count\",\n  \"issuesPerBook\": 10,\n  \"deliveryFormat\": \"epub\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Deliveries",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/deliveries?limit=50&offset=0&all=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"deliveries"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "all",
+									"value": "false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Delivery",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/deliveries/{{delivery_id}}/cancel",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"deliveries",
+								"{{delivery_id}}",
+								"cancel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Pending Deliveries",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/deliveries/cancel-pending?all=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"deliveries",
+								"cancel-pending"
+							],
+							"query": [
+								{
+									"key": "all",
+									"value": "false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Devices",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/devices?all=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"devices"
+							],
+							"query": [
+								{
+									"key": "all",
+									"value": "false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Device",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/email/devices",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"devices"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Kindle\",\n  \"emailAddress\": \"me@kindle.com\",\n  \"deliveryFormat\": \"epub\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Device",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/devices/{{device_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"devices",
+								"{{device_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Device",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/email/devices/{{device_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"devices",
+								"{{device_id}}"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Kindle\",\n  \"emailAddress\": \"me@kindle.com\",\n  \"deliveryFormat\": \"epub\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Send Test Email",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/devices/{{device_id}}/test",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"devices",
+								"{{device_id}}",
+								"test"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Send Files",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/email/send",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"send"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"{{file_path}}\"\n  ],\n  \"deviceId\": 1,\n  \"deliveryFormat\": \"epub\",\n  \"skipAlreadyDelivered\": true,\n  \"condenseMode\": \"none\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Send Series",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/email/send-series",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"send-series"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seriesId\": \"{{series_id}}\",\n  \"deviceId\": 1,\n  \"deliveryFormat\": \"epub\",\n  \"skipAlreadyDelivered\": true,\n  \"condenseMode\": \"none\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Email Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/status",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"status"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Subscriptions",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/subscriptions?series=&all=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"subscriptions"
+							],
+							"query": [
+								{
+									"key": "series",
+									"value": ""
+								},
+								{
+									"key": "all",
+									"value": "false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Upsert Subscription",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/email/subscriptions",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"subscriptions"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seriesTitle\": \"{{series_title}}\",\n  \"deviceId\": 1,\n  \"deliveryFormat\": \"device\",\n  \"enabled\": true\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Subscription",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/email/subscriptions/{{subscription_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"email",
+								"subscriptions",
+								"{{subscription_id}}"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "E-reader devices, sending, condensed books and history."
+		},
+		{
+			"name": "Suwayomi",
+			"item": [
+				{
+					"name": "Download Missing",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/suwayomi/download-missing",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"suwayomi",
+								"download-missing"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seriesTitle\": \"{{series_title}}\",\n  \"alternateTitles\": [],\n  \"suwayomiSeriesId\": null,\n  \"issueNumbers\": [\n    1,\n    2,\n    3\n  ]\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Search Library",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/suwayomi/series?query={{series_title}}&limit=20",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"suwayomi",
+								"series"
+							],
+							"query": [
+								{
+									"key": "query",
+									"value": "{{series_title}}"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Add Series",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/suwayomi/series/{{suwayomi_series_id}}/add",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"suwayomi",
+								"series",
+								"{{suwayomi_series_id}}",
+								"add"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Thumbnail",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/suwayomi/series/{{suwayomi_series_id}}/thumbnail",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"suwayomi",
+								"series",
+								"{{suwayomi_series_id}}",
+								"thumbnail"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Chapters",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/suwayomi/series/{{suwayomi_series_id}}/chapters",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"suwayomi",
+								"series",
+								"{{suwayomi_series_id}}",
+								"chapters"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Sources",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/suwayomi/sources",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"suwayomi",
+								"sources"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Search Source",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/suwayomi/sources/{{suwayomi_source_id}}/series?query={{series_title}}&page=1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"suwayomi",
+								"sources",
+								"{{suwayomi_source_id}}",
+								"series"
+							],
+							"query": [
+								{
+									"key": "query",
+									"value": "{{series_title}}"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Suwayomi Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/suwayomi/status",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"suwayomi",
+								"status"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Scheduled Jobs",
+			"item": [
+				{
+					"name": "List Scheduled Jobs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/scheduled-jobs",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"scheduled-jobs"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Scheduled Job",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/scheduled-jobs/{{scheduled_job_key}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"scheduled-jobs",
+								"{{scheduled_job_key}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Scheduled Job",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/scheduled-jobs/{{scheduled_job_key}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"scheduled-jobs",
+								"{{scheduled_job_key}}"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true,\n  \"intervalMinutes\": 60,\n  \"optionsJson\": null\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Run Scheduled Job Now",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/scheduled-jobs/{{scheduled_job_key}}/run",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"scheduled-jobs",
+								"{{scheduled_job_key}}",
+								"run"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Metadata Audit Findings",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/scheduled-jobs/metadata-audit/findings?type=&offset=0&limit=200",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"scheduled-jobs",
+								"metadata-audit",
+								"findings"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": ""
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "limit",
+									"value": "200"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Administrator only."
 		},
 		{
 			"name": "Settings",
@@ -834,10 +3575,508 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/settings",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Save Settings",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings"
+							]
 						},
-						"description": "Get all application settings"
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"issueNumberPadding\": 4,\n  \"databaseCleanup\": {\n    \"intervalHours\": 12\n  },\n  \"opds\": {\n    \"enabled\": false\n  }\n}"
+						},
+						"description": "Saves any groups in one write. null or left out keeps a value. Answers 409 for a setting an environment variable pins. See docs/API.md for every group."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Allow Registration",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/allow-registration",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"allow-registration"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Allow Registration",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/allow-registration",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"allow-registration"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": false\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cleanup Database",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/cleanup-database?confirm=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"cleanup-database"
+							],
+							"query": [
+								{
+									"key": "confirm",
+									"value": "false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Convert Rar To Cbz On Write",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/convert-rar-to-cbz-on-write",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"convert-rar-to-cbz-on-write"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Convert Rar To Cbz On Write",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/convert-rar-to-cbz-on-write",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"convert-rar-to-cbz-on-write"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Database Cleanup Settings",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/database-cleanup",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"database-cleanup"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Database Cleanup Settings",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/database-cleanup",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"database-cleanup"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"intervalHours\": 12,\n  \"staleCleanupMaxRemovalPercent\": 10,\n  \"staleCleanupMissingGraceHours\": 6,\n  \"staleCleanupSentinelFile\": \"\",\n  \"processingHistoryRetentionDays\": 90,\n  \"processingHistoryMaxEntries\": 50000\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Database Cleanup Interval Hours",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/database-cleanup-interval-hours",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"database-cleanup-interval-hours"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Database Cleanup Interval Hours",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/database-cleanup-interval-hours",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"database-cleanup-interval-hours"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"hours\": 12\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Default Library View",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/default-library-view",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"default-library-view"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Default Library View",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/default-library-view",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"default-library-view"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"view\": \"series\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Default Preferred Language",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/default-preferred-language",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"default-preferred-language"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Default Preferred Language",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/default-preferred-language",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"default-preferred-language"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"language\": \"en\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Download External Series Images",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/download-external-series-images",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"download-external-series-images"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Download External Series Images",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/download-external-series-images",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"download-external-series-images"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Email Settings",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/email",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"email"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"smtpHost\": \"smtp.example.com\",\n  \"smtpPort\": 587,\n  \"smtpUsername\": \"user\",\n  \"smtpPassword\": null,\n  \"smtpUseSsl\": false,\n  \"smtpAllowInsecure\": false,\n  \"emailFromAddress\": \"comics@example.com\",\n  \"emailFromName\": \"ComicMaintainer\",\n  \"emailMaxAttachmentMb\": 25\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Email Rate Limit Settings",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/email-rate-limit",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"email-rate-limit"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"maxSendsPerHour\": 0,\n  \"maxSendsPerDay\": 0,\n  \"minSecondsBetweenSends\": 0\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Error Reporting Settings",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/error-reporting",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"error-reporting"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": false,\n  \"gitHubToken\": null,\n  \"assignee\": \"\",\n  \"maxIssuesPerDay\": 10,\n  \"dedupeWindowHours\": 24,\n  \"commentOnRecurrence\": true\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update External Series Metadata",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/external-series-metadata",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"external-series-metadata"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true,\n  \"comicVineApiKey\": null,\n  \"comicVineBaseUrl\": null,\n  \"enableMangaDex\": true,\n  \"mangaDexBaseUrl\": null,\n  \"enableAniList\": true,\n  \"aniListBaseUrl\": null\n}"
+						}
 					},
 					"response": []
 				},
@@ -848,10 +4087,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/settings/filename-format",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "filename-format"]
-						},
-						"description": "Get the current filename format template"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"filename-format"
+							]
+						}
 					},
 					"response": []
 				},
@@ -865,16 +4109,21 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/filename-format",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"filename-format"
+							]
+						},
 						"body": {
 							"mode": "raw",
 							"raw": "{\n  \"format\": \"{series} - Chapter {issue}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/settings/filename-format",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "filename-format"]
-						},
-						"description": "Update the filename format template. Supports placeholders: {series}, {issue}, {title}, {publisher}, {year}, {volume}"
+						}
 					},
 					"response": []
 				},
@@ -885,10 +4134,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/settings/issue-number-padding",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "issue-number-padding"]
-						},
-						"description": "Get the issue number padding (number of digits)"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"issue-number-padding"
+							]
+						}
 					},
 					"response": []
 				},
@@ -902,16 +4156,21 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/issue-number-padding",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"issue-number-padding"
+							]
+						},
 						"body": {
 							"mode": "raw",
 							"raw": "{\n  \"padding\": 4\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/settings/issue-number-padding",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "issue-number-padding"]
-						},
-						"description": "Update the issue number padding, from 0 to 10. Default is 4 (e.g., 0001)"
+						}
 					},
 					"response": []
 				},
@@ -922,10 +4181,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/settings/log-max-bytes",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "log-max-bytes"]
-						},
-						"description": "Get the maximum log file size in bytes"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"log-max-bytes"
+							]
+						}
 					},
 					"response": []
 				},
@@ -939,35 +4203,83 @@
 								"value": "application/json"
 							}
 						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"maxBytes\": 10485760\n}"
-						},
 						"url": {
 							"raw": "{{base_url}}/api/settings/log-max-bytes",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "log-max-bytes"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"log-max-bytes"
+							]
 						},
-						"description": "Update the maximum log file size in bytes"
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"maxMB\": 10\n}"
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Get Watcher Enable Rename",
+					"name": "Reset Database",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/reset",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"reset"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Restart Application",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/restart",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"restart"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Series Image Limits",
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/settings/watcher-enable-rename",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "watcher-enable-rename"]
-						},
-						"description": "Check if automatic file renaming is enabled in the watcher"
+							"raw": "{{base_url}}/api/settings/series-image-limits",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"series-image-limits"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Update Watcher Enable Rename",
+					"name": "Update Series Image Limits",
 					"request": {
 						"method": "PUT",
 						"header": [
@@ -976,16 +4288,49 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/series-image-limits",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"series-image-limits"
+							]
+						},
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"enabled\": true\n}"
-						},
+							"raw": "{\n  \"maxMB\": 5,\n  \"maxDownloadMB\": 25,\n  \"maxDimension\": 2048\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Suwayomi Settings",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
 						"url": {
-							"raw": "{{base_url}}/api/settings/watcher-enable-rename",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "watcher-enable-rename"]
+							"raw": "{{base_url}}/api/settings/suwayomi",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"suwayomi"
+							]
 						},
-						"description": "Enable or disable automatic file renaming in the watcher"
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": false,\n  \"baseUrl\": \"http://suwayomi:4567\",\n  \"username\": \"\",\n  \"password\": null,\n  \"downloadsDirectory\": null,\n  \"importDirectory\": null\n}"
+						}
 					},
 					"response": []
 				},
@@ -996,10 +4341,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/settings/watcher-enable-normalize",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "watcher-enable-normalize"]
-						},
-						"description": "Check if automatic metadata normalization is enabled in the watcher"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"watcher-enable-normalize"
+							]
+						}
 					},
 					"response": []
 				},
@@ -1013,35 +4363,45 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/watcher-enable-normalize",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"watcher-enable-normalize"
+							]
+						},
 						"body": {
 							"mode": "raw",
 							"raw": "{\n  \"enabled\": true\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/settings/watcher-enable-normalize",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "watcher-enable-normalize"]
-						},
-						"description": "Enable or disable automatic metadata normalization in the watcher"
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Get Database Cleanup Interval",
+					"name": "Get Watcher Enable Rename",
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/settings/database-cleanup-interval-hours",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "database-cleanup-interval-hours"]
-						},
-						"description": "Get the database cleanup interval in hours"
+							"raw": "{{base_url}}/api/settings/watcher-enable-rename",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"watcher-enable-rename"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Update Database Cleanup Interval",
+					"name": "Update Watcher Enable Rename",
 					"request": {
 						"method": "PUT",
 						"header": [
@@ -1050,39 +4410,641 @@
 								"value": "application/json"
 							}
 						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/watcher-enable-rename",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"watcher-enable-rename"
+							]
+						},
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"intervalHours\": 24\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/settings/database-cleanup-interval-hours",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "database-cleanup-interval-hours"]
-						},
-						"description": "Update the database cleanup interval in hours"
+							"raw": "{\n  \"enabled\": true\n}"
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Cleanup Database Now",
+					"name": "Get Write Cover To First Archive",
 					"request": {
-						"method": "POST",
+						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/settings/cleanup-database",
-							"host": ["{{base_url}}"],
-							"path": ["api", "settings", "cleanup-database"]
+							"raw": "{{base_url}}/api/settings/write-cover-to-first-archive",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"write-cover-to-first-archive"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Write Cover To First Archive",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/write-cover-to-first-archive",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"write-cover-to-first-archive"
+							]
 						},
-						"description": "Trigger an immediate database cleanup"
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Write Cover To Series Folder",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/write-cover-to-series-folder",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"write-cover-to-series-folder"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Write Cover To Series Folder",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/settings/write-cover-to-series-folder",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"settings",
+								"write-cover-to-series-folder"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true\n}"
+						}
 					},
 					"response": []
 				}
 			],
-			"description": "Endpoints for managing application settings"
+			"description": "Writes need an administrator."
 		},
 		{
-			"name": "Watcher",
+			"name": "Notifications",
 			"item": [
+				{
+					"name": "Send Test Notification",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/notifications/{{notification_target}}/test",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"notifications",
+								"{{notification_target}}",
+								"test"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Administrator only."
+		},
+		{
+			"name": "Backups",
+			"item": [
+				{
+					"name": "List Backups",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/backups",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"backups"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Backup",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/backups",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"backups"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Backup",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/backups/{{backup_name}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"backups",
+								"{{backup_name}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Download Backup",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/backups/{{backup_name}}/download",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"backups",
+								"{{backup_name}}",
+								"download"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Restore Backup",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/backups/{{backup_name}}/restore",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"backups",
+								"{{backup_name}}",
+								"restore"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Pending Restore",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/backups/restore-pending",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"backups",
+								"restore-pending"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Restore",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/backups/upload-restore",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"backups",
+								"upload-restore"
+							]
+						},
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"description": "multipart/form-data with one field named file, up to 2 GiB."
+					},
+					"response": []
+				}
+			],
+			"description": "Administrator only."
+		},
+		{
+			"name": "Error Reports",
+			"item": [
+				{
+					"name": "Report Client Error",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/client-errors",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"client-errors"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"TypeError\",\n  \"message\": \"Example\",\n  \"stack\": \"\",\n  \"source\": \"/js/main.js\",\n  \"url\": \"/\",\n  \"kind\": \"Error\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List Reports",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/error-reports?limit=50&state=",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"error-reports"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "state",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Report",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/error-reports/{{error_fingerprint}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"error-reports",
+								"{{error_fingerprint}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Mute Report",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/error-reports/{{error_fingerprint}}/mute",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"error-reports",
+								"{{error_fingerprint}}",
+								"mute"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Unmute Report",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/error-reports/{{error_fingerprint}}/unmute",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"error-reports",
+								"{{error_fingerprint}}",
+								"unmute"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Send Test Report",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/error-reports/test",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"error-reports",
+								"test"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Diagnostics and Logs",
+			"item": [
+				{
+					"name": "Get Diagnostics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/diagnostics",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"diagnostics"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Logs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/logs?type=debug&lines=500&filename=",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"logs"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "debug"
+								},
+								{
+									"key": "lines",
+									"value": "500"
+								},
+								{
+									"key": "filename",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Log Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/logs/files?type=debug",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"logs",
+								"files"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "debug"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Administrator only."
+		},
+		{
+			"name": "Application",
+			"item": [
+				{
+					"name": "Get Preferences",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/preferences",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"preferences"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Save Preferences (deprecated)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/preferences",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"preferences"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"theme\": \"dark\",\n  \"perPage\": 100\n}"
+						},
+						"description": "Deprecated alias of PUT /api/preferences."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Preferences",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/preferences",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"preferences"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"theme\": \"dark\",\n  \"perPage\": 100,\n  \"readingMode\": \"manga\",\n  \"libraryViewMode\": \"series\",\n  \"filterMode\": \"all\",\n  \"sortMode\": \"name\",\n  \"sortDirection\": \"asc\"\n}"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Processing History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/processing-history?limit=50&offset=0",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"processing-history"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Version",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/version",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"version"
+							]
+						},
+						"auth": {
+							"type": "noauth"
+						}
+					},
+					"response": []
+				},
 				{
 					"name": "Get Watcher Status",
 					"request": {
@@ -1090,99 +5052,79 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/watcher",
-							"host": ["{{base_url}}"],
-							"path": ["api", "watcher"]
-						},
-						"description": "Get the current status of the file watcher"
-					},
-					"response": []
-				}
-			],
-			"description": "Endpoints for monitoring the file watcher service"
-		},
-		{
-			"name": "Logs",
-			"item": [
-				{
-					"name": "List Log Files",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/logs/files",
-							"host": ["{{base_url}}"],
-							"path": ["api", "logs", "files"]
-						},
-						"description": "List available log files"
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"watcher"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Get Log Content",
+					"name": "Get Watcher Status (deprecated)",
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/logs?filename=app.log&lines=100",
-							"host": ["{{base_url}}"],
-							"path": ["api", "logs"],
-							"query": [
-								{
-									"key": "filename",
-									"value": "app.log",
-									"description": "Log file name (app.log, debug.log, watcher.log)"
-								},
-								{
-									"key": "lines",
-									"value": "100",
-									"description": "Number of lines to retrieve"
-								}
+							"raw": "{{base_url}}/api/watcher/status",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"watcher",
+								"status"
 							]
 						},
-						"description": "Get content from a specific log file"
+						"description": "Deprecated alias of GET /api/watcher."
 					},
 					"response": []
-				}
-			],
-			"description": "Endpoints for accessing application logs"
-		},
-		{
-			"name": "Processing History",
-			"item": [
+				},
 				{
-					"name": "Get Processing History",
+					"name": "Web Manifest",
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/processing-history?page=1&perPage=50",
-							"host": ["{{base_url}}"],
-							"path": ["api", "processing-history"],
-							"query": [
-								{
-									"key": "page",
-									"value": "1",
-									"description": "Page number"
-								},
-								{
-									"key": "perPage",
-									"value": "50",
-									"description": "Items per page"
-								}
+							"raw": "{{base_url}}/manifest.json",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"manifest.json"
 							]
 						},
-						"description": "Get processing history with pagination"
+						"auth": {
+							"type": "noauth"
+						}
 					},
 					"response": []
-				}
-			],
-			"description": "Endpoints for viewing file processing history"
-		},
-		{
-			"name": "Version",
-			"item": [
+				},
 				{
-					"name": "Get Version",
+					"name": "Service Worker",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/sw.js",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"sw.js"
+							]
+						},
+						"auth": {
+							"type": "noauth"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Liveness Probe",
 					"request": {
 						"auth": {
 							"type": "noauth"
@@ -1190,76 +5132,434 @@
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/version",
-							"host": ["{{base_url}}"],
-							"path": ["api", "version"]
-						},
-						"description": "Get API version information"
-					},
-					"response": []
-				}
-			],
-			"description": "Endpoints for API version information"
-		},
-		{
-			"name": "Preferences",
-			"item": [
-				{
-					"name": "Get User Preferences",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/preferences",
-							"host": ["{{base_url}}"],
-							"path": ["api", "preferences"]
-						},
-						"description": "Get current user's preferences (theme, pagination, etc.)"
+							"raw": "{{base_url}}/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health"
+							]
+						}
 					},
 					"response": []
 				},
 				{
-					"name": "Update User Preferences",
+					"name": "Readiness Probe",
 					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"theme\": \"dark\",\n  \"itemsPerPage\": 100\n}"
+						"auth": {
+							"type": "noauth"
 						},
+						"method": "GET",
+						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/preferences",
-							"host": ["{{base_url}}"],
-							"path": ["api", "preferences"]
-						},
-						"description": "Update current user's preferences"
+							"raw": "{{base_url}}/health/ready",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health",
+								"ready"
+							]
+						}
 					},
 					"response": []
 				}
 			],
-			"description": "Endpoints for managing user preferences"
-		}
-	],
-	"variable": [
-		{
-			"key": "base_url",
-			"value": "http://localhost:5000",
-			"type": "string"
+			"description": "Version, watcher, history, preferences and PWA files."
 		},
 		{
-			"key": "jwt_token",
-			"value": "",
-			"type": "string"
+			"name": "Events",
+			"item": [
+				{
+					"name": "Event Stream",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/events/stream?access_token={{stream_token}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"events",
+								"stream"
+							],
+							"query": [
+								{
+									"key": "access_token",
+									"value": "{{stream_token}}"
+								}
+							]
+						},
+						"auth": {
+							"type": "noauth"
+						},
+						"description": "Server-sent events. Run Auth > Get Stream Token first; the token works once and only here."
+					},
+					"response": []
+				}
+			],
+			"description": "Server-sent event stream."
 		},
 		{
-			"key": "api_key",
-			"value": "",
-			"type": "string"
+			"name": "OPDS",
+			"item": [
+				{
+					"name": "Root Feed",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Catalog",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/catalog",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"catalog"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Continue Reading",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/continue-reading",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"continue-reading"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Issue Cover",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/issues/{{opds_issue_id}}/cover",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"issues",
+								"{{opds_issue_id}}",
+								"cover"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Download Issue",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/issues/{{opds_issue_id}}/file",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"issues",
+								"{{opds_issue_id}}",
+								"file"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Download Issue (HEAD)",
+					"request": {
+						"method": "HEAD",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/issues/{{opds_issue_id}}/file",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"issues",
+								"{{opds_issue_id}}",
+								"file"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Issue Page",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/issues/{{opds_issue_id}}/pages/{{opds_page_number}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"issues",
+								"{{opds_issue_id}}",
+								"pages",
+								"{{opds_page_number}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Newly Added",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/newly-added",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"newly-added"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Open Search Description",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/opensearch.xml",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"opensearch.xml"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Search Series",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/search?q={{series_title}}&page=1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"search"
+							],
+							"query": [
+								{
+									"key": "q",
+									"value": "{{series_title}}"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "All Series",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/series?page=1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"series"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Series Updates",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/series-updates",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"series-updates"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Series Issues",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/opds/v1.2/series/{{series_id}}?page=1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"opds",
+								"v1.2",
+								"series",
+								"{{series_id}}"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "HTTP Basic only: opds_username and opds_password. Needs OPDS_ENABLED or Settings > OPDS Catalog.",
+			"auth": {
+				"type": "basic",
+				"basic": [
+					{
+						"key": "username",
+						"value": "{{opds_username}}",
+						"type": "string"
+					},
+					{
+						"key": "password",
+						"value": "{{opds_password}}",
+						"type": "string"
+					}
+				]
+			}
+		},
+		{
+			"name": "Deprecated Aliases",
+			"item": [
+				{
+					"name": "Delete File",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/delete-file?filePath={{file_path}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"delete-file"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								}
+							]
+						},
+						"description": "Deprecated alias of DELETE /api/files/{encodedFilePath}."
+					},
+					"response": []
+				},
+				{
+					"name": "Rename File",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/rename-file?filePath={{file_path}}&forceReprocess=false",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"rename-file"
+							],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "{{file_path}}"
+								},
+								{
+									"key": "forceReprocess",
+									"value": "false"
+								}
+							]
+						},
+						"description": "Deprecated alias of POST /api/files/{encodedFilePath}/rename."
+					},
+					"response": []
+				}
+			],
+			"description": "Still served; use the replacement in new scripts."
 		}
 	]
 }

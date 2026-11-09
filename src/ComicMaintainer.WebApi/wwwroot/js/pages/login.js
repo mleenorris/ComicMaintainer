@@ -51,51 +51,11 @@
             }, 3000);
         }
         
-        // Helper function to decode JWT token and extract expiration
-        function decodeJwtToken(token) {
-            try {
-                // JWT format: header.payload.signature
-                const parts = token.split('.');
-                if (parts.length !== 3) {
-                    return null;
-                }
-                
-                // Decode the payload (second part)
-                const payload = parts[1];
-                // Add padding if needed for base64 decode
-                const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-                const paddedBase64 = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
-                const jsonPayload = decodeURIComponent(atob(paddedBase64).split('').map(function(c) {
-                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-                }).join(''));
-                
-                return JSON.parse(jsonPayload);
-            } catch (error) {
-                console.error('Error decoding JWT token:', error);
-                return null;
-            }
-        }
-        
-        // Helper function to check if JWT token is expired
-        function isTokenExpired(token) {
-            const decoded = decodeJwtToken(token);
-            if (!decoded || !decoded.exp) {
-                return true; // Treat invalid token as expired
-            }
-            
-            // JWT exp claim is in seconds, Date.now() is in milliseconds
-            const expirationTime = decoded.exp * 1000;
-            const currentTime = Date.now();
-            
-            return currentTime >= expirationTime;
-        }
-        
         // Check if setup is required. Resolves to true when it is, and the
         // page is on its way to the setup page.
         async function checkSetupRequired() {
             try {
-                const response = await fetch(apiUrl('/api/auth/setup-required'));
-                const data = await response.json();
+                const data = await apiFetch('/api/auth/setup-required', { auth: false });
                 
                 if (data.setupRequired) {
                     // Setup is required, redirect to setup page
@@ -109,12 +69,10 @@
         }
         
         // Check if already logged in (including Authelia)
-        async function checkAuth() {
+        async function redirectIfSignedIn() {
             try {
                 // First check server auth status (includes Authelia check)
-                const response = await fetch(apiUrl('/api/auth/status'), {
-                    credentials: 'include' // Important for Authelia cookies
-                });
+                const response = await apiFetch('/api/auth/status', { auth: false, json: false });
                 
                 if (response.ok) {
                     const authStatus = await response.json();
@@ -189,12 +147,11 @@
             let redirecting = false;
             
             try {
-                const response = await fetch(apiUrl('/api/auth/login'), {
+                const response = await apiFetch('/api/auth/login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username, password })
+                    auth: false,
+                    json: false,
+                    body: { username, password }
                 });
                 
                 const data = response.status === 429
@@ -237,6 +194,6 @@
         // page must redirect only once.
         checkSetupRequired().then(setupRequired => {
             if (!setupRequired) {
-                checkAuth();
+                redirectIfSignedIn();
             }
         });

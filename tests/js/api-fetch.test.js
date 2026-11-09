@@ -5,6 +5,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { WWWROOT } = require('./support/sandbox');
 const { loadPage, plain, respond } = require('./support/dom');
 const { jwt, validToken } = require('./support/app');
 const { boot, consoleLines, messages, requests, wentToLogin } = require('./support/core-helpers');
@@ -355,3 +358,46 @@ test('debug logging stays off when storage cannot be read', () => {
 
     assert.equal(page.run('isApiDebugEnabled()'), false);
 });
+
+// settings.js moves over when its own changes are merged; sw.js runs in the
+// service worker, which has no session of its own and no page to redirect.
+const NOT_YET_ON_API_FETCH = new Set(['js/app/settings.js']);
+
+test('every page script makes its requests through apiFetch', () => {
+    const scripts = fs.readdirSync(path.join(WWWROOT, 'js'), { recursive: true, withFileTypes: true })
+        .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
+        .map(entry => path.relative(WWWROOT, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'))
+        .filter(script => script !== 'js/app/api.js' && !NOT_YET_ON_API_FETCH.has(script));
+    assert.ok(scripts.includes('js/pages/login.js') && scripts.includes('js/pages/setup.js'));
+
+    for (const script of scripts) {
+        const direct = fs.readFileSync(path.join(WWWROOT, script), 'utf8').split(/\r?\n/)
+            .filter(line => !/^\s*(?:\/\/|\*)/.test(line) && /\bfetch\(/.test(line));
+        assert.deepEqual(direct, [], script);
+    }
+});
+
+for (const [page, url] of [['login.html', '/api/auth/login'], ['setup.html', '/api/auth/setup']]) {
+    test(`${page} posts without a session and leaves a refusal to the page`, async () => {
+        const form = page === 'login.html' ? '#username' : '#setupToken';
+        const loaded = loadPage({
+            html: page,
+            url: `http://localhost/${page}`,
+            routes: {
+                'GET /api/auth/setup-required': { setupRequired: page === 'setup.html' },
+                'GET /api/auth/status': { autheliaEnabled: false, isAuthenticated: false },
+                [`POST ${url}`]: respond(401, { error: 'Nope' })
+            }
+        });
+        await loaded.settle();
+        assert.ok(loaded.$(form), 'the page is ready');
+
+        await loaded.run(`apiFetch('${url}', { method: 'POST', auth: false, json: false, body: { a: 1 } })`);
+        const [call] = requests(loaded, 'POST', url);
+
+        assert.equal(call.init.credentials, 'include');
+        assert.equal(call.init.headers['Content-Type'], 'application/json');
+        assert.equal(call.init.headers.Authorization, undefined);
+        assert.deepEqual(loaded.navigations, [], 'a 401 here is a wrong password, not an ended session');
+    });
+}

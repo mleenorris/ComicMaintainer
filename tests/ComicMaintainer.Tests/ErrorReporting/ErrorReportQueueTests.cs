@@ -64,31 +64,24 @@ public class ErrorReportQueueTests
         Assert.False(string.IsNullOrEmpty(report.Fingerprint));
     }
 
-    [Fact]
-    public void ErrorReportFactory_MasksEveryNotificationSecret()
+    // Each secret alone and with no key name beside it, so only the literal list can mask it.
+    // The path rule would blank most of a webhook URL but keep its last segment, which is the token.
+    [Theory]
+    [InlineData(nameof(AppSettings.NotifyNtfyToken), "Qw3rtyUiop1234", "Qw3rtyUiop1234")]
+    [InlineData(nameof(AppSettings.NotifyGotifyToken), "Asdfgh5678Jklz", "Asdfgh5678Jklz")]
+    [InlineData(nameof(AppSettings.NotifyDiscordWebhookUrl), "https://discord.example/api/webhooks/1/AbCdEf0123", "AbCdEf0123")]
+    [InlineData(nameof(AppSettings.NotifyWebhookUrl), "https://hook.example/p/Zx9Yw8Vu7Ts", "Zx9Yw8Vu7Ts")]
+    [InlineData(nameof(AppSettings.NotifyKomgaApiKey), "Mnbvcx0987Lkjh", "Mnbvcx0987Lkjh")]
+    [InlineData(nameof(AppSettings.NotifyKavitaApiKey), "Poiuyt6543Rewq", "Poiuyt6543Rewq")]
+    public void ErrorReportFactory_MasksEachNotificationSecret(string setting, string value, string mustNotAppear)
     {
-        var settings = new AppSettings
-        {
-            NotifyNtfyToken = "ntfy-token-value",
-            NotifyGotifyToken = "gotify-token-value",
-            NotifyDiscordWebhookUrl = "https://discord.example/api/webhooks/1/hook-token",
-            NotifyWebhookUrl = "https://hook.example/private-path",
-            NotifyKomgaApiKey = "komga-api-key-value",
-            NotifyKavitaApiKey = "kavita-api-key-value",
-        };
-        var secrets = new[]
-        {
-            settings.NotifyNtfyToken, settings.NotifyGotifyToken, settings.NotifyDiscordWebhookUrl,
-            settings.NotifyWebhookUrl, settings.NotifyKomgaApiKey, settings.NotifyKavitaApiKey,
-        };
+        var settings = new AppSettings();
+        typeof(AppSettings).GetProperty(setting)!.SetValue(settings, value);
         var factory = new ErrorReportFactory(new TestOptionsMonitor<AppSettings>(settings));
 
-        var report = factory.Create("Error", "Send failed", string.Join(" and ", secrets), null, "Svc", "corr-1", DateTime.UtcNow);
+        var report = factory.Create("Error", "Send failed", $"The request to {value} was refused", null, "Svc", "corr-1", DateTime.UtcNow);
 
-        foreach (var secret in secrets)
-        {
-            Assert.DoesNotContain(secret, report.RenderedMessage);
-        }
+        Assert.DoesNotContain(mustNotAppear, report.RenderedMessage);
     }
 
     [Fact]

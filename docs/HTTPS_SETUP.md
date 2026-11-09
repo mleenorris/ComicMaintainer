@@ -1,380 +1,177 @@
 # HTTPS Setup Guide
 
-This guide explains how to configure HTTPS for ComicMaintainer. There are two main approaches:
+Use HTTPS for any access from outside your own network. Sign-in details, session tokens and, for [comic apps](OPDS.md), passwords travel with every request.
 
-1. **Direct HTTPS**: The application runs with HTTPS natively (simple, good for development)
-2. **Reverse Proxy**: HTTPS is handled by a reverse proxy like Nginx or Traefik (recommended for production)
+There are two ways to do it:
 
-## Table of Contents
-- [Direct HTTPS Setup](#direct-https-setup)
-  - [Development (Self-Signed Certificates)](#development-self-signed-certificates)
-  - [Production (Trusted Certificates)](#production-trusted-certificates)
-- [Reverse Proxy HTTPS](#reverse-proxy-https)
-- [Comparison](#comparison)
-- [Security Considerations](#security-considerations)
-- [Troubleshooting](#troubleshooting)
+1. **Reverse proxy (recommended).** A proxy such as SWAG, nginx, Traefik or Caddy handles HTTPS and renews its certificate by itself. See the [Reverse Proxy Setup Guide](REVERSE_PROXY.md).
+2. **Direct HTTPS.** ComicMaintainer's own web server serves HTTPS from a certificate you provide. Use this when you have a single service and no proxy.
 
-## Direct HTTPS Setup
+| | Reverse proxy | Direct HTTPS |
+|---|---|---|
+| **Certificate renewal** | Automatic with Let's Encrypt | Your job; restart the container afterwards |
+| **Automatic security headers** (HSTS, `upgrade-insecure-requests`) | Yes, from `X-Forwarded-Proto` | No |
+| **Several services on one address** | Yes | No |
+| **Setup** | One more container or service | Three environment variables and a certificate |
 
-### Development (Self-Signed Certificates)
+## Direct HTTPS
 
-Perfect for development, testing, or private networks where browser certificate warnings are acceptable.
+The image listens on plain HTTP on port 5000. To add HTTPS, set these variables in the container:
 
-#### Step 1: Generate Self-Signed Certificate
+| Variable | Value |
+|---|---|
+| `ASPNETCORE_URLS` | `http://+:5000;https://+:5001` |
+| `ASPNETCORE_Kestrel__Certificates__Default__Path` | The certificate file in PEM format, such as `/certs/fullchain.pem` |
+| `ASPNETCORE_Kestrel__Certificates__Default__KeyPath` | The private key file in PEM format, such as `/certs/privkey.pem` |
 
-Using Docker (recommended):
+Keep port 5000 in `ASPNETCORE_URLS`, because the container's health check uses it, but publish only the HTTPS port.
+
+Both files must be readable by the container's `PUID`. If the app cannot read them or they do not match, it exits at startup and the reason is in `docker logs`.
+
+### Step 1: Get a Certificate
+
+**Self-signed**, for testing or a private network. Browsers will warn about it, and comic apps may refuse it:
+
 ```bash
-docker run --rm \
-  -v /path/to/config:/Config \
-  iceburn1/comictagger-watcher:latest \
-  /generate_self_signed_cert.sh /Config/ssl 365 localhost
-```
-
-Or manually with OpenSSL:
-```bash
-mkdir -p /path/to/config/ssl
+mkdir -p /path/to/certs
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout /path/to/config/ssl/selfsigned.key \
-  -out /path/to/config/ssl/selfsigned.crt \
-  -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,DNS:*.localhost,IP:127.0.0.1"
+  -keyout /path/to/certs/privkey.pem \
+  -out /path/to/certs/fullchain.pem \
+  -subj "/CN=comics.local" \
+  -addext "subjectAltName=DNS:comics.local,IP:192.168.1.10"
+
+# Replace 1000:1000 with your PUID:PGID
+sudo chown 1000:1000 /path/to/certs/privkey.pem /path/to/certs/fullchain.pem
+chmod 600 /path/to/certs/privkey.pem
 ```
 
-#### Step 2: Run with HTTPS
+Change `comics.local` and the IP address to what you will type in the browser.
 
-**Docker CLI:**
+**Let's Encrypt** with certbot, for a public domain:
+
+```bash
+sudo certbot certonly --standalone -d comics.example.com
+```
+
+Certbot stores the files in `/etc/letsencrypt/live/comics.example.com/`, and its private key is readable only by root. Copy them somewhere the container can read:
+
+```bash
+sudo mkdir -p /path/to/certs
+sudo cp -L /etc/letsencrypt/live/comics.example.com/fullchain.pem /path/to/certs/
+sudo cp -L /etc/letsencrypt/live/comics.example.com/privkey.pem /path/to/certs/
+# Replace 1000:1000 with your PUID:PGID
+sudo chown 1000:1000 /path/to/certs/*.pem
+sudo chmod 600 /path/to/certs/privkey.pem
+```
+
+**A certificate from another provider** works the same way: put the certificate, followed by any intermediate certificates, in one PEM file, and the key in another.
+
+### Step 2: Run the Container
+
 ```bash
 docker run -d \
-  --name comictagger-watcher \
+  --name comicmaintainer \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  -e ASPNETCORE_URLS="http://+:5000;https://+:5001" \
+  -e ASPNETCORE_Kestrel__Certificates__Default__Path=/certs/fullchain.pem \
+  -e ASPNETCORE_Kestrel__Certificates__Default__KeyPath=/certs/privkey.pem \
   -v /path/to/comics:/watched_dir \
-  -v /path/to/config:/Config \
-  -e WATCHED_DIR=/watched_dir \
-  -e SSL_CERTFILE=/Config/ssl/selfsigned.crt \
-  -e SSL_KEYFILE=/Config/ssl/selfsigned.key \
-  -e PUID=$(id -u) \
-  -e PGID=$(id -g) \
-  -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
-```
-
-**Docker Compose:**
-```yaml
-version: '3.8'
-
-services:
-  comictagger-watcher:
-    image: iceburn1/comictagger-watcher:latest
-    container_name: comictagger-watcher
-    restart: unless-stopped
-    
-    environment:
-      - WATCHED_DIR=/watched_dir
-      - SSL_CERTFILE=/Config/ssl/selfsigned.crt
-      - SSL_KEYFILE=/Config/ssl/selfsigned.key
-      - PUID=1000
-      - PGID=1000
-    
-    volumes:
-      - /path/to/comics:/watched_dir
-      - /path/to/config:/Config
-    
-    ports:
-      - "5000:5000"
-```
-
-#### Step 3: Access the Application
-
-Open your browser and navigate to: `https://localhost:5000`
-
-**Note**: You'll see a security warning because the certificate is self-signed. This is expected and safe for development. Click "Advanced" → "Proceed to localhost (unsafe)" or similar depending on your browser.
-
-### Production (Trusted Certificates)
-
-For production deployments, use certificates from a trusted Certificate Authority.
-
-#### Option A: Let's Encrypt with Certbot
-
-**Step 1: Install Certbot**
-```bash
-# On Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install certbot
-
-# On CentOS/RHEL
-sudo yum install certbot
-```
-
-**Step 2: Generate Certificate**
-```bash
-# HTTP challenge (requires port 80)
-sudo certbot certonly --standalone -d your-domain.com
-
-# DNS challenge (works with any port)
-sudo certbot certonly --manual --preferred-challenges dns -d your-domain.com
-```
-
-Certificates will be stored in `/etc/letsencrypt/live/your-domain.com/`
-
-**Step 3: Run with Let's Encrypt Certificates**
-```bash
-docker run -d \
-  --name comictagger-watcher \
-  -v /path/to/comics:/watched_dir \
-  -v /path/to/config:/Config \
-  -v /etc/letsencrypt:/certs:ro \
-  -e WATCHED_DIR=/watched_dir \
-  -e SSL_CERTFILE=/certs/live/your-domain.com/fullchain.pem \
-  -e SSL_KEYFILE=/certs/live/your-domain.com/privkey.pem \
-  -e PUID=$(id -u) \
-  -e PGID=$(id -g) \
-  -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
-```
-
-**Step 4: Set Up Automatic Renewal**
-```bash
-# Add cron job for automatic renewal
-sudo crontab -e
-
-# Add this line (checks twice daily)
-0 0,12 * * * certbot renew --quiet --deploy-hook "docker restart comictagger-watcher"
-```
-
-#### Option B: Commercial Certificate
-
-If you have a commercial certificate from a provider (e.g., DigiCert, Comodo):
-
-1. Place your certificate files in a secure location:
-   - Certificate: `/path/to/certs/cert.crt`
-   - Private key: `/path/to/certs/cert.key`
-   - CA bundle (if provided): `/path/to/certs/ca-bundle.crt`
-
-2. Run with your certificates:
-```bash
-docker run -d \
-  --name comictagger-watcher \
-  -v /path/to/comics:/watched_dir \
+  -v /path/to/duplicates:/duplicates \
   -v /path/to/config:/Config \
   -v /path/to/certs:/certs:ro \
-  -e WATCHED_DIR=/watched_dir \
-  -e SSL_CERTFILE=/certs/cert.crt \
-  -e SSL_KEYFILE=/certs/cert.key \
-  -e SSL_CA_CERTS=/certs/ca-bundle.crt \
-  -e PUID=$(id -u) \
-  -e PGID=$(id -g) \
-  -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  -p 443:5001 \
+  iceburn1/comicmaintainer:dotnet
 ```
 
-### Using Standard HTTPS Port (443)
+Or with Docker Compose:
 
-To use the standard HTTPS port 443 instead of 5000:
+```yaml
+services:
+  comicmaintainer:
+    image: iceburn1/comicmaintainer:dotnet
+    container_name: comicmaintainer
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - ASPNETCORE_URLS=http://+:5000;https://+:5001
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/certs/fullchain.pem
+      - ASPNETCORE_Kestrel__Certificates__Default__KeyPath=/certs/privkey.pem
+    volumes:
+      - /path/to/comics:/watched_dir
+      - /path/to/duplicates:/duplicates
+      - /path/to/config:/Config
+      - /path/to/certs:/certs:ro
+    ports:
+      - "443:5001"
+```
+
+Publishing on host port 443 is the standard HTTPS port, so the address needs no port number. Use another host port, such as `-p 5443:5001`, if something else already uses 443.
+
+### Step 3: Open the App
+
+Go to `https://comics.example.com`. With a self-signed certificate your browser shows a warning that you have to accept.
+
+From the command line:
 
 ```bash
-docker run -d \
-  --name comictagger-watcher \
-  -v /path/to/comics:/watched_dir \
-  -v /path/to/config:/Config \
-  -v /etc/letsencrypt:/certs:ro \
-  -e WATCHED_DIR=/watched_dir \
-  -e SSL_CERTFILE=/certs/live/your-domain.com/fullchain.pem \
-  -e SSL_KEYFILE=/certs/live/your-domain.com/privkey.pem \
-  -e PUID=$(id -u) \
-  -e PGID=$(id -g) \
-  -p 443:5000 \
-  iceburn1/comictagger-watcher:latest
+# Should return: {"version":"..."}
+curl https://comics.example.com/api/version
+
+# With a self-signed certificate, add -k
+curl -k https://localhost/api/version
 ```
 
-Access at: `https://your-domain.com` (no port number needed)
+### Renewing the Certificate
 
-**Note**: The application still listens on port 5000 inside the container; the `-p 443:5000` port mapping publishes it on port 443 of the host. Binding a host port below 1024 may require root privileges on the host system.
-
-## Reverse Proxy HTTPS
-
-For production environments, using a reverse proxy is recommended. See the [Reverse Proxy Setup Guide](REVERSE_PROXY.md) for detailed configuration examples with:
-
-- Nginx
-- Traefik
-- Apache
-- Caddy
-
-Reverse proxies provide additional benefits:
-- Automatic certificate management and renewal
-- Advanced security features
-- Better performance (caching, compression)
-- Centralized management for multiple services
-
-## Comparison
-
-| Feature | Direct HTTPS | Reverse Proxy |
-|---------|-------------|---------------|
-| **Setup Complexity** | Simple | Moderate |
-| **Best For** | Single service, development | Multiple services, production |
-| **Certificate Management** | Manual | Automatic (with Let's Encrypt) |
-| **Additional Features** | Basic HTTPS only | Caching, load balancing, WAF, auth |
-| **Performance** | Good | Excellent (with caching) |
-| **Port Flexibility** | Any port | Standard ports (80/443) |
-| **Maintenance** | Manual cert renewal | Automated |
-
-## Security Considerations
-
-### For Self-Signed Certificates (Development)
-
-⚠️ **Self-signed certificates are NOT suitable for production!**
-
-- Browser warnings will appear for all users
-- No protection against man-in-the-middle attacks
-- Not trusted by mobile apps or API clients
-- Use only for development/testing or private networks
-
-### For Production Certificates
-
-✅ **Best Practices:**
-
-1. **Use Strong Certificates**
-   - Minimum 2048-bit RSA or 256-bit ECC
-   - Valid certificates from trusted CAs only
-
-2. **Keep Certificates Secure**
-   - Store private keys with restricted permissions (600)
-   - Never commit private keys to version control
-   - Mount certificate volumes as read-only (`:ro`)
-
-3. **Enable Automatic Renewal**
-   - Set up cron jobs for Let's Encrypt renewal
-   - Test renewal process regularly
-   - Monitor certificate expiration dates
-
-4. **Configure Strong TLS**
-   - Gunicorn uses secure defaults (TLS 1.2+)
-   - Consider using a reverse proxy for advanced TLS configuration
-
-5. **Network Security**
-   - Use firewalls to restrict access
-   - Enable authentication if exposing to the internet
-   - Consider VPN for remote access
-
-6. **Monitor and Update**
-   - Keep Docker images updated
-   - Monitor security advisories
-   - Review logs regularly
-
-### File Permissions
-
-Ensure certificate files have proper permissions:
+The app reads the certificate at startup. After renewing it, copy the new files over the old ones and restart the container. With certbot, a deploy hook does this:
 
 ```bash
-# Set restrictive permissions on private key
-chmod 600 /path/to/certs/cert.key
-chmod 644 /path/to/certs/cert.crt
-
-# If using Docker, ensure the container user can read the files
-# The container runs as PUID/PGID (default: 99/100)
-chown 99:100 /path/to/certs/*
+sudo certbot renew --deploy-hook 'cp -L "$RENEWED_LINEAGE/fullchain.pem" "$RENEWED_LINEAGE/privkey.pem" /path/to/certs/ && chown 1000:1000 /path/to/certs/*.pem && docker restart comicmaintainer'
 ```
+
+## Security Notes
+
+- Self-signed certificates are for testing and private networks only: nothing proves to a client that it is talking to your server.
+- Keep the private key readable only by the container's user (`chmod 600`), mount the certificate folder read-only (`:ro`), and never commit keys to version control.
+- With direct HTTPS the app does not send `Strict-Transport-Security`, because it only adds that header when a proxy reports HTTPS with `X-Forwarded-Proto`.
 
 ## Troubleshooting
 
-### Issue: "Certificate file not found" Error
+### The Container Exits at Startup
 
-**Solution:**
-- Verify the certificate file paths are correct
-- Check file permissions (readable by the container user)
-- Ensure volumes are mounted correctly
-- Check container logs: `docker logs comictagger-watcher`
+Read the reason in the log: `docker logs comicmaintainer`. It is usually a certificate or key file that does not exist at the path you gave, or that the container's `PUID` cannot read. Check the paths and that the folder is mounted.
 
-### Issue: Browser Shows "Connection Not Secure"
+To confirm that the certificate and the key match:
 
-**For Self-Signed Certificates:**
-- This is expected behavior
-- Click "Advanced" and proceed (only for development!)
-
-**For Production Certificates:**
-- Verify certificate is from a trusted CA
-- Check certificate chain is complete (use `SSL_CA_CERTS` for intermediate certificates)
-- Verify domain name matches certificate CN/SAN
-- Test certificate: `openssl s_client -connect your-domain.com:5000`
-
-### Issue: Application Not Starting with HTTPS
-
-**Solution:**
-1. Check logs for specific error messages:
-   ```bash
-   docker logs comictagger-watcher
-   ```
-
-2. Verify certificate format:
-   ```bash
-   openssl x509 -in /path/to/cert.crt -text -noout
-   openssl rsa -in /path/to/cert.key -check
-   ```
-
-3. Test certificates match:
-   ```bash
-   openssl x509 -noout -modulus -in cert.crt | openssl md5
-   openssl rsa -noout -modulus -in cert.key | openssl md5
-   # Output should match
-   ```
-
-4. Check if port is already in use:
-   ```bash
-   netstat -tlnp | grep 5000
-   ```
-
-### Issue: Certificate Expired or About to Expire
-
-**Solution:**
 ```bash
-# Check certificate expiration
-openssl x509 -in /path/to/cert.crt -noout -dates
-
-# For Let's Encrypt, renew manually
-sudo certbot renew --force-renewal
-
-# Restart container to load new certificate
-docker restart comictagger-watcher
+openssl x509 -noout -modulus -in fullchain.pem | openssl md5
+openssl rsa -noout -modulus -in privkey.pem | openssl md5
+# The two values must be the same
 ```
 
-### Issue: "Mixed Content" Warnings in Browser
+### The Browser Warns About the Certificate
 
-**Solution:**
-- Ensure all resources are loaded over HTTPS
-- Check for hardcoded HTTP URLs in configuration
-- Verify `X-Forwarded-Proto` header if behind a proxy
+- A self-signed certificate always gets this warning.
+- For any other certificate, check that the domain matches, that the chain is complete and that it has not expired: `openssl s_client -connect comics.example.com:443 -servername comics.example.com`
 
-### Issue: Performance Degradation with HTTPS
+### The Certificate Has Expired
 
-**Solution:**
-- HTTPS has minimal overhead with modern systems
-- Consider using HTTP/2 (requires reverse proxy)
-- Enable compression at proxy level if applicable
-- Check certificate chain isn't too long
-
-## Testing Your HTTPS Setup
-
-### Basic Connectivity
 ```bash
-# Test HTTPS connection
-curl -k https://localhost:5000
-
-# Get certificate information
-openssl s_client -connect localhost:5000 -showcerts
+openssl x509 -in /path/to/certs/fullchain.pem -noout -dates
 ```
 
-### Verify Certificate
-```bash
-# Check certificate details
-openssl s_client -connect your-domain.com:5000 2>/dev/null | openssl x509 -noout -dates -subject -issuer
-```
+Renew it, copy the new files and restart the container.
 
-### SSL Labs Test (Production Only)
-For production deployments, test your SSL configuration:
-https://www.ssllabs.com/ssltest/
+### Connection Refused
+
+- Check the port mapping: the app listens for HTTPS on the port in `ASPNETCORE_URLS`, so publish that one.
+- Check that nothing else uses the host port: `sudo ss -tlnp | grep 443`
 
 ## Additional Resources
 
-- [Certbot Documentation](https://certbot.eff.org/)
-- [Let's Encrypt Documentation](https://letsencrypt.org/docs/)
-- [OpenSSL Documentation](https://www.openssl.org/docs/)
-- [Mozilla SSL Configuration Generator](https://ssl-config.mozilla.org/)
 - [Reverse Proxy Setup Guide](REVERSE_PROXY.md)
+- [Certbot documentation](https://certbot.eff.org/)
+- [Let's Encrypt documentation](https://letsencrypt.org/docs/)
+- [Mozilla SSL configuration generator](https://ssl-config.mozilla.org/)

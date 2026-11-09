@@ -19,6 +19,15 @@ public interface IFileStoreService
 
     Task<ComicFile?> GetFileAsync(string filePath, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The tracked file's stable row id for each of <paramref name="filePaths"/> that is tracked, keyed by path. Callers
+    /// outside the app (OPDS clients) refer to a file by this opaque id, never by its path.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, int>> GetFileIdsAsync(IReadOnlyCollection<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>The path of the tracked file with row id <paramref name="fileId"/>, or null when there is none.</summary>
+    Task<string?> GetFilePathAsync(int fileId, CancellationToken cancellationToken = default);
+
     Task ApplyUserMetadataEditAsync(string filePath, ComicMetadata patch, ComicMetadataFieldFlags lockFields, CancellationToken cancellationToken = default);
 
     /// <summary>

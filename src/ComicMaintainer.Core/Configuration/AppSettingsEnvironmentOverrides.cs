@@ -130,6 +130,9 @@ public static class AppSettingsEnvironmentOverrides
         Whole("ERROR_REPORTING_MAX_ISSUES_PER_DAY", o => o.ErrorReportingMaxIssuesPerDay, 0, int.MaxValue, "error_reporting_max_issues_per_day"),
         Whole("ERROR_REPORTING_DEDUPE_WINDOW_HOURS", o => o.ErrorReportingDedupeWindowHours, 1, int.MaxValue, "error_reporting_dedupe_window_hours"),
         Flag("ERROR_REPORTING_COMMENT_ON_RECURRENCE", o => o.ErrorReportingCommentOnRecurrence, "error_reporting_comment_on_recurrence"),
+
+        // OPDS catalog: it adds HTTP Basic sign-in under /opds, so an operator can pin it off.
+        Flag("OPDS_ENABLED", o => o.OpdsEnabled, "opds_enabled"),
     ];
 
     /// <summary>The overrides whose variable currently forces a value.</summary>

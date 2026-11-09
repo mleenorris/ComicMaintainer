@@ -76,7 +76,7 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
         };
         claims.AddRange((await _userManager.GetRolesAsync(user)).Select(role => new Claim(ClaimTypes.Role, role)));
 
-        await RecordUseAsync(user);
+        await RecordUseAsync(_dbContextFactory, user, Logger, Context.RequestAborted);
         Logger.LogDebug("Authenticated {Username} with an API key", LoggingHelper.SanitizeForLog(user.UserName));
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name));
@@ -105,7 +105,11 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
     }
 
     // Records when the key was last used, to the minute, so that scripts polling the API do not write on every request.
-    private async Task RecordUseAsync(ApplicationUser user)
+    internal static async Task RecordUseAsync(
+        IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
+        ApplicationUser user,
+        ILogger logger,
+        CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
         if (user.ApiKeyLastUsedAt is { } lastUsed && now - lastUsed < LastUsedResolution)
@@ -116,15 +120,15 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
         try
         {
             var threshold = now - LastUsedResolution;
-            await using var db = await _dbContextFactory.CreateDbContextAsync(Context.RequestAborted);
+            await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
             await db.Users
                 .Where(u => u.Id == user.Id && (u.ApiKeyLastUsedAt == null || u.ApiKeyLastUsedAt < threshold))
-                .ExecuteUpdateAsync(set => set.SetProperty(u => u.ApiKeyLastUsedAt, now), Context.RequestAborted);
+                .ExecuteUpdateAsync(set => set.SetProperty(u => u.ApiKeyLastUsedAt, now), cancellationToken);
         }
         catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
         {
             // Bookkeeping only: a busy database must not refuse the request.
-            Logger.LogDebug(ex, "Could not record the use of the API key of {UserId}", LoggingHelper.SanitizeForLog(user.Id));
+            logger.LogDebug(ex, "Could not record the use of the API key of {UserId}", LoggingHelper.SanitizeForLog(user.Id));
         }
     }
 }

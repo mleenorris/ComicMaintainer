@@ -130,6 +130,7 @@ public class SettingsController : ControllerBase
             error_reporting_max_issues_per_day = _appSettings.CurrentValue.ErrorReportingMaxIssuesPerDay,
             error_reporting_dedupe_window_hours = _appSettings.CurrentValue.ErrorReportingDedupeWindowHours,
             error_reporting_comment_on_recurrence = _appSettings.CurrentValue.ErrorReportingCommentOnRecurrence,
+            opds_enabled = _appSettings.CurrentValue.OpdsEnabled,
             // The settings the environment pins: one entry per field above, naming the variable.
             env_locked = EnvLockEntries(AppSettingsEnvironmentOverrides.Active())
         };
@@ -167,7 +168,8 @@ public class SettingsController : ControllerBase
             Email = request.Email,
             EmailRateLimit = request.EmailRateLimit,
             Suwayomi = request.Suwayomi,
-            ErrorReporting = request.ErrorReporting
+            ErrorReporting = request.ErrorReporting,
+            Opds = request.Opds
         };
 
         return await SaveAsync(
@@ -682,6 +684,7 @@ public class SettingsController : ControllerBase
         public EmailRateLimitUpdate? EmailRateLimit { get; set; }
         public SuwayomiUpdate? Suwayomi { get; set; }
         public ErrorReportingUpdate? ErrorReporting { get; set; }
+        public OpdsUpdate? Opds { get; set; }
     }
 
     /// <summary>The series cover image limits of <see cref="AllSettingsRequest"/>, with sizes in megabytes.</summary>

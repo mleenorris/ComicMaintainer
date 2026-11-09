@@ -45,7 +45,9 @@ public static class WebServiceCollectionExtensions
             {
                 "image/svg+xml",
                 "application/manifest+json",
-                "text/javascript"
+                "text/javascript",
+                "application/atom+xml",
+                "application/opensearchdescription+xml"
             });
         });
 
@@ -85,6 +87,7 @@ public static class WebServiceCollectionExtensions
         var trustedProxies = LoadRateLimiterTrustedProxies(configuration);
         var forwardedHopLimit = LoadRateLimiterForwardedHopLimit(configuration);
         services.AddSingleton(new ClientAddressResolver(trustedProxies, forwardedHopLimit));
+        services.AddSingleton<AuthenticationAttemptLimiter>();
         if (trustedProxies.Networks.Count > 0)
         {
             services.AddSingleton<IStartupFilter>(serviceProvider =>
@@ -118,16 +121,11 @@ public static class WebServiceCollectionExtensions
 
             // Everything that checks a password or a setup code (sign-in, registration, first-run setup,
             // change password, create API key): few attempts per client address, whether or not the
-            // request is authenticated, so one client cannot guess passwords for many accounts.
+            // request is authenticated, so one client cannot guess passwords for many accounts. OPDS
+            // HTTP Basic draws on the same budget (see AuthenticationAttemptLimiter).
             options.AddPolicy(AuthenticationRateLimit.PolicyName, context =>
-                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                    partitionKey: $"ip:{ForwardedClientAddress.Resolve(context, trustedProxies, forwardedHopLimit)?.ToString() ?? "unknown"}",
-                    factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = AuthenticationRateLimit.PermitLimit,
-                        Window = AuthenticationRateLimit.Window,
-                        QueueLimit = 0
-                    }));
+                context.RequestServices.GetRequiredService<AuthenticationAttemptLimiter>()
+                    .PartitionFor(ForwardedClientAddress.Resolve(context, trustedProxies, forwardedHopLimit)));
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             options.OnRejected = new RateLimitRejection(trustedProxies).WriteAsync;
         });

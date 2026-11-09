@@ -456,6 +456,11 @@ public class SettingsService : ISettingsService
             StageErrorReporting(values, errorReporting, current);
         }
 
+        if (update.Opds is { } opds)
+        {
+            StageIfSet(values, nameof(AppSettings.OpdsEnabled), opds.Enabled);
+        }
+
         await SaveValuesAsync(values, cancellationToken);
     }
 

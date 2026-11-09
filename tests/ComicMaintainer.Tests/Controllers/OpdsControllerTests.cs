@@ -448,4 +448,295 @@ public sealed class OpdsControllerTests : IDisposable
         var entry = XDocument.Parse(content.Content!).Root!.Elements(Atom + "entry").Single();
         Assert.Equal("Action", entry.Elements(Atom + "category").Single().Attribute("term")!.Value);
     }
+
+    private static XElement[] Entries(ContentResult content) => XDocument.Parse(content.Content!).Root!.Elements(Atom + "entry").ToArray();
+
+    private static string[] Titles(ContentResult content) => Entries(content).Select(e => e.Element(Atom + "title")!.Value).ToArray();
+
+    private static string? LinkOf(ContentResult content, string rel) =>
+        XDocument.Parse(content.Content!).Root!.Elements(Atom + "link").SingleOrDefault(l => (string?)l.Attribute("rel") == rel)?.Attribute("href")?.Value;
+
+    // ContentResult renders the type with its own spacing, so compare the parsed values.
+    private static void AssertMediaType(string expected, ContentResult content) =>
+        Assert.Equal(Microsoft.Net.Http.Headers.MediaTypeHeaderValue.Parse(expected), Microsoft.Net.Http.Headers.MediaTypeHeaderValue.Parse(content.ContentType));
+
+    private static string ErrorOf(IActionResult result) =>
+        Assert.IsType<string>(Assert.IsType<ProblemDetails>(Assert.IsAssignableFrom<ObjectResult>(result).Value).Extensions["error"]);
+
+    [Fact]
+    public void TheCatalogOffersEveryRowUnderTheBasePath()
+    {
+        _settings.BasePath = "/comics";
+
+        var content = Assert.IsType<ContentResult>(CreateController().Catalog());
+
+        AssertMediaType(OpdsMediaTypes.NavigationFeed, content);
+        Assert.Equal(new[] { "Continue Reading", "Series Updates", "Newly Added", "All Series" }, Titles(content));
+        Assert.Equal(
+            new[]
+            {
+                "/comics/opds/v1.2/continue-reading",
+                "/comics/opds/v1.2/series-updates",
+                "/comics/opds/v1.2/newly-added",
+                "/comics/opds/v1.2/series",
+            },
+            Entries(content).Select(e => e.Element(Atom + "link")!.Attribute("href")!.Value));
+        Assert.Equal("/comics/opds/v1.2/catalog", LinkOf(content, "self"));
+    }
+
+    [Fact]
+    public async Task ContinueReadingResumesTheIssueTheCardPointsAt()
+    {
+        var first = new SeriesIssueDto { FilePath = _comic, FileName = "Saga 001.cbz", Issue = "1" };
+        var second = new SeriesIssueDto { FilePath = Path.Join(_root, "Saga 002.cbz"), FileName = "Saga 002.cbz", Issue = "2" };
+        _overview.Setup(o => o.GetOverviewAsync("reader", It.IsAny<CancellationToken>())).ReturnsAsync(new OverviewResult
+        {
+            // The card's path and the issue's differ in case only: the same file on a case-insensitive filesystem.
+            ContinueReading = [new OverviewSeriesCard { Id = "saga", Title = "Saga", ResumeFilePath = second.FilePath.ToUpperInvariant() }],
+        });
+        _library.Setup(l => l.GetSeriesIssuesForIdsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, SeriesIssuesResult> { ["saga"] = new() { Id = "saga", Title = "Saga", Issues = [first, second] } });
+
+        var content = Assert.IsType<ContentResult>(await CreateController().ContinueReading(default));
+
+        AssertMediaType(OpdsMediaTypes.AcquisitionFeed, content);
+        Assert.Equal(new[] { "Saga #2" }, Titles(content));
+    }
+
+    [Fact]
+    public async Task NewlyAddedListsItsRowAsSeriesThatLeadToTheirIssues()
+    {
+        _overview.Setup(o => o.GetOverviewAsync("reader", It.IsAny<CancellationToken>())).ReturnsAsync(new OverviewResult
+        {
+            NewlyAddedSeries = [new OverviewSeriesCard { Id = "saga", Title = "Saga", CoverFilePath = string.Empty }],
+        });
+
+        var content = Assert.IsType<ContentResult>(await CreateController().NewlyAdded(default));
+
+        AssertMediaType(OpdsMediaTypes.NavigationFeed, content);
+        Assert.Equal(new[] { "Saga" }, Titles(content));
+        Assert.Equal("/opds/v1.2/newly-added", LinkOf(content, "self"));
+    }
+
+    [Fact]
+    public async Task AnUnknownSeriesIsNotFound()
+    {
+        _library.Setup(l => l.GetSeriesIssuesAsync("nope", null, 1, OpdsController.PageSize, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesIssuesResult?)null);
+
+        var result = await CreateController().Series("nope");
+
+        Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeActionResult>(result).StatusCode);
+        Assert.Equal("Series not found", ErrorOf(result));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ASearchWithoutATermIsRefused(string? query)
+    {
+        var result = await CreateController().Search(query);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsAssignableFrom<IStatusCodeActionResult>(result).StatusCode);
+        Assert.Equal("A search term is required", ErrorOf(result));
+        _library.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ASearchTermOverTheLimitIsRefusedAndOneAtTheLimitRuns()
+    {
+        var limit = new string('a', OpdsController.MaxSearchLength);
+        _library.Setup(l => l.GetSeriesSummariesAsync(null, limit, 1, OpdsController.PageSize, "name", "asc", null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesSummaryResult { Page = 1, TotalPages = 1, TotalSeries = 0 });
+
+        var refused = await CreateController().Search(limit + "a");
+        var accepted = await CreateController().Search(limit);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsAssignableFrom<IStatusCodeActionResult>(refused).StatusCode);
+        Assert.Equal($"The search term must be {OpdsController.MaxSearchLength} characters or fewer", ErrorOf(refused));
+        Assert.IsType<ContentResult>(accepted);
+    }
+
+    [Fact]
+    public async Task ASearchListsItsMatchesForTheTrimmedTermAndKeepsItEscapedInItsLinks()
+    {
+        _library.Setup(l => l.GetSeriesSummariesAsync(null, "a&b", 2, OpdsController.PageSize, "name", "asc", null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesSummaryResult { Page = 2, TotalPages = 3, TotalSeries = 120, Series = [new SeriesSummaryDto { Id = "saga", Title = "Saga", CoverFilePath = string.Empty }] });
+
+        var content = Assert.IsType<ContentResult>(await CreateController().Search("  a&b  ", "2"));
+
+        AssertMediaType(OpdsMediaTypes.NavigationFeed, content);
+        var root = XDocument.Parse(content.Content!).Root!;
+        Assert.Equal("Search: a&b", root.Element(Atom + "title")!.Value);
+        Assert.Equal("urn:comicmaintainer:opds:search:a%26b", root.Element(Atom + "id")!.Value);
+        Assert.Equal(new[] { "Saga" }, Titles(content));
+        Assert.Equal("/opds/v1.2/search?q=a%26b&page=2", LinkOf(content, "self"));
+        Assert.Equal("/opds/v1.2/search?q=a%26b", LinkOf(content, "previous"));
+        Assert.Equal("/opds/v1.2/search?q=a%26b&page=3", LinkOf(content, "next"));
+        Assert.Equal("/opds/v1.2/catalog", LinkOf(content, "up"));
+    }
+
+    [Theory]
+    [InlineData(null, 1)]
+    [InlineData("oops", 1)]
+    [InlineData("0", 1)]
+    [InlineData("-2", 1)]
+    [InlineData("3", 3)]
+    public async Task AnOddPageNumberMeansTheFirstPage(string? page, int expected)
+    {
+        _library.Setup(l => l.GetSeriesSummariesAsync(null, "saga", expected, OpdsController.PageSize, "name", "asc", null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesSummaryResult { Page = expected, TotalPages = 3, TotalSeries = 120 });
+
+        Assert.IsType<ContentResult>(await CreateController().Search("saga", page));
+    }
+
+    [Fact]
+    public void TheOpenSearchDescriptionPointsAtTheSearchUnderTheBasePath()
+    {
+        _settings.BasePath = "/comics";
+
+        var content = Assert.IsType<ContentResult>(CreateController().OpenSearchDescription());
+
+        Assert.Equal(OpdsMediaTypes.OpenSearchDescription, content.ContentType);
+        Assert.Contains("/comics/opds/v1.2/search?q={searchTerms}", content.Content!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ACoverTheClientAlreadyHasIsNotSentAgain()
+    {
+        var validator = new FileCoverValidator(4, DateTimeOffset.UtcNow, "orig");
+        _covers.Setup(c => c.GetValidator(_comic)).Returns(validator);
+        var etag = ComicReaderController.BuildCoverETag(validator);
+        var controller = CreateController();
+        controller.Request.Headers.IfNoneMatch = etag;
+
+        var status = await StatusOf(controller.Cover(Id, default));
+
+        Assert.Equal(StatusCodes.Status304NotModified, status);
+        Assert.Equal(etag, controller.Response.Headers.ETag.ToString());
+        Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+        _covers.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task APageNumberBelowZeroIsRefusedBeforeAnythingIsOpened()
+    {
+        var result = await CreateController().Page(Id, -1, default);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsAssignableFrom<IStatusCodeActionResult>(result).StatusCode);
+        Assert.Equal("Page numbers start at 0", ErrorOf(result));
+        _fileStore.Verify(s => s.GetFilePathAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task APageBeyondTheLastIsNotFoundAndNotRecorded()
+    {
+        var result = await CreateController().Page(Id, 2, default);
+
+        Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeActionResult>(result).StatusCode);
+        Assert.Equal("Page not found", ErrorOf(result));
+        _progress.Verify(p => p.RecordPageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // An app that re-reads from its own cache is still reading: the page counts even though no image is sent.
+    [Fact]
+    public async Task APageTheClientAlreadyHasIsNotSentAgainButStillCountsAsRead()
+    {
+        _reader.Setup(r => r.GetPageNamesAsync(_comic)).ReturnsAsync(["p1.jpg"]);
+        var info = new FileInfo(_comic);
+        var etag = ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 1);
+        var controller = CreateController();
+        controller.Request.Headers.IfNoneMatch = etag;
+
+        var status = await StatusOf(controller.Page(Id, 0, default));
+
+        Assert.Equal(StatusCodes.Status304NotModified, status);
+        Assert.Equal(etag, controller.Response.Headers.ETag.ToString());
+        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        _progress.Verify(p => p.RecordPageAsync("reader", _comic, 1, 1, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(s => s.MarkFileReadAsync(_comic, true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ADownloadServesTheOriginalFileSoThatItCanBeResumed()
+    {
+        var controller = CreateController();
+
+        var file = Assert.IsType<FileStreamResult>(await controller.Download(Id, default));
+
+        await using var stream = file.FileStream;
+        var info = new FileInfo(_comic);
+        Assert.Equal("Saga 001.cbz", file.FileDownloadName);
+        Assert.Equal(OpdsMediaTypes.ComicBookZip, file.ContentType);
+        Assert.True(file.EnableRangeProcessing);
+        Assert.Equal(new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero), file.LastModified);
+        Assert.Equal($"\"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}\"", file.EntityTag!.Tag.ToString());
+        Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
+        using var copy = new MemoryStream();
+        await stream.CopyToAsync(copy);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, copy.ToArray());
+    }
+
+    // The app reprocesses and renames files at any time, and a slow download must not stand in its way.
+    [Fact]
+    public async Task ADownloadInProgressDoesNotBlockARenameOfTheFile()
+    {
+        var file = Assert.IsType<FileStreamResult>(await CreateController().Download(Id, default));
+
+        await using var stream = file.FileStream;
+        var renamed = _comic + ".renamed";
+        File.Move(_comic, renamed);
+
+        Assert.True(File.Exists(renamed));
+        using var copy = new MemoryStream();
+        await stream.CopyToAsync(copy);
+        Assert.Equal(4, copy.Length);
+    }
+
+    private async Task AssertEveryFileRouteIsNotFoundAsync()
+    {
+        Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Cover(Id, default)));
+        Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Page(Id, 0, default)));
+        Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Download(Id, default)));
+        _covers.Verify(c => c.GetValidator(It.IsAny<string>()), Times.Never);
+        _reader.Verify(r => r.GetPageNamesAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AnIdTheStoreDoesNotKnowIsNotFoundOnEveryFileRoute()
+    {
+        _fileStore.Setup(s => s.GetFilePathAsync(Id, It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
+
+        await AssertEveryFileRouteIsNotFoundAsync();
+    }
+
+    [Fact]
+    public async Task ATrackedFileThatIsNotAComicIsNotFoundOnEveryFileRoute()
+    {
+        var notes = Path.Join(_root, "notes.txt");
+        File.WriteAllText(notes, "not a comic");
+        _fileStore.Setup(s => s.GetFilePathAsync(Id, It.IsAny<CancellationToken>())).ReturnsAsync(notes);
+
+        await AssertEveryFileRouteIsNotFoundAsync();
+    }
+
+    [Fact]
+    public async Task AFileOutsideTheLibraryIsNotFoundOnEveryFileRoute()
+    {
+        var outsideDirectory = _root + "-outside";
+        Directory.CreateDirectory(outsideDirectory);
+        try
+        {
+            var outside = Path.Join(outsideDirectory, "Secret 001.cbz");
+            File.WriteAllBytes(outside, [1, 2, 3, 4]);
+            _fileStore.Setup(s => s.GetFilePathAsync(Id, It.IsAny<CancellationToken>())).ReturnsAsync(outside);
+
+            await AssertEveryFileRouteIsNotFoundAsync();
+        }
+        finally
+        {
+            TestIO.TryDeleteDirectory(outsideDirectory);
+        }
+    }
 }

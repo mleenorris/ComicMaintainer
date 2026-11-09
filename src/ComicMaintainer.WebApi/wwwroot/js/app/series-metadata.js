@@ -58,11 +58,7 @@
                 return;
             }
             try {
-                const response = await fetch(apiUrl('/api/metadata/refresh-all'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch('/api/metadata/refresh-all', { method: 'POST', json: false });
                 if (!response.ok) {
                     const detail = serverErrorDetail(await response.json().catch(() => null));
                     showMessage(detail
@@ -88,11 +84,7 @@
                 return;
             }
             try {
-                const response = await fetch(apiUrl('/api/metadata/match-unmatched'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch('/api/metadata/match-unmatched', { method: 'POST', json: false });
                 if (!response.ok) {
                     const detail = serverErrorDetail(await response.json().catch(() => null));
                     showMessage(detail
@@ -117,9 +109,6 @@
         }
 
         function getSelectedSeriesTitlesForCoverUpdate() {
-            if (libraryViewMode !== 'series') {
-                return [];
-            }
             // Series detail view: a single series is "selected" simply by being
             // open, so target that series even though the multi-select
             // checkboxes (and `selectedSeries`) only apply to the top-level grid.
@@ -150,15 +139,7 @@
             }
             showProgressModal('Starting cover update...');
             try {
-                const response = await fetch(apiUrl('/api/series-images/apply-current/all'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    credentials: 'same-origin'
-                });
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
+                const response = await apiFetch('/api/series-images/apply-current/all', { method: 'POST', json: false });
                 if (!response.ok) {
                     const error = await response.text();
                     closeProgressModal();
@@ -214,19 +195,7 @@
             }
             showProgressModal('Starting cover update...');
             try {
-                const response = await fetch(apiUrl('/api/series-images/apply-current/selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ series })
-                });
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
+                const response = await apiFetch('/api/series-images/apply-current/selected', { method: 'POST', body: { series }, json: false });
                 if (!response.ok) {
                     const error = await response.text();
                     closeProgressModal();
@@ -253,19 +222,7 @@
             }
             showProgressModal('Starting cover update...');
             try {
-                const response = await fetch(apiUrl('/api/series-images/apply-current/selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ series: [seriesTitle] })
-                });
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
+                const response = await apiFetch('/api/series-images/apply-current/selected', { method: 'POST', body: { series: [seriesTitle] }, json: false });
                 if (!response.ok) {
                     const error = await response.text();
                     closeProgressModal();
@@ -288,11 +245,7 @@
                 // blocked on the (potentially slow) external lookup. Progress is
                 // surfaced via the same inline toast used by refresh-all /
                 // refresh-folder.
-                const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}?queue=true`), {
-                    method: 'POST',
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}?queue=true`, { method: 'POST', json: false });
                 if (!response.ok) {
                     showMessage('Failed to refresh metadata for ' + seriesTitle, 'error');
                     return;
@@ -328,14 +281,7 @@
         async function refreshSeriesFolder(seriesId, seriesTitle) {
             if (!seriesId) return;
             try {
-                const response = await fetch(apiUrl('/api/metadata/refresh/folder'), {
-                    method: 'POST',
-                    headers: Object.assign(
-                        { 'Content-Type': 'application/json' },
-                        getAuthHeaders ? getAuthHeaders() : {}),
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ seriesId })
-                });
+                const response = await apiFetch('/api/metadata/refresh/folder', { method: 'POST', body: { seriesId }, json: false });
                 if (response.status === 404) {
                     showMessage(`Series "${seriesTitle || seriesId}" not found`, 'error');
                     return;
@@ -362,13 +308,7 @@
                 'Use this when a series metadata or filename change refuses to apply.');
             if (!proceed) return;
             try {
-                const response = await fetch(apiUrl(`/api/status/clear-series/${encodeURIComponent(seriesId)}`), {
-                    method: 'POST',
-                    headers: Object.assign(
-                        { 'Content-Type': 'application/json' },
-                        getAuthHeaders ? getAuthHeaders() : {}),
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(`/api/status/clear-series/${encodeURIComponent(seriesId)}`, { method: 'POST', json: false });
                 if (response.status === 404) {
                     showMessage(`Series "${label}" not found`, 'error');
                     return;
@@ -401,10 +341,7 @@
             const intervalMs = 1500;
             const tick = async () => {
                 try {
-                    const response = await fetch(apiUrl(`/api/metadata/refresh/job/${jobId}`), {
-                        headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                        credentials: 'same-origin'
-                    });
+                    const response = await apiFetch(`/api/metadata/refresh/job/${jobId}`, { json: false });
                     if (!response.ok) {
                         metadataRefreshJobs.delete(jobId);
                         return;
@@ -509,10 +446,7 @@
             const { seriesTitle } = state;
             if (!seriesTitle) return;
             try {
-                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}`), {
-                    headers: getAuthHeaders(),
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(`/api/metadata/series/${encodeURIComponent(seriesTitle)}`, { json: false });
                 if (state !== manageSeriesState) return;
                 if (!response.ok) {
                     showMessage('Failed to load series metadata', 'error');
@@ -557,7 +491,7 @@
 
         async function fetchProtectedImageInto(imgElement, apiPath) {
             try {
-                const response = await fetch(apiUrl(apiPath), { headers: getAuthHeaders() });
+                const response = await apiFetch(apiPath, { json: false });
                 if (!response.ok) return;
                 const blob = await response.blob();
                 imgElement.src = URL.createObjectURL(blob);
@@ -582,15 +516,7 @@
             const formData = new FormData();
             formData.append('file', file);
             try {
-                // Let the browser set the multipart Content-Type (with
-                // boundary); getAuthHeaders() defaults it to JSON.
-                const headers = getAuthHeaders();
-                delete headers['Content-Type'];
-                const response = await fetch(apiUrl(`/api/series-images/${encodeURIComponent(seriesTitle)}`), {
-                    method: 'PUT',
-                    headers,
-                    body: formData
-                });
+                const response = await apiFetch(`/api/series-images/${encodeURIComponent(seriesTitle)}`, { method: 'PUT', body: formData, json: false });
                 if (!response.ok) {
                     let msg = 'Failed to upload series image';
                     try { const j = await response.json(); if (j && j.error) msg = j.error; } catch {}
@@ -620,10 +546,7 @@
                 return;
             }
             try {
-                const response = await fetch(apiUrl(`/api/series-images/${encodeURIComponent(key)}`), {
-                    method: 'DELETE',
-                    headers: getAuthHeaders()
-                });
+                const response = await apiFetch(`/api/series-images/${encodeURIComponent(key)}`, { method: 'DELETE', json: false });
                 if (!response.ok && response.status !== 404) {
                     showMessage('Failed to clear series image', 'error');
                     return;
@@ -686,10 +609,7 @@
             status.textContent = 'Searching providers...';
             clearChildren(results);
             try {
-                const response = await fetch(
-                    apiUrl(`/api/series-images/candidates?query=${encodeURIComponent(query)}&limit=12`),
-                    { headers: getAuthHeaders() }
-                );
+                const response = await apiFetch(`/api/series-images/candidates?query=${encodeURIComponent(query)}&limit=12`, { json: false });
                 if (!response.ok) {
                     // A 503 names the providers that could not answer (plain text).
                     let msg = 'Search failed.';
@@ -734,6 +654,7 @@
                     results.appendChild(card);
                 });
             } catch (err) {
+                if (err.authHandled) return;
                 console.error('searchSeriesImageCandidates failed', err);
                 status.textContent = 'Search failed.';
             }
@@ -745,14 +666,7 @@
             const status = document.getElementById('manageSeriesImageProviderStatus');
             if (status) status.textContent = 'Downloading selected image...';
             try {
-                const response = await fetch(
-                    apiUrl(`/api/series-images/${encodeURIComponent(seriesTitle)}/from-provider`),
-                    {
-                        method: 'POST',
-                        headers: Object.assign({ 'Content-Type': 'application/json' }, getAuthHeaders()),
-                        body: JSON.stringify({ imageUrl, source })
-                    }
-                );
+                const response = await apiFetch(`/api/series-images/${encodeURIComponent(seriesTitle)}/from-provider`, { method: 'POST', body: { imageUrl, source }, json: false });
                 if (!response.ok) {
                     let msg = 'Failed to apply provider image';
                     try { const j = await response.json(); if (j && j.error) msg = j.error; } catch {}
@@ -769,6 +683,7 @@
                     loadSeriesLibrary(1, true);
                 }
             } catch (err) {
+                if (err.authHandled) return;
                 console.error('applySeriesImageCandidate failed', err);
                 if (status) status.textContent = 'Failed to apply provider image';
                 showMessage('Failed to apply provider image', 'error');
@@ -816,12 +731,7 @@
             if (!select) return;
             const value = select.value || null;
             try {
-                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/preferred-language`), {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ language: value })
-                });
+                const response = await apiFetch(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/preferred-language`, { method: 'PUT', body: { language: value }, json: false });
                 if (!response.ok) {
                     let msg = 'Failed to update preferred language';
                     try { const j = await response.json(); if (j && (j.error || typeof j === 'string')) msg = j.error || j; } catch {}
@@ -912,12 +822,7 @@
             }
             const value = (name === undefined ? select.value : name) || null;
             try {
-                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/name`), {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ name: value })
-                });
+                const response = await apiFetch(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/name`, { method: 'PUT', body: { name: value }, json: false });
                 if (!response.ok) {
                     let msg = 'Failed to update series name';
                     try { const j = await response.json(); if (j && (j.error || typeof j === 'string')) msg = j.error || j; } catch {}
@@ -998,12 +903,7 @@
             const body = JSON.stringify({ aliases });
             const previous = manageSeriesAliasWrites.get(seriesTitle) || Promise.resolve();
             const write = previous.then(async () => {
-                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    credentials: 'same-origin',
-                    body
-                });
+                const response = await apiFetch(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`, { method: 'PUT', body, json: false });
                 return response.ok;
             });
             const done = write.catch(() => {});
@@ -1043,11 +943,7 @@
             const { seriesTitle } = manageSeriesState;
             if (!seriesTitle) return;
             try {
-                const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`), {
-                    method: 'POST',
-                    headers: getAuthHeaders(),
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`, { method: 'POST', json: false });
                 if (!response.ok) {
                     // A 503 names the provider that could not answer; the record is kept.
                     let msg = 'Failed to refresh metadata';
@@ -1100,10 +996,7 @@
             }
             renderHtml(container, html`<p style="color: var(--text-secondary);">Searching...</p>`);
             try {
-                const response = await fetch(apiUrl(`/api/metadata/search?query=${encodeURIComponent(query)}&limit=10`), {
-                    headers: getAuthHeaders(),
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(`/api/metadata/search?query=${encodeURIComponent(query)}&limit=10`, { json: false });
                 if (!response.ok) {
                     // A 503 names the providers that could not answer.
                     let msg = 'Search failed.';
@@ -1176,6 +1069,7 @@
                 }));
                 window.__manageSeriesSearchResults = results;
             } catch (err) {
+                if (err.authHandled) return;
                 console.error('searchExternalSeries failed', err);
                 renderHtml(container, html`<p style="color: var(--text-error);">Search failed.</p>`);
             }
@@ -1284,11 +1178,7 @@
                 return;
             }
             try {
-                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/apply-match`), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({
+                const response = await apiFetch(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/apply-match`, { method: 'POST', body: {
                         canonicalTitle: result.canonical_title,
                         aliases: result.aliases || [],
                         source: result.source || null,
@@ -1304,8 +1194,7 @@
                         localizedTitles: (result.localized_titles || [])
                             .filter(lt => lt && lt.title)
                             .map(lt => ({ title: lt.title, language: lt.language || null }))
-                    })
-                });
+                    }, json: false });
                 if (!response.ok) {
                     let msg = 'Failed to apply match';
                     try { const j = await response.json(); if (j && (j.error || typeof j === 'string')) msg = j.error || j; } catch {}
@@ -1342,11 +1231,7 @@
                 return;
             }
             try {
-                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/external`), {
-                    method: 'DELETE',
-                    headers: getAuthHeaders(),
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/external`, { method: 'DELETE', json: false });
                 if (response.status === 404) {
                     showMessage('Nothing to clear — no external metadata cached for this series.', 'info');
                     return;

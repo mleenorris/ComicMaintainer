@@ -9,13 +9,21 @@
         // Shared state declared in state.js and reassigned here.
         /* global duplicateReviewFiles: true, combineFolderGroups: true */
 
+        // What the page already knows about a file: the views that open the
+        // Info modal list it either among the open series' issues or in the
+        // duplicate review.
+        function findListedFile(filepath) {
+            const issues = seriesIssuesCache.get(currentSeriesDetailId)?.issues;
+            return (Array.isArray(issues) ? issues.find(issue => issue.file_path === filepath) : undefined)
+                || duplicateReviewFiles.find(file => file.relative_path === filepath);
+        }
+
         function showFileInfo(filepath, filename) {
             // Show file information in a modal
             document.getElementById('fileInfoPath').textContent = filepath;
             document.getElementById('fileInfoName').textContent = filename;
-            
-            // Find the file in the loaded files to get size info
-            const file = getAllLoadedFiles().find(f => f.relative_path === filepath);
+
+            const file = findListedFile(filepath);
             const duplicateReview = document.getElementById('fileInfoDuplicateReview');
             const duplicateReviewBtn = document.getElementById('fileInfoDuplicateReviewBtn');
             if (file) {
@@ -32,11 +40,18 @@
                         delete duplicateReviewBtn.dataset.filepath;
                     }
                 }
-            } else if (duplicateReview && duplicateReviewBtn) {
-                duplicateReview.style.display = 'none';
-                delete duplicateReviewBtn.dataset.filepath;
+            } else {
+                // Nothing is known about this file, so show none of the details
+                // left behind by the last file the modal was opened for.
+                for (const id of ['fileInfoSize', 'fileInfoProcessed', 'fileInfoRenamed', 'fileInfoNormalized', 'fileInfoDuplicate']) {
+                    document.getElementById(id).textContent = '';
+                }
+                if (duplicateReview && duplicateReviewBtn) {
+                    duplicateReview.style.display = 'none';
+                    delete duplicateReviewBtn.dataset.filepath;
+                }
             }
-            
+
             document.getElementById('fileInfoModal').classList.add('active');
         }
         
@@ -73,11 +88,8 @@
             updateDuplicateReviewNavigation();
 
             try {
-                const response = await fetch(apiUrl('/api/files?filter=duplicates&per_page=-1&sort=name'), {
-                    headers: getAuthHeaders()
-                });
+                const response = await apiFetch('/api/files?filter=duplicates&per_page=-1&sort=name', { json: false });
                 if (loadId !== duplicateReviewLoadId) return;
-                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -99,6 +111,7 @@
                 duplicateReviewIndex = matchedIndex >= 0 ? matchedIndex : 0;
                 renderDuplicateReviewItem();
             } catch (error) {
+                if (error.authHandled) return;
                 if (loadId !== duplicateReviewLoadId) return;
                 console.error('Failed to load duplicates for review:', error);
                 emptyState.style.display = 'block';
@@ -236,19 +249,7 @@
             showProgressModal(`Deleting ${paths.length} duplicate(s)...`);
 
             try {
-                const response = await fetch(apiUrl('/api/jobs/delete-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: paths })
-                });
-
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
+                const response = await apiFetch('/api/jobs/delete-selected', { method: 'POST', body: { Files: paths }, json: false });
 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));
@@ -295,14 +296,7 @@
             modal.classList.add('active');
 
             try {
-                const response = await fetch(apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/folders`), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch(`/api/files/series/${encodeURIComponent(seriesId)}/folders`);
                 seriesFoldersCurrent = data;
                 const folders = Array.isArray(data.folders) ? data.folders : [];
 
@@ -336,6 +330,7 @@
                     mergeNote.textContent = 'Use the global "Combine Folders" tool from the toolbar to merge these folders.';
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to load series folders:', error);
                 clearChildren(list);
                 emptyState.style.display = 'block';
@@ -368,7 +363,13 @@
             }
         }
 
+        // Guards against an older answer overwriting a newer one: a job can end
+        // while the reload that followed its start is still on its way, and
+        // that reload's list would bring back the folders the job combined.
+        let combineFoldersLoadToken = 0;
+
         async function openCombineFoldersModal() {
+            const loadToken = ++combineFoldersLoadToken;
             const modal = document.getElementById('combineFoldersModal');
             const emptyState = document.getElementById('combineFoldersEmptyState');
             const content = document.getElementById('combineFoldersContent');
@@ -387,14 +388,8 @@
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
 
             try {
-                const response = await fetch(apiUrl('/api/files/combinable-folders'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/files/combinable-folders');
+                if (loadToken !== combineFoldersLoadToken) return;
                 combineFolderGroups = Array.isArray(data.groups) ? data.groups : [];
                 combineFolderIndex = 0;
                 combineFolderSelectedDestination = null;
@@ -408,11 +403,20 @@
 
                 renderCombineFolderGroup();
             } catch (error) {
+                if (error.authHandled || loadToken !== combineFoldersLoadToken) return;
                 console.error('Failed to load combinable folders:', error);
                 emptyState.style.display = 'block';
                 emptyState.textContent = `Failed to load combinable folders: ${error.message}`;
                 content.style.display = 'none';
                 updateCombineFoldersNavigation();
+            }
+        }
+
+        // The folders a finished job combined are no longer candidates. Refreshes
+        // the list only if the dialog is still open; a closed one stays closed.
+        function refreshCombineFoldersIfOpen() {
+            if (document.getElementById('combineFoldersModal').classList.contains('active')) {
+                openCombineFoldersModal();
             }
         }
 
@@ -570,15 +574,7 @@
          * rejects with the server's error otherwise.
          */
         async function requestCombineFoldersPreview(body) {
-            const response = await fetch(apiUrl('/api/files/combine-folders/preview'), {
-                method: 'POST',
-                headers: {
-                    ...getAuthHeaders(),
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(body)
-            });
-            if (handleAuthError(response)) return null;
+            const response = await apiFetch('/api/files/combine-folders/preview', { method: 'POST', body, json: false });
             const data = await response.json();
             if (!response.ok) {
                 throw new Error(data.error || `HTTP error! status: ${response.status}`);
@@ -713,6 +709,7 @@
                 if (!plan) return;
                 content = renderCombinePreviewContent(plan);
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to build combine preview:', error);
                 content = html`<span class="conflict">Failed to build preview: ${error.message}</span>`;
             } finally {
@@ -738,6 +735,7 @@
             try {
                 plan = await requestCombineFoldersPreview(body);
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to combine folders:', error);
                 showMessage(`Failed to combine folders: ${error.message}`, 'error');
                 combineFolderActionInFlight = false;
@@ -764,15 +762,7 @@
             document.getElementById('combineFoldersPreviewBtn').disabled = true;
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
             try {
-                const response = await fetch(apiUrl('/api/files/combine-folders'), {
-                    method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(body)
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch('/api/files/combine-folders', { method: 'POST', body, json: false });
                 const data = await response.json();
                 if (!response.ok) {
                     throw new Error(data.error || `HTTP error! status: ${response.status}`);
@@ -798,6 +788,9 @@
 
                 showMessage(`Combining ${totalItems} file(s) in background${skipped > 0 ? ` (${skipped} skipped)` : ''}`, 'info');
                 showProgressModal(`Combining ${totalItems} file(s)...`);
+                // Registered before tracking starts: a short job can end during
+                // its first status check.
+                jobProgress.onJobFinished(jobId, refreshCombineFoldersIfOpen);
                 await trackJobStatus(jobId, `Combining ${totalItems} file(s)...`);
 
                 // The progress-modal completion handler already refreshes the
@@ -807,6 +800,7 @@
                 if (typeof refreshFiles === 'function') refreshFiles();
                 await openCombineFoldersModal();
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to combine folders:', error);
                 showMessage(`Failed to combine folders: ${error.message}`, 'error');
             } finally {
@@ -860,14 +854,7 @@
         async function viewTags(filepath) {
             try {
                 const encodedPath = encodeFilePathForUrl(filepath);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}/tags`), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const tags = await response.json();
+                const tags = await apiFetch(`/api/files/${encodedPath}/tags`);
                 
                 if (tags.error) {
                     showMessage(tags.error, 'error');
@@ -941,25 +928,7 @@
             try {
                 console.log('[SINGLE FILE] Starting update metadata file request...');
                 // Start the update metadata job using job-based pattern
-                const response = await fetch(apiUrl('/api/jobs/update-metadata-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: [targetFile], Metadata: metadata, Fields: fields })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[SINGLE FILE] Failed to start updating metadata for file (HTTP ${response.status})`);
-                    throw new Error('Failed to start update metadata job');
-                }
-                
-                const result = await response.json();
+                const result = await apiFetch('/api/jobs/update-metadata-selected', { method: 'POST', body: { Files: [targetFile], Metadata: metadata, Fields: fields }, errorMessage: 'Failed to start update metadata job' });
                 const jobId = result.job_id;
                 
                 if (!jobId) {
@@ -1023,25 +992,7 @@
             try {
                 console.log('[BATCH] Starting update metadata selected files request...');
                 // Start the job using the jobs endpoint
-                const response = await fetch(apiUrl('/api/jobs/update-metadata-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: files, Metadata: metadata, Fields: fields })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start updating metadata for selected files (HTTP ${response.status})`);
-                    throw new Error('Failed to start update metadata job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/update-metadata-selected', { method: 'POST', body: { Files: files, Metadata: metadata, Fields: fields }, errorMessage: 'Failed to start update metadata job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 

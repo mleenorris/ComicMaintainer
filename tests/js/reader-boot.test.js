@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
-const { validToken } = require('./support/app');
+const { jwt, validToken } = require('./support/app');
 const {
     FILE, NEXT_FILE, loadReader, openReader, readerReady, pageRequests, progressPosts, markReadPosts,
     adjacentRequests, shownPage, waitForShownPage, toasts
@@ -165,6 +165,25 @@ test('an expired session while opening the comic goes back to login', async () =
 
     assert.deepEqual(page.navigations, [{ url: 'http://localhost/login.html', replace: false }]);
     assert.equal(page.fetchCalls.some(call => call.path === '/api/ComicReader/progress'), false);
+});
+
+const expiredToken = () => jwt({ sub: 'alice', exp: Math.floor(Date.now() / 1000) - 60 });
+
+test('a comic saved for offline still opens once the session token has expired', async () => {
+    const token = expiredToken();
+    const page = await openReader({ token });
+
+    assert.deepEqual(page.navigations, []);
+    assert.equal(page.$('#comicTitle').textContent, 'Issue 001.cbz');
+    assert.equal(infoCall(page).headers.authorization, `Bearer ${token}`);
+    assert.equal(page.window.localStorage.getItem('jwt_token'), token, 'the session is not wiped on the way');
+});
+
+test('a server that rejects the expired token still ends the session', async () => {
+    const page = loadReader({ token: expiredToken(), routes: { 'GET /api/ComicReader/info': 401 } });
+    await page.settle();
+
+    assert.deepEqual(page.navigations, [{ url: 'http://localhost/login.html', replace: false }]);
 });
 
 test('a comic that cannot be opened shows the error state', async () => {

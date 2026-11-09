@@ -21,6 +21,14 @@
         // to (filePath -> { totalPages, name }).
         let comicMeta = new Map();
 
+        // The reader opens saved comics with no connection, where the service
+        // worker answers and the age of the stored token does not matter. So
+        // the server judges the session: when it can be reached, it answers an
+        // expired token with a 401, which ends the session as usual.
+        function readerApiFetch(path, options = {}) {
+            return apiFetch(path, { ...options, allowExpiredToken: true });
+        }
+
         // Build the key used to track loaded pages for a specific comic.
         function pageLoadedKey(filePath, pageNum) {
             return `${filePath}#${pageNum}`;
@@ -153,12 +161,6 @@
             return urlParams.get(param);
         }
 
-        // Credentials + bearer token unless signed in via Authelia; see
-        // buildCredentialedFetchOptions() in /js/shared.js.
-        function buildFetchOptions(extra) {
-            return buildCredentialedFetchOptions(extra, token);
-        }
-
         // Initialize reader
         async function initReader() {
             comicFilePath = getQueryParam('file');
@@ -172,7 +174,7 @@
 
             // Check authentication - allow either JWT token or Authelia authentication
             if (!token && !isAutheliaAuth) {
-                window.location.href = '/login.html';
+                window.location.href = apiUrl('/login.html');
                 return;
             }
 
@@ -186,16 +188,9 @@
 
             try {
                 // Get comic info
-                const response = await fetch(
-                    `/api/ComicReader/info?filePath=${encodeURIComponent(comicFilePath)}`,
-                    buildFetchOptions()
-                );
+                const response = await readerApiFetch(`/api/ComicReader/info?filePath=${encodeURIComponent(comicFilePath)}`, { json: false });
 
                 if (!response.ok) {
-                    if (response.status === 401) {
-                        window.location.href = '/login.html';
-                        return;
-                    }
                     throw new Error(await refusalMessage(response, 'Failed to load comic info'));
                 }
 
@@ -263,6 +258,7 @@
                 setupTapZones();
                 setupChromeAutoHide();
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Error initializing reader:', error);
                 showError('Failed to load comic: ' + error.message);
             }
@@ -355,7 +351,7 @@
             readingDirection = readingDirection === 'ltr' ? 'rtl' : 'ltr';
             try { localStorage.setItem('readingDirection', readingDirection); } catch (_e) { /* noop */ }
             updateDirectionUI();
-            showMessage(`Reading direction: ${readingDirection.toUpperCase()}`, 'info');
+            showReaderMessage(`Reading direction: ${readingDirection.toUpperCase()}`, 'info');
         }
 
         // Load pages in continuous scroll mode with buffering (Kavita-style)
@@ -456,10 +452,7 @@
 
         // Fetch page `pageNum` of `filePath` as a blob.
         async function fetchWebcomicPageBlob(filePath, pageNum) {
-            const response = await fetch(
-                `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
-                buildFetchOptions()
-            );
+            const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`, { json: false });
             if (!response.ok) {
                 throw new Error(await refusalMessage(response, 'Failed to load page'));
             }
@@ -1040,10 +1033,7 @@
             const container = document.getElementById('webcomicContainer');
             if (!container || !nextPath || nextPath === tailPath) return false;
 
-            const response = await fetch(
-                `/api/ComicReader/info?filePath=${encodeURIComponent(nextPath)}`,
-                buildFetchOptions()
-            );
+            const response = await readerApiFetch(`/api/ComicReader/info?filePath=${encodeURIComponent(nextPath)}`, { json: false });
             if (!container.isConnected) return false;
 
             if (!response.ok) {
@@ -1178,20 +1168,9 @@
             let info = null;
             let failed = true;
             try {
-                const isAutheliaAuth = isAutheliaAuthenticated();
-                const fetchOptions = {
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
+                const response = await readerApiFetch(
                     `/api/ComicReader/adjacent?filePath=${encodeURIComponent(filePath)}&direction=next`,
-                    fetchOptions
+                    { json: false }
                 );
 
                 if (response.ok) {
@@ -1294,14 +1273,8 @@
             if (pageNum < 1 || pageNum > totalPages) return null;
             if (mangaPageCache.has(pageNum)) return mangaPageCache.get(pageNum);
             try {
-                const response = await fetch(
-                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
-                    buildFetchOptions()
-                );
+                const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`, { json: false });
                 if (!response.ok) {
-                    if (response.status === 401) {
-                        window.location.href = '/login.html';
-                    }
                     if (response.status === 422) {
                         mangaPageRefusals.set(pageNum, await refusalMessage(response, 'Failed to load page'));
                     }
@@ -1365,10 +1338,7 @@
             preloadedNextComicPath = nextPath;
             for (let p = 1; p <= NEXT_COMIC_PRELOAD_PAGES; p++) {
                 try {
-                    const response = await fetch(
-                        `/api/ComicReader/page?filePath=${encodeURIComponent(nextPath)}&page=${p}`,
-                        buildFetchOptions()
-                    );
+                    const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(nextPath)}&page=${p}`, { json: false });
                     if (!response.ok) break; // out of pages or an error; stop early
                     // Drain the body so the response is fully received and stored.
                     await response.blob();
@@ -1509,21 +1479,18 @@
                 let nextInfo = nextComicInfo;
                 if (!nextInfo || !nextInfo.hasAdjacent || !nextInfo.filePath
                     || nextInfo.filePath === comicFilePath) {
-                    const response = await fetch(
-                        `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`,
-                        buildFetchOptions()
-                    );
+                    const response = await readerApiFetch(`/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`, { json: false });
                     if (!response.ok) throw new Error('Failed to fetch next comic info');
                     nextInfo = await response.json();
                 }
                 if (nextInfo.hasAdjacent && nextInfo.filePath) {
-                    window.location.replace(`/reader.html?file=${encodeURIComponent(nextInfo.filePath)}`);
+                    window.location.replace(apiUrl(`/reader.html?file=${encodeURIComponent(nextInfo.filePath)}`));
                 } else {
-                    showMessage('No more issues in this series', 'info');
+                    showReaderMessage('No more issues in this series', 'info');
                 }
             } catch (error) {
                 console.error('Error navigating to next comic:', error);
-                showMessage('Failed to load next comic', 'error');
+                showReaderMessage('Failed to load next comic', 'error');
             }
         }
 
@@ -1531,20 +1498,17 @@
         // so a single Back press still leaves the reader.
         async function navigateToPreviousComic() {
             try {
-                const response = await fetch(
-                    `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=prev`,
-                    buildFetchOptions()
-                );
+                const response = await readerApiFetch(`/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=prev`, { json: false });
                 if (!response.ok) throw new Error('Failed to fetch previous comic info');
                 const prevInfo = await response.json();
                 if (prevInfo.hasAdjacent && prevInfo.filePath) {
-                    window.location.replace(`/reader.html?file=${encodeURIComponent(prevInfo.filePath)}#lastpage`);
+                    window.location.replace(apiUrl(`/reader.html?file=${encodeURIComponent(prevInfo.filePath)}#lastpage`));
                 } else {
-                    showMessage('This is the first issue in this series', 'info');
+                    showReaderMessage('This is the first issue in this series', 'info');
                 }
             } catch (error) {
                 console.error('Error navigating to previous comic:', error);
-                showMessage('Failed to load previous comic', 'error');
+                showReaderMessage('Failed to load previous comic', 'error');
             }
         }
 
@@ -1577,7 +1541,7 @@
             // If the referrer is the home page on the same origin, history.back()
             // restores native scroll/state better than any URL navigation.
             if (sameOriginReferrer
-                && (sameOriginReferrer.pathname === '/' || sameOriginReferrer.pathname.endsWith('/index.html'))) {
+                && (sameOriginReferrer.pathname === apiUrl('/') || sameOriginReferrer.pathname.endsWith('/index.html'))) {
                 window.history.back();
                 return;
             }
@@ -1592,7 +1556,7 @@
                 } catch (_e) { /* fall through */ }
             }
 
-            window.location.href = '/';
+            window.location.href = apiUrl('/');
         }
 
         // Fullscreen functionality
@@ -1682,7 +1646,7 @@
             // Sending is a write operation; hide the button for read-only users
             // rather than letting them hit a 403.
             try {
-                const response = await fetch('/api/auth/user', buildFetchOptions());
+                const response = await readerApiFetch('/api/auth/user', { json: false });
                 if (!response.ok) return;
                 const user = await response.json();
                 button.hidden = user.canModifyLibrary === false;
@@ -1695,7 +1659,7 @@
             const sendBtn = document.getElementById('emailPromptSendBtn');
             if (!dlg || !select || !sendBtn) return;
             if (!comicFilePath) {
-                showMessage('No comic is open.', 'error');
+                showReaderMessage('No comic is open.', 'error');
                 return;
             }
 
@@ -1705,28 +1669,28 @@
 
             try {
                 const [status, devices] = await Promise.all([
-                    readerEmailJson('/api/email/status').catch(() => null),
-                    readerEmailJson('/api/email/devices')
+                    readerApiFetch('/api/email/status').catch(() => null),
+                    readerApiFetch('/api/email/devices')
                 ]);
 
                 const list = Array.isArray(devices.devices) ? devices.devices : [];
                 if (!list.length) {
                     select.replaceChildren(new Option('No devices saved', ''));
-                    showMessage('Add an ereader device from the library menu first.', 'error');
+                    showReaderMessage('Add an ereader device from the library menu first.', 'error');
                     return;
                 }
 
                 select.replaceChildren(...list.map(d => new Option(`${d.name} (${d.emailAddress})`, d.id)));
 
                 if (status && status.configured === false) {
-                    showMessage('Email delivery is not configured. Ask an administrator to set the SMTP settings.', 'error');
+                    showReaderMessage('Email delivery is not configured. Ask an administrator to set the SMTP settings.', 'error');
                     return;
                 }
 
                 sendBtn.disabled = false;
             } catch (error) {
                 select.replaceChildren(new Option('Failed to load devices', ''));
-                showMessage('Failed to load ereader devices: ' + error.message, 'error');
+                showReaderMessage('Failed to load ereader devices: ' + error.message, 'error');
             }
         }
 
@@ -1734,38 +1698,17 @@
             document.getElementById('emailPrompt')?.classList.remove('show');
         }
 
-        async function readerEmailJson(path, options = {}) {
-            const response = await fetch(path, buildFetchOptions({
-                ...options,
-                headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
-            }));
-            if (!response.ok) {
-                let message = `HTTP error! status: ${response.status}`;
-                try {
-                    const body = await response.json();
-                    if (body && (body.error || body.message)) message = body.error || body.message;
-                } catch (_) {}
-                throw new Error(message);
-            }
-            if (response.status === 204) return {};
-            try {
-                return await response.json();
-            } catch (_) {
-                return {};
-            }
-        }
-
         async function submitReaderEmail() {
             const deviceId = document.getElementById('emailPromptDevice')?.value;
             const format = document.getElementById('emailPromptFormat')?.value;
             const sendBtn = document.getElementById('emailPromptSendBtn');
             if (!deviceId) {
-                showMessage('Choose an ereader device.', 'error');
+                showReaderMessage('Choose an ereader device.', 'error');
                 return;
             }
             if (sendBtn) sendBtn.disabled = true;
             try {
-                const result = await readerEmailJson('/api/email/send', {
+                const result = await readerApiFetch('/api/email/send', {
                     method: 'POST',
                     body: JSON.stringify({
                         files: [comicFilePath],
@@ -1776,9 +1719,9 @@
                 });
                 hideReaderEmailPrompt();
                 const queued = Array.isArray(result.queued) ? result.queued.length : 0;
-                showMessage(queued ? 'Comic queued for delivery.' : 'Nothing was queued.', queued ? 'success' : 'info');
+                showReaderMessage(queued ? 'Comic queued for delivery.' : 'Nothing was queued.', queued ? 'success' : 'info');
             } catch (error) {
-                showMessage('Failed to email comic: ' + error.message, 'error');
+                showReaderMessage('Failed to email comic: ' + error.message, 'error');
             } finally {
                 if (sendBtn) sendBtn.disabled = false;
             }
@@ -1798,7 +1741,7 @@
         }
 
         // Show toast notification
-        function showMessage(message, type = 'info') {
+        function showReaderMessage(message, type = 'info') {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
@@ -2061,21 +2004,9 @@
 
             markReadInFlight.add(filePath);
             try {
-                const isAutheliaAuth = isAutheliaAuthenticated();
-                const fetchOptions = {
-                    method: 'POST',
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
+                const response = await readerApiFetch(
                     `/api/ComicReader/mark-read?filePath=${encodeURIComponent(filePath)}`,
-                    fetchOptions
+                    { method: 'POST', json: false }
                 );
                 
                 if (response.ok) {
@@ -2157,10 +2088,7 @@
         // Returns true when the request reached the server (so the queued entry
         // can be dropped), false when it should be retried later.
         async function postReadingProgress(filePath, pageNum) {
-            const response = await fetch(
-                `/api/ComicReader/progress?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
-                buildFetchOptions({ method: 'POST' })
-            );
+            const response = await readerApiFetch(`/api/ComicReader/progress?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`, { method: 'POST', json: false });
 
             if (response.ok) {
                 return true;
@@ -2233,10 +2161,7 @@
             const pendingPage = getPendingProgress(comicFilePath);
 
             try {
-                const response = await fetch(
-                    `/api/ComicReader/progress?filePath=${encodeURIComponent(comicFilePath)}`,
-                    buildFetchOptions()
-                );
+                const response = await readerApiFetch(`/api/ComicReader/progress?filePath=${encodeURIComponent(comicFilePath)}`, { json: false });
 
                 if (response.ok) {
                     const data = await response.json();
@@ -2354,7 +2279,7 @@
 
             // Reuse the reader's normal auth headers: the worker cannot read
             // the token out of localStorage itself.
-            const headers = Object.assign({}, buildFetchOptions().headers || {});
+            const headers = (!isAutheliaAuthenticated() && token) ? { Authorization: `Bearer ${token}` } : {};
 
             controller.postMessage({
                 type: 'DOWNLOAD_COMIC',
@@ -2392,7 +2317,7 @@
             const incomplete = (response && response.incomplete) || [];
             if (comics.some((comic) => comic.filePath === filePath)) {
                 endOfflineDownload({ saved: true });
-                showMessage('Available for offline reading', 'success');
+                showReaderMessage('Available for offline reading', 'success');
                 return;
             }
             const partial = incomplete.find((comic) => comic.filePath === filePath);
@@ -2403,7 +2328,7 @@
                 return;
             }
             endOfflineDownload({ partial: partial || null });
-            showMessage('Offline download was interrupted', 'error');
+            showReaderMessage('Offline download was interrupted', 'error');
         }
 
         async function refreshOfflineStatus() {
@@ -2434,7 +2359,7 @@
 
             const controller = navigator.serviceWorker && navigator.serviceWorker.controller;
             if (!controller) {
-                showMessage('Offline downloads are not available in this browser', 'error');
+                showReaderMessage('Offline downloads are not available in this browser', 'error');
                 return;
             }
 
@@ -2443,7 +2368,7 @@
                 offlineComicSaved = false;
                 offlinePartialDownload = null;
                 renderOfflineButton();
-                showMessage('Removed from offline storage', 'info');
+                showReaderMessage('Removed from offline storage', 'info');
                 return;
             }
 
@@ -2463,7 +2388,7 @@
 
             if (data.type === 'OFFLINE_DOWNLOAD_COMPLETE') {
                 endOfflineDownload({ saved: true });
-                showMessage('Available for offline reading', 'success');
+                showReaderMessage('Available for offline reading', 'success');
                 return;
             }
 
@@ -2475,7 +2400,7 @@
                     ? { savedPages: data.completed, pageCount: data.total }
                     : null;
                 endOfflineDownload({ partial });
-                showMessage(partial ? 'Offline download was interrupted' : 'Offline download failed', 'error');
+                showReaderMessage(partial ? 'Offline download was interrupted' : 'Offline download failed', 'error');
             }
         }
 
@@ -2487,7 +2412,7 @@
                     // The reader can be opened directly (deep link, home-screen
                     // shortcut) without ever visiting the library page that
                     // normally registers the worker.
-                    await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+                    await navigator.serviceWorker.register(apiUrl('/sw.js'), { scope: apiUrl('/') });
                     await navigator.serviceWorker.ready;
                 }
                 await refreshOfflineStatus();

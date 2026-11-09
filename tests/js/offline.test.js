@@ -138,6 +138,17 @@ test('the page asks the service worker for the downloaded comics and lists them 
     assert.deepEqual(page.errors, []);
 });
 
+test('under a base path a saved comic opens in the reader inside it', async () => {
+    const controller = recordingController();
+    const page = openOffline({ controller, basePath: '/comics', url: 'http://localhost/comics/offline.html' });
+    await page.settle();
+
+    controller.messages[0].transfer[0].postMessage({ type: 'OFFLINE_COMICS', comics: [{ filePath: 'Series/a b.cbz', pageCount: 2 }] });
+    await page.settle();
+
+    assert.deepEqual(listed(page), [{ href: '/comics/reader.html?file=Series%2Fa%20b.cbz', name: 'a b.cbz', pages: '2 pages saved' }]);
+});
+
 test('a comic path is shown as text, never run as markup', async () => {
     const controller = recordingController();
     const page = openOffline({ controller });

@@ -277,14 +277,11 @@
 
             let seriesMissing = false;
             try {
-                let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}`);
+                let path = `/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}`;
                 if (filterMode !== 'all') {
-                    url += `&filter=${encodeURIComponent(filterMode)}`;
+                    path += `&filter=${encodeURIComponent(filterMode)}`;
                 }
-                const response = await fetch(url, {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(path, { json: false });
                 if (!response.ok) {
                     entry.error = true;
                     seriesMissing = response.status === 404;
@@ -491,10 +488,7 @@
             const paths = entry.unconfirmedPaths;
             if (!paths || ![...paths].some(path => selectedFiles.has(path))) return;
             const getJson = async path => {
-                const response = await fetch(apiUrl(path), {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(path, { json: false });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 return response.json();
             };
@@ -647,10 +641,7 @@
         let suwayomiStatusPromise = null;
 
         async function fetchSuwayomiStatus() {
-            const response = await fetch(apiUrl('/api/suwayomi/status'), {
-                headers: getAuthHeaders(),
-                credentials: 'same-origin'
-            });
+            const response = await apiFetch('/api/suwayomi/status', { json: false });
             if (!response.ok) throw new Error('suwayomi status ' + response.status);
             return await response.json();
         }
@@ -718,13 +709,7 @@
             // back to the rest when the shown title has no exact match.
             const titles = [];
             try {
-                const response = await fetch(
-                    apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=1`),
-                    {
-                        headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                        credentials: 'same-origin'
-                    });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=1`, { json: false });
                 if (!response.ok) {
                     showMessage(`Could not load the full issue list (HTTP ${response.status}).`, 'error');
                     return;
@@ -753,16 +738,7 @@
 
             showMessage(`Asking Suwayomi for ${missing.length} missing issue${missing.length === 1 ? '' : 's'}...`, 'info');
             try {
-                const response = await fetch(apiUrl('/api/suwayomi/download-missing'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ seriesTitle: titles[0] || '', alternateTitles: titles.slice(1), issueNumbers: missing })
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch('/api/suwayomi/download-missing', { method: 'POST', body: { seriesTitle: titles[0] || '', alternateTitles: titles.slice(1), issueNumbers: missing }, json: false });
                 if (!response.ok) {
                     let errorMsg = `HTTP error! status: ${response.status}`;
                     try {

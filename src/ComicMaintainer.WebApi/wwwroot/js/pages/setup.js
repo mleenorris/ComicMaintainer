@@ -6,17 +6,6 @@
         // Security Note: Ensure this application is deployed with HTTPS in production
         // to protect credentials during transmission.
         
-        // Base path for reverse proxy support
-        const BASE_PATH = '';
-        
-        // Helper function to build URLs with base path
-        function apiUrl(path) {
-            if (!path.startsWith('/')) {
-                path = '/' + path;
-            }
-            return BASE_PATH + path;
-        }
-        
         // Theme management
         function initTheme() {
             const theme = localStorage.getItem('theme') || 'light';
@@ -95,12 +84,11 @@
         // Check if setup is still required
         async function checkSetupRequired() {
             try {
-                const response = await fetch(apiUrl('/api/auth/setup-required'));
-                const data = await response.json();
+                const data = await apiFetch('/api/auth/setup-required', { auth: false });
                 
                 if (!data.setupRequired) {
                     // Setup already completed, redirect to login
-                    window.location.href = '/login.html';
+                    window.location.href = apiUrl('/login.html');
                 }
             } catch (error) {
                 console.error('Error checking setup status:', error);
@@ -162,17 +150,16 @@
             setupBtnSpinner.classList.remove('hidden');
             
             try {
-                const response = await fetch(apiUrl('/api/auth/setup'), {
+                const response = await apiFetch('/api/auth/setup', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ 
-                        username, 
+                    auth: false,
+                    json: false,
+                    body: {
+                        username,
                         password,
                         email: null,
                         setupToken
-                    })
+                    }
                 });
                 
                 const data = response.status === 429
@@ -184,7 +171,7 @@
                     showSuccess('Administrator account created successfully! Redirecting to login...');
                     
                     setTimeout(() => {
-                        window.location.href = '/login.html';
+                        window.location.href = apiUrl('/login.html');
                     }, 1500);
                 } else {
                     showError(data.error || 'Setup failed. Please try again.');

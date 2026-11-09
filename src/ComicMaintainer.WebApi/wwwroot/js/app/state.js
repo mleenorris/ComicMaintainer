@@ -7,16 +7,9 @@
         // depends on a script loaded after it.
 
         // Constants
-        const DEFAULT_PER_PAGE = 100; // Default number of items per page
         const LIBRARY_HEALTH_REFRESH_DELAY = 750;
         const FILE_LIST_REFRESH_DEBOUNCE_DELAY = 500;
         const MAX_PROGRESS_RESULTS = 200;
-        
-        // Filename truncation constants
-        const FILENAME_TRUNCATION_START_LENGTH = 30; // Characters to show at the start
-        const FILENAME_TRUNCATION_END_LENGTH = 15; // Characters to show at the end (includes extension)
-        const MAX_EXTENSION_LENGTH = 10; // Maximum length to consider as a valid extension
-        const TRUNCATION_ELLIPSIS = '...'; // String to indicate truncation
         
         let files = [];
         let selectedFiles = new Set();
@@ -34,14 +27,8 @@
         // True while an issue checkbox is being toggled with Shift held.
         let seriesIssueRangeSelectArmed = false;
         let currentEditFile = null;
-        let collapsedDirectories = new Set();
         let searchQuery = '';
-        let allFoldersExpanded = false;
-        let currentPage = 1;
-        let totalPages = 1;
-        let totalFiles = 0;
         let unmarkedCount = 0;
-        let perPage = DEFAULT_PER_PAGE; // Will be loaded from server preferences
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         // Single source of truth for header-filter button labels. Used both when
         // restoring the saved filter on load and when the user changes it, so the
@@ -60,7 +47,6 @@
             'unmatched': 'Not Matched',
             'missing': 'Missing Issues'
         };
-        let libraryViewMode = 'series';
         // Series layout: null = auto (list on mobile portrait, compact otherwise),
         // or one of 'list', 'grid', 'compact' when explicitly chosen by the user.
         let seriesLayoutPreference = null;
@@ -72,17 +58,7 @@
         } catch (_e) { /* localStorage may be unavailable */ }
         let seriesLibrary = [];
         // Incremental library view state
-        const FOLDER_PAGE_SIZE = 100;
         const SERIES_PAGE_SIZE = 60;
-        let folderList = [];
-        let folderTotal = 0;
-        let folderOffset = 0;
-        let folderLoading = false;
-        // Set when a fresh (non-append) folder reload is requested while another
-        // load is in flight, so we re-fetch with the latest filter/search/sort
-        // once the in-flight request settles instead of dropping the request.
-        let folderReloadPending = false;
-        const folderFiles = new Map(); // path -> { status: 'loading'|'loaded'|'error', files: [] }
         let seriesOffset = 0;
         let seriesTotal = 0;
         let seriesLoading = false;

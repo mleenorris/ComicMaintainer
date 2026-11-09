@@ -128,11 +128,11 @@ test('a save that fails says why and keeps the edits', async (t) => {
                 status: 400,
                 errors: { '$.intervalMinutes': ['The JSON value could not be converted to System.Int32. Path: $.intervalMinutes | LineNumber: 0 | BytePositionInLine: 41.'] }
             }, { 'X-Correlation-Id': 'req-400a' }),
-            text: 'Failed to save Library Scan: HTTP error! status: 400 (ref: req-400a)'
+            text: 'Failed to save Library Scan: One or more validation errors occurred. (ref: req-400a)'
         },
         // 401/403 failures are explained by themselves and carry no reference.
         { name: 'lost administrator rights', answer: respond(403, undefined, { 'X-Correlation-Id': 'req-403a' }), text: 'Failed to save Library Scan: Only administrators can manage scheduled jobs.' },
-        { name: 'a job the server no longer has', answer: respond(404, h.NOT_FOUND_PROBLEM), text: 'Failed to save Library Scan: HTTP error! status: 404' },
+        { name: 'a job the server no longer has', answer: respond(404, h.NOT_FOUND_PROBLEM), text: 'Failed to save Library Scan: Not Found' },
         { name: 'an unexpected server error', answer: h.unexpectedError(SAVE, 'req-500a'), text: `Failed to save Library Scan: ${h.UNEXPECTED_ERROR} (ref: req-500a)` },
         { name: 'a proxy error page', answer: respond(502, 'Bad Gateway'), text: 'Failed to save Library Scan: HTTP error! status: 502' },
         { name: 'a network error', answer: () => { throw new TypeError('Failed to fetch'); }, text: 'Failed to save Library Scan: Failed to fetch' }

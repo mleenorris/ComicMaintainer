@@ -139,7 +139,7 @@ test('a status check that fails does not stop the comic being sent', async () =>
 test("a device list that cannot be loaded is reported with the server's reason", async () => {
     const cases = [
         [respond(500, { error: 'Database is locked' }), 'Failed to load ereader devices: Database is locked'],
-        [() => new Response('nope', { status: 403 }), 'Failed to load ereader devices: HTTP error! status: 403']
+        [() => new Response('nope', { status: 403 }), 'Failed to load ereader devices: nope']
     ];
     for (const [reply, message] of cases) {
         const page = await openWithEmail({ 'GET /api/email/devices': reply });

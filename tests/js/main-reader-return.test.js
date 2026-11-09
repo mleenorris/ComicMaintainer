@@ -25,7 +25,6 @@ const snapshot = (overrides = {}) => JSON.stringify({
     scrollY: 0,
     searchQuery: '',
     filterMode: 'all',
-    libraryViewMode: 'series',
     currentSeriesDetailId: null,
     timestamp: Date.now(),
     ...overrides
@@ -51,7 +50,6 @@ test('reading from a series page remembers that series, the search and the scrol
         scrollY: 420,
         searchQuery: 'saga',
         filterMode: 'all',
-        libraryViewMode: 'series',
         currentSeriesDetailId: SAGA.id
     });
     assert.deepEqual(readerFiles(page), ['Saga/Saga 001.cbz']);
@@ -263,7 +261,6 @@ test('readComic falls back to safe values when the library state is not there', 
         scrollY: 75,
         searchQuery: '',
         filterMode: 'all',
-        libraryViewMode: 'files',
         currentSeriesDetailId: null
     });
     assert.equal(sandbox.context.location.href, '/reader.html?file=Saga%2FSaga%20001.cbz');

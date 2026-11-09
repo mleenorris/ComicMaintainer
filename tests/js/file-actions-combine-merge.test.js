@@ -645,3 +645,123 @@ test('an expired session during Combine goes to the login page', async t => {
     assert.ok(!isModalOpen(page, 'progressModal'));
     assert.deepEqual(loggedErrors(page, 'Failed to combine folders:'), []);
 });
+
+// ── The list follows the job ──────────────────────────────────────────────
+
+/** Answer Combine with a running job and start it from the opened dialog. */
+async function startCombineJob(page) {
+    await openCombineFolders(page);
+    chooseDestination(page, '/comics/Saga (2012)');
+    page.click('#combineFoldersConfirmBtn');
+    await page.settle();
+}
+
+const jobRoutes = () => ({
+    [COMBINE]: respond(202, { job_id: JOB_ID, total_items: 3 }),
+    [`GET /api/jobs/${JOB_ID}`]: { job_id: JOB_ID, status: 'running', total_items: 3, processed_items: 0, results: [] }
+});
+
+const listLoads = page => callsTo(page, 'GET', '/api/files/combinable-folders').length;
+
+function jobEnded(page, status) {
+    page.eventSources.at(-1).emit('message', {
+        type: 'job_updated',
+        data: { job_id: JOB_ID, status, progress: { processed: 3, total: 3, success: 3, errors: 0 } }
+    });
+}
+
+for (const status of ['completed', 'failed', 'cancelled']) {
+    test(`the Combine Folders list reloads when the job ends (${status})`, async t => {
+        const page = await boot({ routes: jobRoutes() });
+        t.after(() => page.close());
+        await startCombineJob(page);
+        const atJobStart = listLoads(page);
+        assert.equal(atJobStart, 2, 'once on opening, once as the job starts');
+
+        page.route(COMBINABLE, { groups: [] });
+        jobEnded(page, status);
+        await page.settle();
+
+        assert.equal(listLoads(page), atJobStart + 1);
+        assert.ok(isModalOpen(page, 'combineFoldersModal'));
+        assert.equal(page.$('#combineFoldersEmptyState').style.display, 'block', 'the combined group is gone');
+    });
+}
+
+test('a Combine Folders dialog closed meanwhile is not reopened when the job ends', async t => {
+    const page = await boot({ routes: jobRoutes() });
+    t.after(() => page.close());
+    await startCombineJob(page);
+    const atJobStart = listLoads(page);
+
+    page.run('closeCombineFoldersModal()');
+    jobEnded(page, 'completed');
+    await page.settle();
+
+    assert.equal(listLoads(page), atJobStart);
+    assert.ok(!isModalOpen(page, 'combineFoldersModal'));
+});
+
+test('another job ending does not reload the Combine Folders list', async t => {
+    const page = await boot({ routes: jobRoutes() });
+    t.after(() => page.close());
+    await startCombineJob(page);
+    const atJobStart = listLoads(page);
+
+    page.run("jobProgress.notifyJobFinished('some-other-job')");
+    await page.settle();
+
+    assert.equal(listLoads(page), atJobStart);
+});
+
+test('the list still reloads when another job has taken the progress modal over', async t => {
+    const page = await boot({ routes: jobRoutes() });
+    t.after(() => page.close());
+    await startCombineJob(page);
+    const atJobStart = listLoads(page);
+
+    page.run("currentJobId = 'a-later-job'");
+    jobEnded(page, 'completed');
+    await page.settle();
+
+    assert.equal(listLoads(page), atJobStart + 1);
+});
+
+for (const [outcome, finish] of [
+    ['answers', reload => reload.resolve({ groups: [SAGA] })],
+    ['fails', reload => reload.reject(new TypeError('Failed to fetch'))]
+]) {
+    test(`a reload from the job's start that ${outcome} after the job ended changes nothing`, async t => {
+        const slowReload = deferred();
+        const answers = [{ groups: [SAGA] }, slowReload.promise, { groups: [] }];
+        const page = await boot({ routes: { ...jobRoutes(), [COMBINABLE]: () => answers.shift() } });
+        t.after(() => page.close());
+        await startCombineJob(page);
+
+        jobEnded(page, 'completed');
+        await page.settle();
+        assert.equal(page.$('#combineFoldersEmptyState').textContent, 'No folders look combinable right now.');
+        assert.equal(page.$('#combineFoldersEmptyState').style.display, 'block');
+
+        finish(slowReload);
+        await page.settle();
+
+        assert.equal(page.$('#combineFoldersEmptyState').textContent, 'No folders look combinable right now.');
+        assert.equal(page.$('#combineFoldersEmptyState').style.display, 'block', 'the combined group stays gone');
+    });
+}
+
+test('a job that ends during its first status check still reloads the list', async t => {
+    const page = await boot({
+        routes: {
+            [COMBINE]: respond(202, { job_id: JOB_ID, total_items: 3 }),
+            [`GET /api/jobs/${JOB_ID}`]: { job_id: JOB_ID, status: 'completed', total_items: 3, processed_items: 3, results: [] }
+        }
+    });
+    t.after(() => page.close());
+
+    await startCombineJob(page);
+    await page.settle(3);
+
+    assert.equal(listLoads(page), 3, 'opening, the job start and the job end');
+});

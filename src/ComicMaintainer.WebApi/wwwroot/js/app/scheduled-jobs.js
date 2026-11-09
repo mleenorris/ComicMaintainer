@@ -56,30 +56,9 @@
             navigate('#/jobs');
         }
 
-        /** Fetch a /api/scheduled-jobs endpoint; throws an Error carrying `status` (and the response's `correlationId`) on failure. */
-        async function fetchScheduledJobsApi(path, options = {}) {
-            const response = await fetch(apiUrl(path), {
-                credentials: 'include',
-                ...options,
-                headers: getAuthHeaders()
-            });
-            if (handleAuthError(response)) {
-                const error = new Error('Authentication required');
-                error.status = response.status;
-                error.authHandled = true;
-                throw error;
-            }
-            if (!response.ok) {
-                let message = response.status === 403
-                    ? 'Only administrators can manage scheduled jobs.'
-                    : `HTTP error! status: ${response.status}`;
-                try {
-                    const body = await response.json();
-                    if (body && (body.error || body.message)) message = body.error || body.message;
-                } catch (_) { /* non-JSON error body */ }
-                throw apiResponseError(response, message);
-            }
-            return response;
+        /** Calls a /api/scheduled-jobs endpoint; see apiFetch() for what it returns and throws. */
+        function fetchScheduledJobsApi(path, options = {}) {
+            return apiFetch(path, { forbiddenMessage: 'Only administrators can manage scheduled jobs.', ...options });
         }
 
         function parseScheduledJobOptions(job) {
@@ -365,8 +344,7 @@
                 }
             }
             try {
-                const response = await fetchScheduledJobsApi('/api/scheduled-jobs');
-                const jobs = await response.json();
+                const jobs = await fetchScheduledJobsApi('/api/scheduled-jobs');
                 if (loadRequest !== scheduledJobsLoadRequest) return;
                 const previous = scheduledJobs;
                 scheduledJobs = Array.isArray(jobs) ? jobs : [];
@@ -490,7 +468,7 @@
             const button = card.querySelector('[data-job-action="save"]');
             if (button) button.disabled = true;
             try {
-                const response = await fetchScheduledJobsApi(`/api/scheduled-jobs/${encodeURIComponent(jobKey)}`, {
+                const saved = await fetchScheduledJobsApi(`/api/scheduled-jobs/${encodeURIComponent(jobKey)}`, {
                     method: 'PUT',
                     body: JSON.stringify({
                         enabled: card.querySelector('[data-job-field="enabled"]').checked,
@@ -498,7 +476,6 @@
                         optionsJson: buildScheduledJobOptionsJson(job, shownOptions)
                     })
                 });
-                const saved = await response.json();
                 scheduledJobs = scheduledJobs.map(item => (item.jobKey === jobKey ? saved : item));
                 updateScheduledJobCard(saved, { resetForm: true });
                 showMessage(`${name} saved.`, 'success');
@@ -524,8 +501,7 @@
             scheduledJobRunRequests.set(jobKey, request);
             updateScheduledJobCard(job);
             try {
-                const response = await fetchScheduledJobsApi(`/api/scheduled-jobs/${encodeURIComponent(jobKey)}/run`, { method: 'POST' });
-                const result = await response.json().catch(() => null);
+                const result = await fetchScheduledJobsApi(`/api/scheduled-jobs/${encodeURIComponent(jobKey)}/run`, { method: 'POST' });
                 if (scheduledJobRunRequests.get(jobKey) === request) {
                     request.pending = false;
                     request.requestedAt = Date.now();
@@ -560,8 +536,7 @@
             panel.setAttribute('aria-busy', 'true');
             renderHtml(panel, html`<div class="loading"><div class="spinner"></div><p>Loading findings...</p></div>`);
             try {
-                const response = await fetchScheduledJobsApi('/api/scheduled-jobs/metadata-audit/findings?limit=200');
-                const data = await response.json();
+                const data = await fetchScheduledJobsApi('/api/scheduled-jobs/metadata-audit/findings?limit=200');
                 if (loadRequest !== metadataAuditFindingsRequest) return;
                 renderMetadataAuditFindings(panel, data);
             } catch (error) {

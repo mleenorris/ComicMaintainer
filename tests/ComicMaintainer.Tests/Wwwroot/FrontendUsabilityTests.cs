@@ -135,7 +135,7 @@ public class FrontendUsabilityTests
         Assert.Contains("options.reference", js);
         Assert.Contains("withApiFailureReference(message, options.reference)", js);
         Assert.Contains("function withApiFailureReference(message, reference)", js);
-        Assert.Contains("showMessage('Failed to load files: ' + error.message, 'error', { reference: error });", js);
+        Assert.Contains("showMessage('Failed to load series: ' + error.message, 'error', { reference: error });", js);
 
         // The id travels on the error of the failed request itself. Quoting
         // whichever response failed last instead would give a network error or

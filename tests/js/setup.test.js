@@ -75,7 +75,9 @@ test('once an administrator exists the page sends the user to sign in', async ()
 });
 
 test('a failed setup check is logged and the form stays', async () => {
-    for (const answer of [networkError, badGateway]) {
+    // A failure that explains itself in JSON says nothing about whether setup
+    // is still required, so it must not send the user away either.
+    for (const answer of [networkError, badGateway, respond(500, { error: 'Database is locked' })]) {
         const page = openSetup({ routes: { 'GET /api/auth/setup-required': answer } });
         await page.settle();
 

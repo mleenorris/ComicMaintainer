@@ -43,7 +43,7 @@ function scriptsOfflineDocumentsLoad(pages = OFFLINE_DOCUMENTS) {
 function stylesheetsOfflineDocumentsLink(pages = OFFLINE_DOCUMENTS) {
     const sheets = new Set(pages.flatMap(page =>
         [...fs.readFileSync(path.join(WWWROOT, page), 'utf8')
-            .matchAll(/<link\s+rel="stylesheet"\s+href="\/(css\/[^"?]+\.css)\?v=__APP_VERSION__"/g)]
+            .matchAll(/<link\s+rel="stylesheet"\s+href="__BASE_PATH__\/(css\/[^"?]+\.css)\?v=__APP_VERSION__"/g)]
             .map(match => match[1])));
     return [...sheets].map(path => absolute(`/${path}?v=${APP_VERSION}`)).sort();
 }
@@ -113,7 +113,7 @@ test('install fails when the reader document or an asset the offline reader load
         ...[...scriptsOfflineDocumentsLoad(['reader.html', 'offline.html']), ...stylesheetsOfflineDocumentsLink(['reader.html', 'offline.html'])]
             .map(url => new URL(url).pathname)
     ];
-    assert.deepEqual(readerAssets.sort(), ['/css/main.css', '/js/pages/offline.js', '/js/pages/reader.js', '/js/shared.js', '/reader.html']);
+    assert.deepEqual(readerAssets.sort(), ['/css/main.css', '/js/app/api.js', '/js/pages/offline.js', '/js/pages/reader.js', '/js/shared.js', '/reader.html']);
 
     for (const failing of readerAssets) {
         for (const [label, answer] of [['404', reply(404, 'Not found')], ['network error', () => { throw new TypeError('Failed to fetch'); }]]) {

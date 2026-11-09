@@ -1,6 +1,6 @@
 'use strict';
 
-// js/app/file-list.js: selecting the issues of an open series page — single
+// js/app/selection.js: selecting the issues of an open series page — single
 // issues, Shift-click ranges (which follow the grid's display order and skip
 // missing-issue placeholders), "Select all issues", how the shared selection
 // status follows along, and how the selection follows a reload of the page's

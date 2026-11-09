@@ -60,21 +60,18 @@ test('Info on an issue shows its name and path and no duplicate call-out', async
     assert.equal(page.$('#fileInfoPath').textContent, FIRST);
     assert.equal(page.$('#fileInfoDuplicateReview').style.display, 'none');
     assert.equal(page.$('#fileInfoDuplicateReviewBtn').dataset.filepath, undefined);
-    // The series page never fills the folder file cache the details come from.
-    assert.equal(page.$('#fileInfoSize').textContent, '');
-    assert.equal(page.$('#fileInfoProcessed').textContent, '');
 
     page.click('#fileInfoModal .modal-footer .btn-primary');
     assert.ok(!isModalOpen(page, 'fileInfoModal'));
 });
 
-test('Info for a loaded file shows its size and processing status', async t => {
+test('Info for an issue of the open series shows its size and processing status', async t => {
     const page = await boot();
     t.after(() => page.close());
-    page.run(`folderFiles.set('Saga', { status: 'loaded', files: [
-        { relative_path: ${JSON.stringify(FIRST)}, name: 'Saga 001.cbz', size: 1536, processed: true, renamed: true, normalized: true, duplicate: false },
-        { relative_path: ${JSON.stringify(SECOND)}, name: 'Saga 002.cbz', size: 3 * 1024 * 1024, processed: false, renamed: false, normalized: false, duplicate: true }
-    ] }); folderFiles.set('Other', { status: 'loading', files: [{ relative_path: 'Other/x.cbz' }] });`);
+    page.run(`seriesIssuesCache.set(currentSeriesDetailId, { ...seriesIssuesCache.get(currentSeriesDetailId), issues: [
+        { file_path: ${JSON.stringify(FIRST)}, file_name: 'Saga 001.cbz', size: 1536, processed: true, renamed: true, normalized: true, duplicate: false },
+        { file_path: ${JSON.stringify(SECOND)}, file_name: 'Saga 002.cbz', size: 3 * 1024 * 1024, processed: false, renamed: false, normalized: false, duplicate: true }
+    ] })`);
 
     page.run(`showFileInfo(${JSON.stringify(FIRST)}, 'Saga 001.cbz')`);
     assert.equal(page.$('#fileInfoSize').textContent, '1.5 KB');
@@ -98,10 +95,23 @@ test('Info for a loaded file shows its size and processing status', async t => {
     assert.equal(page.$('#fileInfoDuplicateReview').style.display, 'none');
     assert.equal(page.$('#fileInfoDuplicateReviewBtn').dataset.filepath, undefined);
 
-    // A file outside the cache hides the call-out too.
+    // A file no view lists hides the call-out and leaves no details behind.
     page.run(`showFileInfo(${JSON.stringify(SECOND)}, 'Saga 002.cbz'); showFileInfo('Elsewhere/x.cbz', 'x.cbz')`);
     assert.equal(page.$('#fileInfoDuplicateReview').style.display, 'none');
     assert.equal(page.$('#fileInfoDuplicateReviewBtn').dataset.filepath, undefined);
+    assert.equal(page.$('#fileInfoSize').textContent, '');
+    assert.equal(page.$('#fileInfoDuplicate').textContent, '');
+});
+
+test('Info for a file in the duplicate review shows what that review listed', async t => {
+    const page = await boot();
+    t.after(() => page.close());
+    page.run(`currentSeriesDetailId = null; duplicateReviewFiles = [
+        { relative_path: 'Dupes/x.cbz', name: 'x.cbz', size: 2048, processed: false, renamed: false, normalized: false, duplicate: true }
+    ]; showFileInfo('Dupes/x.cbz', 'x.cbz')`);
+
+    assert.equal(page.$('#fileInfoSize').textContent, '2.0 KB');
+    assert.equal(page.$('#fileInfoDuplicate').textContent, '🔁 Yes');
 });
 
 test('Review Duplicate in the info modal opens the duplicate review on that file', async t => {
@@ -116,8 +126,8 @@ test('Review Duplicate in the info modal opens the duplicate review on that file
         }
     });
     t.after(() => page.close());
-    page.run(`folderFiles.set('Saga', { status: 'loaded', files: [
-        { relative_path: ${JSON.stringify(SECOND)}, name: 'Saga 002.cbz', size: 2048, duplicate: true }
+    page.run(`seriesIssuesCache.set(currentSeriesDetailId, { ...seriesIssuesCache.get(currentSeriesDetailId), issues: [
+        { file_path: ${JSON.stringify(SECOND)}, file_name: 'Saga 002.cbz', size: 2048, duplicate: true }
     ] })`);
     page.run(`showFileInfo(${JSON.stringify(SECOND)}, 'Saga 002.cbz')`);
 
@@ -332,7 +342,7 @@ test('Save reports a job the server did not start', async t => {
 
     assert.deepEqual(messageTexts(page, 'error'), [
         'Failed to update metadata: No job ID returned',
-        'Failed to update metadata: Failed to start update metadata job',
+        'Failed to update metadata: boom',
         'Failed to update metadata: Failed to fetch'
     ]);
     assert.ok(!isModalOpen(page, 'progressModal'));
@@ -468,7 +478,7 @@ test('batch update failures are reported and close the progress modal', async t 
     await save();
 
     assert.deepEqual(messageTexts(page, 'error'), [
-        'Failed to start updating metadata: Failed to start update metadata job',
+        'Failed to start updating metadata: No files',
         'Failed to start updating metadata: Failed to fetch'
     ]);
     assert.ok(!isModalOpen(page, 'progressModal'));

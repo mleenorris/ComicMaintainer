@@ -344,8 +344,8 @@ class FakeMessageChannel {
 }
 
 /** Network routes for one comic's info, pages and cover, as the reader API serves them. */
-function routeComic(network, filePath, { pages = 3, fileName = filePath.split(/[\\/]/).pop() } = {}) {
-    const isFor = path => call => call.path === path && call.query.filePath === filePath;
+function routeComic(network, filePath, { pages = 3, fileName = filePath.split(/[\\/]/).pop(), basePath = '' } = {}) {
+    const isFor = path => call => call.path === basePath + path && call.query.filePath === filePath;
     network.route(isFor('/api/ComicReader/info'), { filePath, fileName, pageCount: pages });
     network.route(isFor('/api/ComicReader/page'), call => image(`${fileName} page ${call.query.page}`));
     network.route(isFor('/api/ComicReader/cover'), image(`${fileName} cover`));
@@ -373,7 +373,15 @@ async function extend(lifetime) {
     }
 }
 
+// What the server does to sw.js, padded so that nothing after the placeholder
+// moves: coverage is merged across runs by offset, and a shifted copy of the
+// script would be counted as a second, mostly unexercised one.
+const BASE_PATH_LITERAL = "'__BASE_PATH__'";
+const fillBasePath = basePath => source =>
+    source.replace(BASE_PATH_LITERAL, `'${basePath}'`.padEnd(BASE_PATH_LITERAL.length));
+
 function loadServiceWorker({
+    basePath,
     routes,
     network = createNetwork(routes),
     caches,
@@ -406,7 +414,7 @@ function loadServiceWorker({
             get: async id => clients.find(client => client.id === id)
         },
         registration,
-        location: new URL(`${ORIGIN}/sw.js`),
+        location: new URL(`${ORIGIN}${basePath ?? ''}/sw.js`),
         skipWaiting: async () => {
             worker.skipWaitingCalls++;
         },
@@ -433,7 +441,7 @@ function loadServiceWorker({
         clearTimeout
     });
     context.self = context;
-    runWwwrootScript('sw.js', context);
+    runWwwrootScript('sw.js', context, basePath ? fillBasePath(basePath) : undefined);
 
     function dispatch(type, init = {}) {
         const lifetime = [];

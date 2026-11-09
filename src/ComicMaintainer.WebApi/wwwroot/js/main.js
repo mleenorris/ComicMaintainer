@@ -55,8 +55,8 @@
             const jobCheckPromise = checkAndResumeActiveJob();
             const libraryHealthPromise = loadLibraryHealth();
             
-            // Start loading files immediately without waiting for preferences or job check
-            // The file list will use default values (perPage=DEFAULT_PER_DEFAULT) and update when preferences arrive
+            // Start loading the library immediately without waiting for preferences or
+            // the job check; it is reloaded below if the saved preferences change it.
             loadActiveLibraryView();
             
             // Fetch initial watcher status in parallel
@@ -64,17 +64,8 @@
             
             // Apply preferences when they arrive (don't block file loading)
             prefsPromise.then(prefs => {
-                const oldPerPage = perPage;
-                const oldLibraryViewMode = libraryViewMode;
                 const oldFilterMode = filterMode;
-                perPage = prefs.perPage || DEFAULT_PER_PAGE;
-                
-                // Set the per-page selector to the saved value
-                const perPageSelect = document.getElementById('perPageSelect');
-                if (perPageSelect) {
-                    perPageSelect.value = perPage;
-                }
-                
+
                 // Restore filter mode from preferences
                 if (prefs.filterMode) {
                     filterMode = prefs.filterMode;
@@ -105,21 +96,14 @@
                     applySortUi();
                 }
 
-                // The Files library view has been removed; always force series
-                // mode regardless of what the server has cached for this user.
-                libraryViewMode = 'series';
-
-                updateLibraryViewButtons();
+                updateSeriesLayoutButtons();
                 updateLibraryViewLayout();
-                
+
                 // The library started loading with the defaults; reload it if
                 // the saved preferences change what it lists.
-                const viewChanged = libraryViewMode !== oldLibraryViewMode;
                 const filterChanged = filterMode !== oldFilterMode;
                 const sortChanged = sortMode !== oldSortMode || sortDirection !== oldSortDirection;
-                const pageSizeChanged = perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE;
-                const shouldReloadLibrary = viewChanged || filterChanged || sortChanged || pageSizeChanged;
-                if (shouldReloadLibrary) {
+                if (filterChanged || sortChanged) {
                     const libraryReload = loadActiveLibraryView();
 
                     // A series page opened before the preferences arrived listed
@@ -194,8 +178,7 @@
                 }
                 // Reopen the series detail panel if one was open.
                 if (snap.currentSeriesDetailId
-                    && typeof openSeriesDetail === 'function'
-                    && libraryViewMode === 'series') {
+                    && typeof openSeriesDetail === 'function') {
                     // Wait briefly for the series list to populate before
                     // reopening the detail panel.
                     await waitForSeriesAvailable(snap.currentSeriesDetailId, 2500);
@@ -205,7 +188,7 @@
                     }
                 }
                 // Finally, restore scroll position. Wait for layout to settle
-                // — folder/series rendering is async — by polling for a few
+                // — series rendering is async — by polling for a few
                 // animation frames.
                 await restoreScrollPosition(snap.scrollY || 0);
             } catch (e) {
@@ -258,7 +241,7 @@
             const onChange = () => {
                 if (seriesLayoutPreference) return; // user has an explicit choice; don't override
                 updateSeriesLayoutButtons();
-                if (libraryViewMode === 'series' && !currentSeriesDetailId) {
+                if (!currentSeriesDetailId) {
                     renderSeriesLibrary();
                 }
             };
@@ -279,7 +262,6 @@
                     scrollY: window.scrollY || document.documentElement.scrollTop || 0,
                     searchQuery: typeof searchQuery === 'string' ? searchQuery : '',
                     filterMode: typeof filterMode === 'string' ? filterMode : 'all',
-                    libraryViewMode: typeof libraryViewMode === 'string' ? libraryViewMode : 'files',
                     // Only remember a series-detail panel to reopen when the
                     // user is actually viewing one. Capturing it from the
                     // overview/home or library list would make the reader
@@ -293,7 +275,7 @@
                 // sessionStorage can throw in private modes — ignore.
             }
             // Open comic reader in the same window
-            window.location.href = `/reader.html?file=${encodeURIComponent(filepath)}`;
+            window.location.href = apiUrl(`/reader.html?file=${encodeURIComponent(filepath)}`);
         }
 
         // Re-evaluate sticky-class placement on viewport rotation/resize so

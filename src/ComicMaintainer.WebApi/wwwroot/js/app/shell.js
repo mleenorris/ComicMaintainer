@@ -19,15 +19,7 @@
             libraryHealthRequestInFlight = true;
 
             try {
-                const response = await fetch(apiUrl('/api/files/counts'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const stats = await response.json();
+                const stats = await apiFetch('/api/files/counts');
                 const total = stats.total || 0;
                 const processed = stats.processed || 0;
                 const unprocessed = stats.unprocessed || 0;
@@ -72,6 +64,7 @@
                     combineFoldersBtn.disabled = combinableFolders === 0;
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to load library health:', error);
                 if (summary) {
                     summary.textContent = 'Unable to load library health right now.';
@@ -173,10 +166,7 @@
         
         async function getActiveJobFromServer() {
             try {
-                const response = await fetch(apiUrl('/api/active-job'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return null;
+                const response = await apiFetch('/api/active-job', { json: false });
                 if (!response.ok) {
                     console.error('Failed to get active job:', response.status);
                     return null;
@@ -287,10 +277,7 @@
         // this only avoids showing actions that would fail with a 403.
         async function loadCurrentUser() {
             try {
-                const response = await fetch(apiUrl('/api/auth/user'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch('/api/auth/user', { json: false });
                 if (!response.ok) {
                     console.error('Failed to load current user:', response.status);
                     return;

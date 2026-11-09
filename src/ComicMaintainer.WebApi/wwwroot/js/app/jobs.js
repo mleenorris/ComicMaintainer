@@ -105,21 +105,7 @@
             try {
                 console.log('[BATCH] Starting process all files request...');
                 // Start the job
-                const response = await fetch(apiUrl(`/api/jobs/process-all?forceReprocess=${forceReprocess}`), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start processing all files (HTTP ${response.status})`);
-                    throw new Error('Failed to start processing job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch(`/api/jobs/process-all?forceReprocess=${forceReprocess}`, { method: 'POST', errorMessage: 'Failed to start processing job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -157,21 +143,7 @@
             try {
                 console.log('[BATCH] Starting process all files request...');
                 // Start the job
-                const response = await fetch(apiUrl(`/api/jobs/process-all?forceReprocess=${forceReprocess}`), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start processing (HTTP ${response.status})`);
-                    throw new Error('Failed to start processing job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch(`/api/jobs/process-all?forceReprocess=${forceReprocess}`, { method: 'POST', errorMessage: 'Failed to start processing job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -216,28 +188,10 @@
             try {
                 console.log(`[BATCH] Starting process selected files request (${files.length} files)...`);
                 // Start the job
-                const response = await fetch(apiUrl('/api/jobs/process-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({
+                const data = await apiFetch('/api/jobs/process-selected', { method: 'POST', body: {
                         Files: files,
                         ForceReprocess: forceReprocess
-                    })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start processing (HTTP ${response.status})`);
-                    throw new Error('Failed to start processing job');
-                }
-                
-                const data = await response.json();
+                    }, errorMessage: 'Failed to start processing job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -268,16 +222,7 @@
 
             const files = Array.from(selectedFiles);
             try {
-                const response = await fetch(apiUrl('/api/status/clear-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ Files: files })
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch('/api/status/clear-selected', { method: 'POST', body: { Files: files }, json: false });
                 if (!response.ok) {
                     showMessage('Failed to clear processed status', 'error');
                     return;
@@ -293,8 +238,7 @@
                 // "… Unmarked" actions and the library health. Every loaded
                 // series page is reloaded so series selected beyond the
                 // first page stay selected for reprocessing.
-                if (libraryViewMode === 'series' && currentSeriesDetailId &&
-                    typeof loadSeriesIssues === 'function') {
+                if (currentSeriesDetailId && typeof loadSeriesIssues === 'function') {
                     await loadSeriesIssues(currentSeriesDetailId, true, { immediate: true });
                 }
                 if (typeof loadActiveLibraryView === 'function') {
@@ -323,25 +267,7 @@
 
             const files = Array.from(selectedFiles);
             try {
-                const response = await fetch(apiUrl('/api/jobs/remove-metadata-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ Files: files })
-                });
-
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    throw new Error('Failed to start remove metadata job');
-                }
-
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/remove-metadata-selected', { method: 'POST', body: { Files: files }, errorMessage: 'Failed to start remove metadata job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
 
@@ -365,24 +291,7 @@
             showProgressModal('Starting metadata removal...');
 
             try {
-                const response = await fetch(apiUrl('/api/jobs/remove-metadata-all'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    credentials: 'same-origin'
-                });
-
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    throw new Error('Failed to start remove metadata job');
-                }
-
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/remove-metadata-all', { method: 'POST', errorMessage: 'Failed to start remove metadata job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
 
@@ -406,10 +315,7 @@
             console.log(`[JOB ${jobId}] Polling job status once...`);
             
             try {
-                const response = await fetch(apiUrl(`/api/jobs/${jobId}`), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch(`/api/jobs/${jobId}`, { json: false });
                 if (!response.ok) {
                     console.warn(`[JOB ${jobId}] Could not fetch job status: ${response.status}`);
                     return;
@@ -503,12 +409,7 @@
             try {
                 console.log(`[CANCEL] Cancelling job ${currentJobId}...`);
                 
-                const response = await fetch(apiUrl(`/api/jobs/${currentJobId}/cancel`), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
+                const response = await apiFetch(`/api/jobs/${currentJobId}/cancel`, { method: 'POST', json: false });
                 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));
@@ -555,11 +456,7 @@
             
             try {
                 // Check if job still exists and is active
-                const response = await fetch(apiUrl(`/api/jobs/${activeJobId}`), {
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
+                const response = await apiFetch(`/api/jobs/${activeJobId}`, { json: false });
                 
                 if (!response.ok) {
                     if (response.status === 404) {
@@ -631,6 +528,7 @@
                     await loadActiveLibraryView({ refresh: true });
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 // Network error or other exception
                 console.error(`[JOB RESUME] Error checking active job ${activeJobId}:`, error);
                 // Don't clear the job on network errors - it might still be running
@@ -654,21 +552,7 @@
             try {
                 console.log('[BATCH] Starting rename all files request...');
                 // Start the job
-                const response = await fetch(apiUrl(`/api/jobs/rename-all?forceReprocess=${forceReprocess}`), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start renaming all files (HTTP ${response.status})`);
-                    throw new Error('Failed to start renaming job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch(`/api/jobs/rename-all?forceReprocess=${forceReprocess}`, { method: 'POST', errorMessage: 'Failed to start renaming job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -706,21 +590,7 @@
             try {
                 console.log('[BATCH] Starting normalize all files request...');
                 // Start the job
-                const response = await fetch(apiUrl(`/api/jobs/normalize-all?forceReprocess=${forceReprocess}`), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start normalizing all files (HTTP ${response.status})`);
-                    throw new Error('Failed to start normalizing job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch(`/api/jobs/normalize-all?forceReprocess=${forceReprocess}`, { method: 'POST', errorMessage: 'Failed to start normalizing job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -754,21 +624,7 @@
             try {
                 console.log('[BATCH] Starting process unmarked files request...');
                 // Start the job
-                const response = await fetch(apiUrl('/api/jobs/process-unmarked'), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start processing unmarked files (HTTP ${response.status})`);
-                    throw new Error('Failed to start processing job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/process-unmarked', { method: 'POST', errorMessage: 'Failed to start processing job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -802,21 +658,7 @@
             try {
                 console.log('[BATCH] Starting rename unmarked files request...');
                 // Start the job
-                const response = await fetch(apiUrl('/api/jobs/rename-unmarked'), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start renaming unmarked files (HTTP ${response.status})`);
-                    throw new Error('Failed to start renaming job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/rename-unmarked', { method: 'POST', errorMessage: 'Failed to start renaming job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -854,21 +696,7 @@
             try {
                 console.log('[BATCH] Starting normalize unmarked files request...');
                 // Start the job
-                const response = await fetch(apiUrl(`/api/jobs/normalize-unmarked?forceReprocess=${forceReprocess}`), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start normalizing unmarked files (HTTP ${response.status})`);
-                    throw new Error('Failed to start normalizing job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch(`/api/jobs/normalize-unmarked?forceReprocess=${forceReprocess}`, { method: 'POST', errorMessage: 'Failed to start normalizing job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -913,25 +741,7 @@
             try {
                 console.log('[BATCH] Starting process selected files request...');
                 // Start the job using the jobs endpoint
-                const response = await fetch(apiUrl('/api/jobs/process-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: files, ForceReprocess: forceReprocess })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start processing selected files (HTTP ${response.status})`);
-                    throw new Error('Failed to start processing job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/process-selected', { method: 'POST', body: { Files: files, ForceReprocess: forceReprocess }, errorMessage: 'Failed to start processing job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -970,25 +780,7 @@
             try {
                 console.log('[BATCH] Starting rename selected files request...');
                 // Start the job using the jobs endpoint
-                const response = await fetch(apiUrl('/api/jobs/rename-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: files, ForceReprocess: forceReprocess })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start renaming selected files (HTTP ${response.status})`);
-                    throw new Error('Failed to start renaming job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/rename-selected', { method: 'POST', body: { Files: files, ForceReprocess: forceReprocess }, errorMessage: 'Failed to start renaming job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -1027,25 +819,7 @@
             try {
                 console.log('[BATCH] Starting normalize selected files request...');
                 // Start the job using the jobs endpoint
-                const response = await fetch(apiUrl('/api/jobs/normalize-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: files, ForceReprocess: forceReprocess })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[BATCH] Failed to start normalizing selected files (HTTP ${response.status})`);
-                    throw new Error('Failed to start normalizing job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/normalize-selected', { method: 'POST', body: { Files: files, ForceReprocess: forceReprocess }, errorMessage: 'Failed to start normalizing job' });
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -1077,25 +851,7 @@
             try {
                 console.log('[SINGLE FILE] Starting process file request...');
                 // Start the job using the process-selected endpoint with a single file
-                const response = await fetch(apiUrl('/api/jobs/process-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: [filepath], ForceReprocess: forceReprocess })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[SINGLE FILE] Failed to start processing file (HTTP ${response.status})`);
-                    throw new Error('Failed to start processing job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch('/api/jobs/process-selected', { method: 'POST', body: { Files: [filepath], ForceReprocess: forceReprocess }, errorMessage: 'Failed to start processing job' });
                 const jobId = data.job_id;
                 
                 console.log(`[SINGLE FILE] Created job ${jobId} for file: ${filepath}`);
@@ -1127,21 +883,7 @@
                 console.log('[SINGLE FILE] Starting rename file request...');
                 // Start the rename job
                 const encodedPath = encodeFilePathForUrl(filepath);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}/rename?forceReprocess=${forceReprocess}`), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[SINGLE FILE] Failed to start renaming file (HTTP ${response.status})`);
-                    throw new Error('Failed to start renaming job');
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch(`/api/files/${encodedPath}/rename?forceReprocess=${forceReprocess}`, { method: 'POST', errorMessage: 'Failed to start renaming job' });
                 const jobId = data.jobId;
                 
                 if (!jobId) {
@@ -1176,25 +918,7 @@
             try {
                 console.log('[SINGLE FILE] Starting normalize file request...');
                 // Start the normalize job
-                const response = await fetch(apiUrl('/api/jobs/normalize-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: [filepath], ForceReprocess: forceReprocess })
-                });
-                
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
-                if (!response.ok) {
-                    console.error(`[SINGLE FILE] Failed to start normalizing file (HTTP ${response.status})`);
-                    throw new Error('Failed to start normalizing job');
-                }
-                
-                const result = await response.json();
+                const result = await apiFetch('/api/jobs/normalize-selected', { method: 'POST', body: { Files: [filepath], ForceReprocess: forceReprocess }, errorMessage: 'Failed to start normalizing job' });
                 const jobId = result.job_id;
                 
                 if (!jobId) {
@@ -1224,15 +948,7 @@
             try {
                 // Use RESTful endpoint: DELETE /api/files/{encodedFilePath}
                 const encodedPath = encodeFilePathForUrl(filepath);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}`), {
-                    method: 'DELETE',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                await apiFetch(`/api/files/${encodedPath}`, { method: 'DELETE' });
                 
                 showMessage('File deleted successfully!', 'success');
                 // A deleted file must not stay selected for the next batch
@@ -1253,15 +969,7 @@
 
             try {
                 const encodedPath = encodeFilePathForUrl(filepath);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}/metadata`), {
-                    method: 'DELETE',
-                    headers: getAuthHeaders()
-                });
-
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                await apiFetch(`/api/files/${encodedPath}/metadata`, { method: 'DELETE' });
 
                 showMessage('Metadata removed and file marked unprocessed.', 'success');
                 await loadActiveLibraryView({ refresh: true });
@@ -1275,7 +983,7 @@
         // so the read state (and the per-issue Mark Read/Unread toggle) updates
         // without rebuilding the whole series library or losing the detail view.
         async function refreshAfterReadStatusChange() {
-            if (libraryViewMode === 'series' && currentSeriesDetailId) {
+            if (currentSeriesDetailId) {
                 await loadSeriesIssues(currentSeriesDetailId, true, { immediate: true });
             } else {
                 await loadActiveLibraryView({ refresh: true });
@@ -1287,19 +995,7 @@
                 showMessage('Marking file as read...', 'info');
                 
                 const encodedPath = encodeFilePathForUrl(filepath);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}/read`), {
-                    method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ read: true })
-                });
-                
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                await apiFetch(`/api/files/${encodedPath}/read`, { method: 'POST', body: { read: true } });
                 
                 showMessage('File marked as read!', 'success');
                 await refreshAfterReadStatusChange();
@@ -1313,19 +1009,7 @@
                 showMessage('Marking file as unread...', 'info');
                 
                 const encodedPath = encodeFilePathForUrl(filepath);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}/read`), {
-                    method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ read: false })
-                });
-                
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                await apiFetch(`/api/files/${encodedPath}/read`, { method: 'POST', body: { read: false } });
                 
                 showMessage('File marked as unread!', 'success');
                 await refreshAfterReadStatusChange();
@@ -1338,14 +1022,7 @@
         // (one set-based transaction), so the client never downloads the
         // whole file table just to post every path back.
         function markWholeLibraryRead(read) {
-            return fetch(apiUrl('/api/files/read-all'), {
-                method: 'POST',
-                headers: {
-                    ...getAuthHeaders(),
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ scope: 'library', read })
-            });
+            return apiFetch('/api/files/read-all', { method: 'POST', body: { scope: 'library', read } });
         }
 
         async function markAllFilesRead() {
@@ -1356,12 +1033,7 @@
             try {
                 showMessage('Marking all files as read...', 'info');
 
-                const response = await markWholeLibraryRead(true);
-                
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                await markWholeLibraryRead(true);
                 
                 showMessage('All files marked as read!', 'success');
                 await refreshAfterReadStatusChange();
@@ -1378,12 +1050,7 @@
             try {
                 showMessage('Marking all files as unread...', 'info');
 
-                const response = await markWholeLibraryRead(false);
-                
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                await markWholeLibraryRead(false);
                 
                 showMessage('All files marked as unread!', 'success');
                 await refreshAfterReadStatusChange();
@@ -1406,19 +1073,7 @@
                 showMessage('Marking selected files as read...', 'info');
                 
                 const selectedFilePaths = Array.from(selectedFiles);
-                const response = await fetch(apiUrl('/api/files/read-batch'), {
-                    method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ files: selectedFilePaths, read: true })
-                });
-                
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                await apiFetch('/api/files/read-batch', { method: 'POST', body: { files: selectedFilePaths, read: true } });
                 
                 showMessage(`${selectedFiles.size} file(s) marked as read!`, 'success');
                 await refreshAfterReadStatusChange();
@@ -1441,19 +1096,7 @@
                 showMessage('Marking selected files as unread...', 'info');
                 
                 const selectedFilePaths = Array.from(selectedFiles);
-                const response = await fetch(apiUrl('/api/files/read-batch'), {
-                    method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ files: selectedFilePaths, read: false })
-                });
-                
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                await apiFetch('/api/files/read-batch', { method: 'POST', body: { files: selectedFilePaths, read: false } });
                 
                 showMessage(`${selectedFiles.size} file(s) marked as unread!`, 'success');
                 await refreshAfterReadStatusChange();
@@ -1716,9 +1359,7 @@
         async function showReportedJobProblems(jobId) {
             let status;
             try {
-                const response = await fetch(apiUrl(`/api/jobs/${jobId}`), {
-                    headers: getAuthHeaders()
-                });
+                const response = await apiFetch(`/api/jobs/${jobId}`, { json: false });
                 if (!response.ok) return;
                 status = await response.json();
             } catch (error) {
@@ -1753,6 +1394,20 @@
             progressModalCloseTimer = null;
         }
 
+        // What to run once a job this page tracks has ended, whichever way it ended.
+        const jobFinishedHandlers = new Map();
+
+        function onJobFinished(jobId, handler) {
+            jobFinishedHandlers.set(jobId, handler);
+        }
+
+        function notifyJobFinished(jobId) {
+            const handler = jobFinishedHandlers.get(jobId);
+            if (!handler) return;
+            jobFinishedHandlers.delete(jobId);
+            handler();
+        }
+
         // The job-tracking API used by other scripts (events.js, file-actions.js,
         // series-metadata.js); the state behind it stays owned by jobs.js.
         window.jobProgress = Object.freeze({
@@ -1760,7 +1415,9 @@
             beginJobStart,
             endJobStart,
             scheduleJobFinalize,
-            scheduleProgressModalClose
+            scheduleProgressModalClose,
+            onJobFinished,
+            notifyJobFinished
         });
         
         function minimizeProgressModal() {
@@ -1822,19 +1479,7 @@
 
             try {
                 console.log(`[BULK DELETE] Starting delete-selected job for ${selectedFilesArray.length} file(s)...`);
-                const response = await fetch(apiUrl('/api/jobs/delete-selected'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ Files: selectedFilesArray })
-                });
-
-                if (handleAuthError(response)) {
-                    closeProgressModal();
-                    return;
-                }
+                const response = await apiFetch('/api/jobs/delete-selected', { method: 'POST', body: { Files: selectedFilesArray }, json: false });
 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));

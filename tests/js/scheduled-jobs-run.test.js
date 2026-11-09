@@ -212,7 +212,7 @@ test('a Run now request that fails says why and re-enables the button', async (t
         {
             name: 'a job the server no longer has',
             answer: respond(404, h.NOT_FOUND_PROBLEM, { 'X-Correlation-Id': 'req-404b' }),
-            text: 'Failed to start Library Scan: HTTP error! status: 404 (ref: req-404b)'
+            text: 'Failed to start Library Scan: Not Found (ref: req-404b)'
         },
         // 401/403 failures are explained by themselves and carry no reference.
         { name: 'lost administrator rights', answer: respond(403, undefined, { 'X-Correlation-Id': 'req-403b' }), text: 'Failed to start Library Scan: Only administrators can manage scheduled jobs.' },
@@ -296,7 +296,7 @@ test('a job that disappears while its Run now request is pending', async (t) => 
 
     answering.resolve(respond(404, h.NOT_FOUND_PROBLEM));
     await page.settle();
-    assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to start Database Backup: HTTP error! status: 404' }]);
+    assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to start Database Backup: Not Found' }]);
     assert.deepEqual(h.jobCardKeys(page), ['library-scan']);
     assert.deepEqual(page.errors, []);
 });

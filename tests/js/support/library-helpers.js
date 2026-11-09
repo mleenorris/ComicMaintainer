@@ -1,7 +1,7 @@
 'use strict';
 
 // Shared setup for the library view tests (js/app/library.js and
-// js/app/file-list.js): fixtures shaped like the FilesController responses
+// js/app/selection.js): fixtures shaped like the FilesController responses
 // (DTOs in src/ComicMaintainer.Core) and a boot helper that opens #/library
 // with the library endpoints routed.
 
@@ -62,60 +62,6 @@ function seriesPages(all, extra = {}) {
     };
 }
 
-/** FolderSummaryDto, as GET /api/files/folders lists it. */
-function makeFolder(path, overrides = {}) {
-    return { path, file_count: 2, total_size: 2048, last_modified: 1700000000, unmarked_count: 0, duplicate_count: 0, ...overrides };
-}
-
-/** FileDto, as GET /api/files/folders/{b64}/files lists it. */
-function makeFile(relativePath, overrides = {}) {
-    return {
-        relative_path: relativePath,
-        name: relativePath.split('/').pop(),
-        size: 1024,
-        modified: Math.floor(Date.now() / 1000) - 3 * 3600,
-        processed: false,
-        renamed: false,
-        normalized: false,
-        duplicate: false,
-        read: false,
-        ...overrides
-    };
-}
-
-/** URL-safe base64 without padding, as the server's DecodeBase64UrlSafe expects. */
-function encodeFolder(path) {
-    return Buffer.from(path, 'utf8').toString('base64url');
-}
-
-/**
- * Route matcher for GET /api/files/folders/{b64}/files; the handler gets
- * `call.folder` decoded. The library root (path '') has its own URL,
- * GET /api/files/folders/files, which this does not match: route it by name.
- */
-function folderFilesMatcher(call) {
-    const match = /^\/api\/files\/folders\/([^/]+)\/files$/.exec(call.path);
-    if (!match || call.method !== 'GET') return false;
-    call.folder = Buffer.from(match[1], 'base64url').toString('utf8');
-    return true;
-}
-
-/** Handler for GET /api/files/folders that pages `all` by offset/limit like the server. */
-function folderPages(all, extra = {}) {
-    return call => {
-        const offset = Number(call.query.offset || 0);
-        const limit = Number(call.query.limit || 100);
-        return {
-            folders: all.slice(offset, offset + limit),
-            offset,
-            limit,
-            total_folders: all.length,
-            unmarked_count: 0,
-            ...extra
-        };
-    };
-}
-
 /**
  * Boot index.html at #/library (or `hash`) with the library endpoints routed:
  * preferences (GET answers `prefs`, PUT echoes), library counts and the
@@ -135,31 +81,12 @@ async function bootLibrary({ series = [], prefs = {}, routes = {}, ...options } 
     });
 }
 
-/**
- * Boot the library and switch it to the legacy Files (folder) view. No control
- * selects that view any more (preferences and the view buttons coerce it to
- * 'series'), so the mode is set directly before loading the folder list the
- * way loadActiveLibraryView() does. `folders` are served paged; `files` maps a
- * folder path to the FileDto list GET /api/files/folders/{b64}/files returns.
- */
-async function bootFilesView({ folders = [], files = {}, routes = {}, ...options } = {}) {
-    const page = await bootLibrary({ ...options, routes: { 'GET /api/files/folders': folderPages(folders), ...routes } });
-    page.route(folderFilesMatcher, call => ({ path: call.folder, files: files[call.folder] || [] }));
-    page.run("libraryViewMode = 'files'");
-    await page.run('loadActiveLibraryView()');
-    await page.settle();
-    return page;
-}
-
 /** Requests to `path`, in order. */
 function callsTo(page, path, method = 'GET') {
     return page.fetchCalls.filter(call => call.path === path && call.method === method);
 }
 
 const seriesCalls = page => callsTo(page, '/api/files/series');
-const folderCalls = page => callsTo(page, '/api/files/folders');
-/** GET /api/files/folders/{b64}/files requests, each with `folder` decoded. */
-const folderFileCalls = page => page.fetchCalls.filter(folderFilesMatcher);
 
 /** Bodies of the PUT /api/preferences requests, in order. */
 const savedPreferences = page => callsTo(page, '/api/preferences', 'PUT').map(call => call.body);
@@ -211,17 +138,9 @@ module.exports = {
     makeSeries,
     makeSeriesList,
     seriesPages,
-    makeFolder,
-    makeFile,
-    encodeFolder,
-    folderFilesMatcher,
-    folderPages,
     bootLibrary,
-    bootFilesView,
     callsTo,
     seriesCalls,
-    folderCalls,
-    folderFileCalls,
     savedPreferences,
     messages,
     imageObserver,

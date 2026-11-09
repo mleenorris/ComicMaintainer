@@ -263,7 +263,7 @@ test('the Suwayomi library is listed first, then each source with the series not
     for (const call of [...librarySearches(page), ...sourceSearches(page)]) {
         assert.deepEqual(call.query.query, 'Saga');
         assert.match(call.headers.authorization, /^Bearer /);
-        assert.equal(call.init.credentials, 'same-origin');
+        assert.equal(call.init.credentials, 'include');
     }
 
     const inLibrary = item(page, 1);

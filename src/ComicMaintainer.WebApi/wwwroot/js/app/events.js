@@ -72,10 +72,7 @@
             // The server knows whether the Authelia session is still valid. A proxy sends an expired
             // session to the Authelia portal with a redirect, and following that one fails just like
             // being offline does (the portal is another origin), so it is looked at and not followed.
-            const response = await fetch(apiUrl('/api/auth/status'), {
-                credentials: 'include', // Important for Authelia cookies
-                redirect: 'manual'
-            });
+            const response = await apiFetch('/api/auth/status', { auth: false, json: false, redirect: 'manual' });
 
             if (response.type === 'opaqueredirect' || response.status === 401 || response.status === 403) {
                 console.warn('[AUTH] Authelia session expired or invalid');
@@ -120,11 +117,7 @@
         async function fetchStreamToken() {
             const isAutheliaAuth = isAutheliaAuthenticated();
             console.log('SSE: Authentication mode -', isAutheliaAuth ? 'Authelia' : 'JWT');
-            const response = await fetch(apiUrl('/api/auth/stream-token'), {
-                method: 'POST',
-                credentials: 'include', // Authelia sessions are cookies
-                headers: getAuthHeaders()
-            });
+            const response = await apiFetch('/api/auth/stream-token', { method: 'POST', json: false, redirectOn401: false });
             if (!response.ok) {
                 console.error('SSE: Failed to get a stream token - status:', response.status);
                 if (response.status === 401 && !isAutheliaAuth) {
@@ -400,31 +393,24 @@
                 addProgressDetail(data.filename, data.success, data.error);
             }
             
-            // Invalidate just the affected folder cache so the next render/expand
-            // shows fresh state. Aggregate summaries are refreshed via the
-            // debounced file_list_updated handler.
-            if (libraryViewMode !== 'series' && data && data.filename) {
-                invalidateFolderForFile(data.filename);
-            } else if (libraryViewMode === 'series') {
-                // When the user has a series detail view open, just refresh
-                // that series's issue list in-place so a rename/normalize
-                // updates the visible file names without rebuilding the
-                // series library (which would lose scroll position and
-                // could close the detail view if the series fell outside
-                // the freshly-loaded first page).
-                if (currentSeriesDetailId) {
-                    loadSeriesIssues(currentSeriesDetailId, true);
-                }
-                // When viewing the series list (no detail open) we intentionally
-                // do NOT rebuild the whole library on each per-file event. A
-                // background job (e.g. the metadata retag queued after a
-                // series-name change) emits one file_processed event per file,
-                // and reloading the list for every one of them makes the series
-                // list visibly flash/reload after each completion. The set of
-                // series shown doesn't change as individual files are retagged;
-                // any genuine list change (renames/moves) is coalesced into a
-                // single refresh by the debounced file_list_updated handler.
+            // When the user has a series detail view open, just refresh
+            // that series's issue list in-place so a rename/normalize
+            // updates the visible file names without rebuilding the
+            // series library (which would lose scroll position and
+            // could close the detail view if the series fell outside
+            // the freshly-loaded first page).
+            if (currentSeriesDetailId) {
+                loadSeriesIssues(currentSeriesDetailId, true);
             }
+            // When viewing the series list (no detail open) we intentionally
+            // do NOT rebuild the whole library on each per-file event. A
+            // background job (e.g. the metadata retag queued after a
+            // series-name change) emits one file_processed event per file,
+            // and reloading the list for every one of them makes the series
+            // list visibly flash/reload after each completion. The set of
+            // series shown doesn't change as individual files are retagged;
+            // any genuine list change (renames/moves) is coalesced into a
+            // single refresh by the debounced file_list_updated handler.
             scheduleLibraryHealthRefresh();
         }
         
@@ -444,7 +430,7 @@
                 // series's issues so renames/moves update the visible file
                 // list without rebuilding the series library and kicking
                 // the user back to the library screen.
-                if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                if (currentSeriesDetailId) {
                     loadSeriesIssues(currentSeriesDetailId, true);
                 } else {
                     loadActiveLibraryView();
@@ -461,7 +447,13 @@
             const progress = data.progress || {};
             
             console.log(`SSE: Job ${jobId} updated - status: ${status}, progress: ${progress.processed}/${progress.total}`);
-            
+
+            // Whoever asked to hear about this job's end is told even when
+            // another job has taken the progress modal over since it started.
+            if (isTerminalJobStatus(status)) {
+                jobProgress.notifyJobFinished(jobId);
+            }
+
             // Only handle updates for the current active job
             if (!hasActiveJob || currentJobId !== jobId) {
                 console.log(`SSE: Ignoring job update for ${jobId} (not current job)`);
@@ -480,7 +472,7 @@
             if (isTerminalJobStatus(status)) {
                 console.log(`SSE: Job ${jobId} finished with status: ${status}`);
                 scheduleLibraryHealthRefresh(250);
-                
+
                 // Allow a brief moment for final updates, then finalize. The
                 // finalize (and the close it schedules) is dropped when another
                 // job takes the progress modal over and does nothing once this
@@ -501,7 +493,7 @@
                         // and could close the detail view).
                         selectedFiles.clear();
                         resetSeriesSelectionState();
-                        if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                        if (currentSeriesDetailId) {
                             await loadSeriesIssues(currentSeriesDetailId, true);
                             scheduleLibraryHealthRefresh();
                         } else {
@@ -561,16 +553,10 @@
         async function updateWatcherStatus() {
             // Fetch the current status; SSE watcher_status events keep it up to date
             try {
-                const response = await fetch(apiUrl('/api/watcher/status'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/watcher/status');
                 updateWatcherStatusDisplay(data.running, data.enabled);
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Error fetching initial watcher status:', error);
                 updateWatcherStatusDisplay(null, null);
             }

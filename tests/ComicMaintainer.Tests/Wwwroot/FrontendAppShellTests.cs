@@ -135,13 +135,10 @@ public class FrontendAppShellTests
         // Save Settings sends one request for every group.
         var helperStart = js.IndexOf("async function saveAllSettings(", StringComparison.Ordinal);
         Assert.True(helperStart >= 0, "Expected the settings save request");
-        var requestStart = js.IndexOf("fetch(apiUrl('/api/settings')", helperStart, StringComparison.Ordinal);
+        // apiFetch adds the session headers to every request it sends.
+        var requestStart = js.IndexOf("apiFetch('/api/settings', { method: 'PUT', body })", helperStart, StringComparison.Ordinal);
         Assert.True(requestStart >= 0, "Expected saveAllSettings to send the request");
-        var requestEnd = js.IndexOf("});", requestStart, StringComparison.Ordinal);
-        Assert.True(requestEnd > requestStart, "Could not find the end of the settings save request");
-        var request = js[requestStart..requestEnd];
-        Assert.Contains("...getAuthHeaders()", request);
-        Assert.Contains("method: 'PUT'", request);
+        Assert.Contains("getAuthHeaders({ allowExpiredToken })", js);
     }
 
     [Fact]

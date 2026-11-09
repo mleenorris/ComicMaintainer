@@ -390,7 +390,7 @@ public class EmailDeliveryUiTests
             new Regex(@"if \(error\?\.status != null\) return;", RegexOptions.Singleline),
             js);
         Assert.Matches(
-            new Regex(@"if \(handleAuthError\(response\)\) \{\s*const error = new Error\('Authentication required'\);\s*error.status = response.status;", RegexOptions.Singleline),
+            new Regex(@"function apiSessionEndedError\(status = 401\) \{\s*const error = new Error\('Authentication required'\);\s*error.status = status;", RegexOptions.Singleline),
             js);
     }
 }

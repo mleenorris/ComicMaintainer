@@ -98,13 +98,14 @@ public class BackupsUiTests
     public void FileUpload_LetsTheBrowserSetTheMultipartContentType()
     {
         // getAuthHeaders() defaults Content-Type to JSON, which would break
-        // the multipart boundary; the helper must not merge it back in.
+        // the multipart boundary; apiFetch drops it for a FormData body.
         var upload = ExtractFunction(Scripts, "restoreBackupFromFile");
-        Assert.Contains("delete headers['Content-Type']", upload);
+        Assert.Contains("body: formData", upload);
+        Assert.DoesNotContain("Content-Type", upload);
+        Assert.Contains("delete requestHeaders['Content-Type']", ExtractFunction(Scripts, "apiFetch"));
 
         var fetchHelper = ExtractFunction(Scripts, "fetchBackupsApi");
-        Assert.Contains("headers: options.headers || getAuthHeaders()", fetchHelper);
-        Assert.Contains("handleAuthError(response)", fetchHelper);
+        Assert.Contains("apiFetch(path, { ...options, json: false })", fetchHelper);
     }
 
     [Theory]
@@ -142,7 +143,8 @@ public class BackupsUiTests
         Assert.DoesNotContain("window.location", download);
         Assert.DoesNotContain("window.open", download);
 
-        Assert.Contains("credentials: 'include'", ExtractFunction(Scripts, "fetchBackupsApi"));
+        Assert.Contains("apiFetch(", ExtractFunction(Scripts, "fetchBackupsApi"));
+        Assert.Contains("credentials: 'include'", ExtractFunction(Scripts, "apiFetch"));
     }
 
     [Fact]

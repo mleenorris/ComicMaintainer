@@ -796,7 +796,7 @@ public sealed class NotificationDispatcherTests : IDisposable
         await dispatcher.RunOnceAsync(default);
 
         Assert.Equal(1, attempts);
-        Assert.Equal(1, _discord.Sent.Count);
+        Assert.Single(_discord.Sent);
 
         // After the first pause only one more attempt happens, then the pause grows.
         _time.Advance(NotificationDispatcher.RetryDelays[0]);
@@ -825,7 +825,7 @@ public sealed class NotificationDispatcherTests : IDisposable
         _time.Advance(NotificationDispatcher.RetryDelays[0]);
         failing = false;
         await dispatcher.RunOnceAsync(default);
-        Assert.Equal(1, _ntfy.Sent.Count);
+        Assert.Single(_ntfy.Sent);
 
         // A later failure starts again at the shortest pause.
         failing = true;

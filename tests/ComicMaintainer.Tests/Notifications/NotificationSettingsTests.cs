@@ -229,7 +229,7 @@ public sealed class NotificationSettingsTests : IDisposable
                 It.IsAny<It.IsAnyType>(),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
-            .Callback(new InvocationAction(invocation => logged.Add(invocation.Arguments[2].ToString()!)));
+            .Callback(new InvocationAction(invocation => logged.Add(invocation.Arguments[2]!.ToString()!)));
         var service = new SettingsService(
             logger.Object,
             new TestOptionsMonitor<AppSettings>(_settings),

@@ -442,7 +442,8 @@ public sealed class OpdsController : ControllerBase
             s.Title,
             DateTimeOffset.FromUnixTimeSeconds(s.LatestModified),
             s.Synopsis,
-            coverIds.TryGetValue(s.CoverFilePath, out var coverId) ? coverId : null));
+            coverIds.TryGetValue(s.CoverFilePath, out var coverId) ? coverId : null,
+            s.Genres));
         return Feed(OpdsFeedBuilder.BuildFeed(links, feed, entries), feed.MediaType);
     }
 

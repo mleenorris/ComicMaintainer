@@ -124,6 +124,57 @@ public sealed class SettingsEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task PutSettings_TheOpdsProviderFillAndEveryNotificationField_ReachTheNextRead()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var save = await client.PutAsJsonAsync("/api/settings", new
+        {
+            opds = new { enabled = true },
+            externalSeriesMetadata = new { fillComicInfoFromProviders = false },
+            notifications = new
+            {
+                ntfy = new { enabled = true, url = "https://ntfy.example", topic = "comics", token = "ntfy-token", events = "job-failed" },
+                gotify = new { enabled = true, url = "https://gotify.example", token = "gotify-token", events = "new-chapters" },
+                discord = new { enabled = true, url = "https://discord.com/api/webhooks/1/discord-secret", events = "job-findings" },
+                webhook = new { enabled = true, url = "https://hooks.example/webhook-secret", events = "suwayomi-import-failed" },
+                komga = new { enabled = true, url = "http://komga.example", token = "komga-key", libraryId = "lib-1", events = "library-changed" },
+                kavita = new { enabled = true, url = "http://kavita.example", token = "kavita-key", libraryId = "7", events = "new-chapters" },
+            },
+        });
+        Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+
+        using var read = await client.GetAsync("/api/settings");
+        using var settings = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
+        var body = settings.RootElement;
+        Assert.True(body.GetProperty("opds_enabled").GetBoolean());
+        Assert.False(body.GetProperty("fill_comicinfo_from_providers").GetBoolean());
+
+        foreach (var flag in new[]
+        {
+            "notify_ntfy_enabled", "notify_ntfy_token_set", "notify_gotify_enabled", "notify_gotify_token_set",
+            "notify_discord_enabled", "notify_discord_webhook_url_set", "notify_webhook_enabled", "notify_webhook_url_set",
+            "notify_komga_enabled", "notify_komga_api_key_set", "notify_kavita_enabled", "notify_kavita_api_key_set",
+        })
+        {
+            Assert.True(body.GetProperty(flag).GetBoolean(), flag);
+        }
+
+        foreach (var (field, value) in new[]
+        {
+            ("notify_ntfy_url", "https://ntfy.example"), ("notify_ntfy_topic", "comics"), ("notify_ntfy_events", "job-failed"),
+            ("notify_gotify_url", "https://gotify.example"), ("notify_gotify_events", "new-chapters"),
+            ("notify_discord_events", "job-findings"), ("notify_webhook_events", "suwayomi-import-failed"),
+            ("notify_komga_url", "http://komga.example"), ("notify_komga_library_id", "lib-1"), ("notify_komga_events", "library-changed"),
+            ("notify_kavita_url", "http://kavita.example"), ("notify_kavita_library_id", "7"), ("notify_kavita_events", "new-chapters"),
+        })
+        {
+            Assert.Equal(value, body.GetProperty(field).GetString());
+        }
+    }
+
+    [Fact]
     public async Task PutSettings_ANotificationUrlThatIsNotHttp_IsRefused()
     {
         await using var factory = CreateFactory();

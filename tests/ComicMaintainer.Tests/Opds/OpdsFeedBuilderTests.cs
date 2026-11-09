@@ -164,6 +164,28 @@ public sealed class OpdsFeedBuilderTests
     }
 
     [Fact]
+    public void ASeriesEntryListsEachGenreOnceAsAnAtomCategory()
+    {
+        const string hostile = "<b>&\"";
+
+        var entry = OpdsFeedBuilder.SeriesEntry(Links, "saga", "Saga", DateTimeOffset.UtcNow, null, null, ["Action", "action", "  ", "Slice\u0001 of Life", hostile, "\u0001"]);
+
+        var categories = Feed(NavigationFeed, entry).Elements(Atom + "entry").Single().Elements(Atom + "category").ToList();
+        Assert.Equal(new[] { "Action", "Slice of Life", hostile }, categories.Select(c => c.Attribute("term")!.Value));
+        Assert.Equal(new[] { "Action", "Slice of Life", hostile }, categories.Select(c => c.Attribute("label")!.Value));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ASeriesEntryWithoutGenresHasNoCategories(bool emptyList)
+    {
+        var entry = OpdsFeedBuilder.SeriesEntry(Links, "saga", "Saga", DateTimeOffset.UtcNow, null, null, emptyList ? [] : null);
+
+        Assert.Empty(Feed(NavigationFeed, entry).Elements(Atom + "entry").Single().Elements(Atom + "category"));
+    }
+
+    [Fact]
     public void CharactersXmlCannotCarryAreRemovedSoTheFeedStillParses()
     {
         var entry = OpdsFeedBuilder.NavigationEntry("urn:x", "Bad\u0001Title￾", "/x", OpdsMediaTypes.NavigationFeed, "Also\u0000bad");

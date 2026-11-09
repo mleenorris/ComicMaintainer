@@ -798,6 +798,26 @@ public sealed class OpdsCatalogModesIntegrationTests
         return names;
     }
 
+    [Theory]
+    [InlineData("/opds/v1.2/series")]
+    [InlineData("/opds/v1.2/newly-added")]
+    [InlineData("/opds/v1.2/search?q=Genre")]
+    public async Task SeriesFeedsListTheGenresOfTheProviderMatch(string feedUrl)
+    {
+        await using var host = new OpdsTestHost();
+        var user = await host.CreateUserAsync();
+        const string series = "Genre Walk";
+        await host.AddComicAsync(Path.Join(series, series + " - Chapter 1.cbz"), ("p1.jpg", "a"));
+        await host.AddProviderMatchAsync(series, "Action", "Slice of Life");
+
+        using var response = await host.GetAsync(feedUrl, user.UserName, OpdsTestHost.Password);
+        var feed = await OpdsTestHost.ReadFeedAsync(response);
+
+        var entry = feed.Root!.Elements(Atom + "entry").Single(e => (string?)e.Element(Atom + "title") == series);
+        var categories = entry.Elements(Atom + "category").Select(c => c.Attribute("term")!.Value);
+        Assert.Equal(new[] { "Action", "Slice of Life" }, categories);
+    }
+
     [Fact]
     public async Task AllSeriesIsPagedBothWays()
     {

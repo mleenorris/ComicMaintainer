@@ -264,6 +264,9 @@ public class OverviewService : IOverviewService
         ExternalImageUrl = summary.ExternalImageUrl,
         LookupStatus = summary.LookupStatus,
         LastLookupUtc = summary.LastLookupUtc,
-        Synopsis = summary.Synopsis
+        Synopsis = summary.Synopsis,
+        Genres = summary.Genres,
+        PublicationStatus = summary.PublicationStatus,
+        SiteUrl = summary.SiteUrl
     };
 }

@@ -80,12 +80,13 @@ public static class OpdsFeedBuilder
             content is null ? null : new XElement(Atom + "content", new XAttribute("type", "text"), Clean(content)),
             Link("subsection", href, targetMediaType));
 
-    /// <summary>A series, as a navigation entry that leads to its issues.</summary>
-    public static XElement SeriesEntry(OpdsLinks links, string seriesId, string title, DateTimeOffset updated, string? synopsis, int? coverFileId) =>
+    /// <summary>A series, as a navigation entry that leads to its issues, with one <c>atom:category</c> per genre.</summary>
+    public static XElement SeriesEntry(OpdsLinks links, string seriesId, string title, DateTimeOffset updated, string? synopsis, int? coverFileId, IEnumerable<string>? genres = null) =>
         new(Atom + "entry",
             new XElement(Atom + "id", Clean($"urn:comicmaintainer:series:{Uri.EscapeDataString(seriesId)}")),
             new XElement(Atom + "title", Clean(title)),
             new XElement(Atom + "updated", FormatDate(updated)),
+            Categories(genres),
             string.IsNullOrWhiteSpace(synopsis) ? null : new XElement(Atom + "content", new XAttribute("type", "text"), Clean(synopsis)),
             Covers(links, coverFileId),
             Link("subsection", links.Series(seriesId), OpdsMediaTypes.AcquisitionFeed));
@@ -177,6 +178,13 @@ public static class OpdsFeedBuilder
     private static IEnumerable<XElement> Covers(OpdsLinks links, int? coverFileId) => coverFileId is { } id
         ? [Link(ImageRel, links.IssueCover(id), OpdsMediaTypes.Jpeg), Link(ThumbnailRel, links.IssueCover(id), OpdsMediaTypes.Jpeg)]
         : [];
+
+    /// <summary>Atom requires a non-empty <c>term</c> on a category, so a value with nothing left after cleaning is dropped.</summary>
+    private static IEnumerable<XElement> Categories(IEnumerable<string>? genres) => (genres ?? [])
+        .Select(genre => Clean(genre).Trim())
+        .Where(genre => genre.Length > 0)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Select(genre => new XElement(Atom + "category", new XAttribute("term", genre), new XAttribute("label", genre)));
 
     private static string FormatDate(DateTimeOffset value) =>
         value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);

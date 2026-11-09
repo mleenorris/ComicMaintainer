@@ -172,6 +172,45 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
             entries);
     }
 
+    [Theory]
+    [InlineData("OPDS_ENABLED", "true", "opds_enabled")]
+    [InlineData("FILL_COMICINFO_FROM_PROVIDERS", "false", "fill_comicinfo_from_providers")]
+    [InlineData("NOTIFY_NTFY_ENABLED", "true", "notify_ntfy_enabled")]
+    [InlineData("NOTIFY_NTFY_URL", "https://ntfy.example", "notify_ntfy_url")]
+    [InlineData("NOTIFY_NTFY_TOPIC", "comics", "notify_ntfy_topic")]
+    [InlineData("NOTIFY_NTFY_TOKEN", "secret", "notify_ntfy_token_set")]
+    [InlineData("NOTIFY_NTFY_EVENTS", "job-failed", "notify_ntfy_events")]
+    [InlineData("NOTIFY_GOTIFY_ENABLED", "true", "notify_gotify_enabled")]
+    [InlineData("NOTIFY_GOTIFY_URL", "https://gotify.example", "notify_gotify_url")]
+    [InlineData("NOTIFY_GOTIFY_TOKEN", "secret", "notify_gotify_token_set")]
+    [InlineData("NOTIFY_GOTIFY_EVENTS", "job-failed", "notify_gotify_events")]
+    [InlineData("NOTIFY_DISCORD_ENABLED", "true", "notify_discord_enabled")]
+    [InlineData("NOTIFY_DISCORD_WEBHOOK_URL", "https://discord.example/hook", "notify_discord_webhook_url_set")]
+    [InlineData("NOTIFY_DISCORD_EVENTS", "job-failed", "notify_discord_events")]
+    [InlineData("NOTIFY_WEBHOOK_ENABLED", "true", "notify_webhook_enabled")]
+    [InlineData("NOTIFY_WEBHOOK_URL", "https://hooks.example/x", "notify_webhook_url_set")]
+    [InlineData("NOTIFY_WEBHOOK_EVENTS", "job-failed", "notify_webhook_events")]
+    [InlineData("NOTIFY_KOMGA_ENABLED", "true", "notify_komga_enabled")]
+    [InlineData("NOTIFY_KOMGA_URL", "http://komga.example", "notify_komga_url")]
+    [InlineData("NOTIFY_KOMGA_API_KEY", "secret", "notify_komga_api_key_set")]
+    [InlineData("NOTIFY_KOMGA_LIBRARY_ID", "lib-1", "notify_komga_library_id")]
+    [InlineData("NOTIFY_KOMGA_EVENTS", "library-changed", "notify_komga_events")]
+    [InlineData("NOTIFY_KAVITA_ENABLED", "true", "notify_kavita_enabled")]
+    [InlineData("NOTIFY_KAVITA_URL", "http://kavita.example", "notify_kavita_url")]
+    [InlineData("NOTIFY_KAVITA_API_KEY", "secret", "notify_kavita_api_key_set")]
+    [InlineData("NOTIFY_KAVITA_LIBRARY_ID", "7", "notify_kavita_library_id")]
+    [InlineData("NOTIFY_KAVITA_EVENTS", "library-changed", "notify_kavita_events")]
+    public async Task EachNewFeatureSetting_PinnedByItsVariable_IsListedInEnvLocked(string variable, string value, string apiField)
+    {
+        _environment.Set(variable, value);
+
+        var json = JsonSerializer.SerializeToElement(((OkObjectResult)(await CreateController().GetAllSettings()).Result!).Value);
+
+        var entry = Assert.Single(json.GetProperty("env_locked").EnumerateArray());
+        Assert.Equal(apiField, entry.GetProperty("field").GetString());
+        Assert.Equal(variable, entry.GetProperty("variable").GetString());
+    }
+
     [Fact]
     public async Task GetAllSettings_WithNothingPinned_ReturnsAnEmptyList()
     {

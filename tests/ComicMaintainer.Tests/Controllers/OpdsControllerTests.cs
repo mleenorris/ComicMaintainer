@@ -424,4 +424,28 @@ public sealed class OpdsControllerTests : IDisposable
         Assert.Equal("A story", entry.Element(Atom + "content")!.Value);
         Assert.DoesNotContain(entry.Elements(Atom + "link"), l => ((string?)l.Attribute("rel"))?.Contains("image", StringComparison.Ordinal) == true);
     }
+
+    [Fact]
+    public async Task AllSeriesEntriesCarryTheirGenres()
+    {
+        _library.Setup(l => l.GetSeriesSummariesAsync(null, null, 1, OpdsController.PageSize, "name", "asc", null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesSummaryResult { Page = 1, TotalPages = 1, TotalSeries = 1, Series = [new SeriesSummaryDto { Id = "saga", Title = "Saga", Genres = ["Action", "Drama"], CoverFilePath = string.Empty }] });
+
+        var content = Assert.IsType<ContentResult>(await CreateController().AllSeries());
+
+        var entry = XDocument.Parse(content.Content!).Root!.Elements(Atom + "entry").Single();
+        Assert.Equal(new[] { "Action", "Drama" }, entry.Elements(Atom + "category").Select(c => c.Attribute("term")!.Value));
+    }
+
+    [Fact]
+    public async Task OverviewRowEntriesCarryTheirGenres()
+    {
+        _overview.Setup(o => o.GetOverviewAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OverviewResult { SeriesUpdates = [new OverviewSeriesCard { Id = "saga", Title = "Saga", Genres = ["Action"], CoverFilePath = string.Empty }] });
+
+        var content = Assert.IsType<ContentResult>(await CreateController().SeriesUpdates(default));
+
+        var entry = XDocument.Parse(content.Content!).Root!.Elements(Atom + "entry").Single();
+        Assert.Equal("Action", entry.Elements(Atom + "category").Single().Attribute("term")!.Value);
+    }
 }

@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
@@ -128,6 +129,24 @@ internal sealed class OpdsTestHost : IAsyncDisposable
             .ToArray()));
         await Services.GetRequiredService<IFileStoreService>().AddFileAsync(path);
         return path;
+    }
+
+    /// <summary>Records a successful provider match for the series, as a metadata lookup would leave it.</summary>
+    public async Task AddProviderMatchAsync(string seriesTitle, params string[] genres)
+    {
+        using var scope = Services.CreateScope();
+        var key = scope.ServiceProvider.GetRequiredService<ISeriesMetadataCacheService>().NormalizeKey(seriesTitle);
+        await using var db = await Services.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>().CreateDbContextAsync();
+        db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+        {
+            NormalizedKey = key,
+            CanonicalTitle = seriesTitle,
+            Source = "AniListManga",
+            SourceId = "1",
+            LookupStatus = "success",
+            GenresJson = JsonSerializer.Serialize(genres),
+        });
+        await db.SaveChangesAsync();
     }
 
     /// <summary>A tracked row for an arbitrary path, as a stale or restored database could hold.</summary>

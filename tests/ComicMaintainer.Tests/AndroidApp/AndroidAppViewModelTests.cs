@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Text.RegularExpressions;
+using System.Windows.Input;
 using System.Xml.Linq;
 using ComicMaintainer.MauiApp.Models;
 using ComicMaintainer.MauiApp.Services;
@@ -173,9 +176,8 @@ public sealed class FilesViewModelTests
     // Every item the picker really offers: until 3.0.0 the app sent values the server silently ignored.
     public static TheoryData<string, string?> PickerItems()
     {
-        var page = Path.Join(FindRepositoryRoot(), "src", "ComicMaintainer.MauiApp", "Views", "MainPage.xaml");
         XNamespace x = "http://schemas.microsoft.com/winfx/2009/xaml";
-        var items = XDocument.Load(page).Descendants(x + "String").Select(element => element.Value).ToArray();
+        var items = XDocument.Load(MainPagePath).Descendants(x + "String").Select(element => element.Value).ToArray();
         Assert.Equal(4, items.Length);
 
         var data = new TheoryData<string, string?>();
@@ -186,6 +188,8 @@ public sealed class FilesViewModelTests
         return data;
     }
 
+    private static string MainPagePath => Path.Join(FindRepositoryRoot(), "src", "ComicMaintainer.MauiApp", "Views", "MainPage.xaml");
+
     private static string FindRepositoryRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
@@ -195,6 +199,250 @@ public sealed class FilesViewModelTests
         }
 
         return Assert.IsType<DirectoryInfo>(current).FullName;
+    }
+
+    // RefreshView runs its Command whenever IsRefreshing turns true, from code as well as from the gesture. This does
+    // the same with the properties MainPage.xaml really binds, because that is a behaviour of the pair: neither the
+    // view model nor the markup is wrong alone.
+    private static void ActLikeTheRefreshViewInMainPage(FilesViewModel viewModel)
+    {
+        var refreshView = XDocument.Load(MainPagePath).Descendants().Single(element => element.Name.LocalName == "RefreshView");
+        var isRefreshing = BoundProperty(refreshView, "IsRefreshing");
+        var command = Assert.IsAssignableFrom<ICommand>(BoundProperty(refreshView, "Command").GetValue(viewModel));
+
+        viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == isRefreshing.Name && Assert.IsType<bool>(isRefreshing.GetValue(viewModel)) && command.CanExecute(null))
+            {
+                command.Execute(null);
+            }
+        };
+    }
+
+    private static PropertyInfo BoundProperty(XElement element, string attribute)
+    {
+        var path = Regex.Match(element.Attribute(attribute)!.Value, @"^\{Binding (?<path>\w+)\}$").Groups["path"].Value;
+        return Assert.IsAssignableFrom<PropertyInfo>(typeof(FilesViewModel).GetProperty(path));
+    }
+
+    [Fact]
+    public async Task InMainPage_TheNextPageButtonLeavesTheFirstPage()
+    {
+        _api.Page = PageOf(1, 3, First);
+        var viewModel = Create();
+        ActLikeTheRefreshViewInMainPage(viewModel);
+        await viewModel.LoadFilesCommand.ExecuteAsync(null);
+        Assert.Equal(1, Assert.Single(_api.Loads).Page);
+        _api.Loads.Clear();
+
+        _api.Page = PageOf(2, 3, Second);
+        await viewModel.NextPageCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, Assert.Single(_api.Loads).Page);
+        Assert.Equal("Page 2 of 3", viewModel.PageText);
+        Assert.Equal([Second], viewModel.Files);
+    }
+
+    [Fact]
+    public async Task InMainPage_AFailedLoadIsSentAndReportedOnce()
+    {
+        _api.Failure = new ApiException(ApiErrorKind.Network, "Could not reach the server.");
+        var viewModel = Create();
+        ActLikeTheRefreshViewInMainPage(viewModel);
+
+        await viewModel.LoadFilesCommand.ExecuteAsync(null);
+
+        Assert.Single(_api.Loads);
+        Assert.Single(_dialogs.Alerts);
+    }
+
+    [Fact]
+    public void InMainPage_PullingToRefreshReloadsTheFirstPageAndStopsTheSpinner()
+    {
+        _api.Page = PageOf(1, 3, First);
+        var viewModel = Create();
+        ActLikeTheRefreshViewInMainPage(viewModel);
+        viewModel.CurrentPage = 2;
+
+        viewModel.IsRefreshing = true;
+
+        Assert.Equal(1, Assert.Single(_api.Loads).Page);
+        Assert.Equal([First], viewModel.Files);
+        Assert.False(viewModel.IsRefreshing);
+    }
+
+    [Fact]
+    public async Task AnOrdinaryLoad_ShowsTheListsSpinnerUntilItIsDone()
+    {
+        var answer = new TaskCompletionSource<FilesPage>();
+        _api.HeldLoads.Enqueue(answer);
+        var viewModel = Create();
+        var notified = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+
+        var load = viewModel.LoadFilesCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.ShowsLoadingIndicator);
+        Assert.Contains(nameof(FilesViewModel.ShowsLoadingIndicator), notified);
+
+        answer.SetResult(PageOf(1, 1));
+        await load;
+
+        Assert.False(viewModel.ShowsLoadingIndicator);
+    }
+
+    [Fact]
+    public async Task APullToRefresh_ShowsOnlyRefreshViewsSpinner()
+    {
+        var answer = new TaskCompletionSource<FilesPage>();
+        _api.HeldLoads.Enqueue(answer);
+        var viewModel = Create();
+
+        viewModel.IsRefreshing = true;
+        var refresh = viewModel.RefreshFilesCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsLoading);
+        Assert.False(viewModel.ShowsLoadingIndicator);
+
+        answer.SetResult(PageOf(1, 1));
+        await refresh;
+
+        Assert.False(viewModel.IsRefreshing);
+    }
+
+    [Fact]
+    public async Task AFailedPullToRefresh_StillStopsTheSpinner()
+    {
+        _api.Failure = new ApiException(ApiErrorKind.Network, "Could not reach the server.");
+        var viewModel = Create();
+        viewModel.IsRefreshing = true;
+
+        await viewModel.RefreshFilesCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.IsRefreshing);
+    }
+
+    [Fact]
+    public async Task AReload_KeepsTheSelectionOnTheFilesStillListed()
+    {
+        _api.Page = PageOf(1, 1, First, Second);
+        var viewModel = Create();
+        await viewModel.LoadFilesCommand.ExecuteAsync(null);
+        viewModel.SelectedFiles.Add(First);
+        viewModel.SelectedFiles.Add(Second);
+
+        // Every load brings new objects, and CollectionView highlights a row by its object.
+        var firstAgain = new ComicFile { FilePath = First.FilePath, FileName = First.FileName };
+        _api.Page = PageOf(1, 1, firstAgain);
+        await viewModel.LoadFilesCommand.ExecuteAsync(null);
+
+        Assert.Same(firstAgain, Assert.Single(viewModel.SelectedFiles));
+        Assert.Equal("1 file(s) selected", viewModel.SelectionStatusText);
+    }
+
+    [Fact]
+    public async Task ChangingPage_DropsASelectionTheUserCanNoLongerSee()
+    {
+        _api.Page = PageOf(1, 2, First);
+        var viewModel = Create();
+        await viewModel.LoadFilesCommand.ExecuteAsync(null);
+        viewModel.SelectedFiles.Add(First);
+
+        _api.Page = PageOf(2, 2, Second);
+        await viewModel.NextPageCommand.ExecuteAsync(null);
+
+        Assert.Empty(viewModel.SelectedFiles);
+        Assert.False(viewModel.HasSelectedFiles);
+        Assert.Equal("No files selected", viewModel.SelectionStatusText);
+    }
+
+    [Fact]
+    public async Task AFailedReload_LeavesTheListAndItsSelectionAlone()
+    {
+        _api.Page = PageOf(1, 1, First);
+        var viewModel = Create();
+        await viewModel.LoadFilesCommand.ExecuteAsync(null);
+        viewModel.SelectedFiles.Add(First);
+
+        _api.Failure = new ApiException(ApiErrorKind.Network, "Could not reach the server.");
+        await viewModel.LoadFilesCommand.ExecuteAsync(null);
+
+        Assert.Equal([First], viewModel.Files);
+        Assert.Same(First, Assert.Single(viewModel.SelectedFiles));
+    }
+
+    [Fact]
+    public async Task AnAnswerArrivingAfterTheSessionEnded_IsDiscarded()
+    {
+        var answer = new TaskCompletionSource<FilesPage>();
+        _api.HeldLoads.Enqueue(answer);
+        var viewModel = Create();
+        var load = viewModel.LoadFilesCommand.ExecuteAsync(null);
+
+        _session.EndSession(null);
+        Assert.False(viewModel.IsLoading);
+
+        answer.SetResult(PageOf(2, 2, First));
+        await load;
+
+        Assert.Empty(viewModel.Files);
+        Assert.Equal(1, viewModel.CurrentPage);
+        Assert.Equal(1, viewModel.TotalPages);
+        Assert.False(viewModel.IsLoading);
+    }
+
+    [Fact]
+    public async Task AFailureArrivingAfterTheSessionEnded_IsNotShown()
+    {
+        var answer = new TaskCompletionSource<FilesPage>();
+        _api.HeldLoads.Enqueue(answer);
+        var viewModel = Create();
+        var load = viewModel.LoadFilesCommand.ExecuteAsync(null);
+
+        _session.EndSession(null);
+        answer.SetException(new ApiException(ApiErrorKind.Network, "Could not reach the server."));
+        await load;
+
+        Assert.Empty(_dialogs.Alerts);
+    }
+
+    [Fact]
+    public async Task AnOlderLoadArrivingLate_CannotReplaceANewerOnesAnswer()
+    {
+        var older = new TaskCompletionSource<FilesPage>();
+        var newer = new TaskCompletionSource<FilesPage>();
+        _api.HeldLoads.Enqueue(older);
+        _api.HeldLoads.Enqueue(newer);
+        var viewModel = Create();
+        var olderLoad = viewModel.LoadFilesCommand.ExecuteAsync(null);
+        var newerLoad = viewModel.RefreshFilesCommand.ExecuteAsync(null);
+
+        newer.SetResult(PageOf(1, 1, Second));
+        await newerLoad;
+        older.SetResult(PageOf(1, 1, First));
+        await olderLoad;
+
+        Assert.Equal([Second], viewModel.Files);
+    }
+
+    [Fact]
+    public async Task TheSpinner_StaysUntilTheNewestLoadIsDone()
+    {
+        var older = new TaskCompletionSource<FilesPage>();
+        var newer = new TaskCompletionSource<FilesPage>();
+        _api.HeldLoads.Enqueue(older);
+        _api.HeldLoads.Enqueue(newer);
+        var viewModel = Create();
+        var olderLoad = viewModel.LoadFilesCommand.ExecuteAsync(null);
+        var newerLoad = viewModel.RefreshFilesCommand.ExecuteAsync(null);
+
+        older.SetResult(PageOf(1, 1, First));
+        await olderLoad;
+        Assert.True(viewModel.IsLoading);
+
+        newer.SetResult(PageOf(1, 1, Second));
+        await newerLoad;
+        Assert.False(viewModel.IsLoading);
     }
 
     [Theory]

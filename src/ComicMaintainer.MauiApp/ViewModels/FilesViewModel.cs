@@ -13,11 +13,22 @@ public partial class FilesViewModel : ObservableObject, IDisposable
     private readonly ISessionManager _session;
     private readonly IUserDialogs _dialogs;
 
+    // Moved on by every load and by the end of a session, so that only the newest request's answer is ever shown.
+    private int _loadGeneration;
+
     [ObservableProperty]
     private ObservableCollection<ComicFile> _files = new();
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsLoadingIndicator))]
     private bool _isLoading;
+
+    // Only RefreshView's pull gesture sets this, and RefreshFiles clears it. It has to stay apart from IsLoading:
+    // RefreshView runs its command whenever this turns true, from code as well, so bound to every load it would make
+    // each one start a second load, back on the first page.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsLoadingIndicator))]
+    private bool _isRefreshing;
 
     [ObservableProperty]
     private string _searchText = string.Empty;
@@ -53,6 +64,9 @@ public partial class FilesViewModel : ObservableObject, IDisposable
     /// objects: bound to a list of <see cref="ComicFile"/> it would silently never select anything.
     /// </summary>
     public ObservableCollection<object> SelectedFiles { get; } = new();
+
+    /// <summary>Whether to show the list's own spinner. A pull to refresh already shows RefreshView's.</summary>
+    public bool ShowsLoadingIndicator => IsLoading && !IsRefreshing;
 
     public bool HasPreviousPage => CurrentPage > 1;
 
@@ -90,6 +104,10 @@ public partial class FilesViewModel : ObservableObject, IDisposable
     // The next account must not see this one's library.
     private void OnSessionEnded(object? sender, SessionEndedEventArgs e)
     {
+        // An answer still on its way belongs to the account that just ended.
+        _loadGeneration++;
+        IsLoading = false;
+        IsRefreshing = false;
         Files.Clear();
         SelectedFiles.Clear();
         CurrentPage = 1;
@@ -105,6 +123,7 @@ public partial class FilesViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task LoadFiles()
     {
+        var generation = ++_loadGeneration;
         IsLoading = true;
 
         try
@@ -114,24 +133,48 @@ public partial class FilesViewModel : ObservableObject, IDisposable
                 filter: ToApiFilter(SelectedFilter),
                 search: string.IsNullOrWhiteSpace(SearchText) ? null : SearchText);
 
-            Files.Clear();
-            foreach (var file in result.Files)
+            if (generation == _loadGeneration)
             {
-                Files.Add(file);
+                ShowPage(result);
             }
-
-            // The server clamps the page, for example when the library shrank since the last load.
-            CurrentPage = result.Page;
-            TotalPages = Math.Max(1, result.TotalPages);
         }
         catch (ApiException exception)
         {
-            await ReportAsync(exception);
+            if (generation == _loadGeneration)
+            {
+                await ReportAsync(exception);
+            }
         }
         finally
         {
-            IsLoading = false;
+            if (generation == _loadGeneration)
+            {
+                IsLoading = false;
+            }
         }
+    }
+
+    // Every load brings new objects, so what stays selected has to be found again among them. A file that is no longer
+    // listed stops being selected: the selection's actions must not reach files the user cannot see.
+    private void ShowPage(FilesPage page)
+    {
+        var selectedPaths = SelectedPaths.ToHashSet(StringComparer.Ordinal);
+        SelectedFiles.Clear();
+
+        Files.Clear();
+        foreach (var file in page.Files)
+        {
+            Files.Add(file);
+        }
+
+        foreach (var file in page.Files.Where(file => selectedPaths.Contains(file.FilePath)))
+        {
+            SelectedFiles.Add(file);
+        }
+
+        // The server clamps the page, for example when the library shrank since the last load.
+        CurrentPage = page.Page;
+        TotalPages = Math.Max(1, page.TotalPages);
     }
 
     [RelayCommand]
@@ -172,8 +215,15 @@ public partial class FilesViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task RefreshFiles()
     {
-        CurrentPage = 1;
-        await LoadFiles();
+        try
+        {
+            CurrentPage = 1;
+            await LoadFiles();
+        }
+        finally
+        {
+            IsRefreshing = false;
+        }
     }
 
     private CancellationTokenSource? _searchCts;

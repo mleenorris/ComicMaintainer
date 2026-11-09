@@ -178,6 +178,14 @@ internal sealed class FakeApi : IApiService
 
     public List<(int Page, string? Filter, string? Search)> Loads { get; } = [];
 
+    /// <summary>Answers for the next loads, oldest first, which arrive when the test completes them.</summary>
+    public Queue<TaskCompletionSource<FilesPage>> HeldLoads { get; } = new();
+
+    public List<string> TestedAddresses { get; } = [];
+
+    /// <summary>When set, a connection test waits for this.</summary>
+    public TaskCompletionSource<ConnectionTestResult>? HeldConnectionTest { get; set; }
+
     public List<string> Processed { get; } = [];
 
     public List<string> Deleted { get; } = [];
@@ -192,6 +200,11 @@ internal sealed class FakeApi : IApiService
     public Task<FilesPage> GetFilesAsync(int page = 1, int perPage = 100, string? filter = null, string? search = null, CancellationToken cancellationToken = default)
     {
         Loads.Add((page, filter, search));
+        if (HeldLoads.TryDequeue(out var held))
+        {
+            return held.Task;
+        }
+
         return Failure is null ? Task.FromResult(Page) : Task.FromException<FilesPage>(Failure);
     }
 

@@ -106,6 +106,19 @@ public sealed class OpdsCatalogIntegrationTests : IClassFixture<OpdsHostFixture>
         Assert.Equal("bytes", download.Headers.AcceptRanges.Single());
     }
 
+    [Theory]
+    [InlineData("/opds/v1.2")]
+    [InlineData("/opds/v1.2/")]
+    public async Task TheCatalogIsAlsoAtItsBareAddress(string address)
+    {
+        var user = await _host.CreateUserAsync();
+
+        using var response = await _host.GetAsync(address, user.UserName, OpdsTestHost.Password);
+
+        var feed = await OpdsTestHost.ReadFeedAsync(response);
+        Assert.Equal(4, Entries(feed).Count);
+    }
+
     [Fact]
     public async Task AnApiKeyWorksAsThePasswordForItsOwnerOnly()
     {
@@ -478,6 +491,8 @@ public sealed class OpdsCatalogIntegrationTests : IClassFixture<OpdsHostFixture>
         Assert.Equal(bytes[..10], await range.Content.ReadAsByteArrayAsync());
         Assert.Equal(new ContentRangeHeaderValue(0, 9, bytes.Length), range.Content.Headers.ContentRange);
         Assert.Equal(Path.GetFileName(comic), range.Content.Headers.ContentDisposition!.FileNameStar ?? range.Content.Headers.ContentDisposition.FileName);
+
+        Assert.Null(await _host.ProgressAsync(user.Id, comic));
 
         using var head = await _host.GetAsync($"/opds/v1.2/issues/{id}/file", user.UserName, OpdsTestHost.Password, method: HttpMethod.Head);
         Assert.Equal(HttpStatusCode.OK, head.StatusCode);

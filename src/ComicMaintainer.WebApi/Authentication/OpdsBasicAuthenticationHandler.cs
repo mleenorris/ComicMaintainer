@@ -129,7 +129,8 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
             Context.Items[RateLimitedItem] = attempt.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
                 ? (int?)Math.Ceiling(retryAfter.TotalSeconds)
                 : null;
-            Logger.LogWarning(
+            // Debug: the failed attempts themselves are in the auth log, and a flood past the limit must not fill it.
+            Logger.LogDebug(
                 "Refused OPDS credentials from {ClientAddress} for {Path}: too many attempts",
                 LoggingHelper.SanitizeForLog(_clientAddresses.Describe(Context)),
                 LoggingHelper.SanitizeForLog(Request.Path.Value));

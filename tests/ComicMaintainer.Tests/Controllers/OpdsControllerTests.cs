@@ -182,6 +182,26 @@ public sealed class OpdsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task ReachingTheLastPageMarksTheIssueRead()
+    {
+        SetupPage([1], "image/jpeg", "p1.jpg");
+
+        await CreateController().Page(Id, 0, default);
+
+        _fileStore.Verify(s => s.MarkFileReadAsync(_comic, true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AnEarlierPageDoesNotMarkTheIssueRead()
+    {
+        SetupPage([1], "image/jpeg", "p1.jpg", "p2.jpg");
+
+        await CreateController().Page(Id, 0, default);
+
+        _fileStore.Verify(s => s.MarkFileReadAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ABusyDatabaseDoesNotCostTheClientThePage()
     {
         SetupPage([1], "image/jpeg", "p1.jpg");

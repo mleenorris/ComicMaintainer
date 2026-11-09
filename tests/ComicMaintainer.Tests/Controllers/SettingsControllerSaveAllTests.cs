@@ -57,6 +57,7 @@ public sealed class SettingsControllerSaveAllTests
             EmailRateLimit = new EmailRateLimitUpdate(1, 2, 3),
             Suwayomi = new SuwayomiUpdate(Enabled: false),
             ErrorReporting = new ErrorReportingUpdate(Enabled: false),
+            Opds = new OpdsUpdate(Enabled: true),
         };
         SettingsUpdate? saved = null;
         _settingsService
@@ -78,6 +79,7 @@ public sealed class SettingsControllerSaveAllTests
         Assert.Equal(1, saved.EmailRateLimit!.MaxSendsPerHour);
         Assert.False(saved.Suwayomi!.Enabled);
         Assert.False(saved.ErrorReporting!.Enabled);
+        Assert.True(saved.Opds!.Enabled);
     }
 
     [Fact]

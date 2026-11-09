@@ -87,7 +87,8 @@ public sealed class OpdsController : ControllerBase
         }
     }
 
-    /// <summary>The root navigation feed.</summary>
+    /// <summary>The root navigation feed, also at the bare catalog address some apps are given.</summary>
+    [HttpGet]
     [HttpGet("catalog")]
     public IActionResult Catalog()
     {
@@ -504,7 +505,8 @@ public sealed class OpdsController : ControllerBase
     }
 
     /// <summary>
-    /// Records the page against the user, the same write as the web reader's. It is bookkeeping, so a busy database
+    /// Records the page against the user, the same write as the web reader's, and marks the issue read once its last
+    /// page is reached (the reader does that with its own request; PSE has none). It is bookkeeping, so a busy database
     /// is logged and does not cost the client the page.
     /// </summary>
     private async Task RecordProgressAsync(string filePath, int readerPage, int totalPages, CancellationToken cancellationToken)
@@ -517,6 +519,10 @@ public sealed class OpdsController : ControllerBase
         try
         {
             await _progress.RecordPageAsync(userId, filePath, readerPage, totalPages, cancellationToken);
+            if (readerPage >= totalPages)
+            {
+                await _fileStore.MarkFileReadAsync(filePath, true, cancellationToken);
+            }
         }
         catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or SqliteException)
         {

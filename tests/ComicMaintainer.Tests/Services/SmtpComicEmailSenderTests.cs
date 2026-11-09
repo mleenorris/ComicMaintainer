@@ -183,14 +183,37 @@ public class SmtpComicEmailSenderTests : IDisposable
         _settings.SmtpUsername = "reader";
         _settings.SmtpPassword = "s3cret";
 
-        await Assert.ThrowsAsync<NotSupportedException>(() => _sender.SendAsync(
+        var failure = await Assert.ThrowsAsync<NotSupportedException>(() => _sender.SendAsync(
             new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
             _guard.Token));
 
+        Assert.Equal(
+            "The mail server does not offer a secure connection. Check the SMTP port and TLS settings.",
+            SmtpComicEmailSender.DescribeFailureForUser(failure));
         Assert.Null(server.AuthPayload);
         Assert.DoesNotContain(server.Commands, c =>
             c.StartsWith("AUTH", StringComparison.OrdinalIgnoreCase)
             || c.StartsWith("MAIL", StringComparison.OrdinalIgnoreCase));
+        Assert.False(server.Message.IsCompleted);
+    }
+
+    [Fact]
+    public async Task SendAsync_WithAUsernameOnAServerOfferingNoLogin_BlamesTheLoginNotTheConnection()
+    {
+        using var server = new FakeSmtpServer { OffersLogin = false };
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+        _settings.SmtpUsername = "reader";
+        _settings.SmtpPassword = "s3cret";
+
+        var failure = await Assert.ThrowsAnyAsync<NotSupportedException>(() => _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
+            _guard.Token));
+
+        Assert.Equal(
+            "The mail server does not accept logins on this connection. Leave the SMTP username empty if it needs no login, otherwise check the SMTP port and TLS settings.",
+            SmtpComicEmailSender.DescribeFailureForUser(failure));
+        Assert.False(SmtpComicEmailSender.IsTransient(failure, CancellationToken.None));
         Assert.False(server.Message.IsCompleted);
     }
 
@@ -527,6 +550,9 @@ public class SmtpComicEmailSenderTests : IDisposable
         /// <summary>Message size limit advertised with the SIZE extension; none when null.</summary>
         public long? MaxMessageSize { get; set; }
 
+        /// <summary>Whether the AUTH extension is advertised; a relay without login does not.</summary>
+        public bool OffersLogin { get; set; } = true;
+
         private async Task AcceptLoopAsync(CancellationToken token)
         {
             while (!token.IsCancellationRequested)
@@ -579,9 +605,8 @@ public class SmtpComicEmailSenderTests : IDisposable
                 switch (verb)
                 {
                     case "EHLO":
-                        await writer.WriteAsync(MaxMessageSize is long maxSize
-                            ? $"250-localhost\r\n250-SIZE {maxSize}\r\n250 AUTH PLAIN\r\n"
-                            : "250-localhost\r\n250 AUTH PLAIN\r\n");
+                        var size = MaxMessageSize is long maxSize ? $"250-SIZE {maxSize}\r\n" : string.Empty;
+                        await writer.WriteAsync($"250-localhost\r\n{size}{(OffersLogin ? "250 AUTH PLAIN" : "250 8BITMIME")}\r\n");
                         break;
                     case "AUTH":
                         var payload = parts.Length > 2 ? parts[2] : null;

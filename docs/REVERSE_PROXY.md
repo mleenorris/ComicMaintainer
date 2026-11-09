@@ -28,7 +28,7 @@ To serve HTTPS from the app itself instead, see the [HTTPS Setup Guide](HTTPS_SE
 | Allow long requests | Most requests must finish within 30 seconds, but condensing a book or queueing a bulk send can take up to 10 minutes, and comic downloads have no limit. |
 | Allow large uploads | Restoring an uploaded database backup can be up to 2 GB; a series image can be up to 20 MB. |
 | Let `/manifest.json` through | The browser fetches it, with a cookie, to install the web app. Auth gateways must let that request pass. |
-| Let `/api/version` through | A new version of the service worker needs it during install. If it fails, the installed version stays in control and the next update check tries again. |
+| Let `/api/version`, `/reader.html` and `/css/main.css` through | A new version of the service worker fetches them during install, so that saved comics still open offline after an update. If `/api/version` fails, the installed version stays in control and the next update check tries again. |
 | Not cache comic pages or covers | `/api/comicreader/page` and `/api/comicreader/cover` are sent with `Cache-Control: private`, because they are behind authentication. Do not add a `proxy_cache` or a CDN "cache everything" rule for them. |
 
 The app does not read `X-Forwarded-Host` or `X-Forwarded-Prefix`, so you do not need to send them. It generates links relative to the address the client used.

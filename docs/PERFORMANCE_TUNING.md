@@ -45,7 +45,7 @@ Use the batch actions in the web interface. Batch jobs keep running if you close
 
 Files that are already correct are left alone, so running a job twice costs little.
 
-### Library Scan
+### Incremental Library Scans
 
 The **Library Scan** scheduled job (`library-scan`) loads the tracked file list once per run and reuses it for the additions, deletions and modified-file passes, so a scan costs one directory walk plus one in-memory lookup per file. Its options (JSON, editable with `PUT /api/scheduled-jobs/library-scan`) are:
 

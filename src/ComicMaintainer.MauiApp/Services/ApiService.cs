@@ -8,8 +8,6 @@ namespace ComicMaintainer.MauiApp.Services;
 /// <inheritdoc cref="IApiService"/>
 public sealed class ApiService : IApiService
 {
-    private static readonly TimeSpan ConnectionTestTimeout = TimeSpan.FromSeconds(10);
-
     private readonly ApiTransport _transport;
     private readonly ISessionManager _session;
 
@@ -29,14 +27,14 @@ public sealed class ApiService : IApiService
 
         try
         {
-            var versionBody = await _transport.SendAsync(server, HttpMethod.Get, "api/version", timeout: ConnectionTestTimeout, cancellationToken: cancellationToken);
+            var versionBody = await _transport.SendAsync(server, HttpMethod.Get, "api/version", timeout: ApiTransport.QuickRequestTimeout, cancellationToken: cancellationToken);
             var version = ApiTransport.ParseJson(versionBody, ApiJsonContext.Default.VersionResponse);
             if (string.IsNullOrEmpty(version.Version) || string.IsNullOrEmpty(version.Platform))
             {
                 return new ConnectionTestResult(false, "Something answered at this address, but it is not a ComicMaintainer server.");
             }
 
-            var setupBody = await _transport.SendAsync(server, HttpMethod.Get, "api/auth/setup-required", timeout: ConnectionTestTimeout, cancellationToken: cancellationToken);
+            var setupBody = await _transport.SendAsync(server, HttpMethod.Get, "api/auth/setup-required", timeout: ApiTransport.QuickRequestTimeout, cancellationToken: cancellationToken);
             return ApiTransport.ParseJson(setupBody, ApiJsonContext.Default.SetupRequiredResponse).SetupRequired
                 ? new ConnectionTestResult(true, $"Reached ComicMaintainer {version.Version}. {SessionManager.SetupRequiredMessage}")
                 : new ConnectionTestResult(true, $"Reached ComicMaintainer {version.Version}.");

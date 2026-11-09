@@ -28,14 +28,28 @@ public sealed class SessionManager : ISessionManager
     private readonly ApiTransport _transport;
     private readonly ICredentialStore _store;
     private readonly ISettingsService _settings;
+    private readonly TimeSpan _quickRequestTimeout;
     private ApiCredential? _current;
     private bool _loaded;
 
     public SessionManager(ApiTransport transport, ICredentialStore store, ISettingsService settings)
+        : this(transport, store, settings, ApiTransport.QuickRequestTimeout)
+    {
+    }
+
+    /// <param name="transport">Sends the requests.</param>
+    /// <param name="store">Keeps the credential.</param>
+    /// <param name="settings">Holds the server address.</param>
+    /// <param name="quickRequestTimeout">
+    /// The wait for the requests sign-out and startup can do without. Not public, so dependency injection keeps to the
+    /// constructor above.
+    /// </param>
+    internal SessionManager(ApiTransport transport, ICredentialStore store, ISettingsService settings, TimeSpan quickRequestTimeout)
     {
         _transport = transport;
         _store = store;
         _settings = settings;
+        _quickRequestTimeout = quickRequestTimeout;
     }
 
     /// <inheritdoc/>
@@ -58,7 +72,7 @@ public sealed class SessionManager : ISessionManager
 
         try
         {
-            Account = await FetchAccountAsync(credential, cancellationToken);
+            Account = await FetchAccountAsync(credential, _quickRequestTimeout, cancellationToken);
             return SessionRestoreResult.SignedIn;
         }
         catch (ApiException exception) when (exception.Kind == ApiErrorKind.Unauthorized)
@@ -100,7 +114,7 @@ public sealed class SessionManager : ISessionManager
         }
 
         var credential = new ApiCredential(CredentialKind.Session, token, server);
-        await EstablishAsync(credential, await FetchAccountAsync(credential, cancellationToken));
+        await EstablishAsync(credential, await FetchAccountAsync(credential, timeout: null, cancellationToken));
     }
 
     /// <inheritdoc/>
@@ -120,7 +134,7 @@ public sealed class SessionManager : ISessionManager
         AccountInfo account;
         try
         {
-            account = await FetchAccountAsync(credential, cancellationToken);
+            account = await FetchAccountAsync(credential, timeout: null, cancellationToken);
         }
         catch (ApiException exception) when (exception.Kind == ApiErrorKind.Unauthorized)
         {
@@ -145,7 +159,7 @@ public sealed class SessionManager : ISessionManager
         {
             try
             {
-                await _transport.SendAsync(credential.ServerUrl, HttpMethod.Post, "api/auth/logout", credential: credential, cancellationToken: cancellationToken);
+                await _transport.SendAsync(credential.ServerUrl, HttpMethod.Post, "api/auth/logout", credential: credential, timeout: _quickRequestTimeout, cancellationToken: cancellationToken);
             }
             catch (ApiException exception) when (exception.Kind != ApiErrorKind.Unauthorized)
             {
@@ -232,9 +246,9 @@ public sealed class SessionManager : ISessionManager
         await _store.ClearAsync();
     }
 
-    private async Task<AccountInfo> FetchAccountAsync(ApiCredential credential, CancellationToken cancellationToken)
+    private async Task<AccountInfo> FetchAccountAsync(ApiCredential credential, TimeSpan? timeout, CancellationToken cancellationToken)
     {
-        var body = await _transport.SendAsync(credential.ServerUrl, HttpMethod.Get, "api/auth/user", credential: credential, cancellationToken: cancellationToken);
+        var body = await _transport.SendAsync(credential.ServerUrl, HttpMethod.Get, "api/auth/user", credential: credential, timeout: timeout, cancellationToken: cancellationToken);
         return ApiTransport.ParseJson(body, ApiJsonContext.Default.AccountInfo);
     }
 

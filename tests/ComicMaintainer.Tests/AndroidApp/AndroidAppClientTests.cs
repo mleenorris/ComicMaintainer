@@ -362,6 +362,9 @@ namespace ComicMaintainer.Tests.AndroidApp
         private const string Server = "https://comics.example.test/";
         private const string UserJson = """{"username":"alice","canModifyLibrary":true}""";
 
+        // Far above the short timeout these tests set, and far below the client's own 100 seconds.
+        private static readonly TimeSpan SilentServerLimit = TimeSpan.FromSeconds(30);
+
         private readonly InMemoryCredentialStore _store = new();
         private readonly InMemorySettings _settings = new();
         private readonly List<string?> _ended = [];
@@ -369,6 +372,14 @@ namespace ComicMaintainer.Tests.AndroidApp
         private SessionManager Create(StubHandler handler)
         {
             var session = new SessionManager(new ApiTransport(new StubHttpClients(handler)), _store, _settings);
+            session.SessionEnded += (_, e) => _ended.Add(e.Message);
+            return session;
+        }
+
+        private SessionManager CreateForSilentServer()
+        {
+            var transport = new ApiTransport(new StubHttpClients(new SilentHandler()));
+            var session = new SessionManager(transport, _store, _settings, TimeSpan.FromMilliseconds(20));
             session.SessionEnded += (_, e) => _ended.Add(e.Message);
             return session;
         }
@@ -540,6 +551,29 @@ namespace ComicMaintainer.Tests.AndroidApp
             var session = Create(new StubHandler(_ => throw new HttpRequestException("offline")));
 
             await session.SignOutAsync();
+
+            Assert.Null(_store.Stored);
+            Assert.Equal(SessionManager.ServerNotReachedNotice, Assert.Single(_ended));
+        }
+
+        [Fact]
+        public async Task Restore_FromAServerThatNeverAnswers_GivesUpSoonAndKeepsTheCredential()
+        {
+            var credential = StoreCredential();
+
+            var restored = await CreateForSilentServer().RestoreAsync().WaitAsync(SilentServerLimit);
+
+            Assert.Equal(SessionRestoreResult.Unverified, restored);
+            Assert.Same(credential, _store.Stored);
+            Assert.Empty(_ended);
+        }
+
+        [Fact]
+        public async Task SignOut_FromAServerThatNeverAnswers_GivesUpSoonAndSaysSo()
+        {
+            StoreCredential();
+
+            await CreateForSilentServer().SignOutAsync().WaitAsync(SilentServerLimit);
 
             Assert.Null(_store.Stored);
             Assert.Equal(SessionManager.ServerNotReachedNotice, Assert.Single(_ended));

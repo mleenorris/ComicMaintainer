@@ -65,6 +65,16 @@ internal sealed class StubHandler : HttpMessageHandler
     }
 }
 
+/// <summary>A server that takes the request and never answers, as an unreachable one can behave.</summary>
+internal sealed class SilentHandler : HttpMessageHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        await Task.Delay(Timeout.Infinite, cancellationToken);
+        throw new InvalidOperationException("A delay without an end only finishes by being cancelled.");
+    }
+}
+
 internal sealed class StubHttpClients(HttpMessageHandler handler) : IHttpClientFactory
 {
     public HttpClient CreateClient(string name)
@@ -136,6 +146,9 @@ internal sealed class FakeSession : ISessionManager
 
     public int SignOuts { get; private set; }
 
+    /// <summary>When set, signing out waits for this.</summary>
+    public TaskCompletionSource? HeldSignOut { get; set; }
+
     public (string Server, string Username, string Password)? PasswordSignIn { get; private set; }
 
     public (string Server, string ApiKey)? ApiKeySignIn { get; private set; }
@@ -159,7 +172,7 @@ internal sealed class FakeSession : ISessionManager
     public Task SignOutAsync(CancellationToken cancellationToken = default)
     {
         SignOuts++;
-        return Task.CompletedTask;
+        return HeldSignOut?.Task ?? Task.CompletedTask;
     }
 
     public Task<ApiCredential> RequireCredentialAsync() => throw new NotSupportedException();

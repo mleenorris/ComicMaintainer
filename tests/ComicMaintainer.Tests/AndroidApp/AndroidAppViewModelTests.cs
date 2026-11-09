@@ -882,6 +882,40 @@ public sealed class SettingsViewModelTests
         Assert.Equal(1, _session.SignOuts);
     }
 
+    [Fact]
+    public async Task SigningOut_ShowsThatItIsBusyUntilItIsDone()
+    {
+        _session.HeldSignOut = new TaskCompletionSource();
+        var viewModel = Create();
+
+        var signOut = viewModel.SignOutCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsSigningOut);
+
+        _session.HeldSignOut.SetResult();
+        await signOut;
+
+        Assert.False(viewModel.IsSigningOut);
+    }
+
+    [Fact]
+    public async Task ChangingTheServerWhileSignedIn_ShowsThatItIsBusySigningOut()
+    {
+        _session.CurrentKind = CredentialKind.Session;
+        _session.HeldSignOut = new TaskCompletionSource();
+        var viewModel = Create();
+        viewModel.ServerUrl = "https://new.example.test";
+
+        var save = viewModel.SaveSettingsCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsSigningOut);
+
+        _session.HeldSignOut.SetResult();
+        await save;
+
+        Assert.False(viewModel.IsSigningOut);
+    }
+
     [Theory]
     [InlineData("alice", CredentialKind.Session, "Signed in as alice")]
     [InlineData("alice", CredentialKind.ApiKey, "Signed in as alice with an API key")]

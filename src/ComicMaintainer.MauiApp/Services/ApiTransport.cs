@@ -21,6 +21,12 @@ public sealed class ApiTransport
     /// <summary>The name of the <see cref="HttpClient"/> requests are sent with.</summary>
     public const string HttpClientName = "ComicMaintainerApi";
 
+    /// <summary>
+    /// How long to wait for a request that someone is watching a spinner for and that can be done without an answer,
+    /// because an unreachable server, such as one that is only on the home network, may never give one.
+    /// </summary>
+    internal static readonly TimeSpan QuickRequestTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>Shown when the HTTPS connection fails on the certificate, which a user can do something about.</summary>
     internal const string UntrustedCertificateMessage =
         "This device does not trust the server's HTTPS certificate. The app cannot use a self-signed certificate: " +

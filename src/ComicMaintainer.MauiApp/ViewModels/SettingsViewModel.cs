@@ -25,6 +25,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _isDarkMode;
 
+    [ObservableProperty]
+    private bool _isSigningOut;
+
     public SettingsViewModel(
         IApiService apiService,
         ISettingsService settingsService,
@@ -90,7 +93,7 @@ public partial class SettingsViewModel : ObservableObject
             if (await _dialogs.ConfirmAsync("Change server", "Changing the server signs you out of this one.", "Change", "Cancel"))
             {
                 _settingsService.ServerUrl = normalized;
-                await _session.SignOutAsync();
+                await SignOut();
             }
 
             return;
@@ -101,6 +104,18 @@ public partial class SettingsViewModel : ObservableObject
         TestResult = "✓ Settings saved";
     }
 
+    // Ending the session can wait on a server that does not answer, and the page must not look frozen meanwhile.
     [RelayCommand]
-    private Task SignOut() => _session.SignOutAsync();
+    private async Task SignOut()
+    {
+        IsSigningOut = true;
+        try
+        {
+            await _session.SignOutAsync();
+        }
+        finally
+        {
+            IsSigningOut = false;
+        }
+    }
 }

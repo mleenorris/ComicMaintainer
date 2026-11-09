@@ -6,6 +6,7 @@ using System.Xml.Linq;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.WebApi.Authentication;
+using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -601,7 +602,11 @@ public sealed class OpdsCatalogIntegrationTests : IClassFixture<OpdsHostFixture>
             var duplicate = Path.Join(_host.DuplicateDirectory, Guid.NewGuid().ToString("N") + ".cbz");
             await File.WriteAllBytesAsync(duplicate, [1, 2, 3]);
             var duplicateId = await _host.AddTrackedRowAsync(duplicate);
-            var notAComic = await _host.AddTrackedRowAsync(Path.Join(_host.WatchedDirectory, "notes.txt"));
+
+            // A real file inside the library, so that only the check that it is a comic can refuse it.
+            var notes = Path.Join(_host.WatchedDirectory, Guid.NewGuid().ToString("N") + ".txt");
+            await File.WriteAllBytesAsync(notes, [1, 2, 3]);
+            var notAComic = await _host.AddTrackedRowAsync(notes);
 
             foreach (var id in new[] { outsideId, duplicateId, notAComic, int.MaxValue })
             {
@@ -701,7 +706,7 @@ public sealed class OpdsCatalogIntegrationTests : IClassFixture<OpdsHostFixture>
     }
 
     [Fact]
-    public async Task ALargeSeriesAndTheLibraryArePagedBothWays()
+    public async Task ALargeSeriesIsPagedBothWays()
     {
         var user = await _host.CreateUserAsync();
         var series = UniqueSeries();
@@ -724,10 +729,33 @@ public sealed class OpdsCatalogIntegrationTests : IClassFixture<OpdsHostFixture>
         Assert.Single(Entries(second));
         Assert.Null(Href(second.Root!, "next"));
         Assert.Equal(seriesFeedHref, Href(second.Root!, "previous"));
+    }
 
-        using var all = await _host.GetAsync("/opds/v1.2/series", user.UserName, OpdsTestHost.Password);
-        var library = await OpdsTestHost.ReadFeedAsync(all);
-        Assert.Equal(Atom + "feed", library.Root!.Name);
+    [Fact]
+    public async Task AnArchiveThatCannotBeReadStaysInTheFeedWithoutAStream()
+    {
+        var (user, _, comic, seriesEntry) = await UserWithComicAsync(("p1.jpg", "first"));
+        await File.WriteAllBytesAsync(comic, [1, 2, 3, 4, 5, 6, 7, 8]);
+
+        var seriesHref = Href(seriesEntry, "subsection")!;
+        for (var view = 0; view < 2; view++)
+        {
+            using var response = await _host.GetAsync(seriesHref, user.UserName, OpdsTestHost.Password);
+            var entry = Assert.Single(Entries(await OpdsTestHost.ReadFeedAsync(response)));
+            Assert.NotNull(Href(entry, AcquisitionRel));
+            Assert.Null(Href(entry, StreamRel));
+        }
+    }
+
+    [Fact]
+    public async Task EveryCatalogEntryLeadsToASubsection()
+    {
+        var user = await _host.CreateUserAsync();
+
+        using var response = await _host.GetAsync(Catalog, user.UserName, OpdsTestHost.Password);
+
+        var feed = await OpdsTestHost.ReadFeedAsync(response);
+        Assert.All(Entries(feed), entry => Assert.Equal("subsection", entry.Elements(Atom + "link").Single().Attribute("rel")!.Value));
     }
 
     [Fact]
@@ -749,6 +777,102 @@ public sealed class OpdsCatalogModesIntegrationTests
     private static readonly XNamespace Atom = "http://www.w3.org/2005/Atom";
     private const string StreamRel = "http://vaemendis.net/opds-pse/stream";
     private const string AcquisitionRel = "http://opds-spec.org/acquisition/open-access";
+
+    private static string? Href(XElement parent, string rel) =>
+        parent.Elements(Atom + "link").FirstOrDefault(l => (string?)l.Attribute("rel") == rel)?.Attribute("href")?.Value;
+
+    private static List<string> Titles(XDocument feed) =>
+        feed.Root!.Elements(Atom + "entry").Select(e => e.Element(Atom + "title")!.Value).ToList();
+
+    /// <summary>One more than a page of series named <paramref name="prefix"/> and two letters, so name order is known.</summary>
+    private static async Task<List<string>> AddMoreSeriesThanAPageHoldsAsync(OpdsTestHost host, string prefix)
+    {
+        var names = new List<string>();
+        for (var i = 0; i <= OpdsController.PageSize; i++)
+        {
+            var name = $"{prefix} {(char)('a' + (i / 26))}{(char)('a' + (i % 26))}";
+            await host.AddComicAsync(Path.Join(name, name + " - Chapter 1.cbz"), ("p1.jpg", "a"));
+            names.Add(name);
+        }
+
+        return names;
+    }
+
+    [Fact]
+    public async Task AllSeriesIsPagedBothWays()
+    {
+        await using var host = new OpdsTestHost();
+        var user = await host.CreateUserAsync();
+        var names = await AddMoreSeriesThanAPageHoldsAsync(host, "Paged");
+
+        using var firstResponse = await host.GetAsync("/opds/v1.2/series", user.UserName, OpdsTestHost.Password);
+        var first = await OpdsTestHost.ReadFeedAsync(firstResponse);
+
+        Assert.Equal(names.Take(OpdsController.PageSize), Titles(first));
+        Assert.Null(Href(first.Root!, "previous"));
+        var next = Href(first.Root!, "next");
+        Assert.Equal("/opds/v1.2/series?page=2", next);
+
+        using var secondResponse = await host.GetAsync(next!, user.UserName, OpdsTestHost.Password);
+        var second = await OpdsTestHost.ReadFeedAsync(secondResponse);
+
+        Assert.Equal(names.Skip(OpdsController.PageSize), Titles(second));
+        Assert.Null(Href(second.Root!, "next"));
+        Assert.Equal("/opds/v1.2/series", Href(second.Root!, "previous"));
+        Assert.Equal("/opds/v1.2/series?page=2", Href(second.Root!, "self"));
+    }
+
+    [Fact]
+    public async Task SearchIsPagedBothWaysAndKeepsItsTermEscaped()
+    {
+        await using var host = new OpdsTestHost();
+        var user = await host.CreateUserAsync();
+        const string term = "Tom & Jerry";
+        const string escapedTerm = "Tom%20%26%20Jerry";
+        var names = await AddMoreSeriesThanAPageHoldsAsync(host, term);
+        await host.AddComicAsync(Path.Join("Unrelated", "Unrelated - Chapter 1.cbz"), ("p1.jpg", "a"));
+
+        using var firstResponse = await host.GetAsync($"/opds/v1.2/search?q={escapedTerm}", user.UserName, OpdsTestHost.Password);
+        var firstXml = await firstResponse.Content.ReadAsStringAsync();
+        var first = XDocument.Parse(firstXml);
+
+        Assert.Equal(names.Take(OpdsController.PageSize), Titles(first));
+        Assert.Null(Href(first.Root!, "previous"));
+        var next = Href(first.Root!, "next");
+        Assert.Equal($"/opds/v1.2/search?q={escapedTerm}&page=2", next);
+        Assert.Contains($"?q={escapedTerm}&amp;page=2", firstXml, StringComparison.Ordinal);
+
+        using var secondResponse = await host.GetAsync(next!, user.UserName, OpdsTestHost.Password);
+        var second = await OpdsTestHost.ReadFeedAsync(secondResponse);
+
+        Assert.Equal(names.Skip(OpdsController.PageSize), Titles(second));
+        Assert.Null(Href(second.Root!, "next"));
+        Assert.Equal($"/opds/v1.2/search?q={escapedTerm}", Href(second.Root!, "previous"));
+    }
+
+    [Fact]
+    public async Task APageThatIsNotANumberMeansTheFirstPage()
+    {
+        await using var host = new OpdsTestHost();
+        var user = await host.CreateUserAsync();
+        var series = "Saga " + Guid.NewGuid().ToString("N")[..8];
+        await host.AddComicAsync(Path.Join(series, series + " - Chapter 1.cbz"), ("p1.jpg", "a"));
+        using var search = await host.GetAsync($"/opds/v1.2/search?q={Uri.EscapeDataString(series)}", user.UserName, OpdsTestHost.Password);
+        var seriesHref = (await OpdsTestHost.ReadFeedAsync(search)).Root!.Elements(Atom + "entry").Single().Elements(Atom + "link").Single(l => (string?)l.Attribute("rel") == "subsection").Attribute("href")!.Value;
+
+        foreach (var address in new[] { "/opds/v1.2/series", seriesHref, $"/opds/v1.2/search?q={Uri.EscapeDataString(series)}" })
+        {
+            foreach (var page in new[] { "abc", "-1", "0", "99999999999" })
+            {
+                var separator = address.Contains('?') ? '&' : '?';
+                using var response = await host.GetAsync($"{address}{separator}page={page}", user.UserName, OpdsTestHost.Password);
+
+                var feed = await OpdsTestHost.ReadFeedAsync(response);
+                Assert.Single(feed.Root!.Elements(Atom + "entry"));
+                Assert.Null(Href(feed.Root!, "previous"));
+            }
+        }
+    }
 
     [Theory]
     [InlineData("/opds/v1.2/catalog")]

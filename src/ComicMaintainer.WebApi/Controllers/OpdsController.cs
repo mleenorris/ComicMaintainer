@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
@@ -15,6 +16,7 @@ using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 
@@ -44,8 +46,10 @@ public sealed class OpdsController : ControllerBase
     // Archives listed at once while building a feed: a feed's first view lists up to PageSize archives.
     private const int MaxConcurrentListings = 4;
 
-    // The quality pages in formats PSE does not allow are converted to JPEG at.
-    private const int ConvertedPageQuality = 90;
+    // How long the feeds leave alone a file the reader could not list; a file that changes is listed again at once.
+    private static readonly TimeSpan UnreadableRememberedFor = TimeSpan.FromMinutes(15);
+
+    private const string UnreadableCacheKeyPrefix = "opds-unreadable:";
 
     private readonly ISeriesLibraryService _library;
     private readonly IOverviewService _overview;
@@ -53,6 +57,8 @@ public sealed class OpdsController : ControllerBase
     private readonly IComicReaderService _reader;
     private readonly IFileCoverCacheService _covers;
     private readonly IReadingProgressService _progress;
+    private readonly OpdsImageConverter _images;
+    private readonly IMemoryCache _cache;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<OpdsController> _logger;
 
@@ -63,6 +69,8 @@ public sealed class OpdsController : ControllerBase
         IComicReaderService reader,
         IFileCoverCacheService covers,
         IReadingProgressService progress,
+        OpdsImageConverter images,
+        IMemoryCache cache,
         IOptionsMonitor<AppSettings> settings,
         ILogger<OpdsController> logger)
     {
@@ -72,6 +80,8 @@ public sealed class OpdsController : ControllerBase
         _reader = reader;
         _covers = covers;
         _progress = progress;
+        _images = images;
+        _cache = cache;
         _settings = settings;
         _logger = logger;
     }
@@ -99,7 +109,7 @@ public sealed class OpdsController : ControllerBase
             [
                 OpdsFeedBuilder.NavigationEntry("urn:comicmaintainer:opds:continue-reading", "Continue Reading", links.ContinueReading, OpdsMediaTypes.AcquisitionFeed, "Pick up where you left off"),
                 OpdsFeedBuilder.NavigationEntry("urn:comicmaintainer:opds:series-updates", "Series Updates", links.SeriesUpdates, OpdsMediaTypes.NavigationFeed, "Series with new issues"),
-                OpdsFeedBuilder.NavigationEntry("urn:comicmaintainer:opds:newly-added", "Newly Added", links.NewlyAdded, OpdsMediaTypes.NavigationFeed, "Series added recently", newest: true),
+                OpdsFeedBuilder.NavigationEntry("urn:comicmaintainer:opds:newly-added", "Newly Added", links.NewlyAdded, OpdsMediaTypes.NavigationFeed, "Series added recently"),
                 OpdsFeedBuilder.NavigationEntry("urn:comicmaintainer:opds:all-series", "All Series", links.AllSeries(), OpdsMediaTypes.NavigationFeed, "Every series in the library"),
             ]),
             OpdsMediaTypes.NavigationFeed);
@@ -165,10 +175,10 @@ public sealed class OpdsController : ControllerBase
     /// <summary>Every series in the library, a page at a time.</summary>
     [HttpGet("series")]
     [FailureMessage("Error building the series feed")]
-    public async Task<IActionResult> AllSeries([FromQuery] int page = 1, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> AllSeries([FromQuery] string? page = null, CancellationToken cancellationToken = default)
     {
         var links = Links;
-        var result = await _library.GetSeriesSummariesAsync(page: Math.Max(page, 1), perPage: PageSize, sort: "name", direction: "asc", cancellationToken: cancellationToken);
+        var result = await _library.GetSeriesSummariesAsync(page: PageNumber(page), perPage: PageSize, sort: "name", direction: "asc", cancellationToken: cancellationToken);
         return await SeriesNavigationFeedAsync(
             links,
             new OpdsFeedInfo(
@@ -185,10 +195,10 @@ public sealed class OpdsController : ControllerBase
     /// <summary>The acquisition feed of one series: its issues, a page at a time.</summary>
     [HttpGet("series/{seriesId}")]
     [FailureMessage("Error building the series feed")]
-    public async Task<IActionResult> Series(string seriesId, [FromQuery] int page = 1, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> Series(string seriesId, [FromQuery] string? page = null, CancellationToken cancellationToken = default)
     {
         var links = Links;
-        var result = await _library.GetSeriesIssuesAsync(seriesId, filter: null, page: Math.Max(page, 1), perPage: PageSize, cancellationToken: cancellationToken);
+        var result = await _library.GetSeriesIssuesAsync(seriesId, filter: null, page: PageNumber(page), perPage: PageSize, cancellationToken: cancellationToken);
         if (result is null)
         {
             return Refuse(StatusCodes.Status404NotFound, "Series not found");
@@ -211,7 +221,7 @@ public sealed class OpdsController : ControllerBase
     /// <summary>Series whose names or issues match <paramref name="q"/>, a page at a time.</summary>
     [HttpGet("search")]
     [FailureMessage("Error searching the library")]
-    public async Task<IActionResult> Search([FromQuery] string? q, [FromQuery] int page = 1, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> Search([FromQuery] string? q, [FromQuery] string? page = null, CancellationToken cancellationToken = default)
     {
         var query = q?.Trim() ?? string.Empty;
         if (query.Length == 0)
@@ -225,7 +235,7 @@ public sealed class OpdsController : ControllerBase
         }
 
         var links = Links;
-        var result = await _library.GetSeriesSummariesAsync(search: query, page: Math.Max(page, 1), perPage: PageSize, sort: "name", direction: "asc", cancellationToken: cancellationToken);
+        var result = await _library.GetSeriesSummariesAsync(search: query, page: PageNumber(page), perPage: PageSize, sort: "name", direction: "asc", cancellationToken: cancellationToken);
         return await SeriesNavigationFeedAsync(
             links,
             new OpdsFeedInfo(
@@ -286,7 +296,7 @@ public sealed class OpdsController : ControllerBase
         }
 
         var served = entry.Value.Validator;
-        var (data, contentType) = await ConvertForOpdsAsync(entry.Value.Data, entry.Value.ContentType, OpdsMediaTypes.Jpeg, cancellationToken);
+        var (data, contentType) = await _images.ConvertAsync(entry.Value.Data, entry.Value.ContentType, OpdsMediaTypes.Jpeg, cancellationToken);
         SetPrivateCaching(ComicReaderController.BuildCoverETag(served));
         Response.Headers.LastModified = served.SourceLastModified.ToString("R");
         return File(data, contentType);
@@ -341,7 +351,7 @@ public sealed class OpdsController : ControllerBase
 
             await RecordProgressAsync(issue.FilePath, readerPage, pageNames.Count, cancellationToken);
 
-            var (data, contentType) = await ConvertForOpdsAsync(page.Value.Data, page.Value.ContentType, OpdsMediaTypes.ForPageStream(pageNames), cancellationToken);
+            var (data, contentType) = await _images.ConvertAsync(page.Value.Data, page.Value.ContentType, OpdsMediaTypes.ForPageStream(pageNames), cancellationToken);
             SetPrivateCaching(etag);
             Response.Headers.LastModified = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero).ToString("R");
             return File(data, contentType);
@@ -485,9 +495,29 @@ public sealed class OpdsController : ControllerBase
             return null;
         }
 
+        var info = new FileInfo(resolvedPath);
+        if (!info.Exists)
+        {
+            return null;
+        }
+
+        // A feed lists every issue it shows, opened or not, and the reader does not remember a listing that failed:
+        // without this a corrupt file would be reopened, and logged as an error, on every view of every feed.
+        var unreadableKey = string.Create(CultureInfo.InvariantCulture, $"{UnreadableCacheKeyPrefix}{info.Length:x}:{info.LastWriteTimeUtc.Ticks:x}:{resolvedPath}");
+        if (_cache.TryGetValue(unreadableKey, out _))
+        {
+            return null;
+        }
+
         try
         {
-            return await _reader.GetPageNamesAsync(resolvedPath);
+            var names = await _reader.GetPageNamesAsync(resolvedPath);
+            if (names.Count == 0)
+            {
+                _cache.Set(unreadableKey, true, UnreadableRememberedFor);
+            }
+
+            return names;
         }
         catch (ArchiveLimitExceededException)
         {
@@ -495,6 +525,10 @@ public sealed class OpdsController : ControllerBase
             return null;
         }
     }
+
+    /// <summary>The page asked for. Anything that is not a page number means page 1, so an odd link still gets a feed.</summary>
+    private static int PageNumber(string? page) =>
+        int.TryParse(page, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number > 0 ? number : 1;
 
     private static string IssueTitle(string seriesTitle, SeriesIssueDto issue)
     {
@@ -528,23 +562,6 @@ public sealed class OpdsController : ControllerBase
         {
             _logger.LogWarning(ex, "Could not record reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
         }
-    }
-
-    /// <summary>
-    /// The image as a client of this feed may expect it: unchanged when it is already of <paramref name="target"/>,
-    /// otherwise converted to JPEG. An image that cannot be converted is passed through unchanged.
-    /// </summary>
-    private static async Task<(byte[] Data, string ContentType)> ConvertForOpdsAsync(byte[] data, string contentType, string target, CancellationToken cancellationToken)
-    {
-        if (string.Equals(contentType, target, StringComparison.OrdinalIgnoreCase))
-        {
-            return (data, contentType);
-        }
-
-        var converted = await Task.Run(
-            () => CoverThumbnailEncoder.TryCreateThumbnail(data, int.MaxValue, "jpeg", ConvertedPageQuality),
-            cancellationToken);
-        return converted ?? (data, contentType);
     }
 
     private void SetPrivateCaching(string etag)

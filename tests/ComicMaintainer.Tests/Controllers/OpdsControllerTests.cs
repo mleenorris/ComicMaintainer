@@ -10,12 +10,14 @@ using ComicMaintainer.Core.Reader.Models;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
+using ComicMaintainer.WebApi.Opds;
 using ImageMagick;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -37,6 +39,7 @@ public sealed class OpdsControllerTests : IDisposable
     private readonly Mock<IComicReaderService> _reader = new();
     private readonly Mock<IFileCoverCacheService> _covers = new();
     private readonly Mock<IReadingProgressService> _progress = new();
+    private readonly MemoryCache _cache = new(new MemoryCacheOptions());
     private readonly AppSettings _settings;
 
     public OpdsControllerTests()
@@ -54,7 +57,11 @@ public sealed class OpdsControllerTests : IDisposable
         _reader.Setup(r => r.GetPageNamesAsync(It.IsAny<string>())).ReturnsAsync(["p1.jpg", "p2.jpg"]);
     }
 
-    public void Dispose() => TestIO.TryDeleteDirectory(_root);
+    public void Dispose()
+    {
+        _cache.Dispose();
+        TestIO.TryDeleteDirectory(_root);
+    }
 
     private OpdsController CreateController(string? userId = "reader")
     {
@@ -65,6 +72,8 @@ public sealed class OpdsControllerTests : IDisposable
             _reader.Object,
             _covers.Object,
             _progress.Object,
+            new OpdsImageConverter(),
+            _cache,
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<OpdsController>.Instance);
         var identity = userId is null ? new ClaimsIdentity() : new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userId)], "Test");
@@ -132,6 +141,32 @@ public sealed class OpdsControllerTests : IDisposable
 
         Assert.Equal("image/png", file.ContentType);
         Assert.Equal(png, file.FileContents);
+    }
+
+    [Theory]
+    [InlineData("image/jpeg", "p1.jpg", "p2.jpeg")]
+    [InlineData("image/png", "p1.png", "p2.PNG")]
+    [InlineData("image/gif", "p1.gif", "p2.gif")]
+    [InlineData("image/jpeg", "p1.webp", "p2.webp")]
+    [InlineData("image/jpeg", "p1.png", "p2.jpg")]
+    public async Task TheFeedAdvertisesTheTypeThePagesAreServedAs(string expected, string firstPage, string secondPage)
+    {
+        var (format, contentType) = Path.GetExtension(firstPage).ToLowerInvariant() switch
+        {
+            ".png" => (MagickFormat.Png, "image/png"),
+            ".gif" => (MagickFormat.Gif, "image/gif"),
+            ".webp" => (MagickFormat.WebP, "image/webp"),
+            _ => (MagickFormat.Jpeg, "image/jpeg"),
+        };
+        SetupPage(Image(format), contentType, firstPage, secondPage);
+        SetupSeriesWithOneIssue();
+
+        var content = Assert.IsType<ContentResult>(await CreateController().Series("saga"));
+        var stream = XDocument.Parse(content.Content!).Root!.Elements(Atom + "entry").Single().Elements(Atom + "link").Single(l => (string?)l.Attribute("rel") == StreamRel);
+        var page = Assert.IsType<FileContentResult>(await CreateController().Page(Id, 0, default));
+
+        Assert.Equal(expected, stream.Attribute("type")!.Value);
+        Assert.Equal(expected, page.ContentType);
     }
 
     [Fact]
@@ -270,6 +305,47 @@ public sealed class OpdsControllerTests : IDisposable
         var entry = XDocument.Parse(content.Content!).Root!.Elements(Atom + "entry").Single();
         Assert.Equal("Saga #1 - Dawn", entry.Element(Atom + "title")!.Value);
         Assert.DoesNotContain(entry.Elements(Atom + "link"), l => (string?)l.Attribute("rel") == StreamRel);
+    }
+
+    private void SetupSeriesWithOneIssue() =>
+        _library.Setup(l => l.GetSeriesIssuesAsync("saga", null, 1, OpdsController.PageSize, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesIssuesResult { Id = "saga", Title = "Saga", Page = 1, TotalPages = 1, IssueCount = 1, Issues = [new SeriesIssueDto { FilePath = _comic, FileName = "Saga 001.cbz", Issue = "1", Title = "Dawn" }] });
+
+    [Fact]
+    public async Task AnUnreadableArchiveIsNotListedAgainOnEveryViewUntilItChanges()
+    {
+        _reader.Setup(r => r.GetPageNamesAsync(It.IsAny<string>())).ReturnsAsync([]);
+        SetupSeriesWithOneIssue();
+
+        for (var view = 0; view < 3; view++)
+        {
+            var content = Assert.IsType<ContentResult>(await CreateController().Series("saga"));
+            var entry = XDocument.Parse(content.Content!).Root!.Elements(Atom + "entry").Single();
+            Assert.DoesNotContain(entry.Elements(Atom + "link"), l => (string?)l.Attribute("rel") == StreamRel);
+        }
+
+        _reader.Verify(r => r.GetPageNamesAsync(It.IsAny<string>()), Times.Once);
+
+        // The same path as a new version of the file, and now it has pages.
+        File.SetLastWriteTimeUtc(_comic, DateTime.UtcNow.AddMinutes(1));
+        _reader.Setup(r => r.GetPageNamesAsync(It.IsAny<string>())).ReturnsAsync(["p1.jpg"]);
+
+        var repaired = Assert.IsType<ContentResult>(await CreateController().Series("saga"));
+
+        var stream = XDocument.Parse(repaired.Content!).Root!.Elements(Atom + "entry").Single().Elements(Atom + "link").Single(l => (string?)l.Attribute("rel") == StreamRel);
+        Assert.Equal("1", stream.Attribute(Pse + "count")!.Value);
+    }
+
+    [Fact]
+    public async Task AnIssueWhoseFileIsGoneIsNotAskedForItsPages()
+    {
+        File.Delete(_comic);
+        SetupSeriesWithOneIssue();
+
+        var content = Assert.IsType<ContentResult>(await CreateController().Series("saga"));
+
+        Assert.DoesNotContain(XDocument.Parse(content.Content!).Root!.Elements(Atom + "entry").Single().Elements(Atom + "link"), l => (string?)l.Attribute("rel") == StreamRel);
+        _reader.Verify(r => r.GetPageNamesAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

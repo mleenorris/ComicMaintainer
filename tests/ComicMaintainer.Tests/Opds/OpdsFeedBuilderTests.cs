@@ -188,11 +188,12 @@ public sealed class OpdsFeedBuilderTests
     }
 
     [Fact]
-    public void ANewestEntryUsesTheSortNewRelation()
+    public void ANavigationEntryLeadsToASubsection()
     {
-        var entry = OpdsFeedBuilder.NavigationEntry("urn:x", "New", "/new", OpdsMediaTypes.NavigationFeed, newest: true);
+        var entry = OpdsFeedBuilder.NavigationEntry("urn:x", "New", "/new", OpdsMediaTypes.NavigationFeed);
 
-        Assert.Equal("http://opds-spec.org/sort/new", LinkElements(entry).Single().Attribute("rel")!.Value);
+        // Not http://opds-spec.org/sort/new: OPDS 1.2 defines that relation as an acquisition feed of new entries.
+        Assert.Equal("subsection", LinkElements(entry).Single().Attribute("rel")!.Value);
     }
 
     [Fact]

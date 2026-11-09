@@ -69,17 +69,16 @@ public static class OpdsFeedBuilder
     private const string ImageRel = "http://opds-spec.org/image";
     private const string ThumbnailRel = "http://opds-spec.org/image/thumbnail";
     private const string StreamRel = "http://vaemendis.net/opds-pse/stream";
-    private const string SortNewRel = "http://opds-spec.org/sort/new";
     private const string CatalogAuthor = "ComicMaintainer";
 
     /// <summary>A navigation entry that leads to another feed.</summary>
-    public static XElement NavigationEntry(string id, string title, string href, string targetMediaType, string? content = null, bool newest = false) =>
+    public static XElement NavigationEntry(string id, string title, string href, string targetMediaType, string? content = null) =>
         new(Atom + "entry",
             new XElement(Atom + "id", Clean(id)),
             new XElement(Atom + "title", Clean(title)),
             new XElement(Atom + "updated", FormatDate(DateTimeOffset.UtcNow)),
             content is null ? null : new XElement(Atom + "content", new XAttribute("type", "text"), Clean(content)),
-            Link(newest ? SortNewRel : "subsection", href, targetMediaType));
+            Link("subsection", href, targetMediaType));
 
     /// <summary>A series, as a navigation entry that leads to its issues.</summary>
     public static XElement SeriesEntry(OpdsLinks links, string seriesId, string title, DateTimeOffset updated, string? synopsis, int? coverFileId) =>

@@ -1217,7 +1217,28 @@
                             <label for="opdsFeedUrl">Feed URL</label>
                             <input type="text" id="opdsFeedUrl" name="opdsFeedUrl" readonly spellcheck="false" autocomplete="off">
                             <small class="form-hint">
-                                Add this address to your comic app and sign in with your username and password. You can use your API key as the password instead (required when signing in through Authelia).
+                                Add this address to your comic app and sign in with your username and password, or with your API key (below) as the password. When you sign in through Authelia, only the API key works here.
+                            </small>
+                        </div>
+                        <div class="form-group" data-user-setting>
+                            <label for="opdsApiKeyStatus">Your API key</label>
+                            <output class="form-hint" id="opdsApiKeyStatus" for="opdsApiKeyButton"></output>
+                        </div>
+                        <div class="form-group" id="opdsApiKeyPasswordGroup" data-user-setting>
+                            <label for="opdsApiKeyPassword">Current password</label>
+                            <input type="password" id="opdsApiKeyPassword" name="opdsApiKeyPassword" autocomplete="current-password" spellcheck="false">
+                            <small class="form-hint">
+                                An API key keeps working after you sign out, so creating one asks for your password.
+                            </small>
+                        </div>
+                        <div class="form-group" data-user-setting>
+                            <button type="button" class="btn btn-secondary" id="opdsApiKeyButton" onclick="createOpdsApiKey()">Create API key</button>
+                        </div>
+                        <div class="form-group" id="opdsApiKeyResult" data-user-setting hidden>
+                            <label for="opdsApiKeyValue">New API key</label>
+                            <input type="text" id="opdsApiKeyValue" name="opdsApiKeyValue" readonly spellcheck="false" autocomplete="off">
+                            <small class="form-hint">
+                                Copy it now: it is not shown again. Enter it in your comic app as the password, with your username.
                             </small>
                         </div>
                     </section>

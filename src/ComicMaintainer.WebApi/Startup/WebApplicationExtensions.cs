@@ -225,8 +225,8 @@ internal static class WebApplicationExtensions
 
     public static WebApplication UseComicMaintainerPipeline(this WebApplication app)
     {
-        // BASE_PATH deployments. A reverse proxy either forwards the prefix (/comics/js/x.js) or
-        // strips it (/js/x.js, as docs/swag-configs/comicmaintainer.subfolder.conf does); this
+        // BASE_PATH deployments. A reverse proxy either forwards the prefix (/comics/js/x.js, as
+        // docs/swag-configs/comicmaintainer.subfolder.conf does) or strips it (/js/x.js); this
         // moves a forwarded prefix into PathBase and leaves a stripped request alone, so the rest
         // of the pipeline sees the same path either way. It must run before UseRouting.
         var configuredBasePath = app.Services.GetRequiredService<IOptions<AppSettings>>().Value.BasePath;
@@ -305,9 +305,10 @@ internal static class WebApplicationExtensions
                 "frame-ancestors 'none'";
 
             // Add HSTS and CSP headers when behind HTTPS proxy
-            // Use case-insensitive comparison as HTTP headers are case-insensitive per RFC 7230
-            if (context.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto) && 
-                forwardedProto.ToString().Equals("https", StringComparison.OrdinalIgnoreCase))
+            // Use case-insensitive comparison as HTTP headers are case-insensitive per RFC 7230.
+            // The first value is the client's scheme; a proxy that sets the header twice sends a list.
+            if (context.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto) &&
+                forwardedProto.ToString().Split(',')[0].Trim().Equals("https", StringComparison.OrdinalIgnoreCase))
             {
                 // HSTS: Force HTTPS for 1 year
                 context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";

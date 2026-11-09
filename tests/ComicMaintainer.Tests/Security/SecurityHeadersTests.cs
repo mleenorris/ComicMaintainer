@@ -161,6 +161,22 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Contains("camera=()", policy);
     }
 
+    // A proxy that sets the header twice sends a list; the first value is the client's scheme.
+    [Theory]
+    [InlineData("https,https", true)]
+    [InlineData("https, http", true)]
+    [InlineData("http,https", false)]
+    public async Task SecurityHeaders_WithAListOfForwardedProtos_TheFirstDecidesHsts(string forwardedProto, bool expectHsts)
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/version");
+        request.Headers.Add("X-Forwarded-Proto", forwardedProto);
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(expectHsts, response.Headers.Contains("Strict-Transport-Security"));
+    }
+
     [Fact]
     public async Task SecurityHeaders_WithHttpsForwardedProto_HstsIsPresent()
     {

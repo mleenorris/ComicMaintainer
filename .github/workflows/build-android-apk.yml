@@ -149,7 +149,7 @@ jobs:
           ## Troubleshooting
 
           ### Cannot connect to server:
-          - Open Settings and tap "Test Connection"; it says what went wrong
+          - On the sign-in page, tap "Test Connection"; it says what went wrong
           - Verify server is running and the address is correct
           - Ensure devices are on same network, and check firewall settings on server
 

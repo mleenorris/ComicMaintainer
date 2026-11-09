@@ -207,8 +207,11 @@ internal sealed class FakeApi : IApiService
 
     public List<IReadOnlyCollection<string>> BatchDeleted { get; } = [];
 
-    public Task<ConnectionTestResult> TestConnectionAsync(string serverUrl, CancellationToken cancellationToken = default) =>
-        Task.FromResult(ConnectionResult);
+    public Task<ConnectionTestResult> TestConnectionAsync(string serverUrl, CancellationToken cancellationToken = default)
+    {
+        TestedAddresses.Add(serverUrl);
+        return HeldConnectionTest?.Task ?? Task.FromResult(ConnectionResult);
+    }
 
     public Task<FilesPage> GetFilesAsync(int page = 1, int perPage = 100, string? filter = null, string? search = null, CancellationToken cancellationToken = default)
     {

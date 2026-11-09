@@ -68,8 +68,7 @@ public partial class SettingsViewModel : ObservableObject
 
         try
         {
-            var result = await _apiService.TestConnectionAsync(ServerUrl);
-            TestResult = (result.Success ? "✓ " : "✗ ") + result.Message;
+            TestResult = (await _apiService.TestConnectionAsync(ServerUrl)).StatusText;
         }
         finally
         {

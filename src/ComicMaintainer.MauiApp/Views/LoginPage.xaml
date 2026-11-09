@@ -37,6 +37,18 @@
                    TextColor="#b8860b"
                    FontSize="12" />
 
+            <Button Text="🔗 Test Connection"
+                    Command="{Binding TestConnectionCommand}"
+                    IsEnabled="{Binding IsTesting, Converter={StaticResource InvertedBoolConverter}}"
+                    BackgroundColor="#28a745"
+                    TextColor="White"
+                    HorizontalOptions="Fill" />
+            <Label Text="{Binding ConnectionResult}"
+                   IsVisible="{Binding ConnectionResult, Converter={StaticResource StringNotEmptyConverter}}"
+                   FontSize="14"
+                   HorizontalTextAlignment="Center"
+                   TextColor="{AppThemeBinding Light=#2c3e50, Dark=#d1d5db}" />
+
             <HorizontalStackLayout Spacing="10">
                 <Switch IsToggled="{Binding UseApiKey}" OnColor="#28a745" VerticalOptions="Center" />
                 <Label Text="Sign in with an API key"

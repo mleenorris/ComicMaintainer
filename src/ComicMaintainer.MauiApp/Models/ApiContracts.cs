@@ -56,7 +56,11 @@ public sealed class AccountInfo
 }
 
 /// <summary>The outcome of testing a server address. <see cref="Message"/> is written for the user.</summary>
-public sealed record ConnectionTestResult(bool Success, string Message);
+public sealed record ConnectionTestResult(bool Success, string Message)
+{
+    /// <summary>The outcome as a page shows it.</summary>
+    public string StatusText => (Success ? "✓ " : "✗ ") + Message;
+}
 
 /// <summary>The body of <c>POST /api/auth/login</c>.</summary>
 internal sealed record LoginRequest(

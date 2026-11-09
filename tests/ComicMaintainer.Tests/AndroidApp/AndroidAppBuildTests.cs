@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using ComicMaintainer.MauiApp.ViewModels;
 
 namespace ComicMaintainer.Tests.AndroidApp;
 
@@ -143,12 +144,56 @@ public sealed class AndroidAppBuildTests
         Assert.All(used, alias => Assert.Contains(registered, match => match.Groups["alias"].Value == alias));
     }
 
+    // The pages are only compiled when a release builds the app, and bindings with a Source not even then.
+    [Theory]
+    [InlineData("LoginPage.xaml", typeof(LoginViewModel))]
+    [InlineData("MainPage.xaml", typeof(FilesViewModel))]
+    [InlineData("SettingsPage.xaml", typeof(SettingsViewModel))]
+    public void EveryBindingOfAPage_NamesAPropertyOfItsViewModel(string page, Type viewModel)
+    {
+        var paths = XDocument.Load(Path.Join(AppDirectory, "Views", page)).Descendants()
+            .SelectMany(element => element.Attributes().Select(attribute => ViewModelBindingPath(element, attribute.Value)))
+            .OfType<string>()
+            .ToList();
+
+        Assert.NotEmpty(paths);
+        Assert.All(paths, path => Assert.NotNull(viewModel.GetProperty(path)));
+    }
+
+    // Settings opens from the library, so someone who cannot connect has only the sign-in page to find out why.
+    [Fact]
+    public void TheSignInPage_OffersTheConnectionTest()
+    {
+        var page = File.ReadAllText(Path.Join(AppDirectory, "Views", "LoginPage.xaml"));
+
+        Assert.Contains("Command=\"{Binding TestConnectionCommand}\"", page, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void GeneratedSdkBackupFiles_AreIgnored()
     {
         var ignored = File.ReadAllLines(Path.Join(RepositoryRoot, ".gitignore")).Select(line => line.Trim());
 
         Assert.Contains("*.tmp", ignored);
+    }
+
+    /// <summary>The view model property an attribute is bound to, or null if it is not bound to the view model.</summary>
+    private static string? ViewModelBindingPath(XElement element, string value)
+    {
+        var relativeToViewModel = Regex.Match(value, @"^\{Binding Source=\{RelativeSource AncestorType=\{x:Type viewmodels:\w+\}\}, Path=(?<path>\w+)\}$");
+        if (relativeToViewModel.Success)
+        {
+            return relativeToViewModel.Groups["path"].Value;
+        }
+
+        // Inside a DataTemplate a plain binding is relative to the list's item.
+        if (element.AncestorsAndSelf().Any(ancestor => ancestor.Name.LocalName == "DataTemplate"))
+        {
+            return null;
+        }
+
+        var plain = Regex.Match(value, @"^\{Binding (?<path>\w+)[,}]");
+        return plain.Success ? plain.Groups["path"].Value : null;
     }
 
     private static XDocument LoadManifest() =>

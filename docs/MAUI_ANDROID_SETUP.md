@@ -84,7 +84,8 @@ A network problem does not sign you out. The app keeps your session and shows th
 
 ## Connecting
 
-**Settings > Test Connection** checks that the address really is a ComicMaintainer server, without needing an account.
+**Test Connection**, on the sign-in page and in Settings, checks that the address really is a ComicMaintainer server,
+without needing an account.
 
 ### Plain HTTP
 
@@ -193,5 +194,5 @@ fails the test suite:
 dotnet test tests/ComicMaintainer.Tests --filter "FullyQualifiedName~AndroidApp"
 ```
 
-Keep MAUI types out of those folders, or the test project stops compiling. The pages and `Services/Platform` are not
-covered by automated tests.
+Keep MAUI types out of those folders, or the test project stops compiling. The tests check that the pages' bindings
+name real view model properties, but do not run the pages or `Services/Platform`.

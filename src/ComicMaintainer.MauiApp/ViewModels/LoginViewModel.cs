@@ -13,6 +13,7 @@ public partial class LoginViewModel : ObservableObject
     private readonly ISessionManager _session;
     private readonly ISettingsService _settings;
     private readonly INavigator _navigator;
+    private readonly IApiService _apiService;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ServerWarning))]
@@ -36,16 +37,26 @@ public partial class LoginViewModel : ObservableObject
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    public LoginViewModel(ISessionManager session, ISettingsService settings, INavigator navigator)
+    [ObservableProperty]
+    private bool _isTesting;
+
+    [ObservableProperty]
+    private string _connectionResult = string.Empty;
+
+    public LoginViewModel(ISessionManager session, ISettingsService settings, INavigator navigator, IApiService apiService)
     {
         _session = session;
         _settings = settings;
         _navigator = navigator;
+        _apiService = apiService;
         _session.SessionEnded += OnSessionEnded;
     }
 
     /// <summary>Warns about an address that would send the password unencrypted; empty when there is nothing to warn about.</summary>
     public string ServerWarning => ServerAddress.DescribeRisk(ServerUrl);
+
+    // A result says nothing about an address other than the one tested.
+    partial void OnServerUrlChanged(string value) => ConnectionResult = string.Empty;
 
     /// <summary>Called whenever the page appears: goes straight to the library if an earlier sign-in is still good.</summary>
     public async Task InitializeAsync()
@@ -66,10 +77,31 @@ public partial class LoginViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Checks the address without an account. This is here as well as in Settings because Settings can only be reached
+    /// once signed in, and someone who cannot connect never gets that far.
+    /// </summary>
+    [RelayCommand]
+    private async Task TestConnection()
+    {
+        IsTesting = true;
+        ConnectionResult = "Testing connection...";
+
+        try
+        {
+            ConnectionResult = (await _apiService.TestConnectionAsync(ServerUrl)).StatusText;
+        }
+        finally
+        {
+            IsTesting = false;
+        }
+    }
+
     [RelayCommand]
     private async Task SignIn()
     {
         StatusMessage = string.Empty;
+        ConnectionResult = string.Empty;
 
         if (UseApiKey ? string.IsNullOrWhiteSpace(ApiKey) : string.IsNullOrWhiteSpace(Username) || string.IsNullOrEmpty(Password))
         {

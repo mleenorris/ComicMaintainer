@@ -13,8 +13,67 @@ public sealed class LoginViewModelTests
     private readonly FakeSession _session = new();
     private readonly InMemorySettings _settings = new() { ServerUrl = "https://comics.example.test/" };
     private readonly RecordingNavigator _navigator = new();
+    private readonly FakeApi _api = new();
 
-    private LoginViewModel Create() => new(_session, _settings, _navigator);
+    private LoginViewModel Create() => new(_session, _settings, _navigator, _api);
+
+    [Theory]
+    [InlineData(true, "✓ Reached ComicMaintainer 3.0.0.")]
+    [InlineData(false, "✗ Reached ComicMaintainer 3.0.0.")]
+    public async Task TheConnectionTest_WorksBeforeSigningIn(bool success, string expected)
+    {
+        _api.ConnectionResult = new ConnectionTestResult(success, "Reached ComicMaintainer 3.0.0.");
+        var viewModel = Create();
+        viewModel.ServerUrl = "https://a.test";
+
+        await viewModel.TestConnectionCommand.ExecuteAsync(null);
+
+        Assert.Equal("https://a.test", Assert.Single(_api.TestedAddresses));
+        Assert.Equal(expected, viewModel.ConnectionResult);
+        Assert.Empty(_navigator.Pages);
+    }
+
+    [Fact]
+    public async Task TheConnectionTest_SaysSoWhileItRuns()
+    {
+        _api.HeldConnectionTest = new TaskCompletionSource<ConnectionTestResult>();
+        var viewModel = Create();
+
+        var test = viewModel.TestConnectionCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsTesting);
+        Assert.Equal("Testing connection...", viewModel.ConnectionResult);
+
+        _api.HeldConnectionTest.SetResult(_api.ConnectionResult);
+        await test;
+
+        Assert.False(viewModel.IsTesting);
+    }
+
+    [Fact]
+    public async Task ChangingTheAddress_ClearsTheConnectionTestsResult()
+    {
+        var viewModel = Create();
+        viewModel.ServerUrl = "https://a.test";
+        await viewModel.TestConnectionCommand.ExecuteAsync(null);
+
+        viewModel.ServerUrl = "https://b.test";
+
+        Assert.Empty(viewModel.ConnectionResult);
+    }
+
+    [Fact]
+    public async Task SigningIn_ClearsTheConnectionTestsResult()
+    {
+        var viewModel = Create();
+        await viewModel.TestConnectionCommand.ExecuteAsync(null);
+        viewModel.Username = "alice";
+        viewModel.Password = "pw";
+
+        await viewModel.SignInCommand.ExecuteAsync(null);
+
+        Assert.Empty(viewModel.ConnectionResult);
+    }
 
     [Fact]
     public async Task AFailedSignIn_ShowsWhyAndStaysOnThePage()

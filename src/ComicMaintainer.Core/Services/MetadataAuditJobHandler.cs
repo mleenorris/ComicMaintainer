@@ -1,11 +1,9 @@
 using System.Text.Json;
-using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.Core.Services;
 

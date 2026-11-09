@@ -229,7 +229,11 @@ public partial class FilesController
             issues = result.Issues,
             page = result.Page,
             per_page = result.PerPage,
-            total_pages = result.TotalPages
+            total_pages = result.TotalPages,
+            synopsis = result.Synopsis,
+            genres = result.Genres,
+            publication_status = result.PublicationStatus,
+            site_url = result.SiteUrl
         });
     }
 

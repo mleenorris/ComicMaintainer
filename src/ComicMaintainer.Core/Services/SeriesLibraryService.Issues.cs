@@ -244,7 +244,11 @@ public partial class SeriesLibraryService
             Issues = pageIssues,
             Page = page,
             PerPage = effectivePerPage,
-            TotalPages = totalPages
+            TotalPages = totalPages,
+            Synopsis = accumulator.Synopsis,
+            Genres = accumulator.Genres,
+            PublicationStatus = accumulator.PublicationStatus,
+            SiteUrl = accumulator.SiteUrl
         };
     }
 

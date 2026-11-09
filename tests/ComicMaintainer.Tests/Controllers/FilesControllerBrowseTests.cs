@@ -276,6 +276,31 @@ public sealed class FilesControllerBrowseTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeriesIssues("saga"));
     }
 
+    [Fact]
+    public async Task GetSeriesIssues_CarriesTheProviderDetails()
+    {
+        // The series page is built from this answer when the series is not on a loaded page.
+        _seriesLibrary
+            .Setup(s => s.GetSeriesIssuesAsync("saga", It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesIssuesResult
+            {
+                Id = "saga",
+                Synopsis = "A space opera.",
+                Genres = new List<string> { "Drama" },
+                PublicationStatus = SeriesPublicationStatus.Ongoing,
+                SiteUrl = "https://anilist.co/manga/1"
+            });
+
+        var result = await _controller.GetSeriesIssues("saga");
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        object? Field(string name) => ok.Value!.GetType().GetProperty(name)!.GetValue(ok.Value);
+        Assert.Equal("A space opera.", Field("synopsis"));
+        Assert.Equal(new[] { "Drama" }, (List<string>)Field("genres")!);
+        Assert.Equal(SeriesPublicationStatus.Ongoing, Field("publication_status"));
+        Assert.Equal("https://anilist.co/manga/1", Field("site_url"));
+    }
+
     // ------------------------------------------------------------ GetSeriesFolders
 
     [Fact]

@@ -661,6 +661,41 @@ public class SeriesLibraryServiceCoverageTests
         Assert.Contains(result.Issues, issue => issue.FilePath == expectedPath);
     }
 
+    private void SeedSeriesWithProviderDetails()
+    {
+        _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1") };
+        _records = new List<SeriesMetadataCacheRecord>
+        {
+            new()
+            {
+                NormalizedKey = "saga",
+                CanonicalTitle = "Saga",
+                LookupStatus = "success",
+                Synopsis = "A space opera.",
+                Genres = new List<string> { "Drama" },
+                PublicationStatus = SeriesPublicationStatus.Ongoing,
+                SiteUrl = "https://anilist.co/manga/1"
+            }
+        };
+        _filteredFiles["empty"] = new List<ComicFile>();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("empty")]
+    public async Task GetSeriesIssuesAsync_CarriesTheProviderDetails(string? filter)
+    {
+        SeedSeriesWithProviderDetails();
+
+        var result = await CreateService().GetSeriesIssuesAsync("saga", filter: filter);
+
+        Assert.NotNull(result);
+        Assert.Equal("A space opera.", result.Synopsis);
+        Assert.Equal(new[] { "Drama" }, result.Genres);
+        Assert.Equal(SeriesPublicationStatus.Ongoing, result.PublicationStatus);
+        Assert.Equal("https://anilist.co/manga/1", result.SiteUrl);
+    }
+
     [Theory]
     [InlineData("no-match")]
     [InlineData("empty")]

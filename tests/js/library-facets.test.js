@@ -14,6 +14,7 @@ const {
     seriesCalls,
     renderedTitles
 } = require('./support/library-helpers');
+const { bootSeries, seriesCard, issue, issuesBody } = require('./support/series-helpers');
 
 const FACETS_PATH = '/api/files/series/facets';
 const FACETS = {
@@ -250,6 +251,41 @@ test('a series with no match shows no details block at all', async () => {
 
     assert.equal(page.$('.series-detail-details'), null);
     assert.doesNotMatch(page.$('.series-detail-summary-body').textContent, /not available yet/);
+});
+
+// Opened from the overview, a deep link or a reload: the series is not on a
+// loaded library page, so the page is built from its issues response.
+async function seriesOutsideLoadedPage(details) {
+    const series = seriesCard({ metadata_source: 'AniListManga' });
+    const page = await bootSeries({
+        series,
+        library: makeSeriesList(2),
+        routes: { 'GET /api/files/series/saga/issues': issuesBody(series, [issue(1)], details) }
+    });
+    await page.settle();
+    return page;
+}
+
+test('a series outside the loaded page shows the details from its issues response', async () => {
+    const page = await seriesOutsideLoadedPage({
+        synopsis: 'A <b>space</b> opera.',
+        genres: ['Drama'],
+        publication_status: 'ongoing',
+        site_url: 'https://anilist.co/manga/1'
+    });
+
+    assert.deepEqual(page.$$('.series-detail-chip').map(chip => chip.textContent), ['Ongoing', 'Drama']);
+    assert.equal(page.$('.series-detail-link').getAttribute('href'), 'https://anilist.co/manga/1');
+    assert.equal(page.$('.series-detail-synopsis-text').textContent, 'A <b>space</b> opera.');
+    assert.equal(page.$('.series-detail-synopsis-text b'), null);
+    assert.doesNotMatch(page.$('.series-detail-summary-body').textContent, /not available yet/);
+});
+
+test('a series outside the loaded page with no details yet says they are coming', async () => {
+    const page = await seriesOutsideLoadedPage({ synopsis: null, genres: [], publication_status: null, site_url: null });
+
+    assert.equal(page.$('.series-detail-details'), null);
+    assert.match(page.$('.series-detail-summary-body').textContent, /Genres and status are not available yet/);
 });
 
 test('a page without the filter bar is left alone', async () => {

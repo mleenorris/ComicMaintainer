@@ -319,7 +319,11 @@
                                 has_external_image: data.has_external_image,
                                 external_image_url: data.external_image_url,
                                 issue_count: data.issue_count,
-                                total_size: data.total_size
+                                total_size: data.total_size,
+                                synopsis: data.synopsis,
+                                genres: data.genres,
+                                publication_status: data.publication_status,
+                                site_url: data.site_url
                             }
                         );
                     }

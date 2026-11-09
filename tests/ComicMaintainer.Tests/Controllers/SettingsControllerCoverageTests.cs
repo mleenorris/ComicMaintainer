@@ -58,7 +58,8 @@ public class SettingsControllerCoverageTests
             _lifetime.Object,
             _retag.Object,
             _broadcaster.Object,
-            _history.Object);
+            _history.Object,
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
 
     private static JsonElement OkJson(ActionResult<object> result) =>
         JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(result.Result).Value);
@@ -95,14 +96,14 @@ public class SettingsControllerCoverageTests
     // ---------------------------------------------------------------- GET /api/settings
 
     [Fact]
-    public void GetAllSettings_ReportsWhichSecretsAreStoredWithoutReturningThem()
+    public async Task GetAllSettings_ReportsWhichSecretsAreStoredWithoutReturningThem()
     {
         _settings.SmtpPassword = "smtp-pw-do-not-echo";
         _settings.SuwayomiPassword = "suwayomi-pw-do-not-echo";
         _settings.ErrorReportingGitHubToken = "ghp_token_do_not_echo";
         _settings.ComicVineApiKey = "cv-key-do-not-echo";
 
-        var result = CreateController().GetAllSettings();
+        var result = await CreateController().GetAllSettings();
 
         var json = OkJson(result);
         Assert.True(json.GetProperty("smtp_password_set").GetBoolean());
@@ -121,14 +122,14 @@ public class SettingsControllerCoverageTests
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    public void GetAllSettings_ReportsMissingSecretsAsNotSet(string? secret)
+    public async Task GetAllSettings_ReportsMissingSecretsAsNotSet(string? secret)
     {
         _settings.SmtpPassword = secret;
         _settings.SuwayomiPassword = secret;
         _settings.ErrorReportingGitHubToken = secret;
         _settings.ComicVineApiKey = secret;
 
-        var json = OkJson(CreateController().GetAllSettings());
+        var json = OkJson(await CreateController().GetAllSettings());
 
         Assert.False(json.GetProperty("smtp_password_set").GetBoolean());
         Assert.False(json.GetProperty("suwayomi_password_set").GetBoolean());
@@ -137,9 +138,9 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public void GetAllSettings_ReturnsFixedErrorReportingDestinationAndConfiguredValues()
+    public async Task GetAllSettings_ReturnsFixedErrorReportingDestinationAndConfiguredValues()
     {
-        var json = OkJson(CreateController().GetAllSettings());
+        var json = OkJson(await CreateController().GetAllSettings());
 
         Assert.Equal(ErrorReportingDestination.Owner, json.GetProperty("error_reporting_github_owner").GetString());
         Assert.Equal(ErrorReportingDestination.Repo, json.GetProperty("error_reporting_github_repo").GetString());
@@ -1166,13 +1167,13 @@ public class SettingsControllerCoverageTests
     // ---------------------------------------------------------------- email rate limit
 
     [Fact]
-    public void GetAllSettings_ReturnsTheEmailRateLimit()
+    public async Task GetAllSettings_ReturnsTheEmailRateLimit()
     {
         _settings.EmailMaxSendsPerHour = 20;
         _settings.EmailMaxSendsPerDay = 200;
         _settings.EmailMinSecondsBetweenSends = 30;
 
-        var json = OkJson(CreateController().GetAllSettings());
+        var json = OkJson(await CreateController().GetAllSettings());
 
         Assert.Equal(20, json.GetProperty("email_max_sends_per_hour").GetInt32());
         Assert.Equal(200, json.GetProperty("email_max_sends_per_day").GetInt32());

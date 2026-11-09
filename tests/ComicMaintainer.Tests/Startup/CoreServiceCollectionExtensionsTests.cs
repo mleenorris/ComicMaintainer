@@ -1,3 +1,4 @@
+using System.Net;
 using System.Reflection;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
@@ -11,6 +12,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 
@@ -314,6 +317,53 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         }
 
         Assert.False(Assert.IsType<SocketsHttpHandler>(handler).AllowAutoRedirect);
+    }
+
+    // HttpClient's default logging records request URLs, and a Discord webhook's path is its token.
+    [Fact]
+    public async Task NotificationClient_LogsNothing_UnlikeAClientWithDefaultLogging()
+    {
+        var logged = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var services = new ServiceCollection();
+        services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Trace).AddProvider(new RecordingLoggerProvider(logged)));
+        services.AddOptions<ComicMaintainer.Core.Configuration.AppSettings>();
+        AddComicMaintainerCore(services);
+        services.AddHttpClient("control");
+        foreach (var name in new[] { ComicMaintainer.Core.Notifications.NotificationHttpClient.HttpClientName, "control" })
+        {
+            services.Configure<HttpClientFactoryOptions>(name, options => options.HttpMessageHandlerBuilderActions.Add(
+                builder => builder.PrimaryHandler = new ComicMaintainer.Tests.Notifications.StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK))));
+        }
+
+        using var provider = services.BuildServiceProvider();
+        var clients = provider.GetRequiredService<IHttpClientFactory>();
+
+        using var notification = await clients.CreateClient(ComicMaintainer.Core.Notifications.NotificationHttpClient.HttpClientName)
+            .GetAsync("https://discord.example/api/webhooks/1/secret-token");
+        using var control = await clients.CreateClient("control").GetAsync("https://discord.example/control");
+
+        Assert.Contains(logged, category => category.StartsWith("System.Net.Http.HttpClient.control", StringComparison.Ordinal));
+        Assert.DoesNotContain(logged, category => category.Contains(ComicMaintainer.Core.Notifications.NotificationHttpClient.HttpClientName, StringComparison.Ordinal));
+    }
+
+    private sealed class RecordingLoggerProvider(System.Collections.Concurrent.ConcurrentBag<string> logged) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => new RecordingLogger(categoryName, logged);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class RecordingLogger(string category, System.Collections.Concurrent.ConcurrentBag<string> logged) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                logged.Add(category);
+        }
     }
 
     [Theory]

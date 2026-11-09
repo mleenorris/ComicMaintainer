@@ -32,7 +32,8 @@ public sealed class SettingsControllerSaveAllTests
             Mock.Of<IHostApplicationLifetime>(),
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IEventBroadcaster>(),
-            Mock.Of<IProcessingHistoryService>());
+            Mock.Of<IProcessingHistoryService>(),
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
     }
 
     private static JsonElement ProblemJson(ObjectResult result, int status)

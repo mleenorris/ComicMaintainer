@@ -65,6 +65,33 @@ public class ErrorReportQueueTests
     }
 
     [Fact]
+    public void ErrorReportFactory_MasksEveryNotificationSecret()
+    {
+        var settings = new AppSettings
+        {
+            NotifyNtfyToken = "ntfy-token-value",
+            NotifyGotifyToken = "gotify-token-value",
+            NotifyDiscordWebhookUrl = "https://discord.example/api/webhooks/1/hook-token",
+            NotifyWebhookUrl = "https://hook.example/private-path",
+            NotifyKomgaApiKey = "komga-api-key-value",
+            NotifyKavitaApiKey = "kavita-api-key-value",
+        };
+        var secrets = new[]
+        {
+            settings.NotifyNtfyToken, settings.NotifyGotifyToken, settings.NotifyDiscordWebhookUrl,
+            settings.NotifyWebhookUrl, settings.NotifyKomgaApiKey, settings.NotifyKavitaApiKey,
+        };
+        var factory = new ErrorReportFactory(new TestOptionsMonitor<AppSettings>(settings));
+
+        var report = factory.Create("Error", "Send failed", string.Join(" and ", secrets), null, "Svc", "corr-1", DateTime.UtcNow);
+
+        foreach (var secret in secrets)
+        {
+            Assert.DoesNotContain(secret, report.RenderedMessage);
+        }
+    }
+
+    [Fact]
     public void ErrorReportFactory_TreatsThePlaceholderCorrelationIdAsAbsent()
     {
         var factory = new ErrorReportFactory(new TestOptionsMonitor<AppSettings>(new AppSettings()));

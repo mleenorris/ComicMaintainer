@@ -5,6 +5,7 @@ using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -33,6 +34,7 @@ public class SettingsController : ControllerBase
     private readonly ISeriesLanguagePreferenceRetagService _languageRetag;
     private readonly IEventBroadcaster _eventBroadcaster;
     private readonly IProcessingHistoryService _processingHistory;
+    private readonly IAuthorizationService _authorization;
 
     public SettingsController(
         IOptionsMonitor<AppSettings> appSettings, 
@@ -44,7 +46,8 @@ public class SettingsController : ControllerBase
         IHostApplicationLifetime applicationLifetime,
         ISeriesLanguagePreferenceRetagService languageRetag,
         IEventBroadcaster eventBroadcaster,
-        IProcessingHistoryService processingHistory)
+        IProcessingHistoryService processingHistory,
+        IAuthorizationService authorization)
     {
         _appSettings = appSettings;
         _logger = logger;
@@ -56,13 +59,16 @@ public class SettingsController : ControllerBase
         _languageRetag = languageRetag;
         _eventBroadcaster = eventBroadcaster;
         _processingHistory = processingHistory;
+        _authorization = authorization;
     }
 
     // RESTful endpoint: GET /api/settings - Get all settings
     [HttpGet]
-    public ActionResult<object> GetAllSettings()
+    public async Task<ActionResult<object>> GetAllSettings()
     {
         _logger.LogInformation("GetAllSettings endpoint called");
+
+        var isAdministrator = (await _authorization.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister)).Succeeded;
 
         var settings = new
         {
@@ -134,7 +140,9 @@ public class SettingsController : ControllerBase
             // URLs (which carry a token) are never returned; only whether one is stored.
             notify_ntfy_enabled = _appSettings.CurrentValue.NotifyNtfyEnabled,
             notify_ntfy_url = _appSettings.CurrentValue.NotifyNtfyUrl,
-            notify_ntfy_topic = _appSettings.CurrentValue.NotifyNtfyTopic,
+            // On a public ntfy server knowing the topic is enough to subscribe to it, so it goes
+            // only to those who can change it.
+            notify_ntfy_topic = isAdministrator ? _appSettings.CurrentValue.NotifyNtfyTopic : string.Empty,
             notify_ntfy_token_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.NotifyNtfyToken),
             notify_ntfy_events = _appSettings.CurrentValue.NotifyNtfyEvents,
             notify_gotify_enabled = _appSettings.CurrentValue.NotifyGotifyEnabled,

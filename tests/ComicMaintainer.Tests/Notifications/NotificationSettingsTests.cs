@@ -278,8 +278,31 @@ public sealed class NotificationSettingsTests : IDisposable
         Assert.True(Saved().GetProperty("NotifyKavitaEnabled").GetBoolean());
     }
 
+    [Theory]
+    [InlineData(true, "comics")]
+    [InlineData(false, "")]
+    public async Task GetAllSettings_TheNtfyTopic_GoesOnlyToAdministrators(bool administrator, string expected)
+    {
+        var controller = new SettingsController(
+            new TestOptionsMonitor<AppSettings>(new AppSettings { NotifyNtfyTopic = "comics" }),
+            NullLogger<SettingsController>.Instance,
+            Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>(),
+            Mock.Of<IBatchJobRegistry>(),
+            Mock.Of<IFileStoreService>(),
+            Mock.Of<ISettingsService>(),
+            Mock.Of<IHostApplicationLifetime>(),
+            Mock.Of<ISeriesLanguagePreferenceRetagService>(),
+            Mock.Of<IEventBroadcaster>(),
+            Mock.Of<IProcessingHistoryService>(),
+            administrator ? TestAuthorization.Administrator : TestAuthorization.NotAdministrator);
+
+        var json = JsonSerializer.SerializeToElement(((OkObjectResult)(await controller.GetAllSettings()).Result!).Value);
+
+        Assert.Equal(expected, json.GetProperty("notify_ntfy_topic").GetString());
+    }
+
     [Fact]
-    public void GetAllSettings_ReturnsWhetherSecretsAreSet_NeverTheSecrets()
+    public async Task GetAllSettings_ReturnsWhetherSecretsAreSet_NeverTheSecrets()
     {
         var settings = new AppSettings
         {
@@ -301,9 +324,10 @@ public sealed class NotificationSettingsTests : IDisposable
             Mock.Of<IHostApplicationLifetime>(),
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IEventBroadcaster>(),
-            Mock.Of<IProcessingHistoryService>());
+            Mock.Of<IProcessingHistoryService>(),
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
 
-        var json = JsonSerializer.Serialize(((OkObjectResult)controller.GetAllSettings().Result!).Value);
+        var json = JsonSerializer.Serialize(((OkObjectResult)(await controller.GetAllSettings()).Result!).Value);
 
         Assert.DoesNotContain("secret-", json);
         Assert.Contains("\"notify_ntfy_token_set\":true", json);

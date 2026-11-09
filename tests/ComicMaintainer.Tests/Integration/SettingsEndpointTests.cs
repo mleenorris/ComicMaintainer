@@ -244,7 +244,10 @@ public sealed class SettingsEndpointTests : IDisposable
 
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(overrides));
             builder.ConfigureTestServices(services =>
-                services.AddSingleton<IAuthorizationMiddlewareResultHandler, AllowAllAuthorizationHandler>());
+            {
+                services.AddSingleton<IAuthorizationMiddlewareResultHandler, AllowAllAuthorizationHandler>();
+                services.AddSingleton(ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
+            });
         }
     }
 

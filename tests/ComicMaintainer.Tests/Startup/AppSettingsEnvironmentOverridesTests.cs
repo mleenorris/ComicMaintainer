@@ -67,7 +67,8 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
             Mock.Of<IHostApplicationLifetime>(),
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IEventBroadcaster>(),
-            Mock.Of<IProcessingHistoryService>());
+            Mock.Of<IProcessingHistoryService>(),
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
 
     private static string WwwrootFile(string name)
     {
@@ -100,9 +101,9 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
     }
 
     [Fact]
-    public void EveryApiField_IsAFieldOfGetAllSettings()
+    public async Task EveryApiField_IsAFieldOfGetAllSettings()
     {
-        var json = JsonSerializer.SerializeToElement(((OkObjectResult)CreateController().GetAllSettings().Result!).Value);
+        var json = JsonSerializer.SerializeToElement(((OkObjectResult)(await CreateController().GetAllSettings()).Result!).Value);
 
         Assert.All(
             AppSettingsEnvironmentOverrides.All.Where(o => o.ApiField is not null),
@@ -155,14 +156,14 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
     }
 
     [Fact]
-    public void GetAllSettings_ListsThePinnedFieldsAndTheirVariables()
+    public async Task GetAllSettings_ListsThePinnedFieldsAndTheirVariables()
     {
         _environment.Set("SMTP_HOST", "mail.example");
         _environment.Set("SMTP_PASSWORD", "secret");
         _environment.Set("SMTP_PORT", "not-a-number");
         _environment.Set("WATCHED_DIR", "/library");
 
-        var json = JsonSerializer.SerializeToElement(((OkObjectResult)CreateController().GetAllSettings().Result!).Value);
+        var json = JsonSerializer.SerializeToElement(((OkObjectResult)(await CreateController().GetAllSettings()).Result!).Value);
 
         var entries = json.GetProperty("env_locked").EnumerateArray()
             .ToDictionary(e => e.GetProperty("field").GetString()!, e => e.GetProperty("variable").GetString()!);
@@ -172,9 +173,9 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
     }
 
     [Fact]
-    public void GetAllSettings_WithNothingPinned_ReturnsAnEmptyList()
+    public async Task GetAllSettings_WithNothingPinned_ReturnsAnEmptyList()
     {
-        var json = JsonSerializer.SerializeToElement(((OkObjectResult)CreateController().GetAllSettings().Result!).Value);
+        var json = JsonSerializer.SerializeToElement(((OkObjectResult)(await CreateController().GetAllSettings()).Result!).Value);
 
         Assert.Empty(EnvLockFields(json));
     }

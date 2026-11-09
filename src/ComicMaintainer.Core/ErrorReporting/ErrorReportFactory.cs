@@ -191,11 +191,17 @@ public sealed class ErrorReportFactory : IErrorReportFactory
     private IReadOnlyCollection<string> CollectLiteralSecrets()
     {
         var settings = _appSettings.CurrentValue;
-        var secrets = new List<string>(3);
+        var secrets = new List<string>(9);
 
         AddIfPresent(secrets, settings.SmtpPassword);
         AddIfPresent(secrets, settings.ComicVineApiKey);
         AddIfPresent(secrets, settings.ErrorReportingGitHubToken);
+        AddIfPresent(secrets, settings.NotifyNtfyToken);
+        AddIfPresent(secrets, settings.NotifyGotifyToken);
+        AddIfPresent(secrets, settings.NotifyDiscordWebhookUrl);
+        AddIfPresent(secrets, settings.NotifyWebhookUrl);
+        AddIfPresent(secrets, settings.NotifyKomgaApiKey);
+        AddIfPresent(secrets, settings.NotifyKavitaApiKey);
 
         return secrets;
     }

@@ -561,6 +561,27 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         }
     }
 
+    /// <summary>
+    /// The string property <paramref name="name"/> of <paramref name="item"/>; null when it is
+    /// absent or of another type, so one odd field does not cost the whole candidate.
+    /// </summary>
+    private protected static string? ReadString(JsonElement item, string name)
+        => item.ValueKind == JsonValueKind.Object
+           && item.TryGetProperty(name, out var value)
+           && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    /// <summary>The whole-number property <paramref name="name"/> when it is above zero, otherwise null.</summary>
+    private protected static int? ReadPositiveInt(JsonElement item, string name)
+        => item.ValueKind == JsonValueKind.Object
+           && item.TryGetProperty(name, out var value)
+           && value.ValueKind == JsonValueKind.Number
+           && value.TryGetInt32(out var number)
+           && number > 0
+            ? number
+            : null;
+
     /// <summary>Reads a string or integer JSON id as a string; null when absent.</summary>
     private protected static string? ReadId(JsonElement item)
     {

@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Reader.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -212,6 +213,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Source).HasMaxLength(128);
             entity.Property(e => e.SourceId).HasMaxLength(128);
             entity.Property(e => e.LookupStatus).HasMaxLength(64);
+            entity.Property(e => e.SiteUrl).HasMaxLength(ProviderMetadataText.MaxSiteUrlLength);
+            entity.Property(e => e.PublicationStatus).HasMaxLength(32);
+            entity.Property(e => e.Origin).HasMaxLength(ProviderMetadataText.MaxOriginLength);
             // Aliases and UserAliases are stored as newline-delimited strings to
             // keep the entity model portable across providers without requiring
             // additional join tables.
@@ -714,6 +718,21 @@ public class SeriesMetadataCacheEntity
     /// provider returned no description or the series is unmatched.
     /// </summary>
     public string? Synopsis { get; set; }
+
+    /// <summary>The series' page on the provider's website, null until a lookup reports it.</summary>
+    public string? SiteUrl { get; set; }
+
+    /// <summary>JSON array of the provider's genre names, null until a lookup reports any.</summary>
+    public string? GenresJson { get; set; }
+
+    /// <summary>A <see cref="SeriesPublicationStatus"/> value, null until a lookup reports one.</summary>
+    public string? PublicationStatus { get; set; }
+
+    /// <summary>Chapters or issues the provider reports, null until a lookup reports them.</summary>
+    public int? TotalChapters { get; set; }
+
+    /// <summary>Primary language tag the series was first published in, null until a lookup reports it.</summary>
+    public string? Origin { get; set; }
 }
 
 /// <summary>

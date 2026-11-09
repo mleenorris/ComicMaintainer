@@ -93,6 +93,29 @@ public class SeriesMetadataCacheRecord
     [JsonPropertyName("synopsis")]
     public string? Synopsis { get; set; }
 
+    /// <summary>The matched series' page on the provider's website, or null when unknown.</summary>
+    [JsonPropertyName("site_url")]
+    public string? SiteUrl { get; set; }
+
+    /// <summary>Genres from the last lookup that reported them; empty until then.</summary>
+    [JsonPropertyName("genres")]
+    public List<string> Genres { get; set; } = new();
+
+    /// <summary>
+    /// One of the <see cref="SeriesPublicationStatus"/> values, or null when no lookup has
+    /// reported one. Unrelated to <see cref="LookupStatus"/>, which describes our own lookup.
+    /// </summary>
+    [JsonPropertyName("publication_status")]
+    public string? PublicationStatus { get; set; }
+
+    /// <summary>See <see cref="ExternalSeriesMetadata.TotalChapters"/>.</summary>
+    [JsonPropertyName("total_chapters")]
+    public int? TotalChapters { get; set; }
+
+    /// <summary>See <see cref="ExternalSeriesMetadata.Origin"/>.</summary>
+    [JsonPropertyName("origin")]
+    public string? Origin { get; set; }
+
     /// <summary>
     /// Monotonic version bumped on every cache mutation that should
     /// invalidate stale per-file metadata stamps. Surfaced so external

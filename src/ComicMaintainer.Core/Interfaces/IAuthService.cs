@@ -13,6 +13,14 @@ public interface IAuthService
     /// with <paramref name="clientAddress"/>; repeated failures lock the account out for a while.
     /// </summary>
     Task<(bool Success, string Token, string? Error)> LoginAsync(string username, string password, string? clientAddress = null);
+
+    /// <summary>
+    /// Checks a username and password by every rule of a sign-in (lockout, disabled accounts, published passwords,
+    /// failure logging with <paramref name="clientAddress"/>) without starting a session, for clients that send the
+    /// password with each request. Returns the account, or null when the sign-in would have been refused.
+    /// </summary>
+    Task<ApplicationUser?> VerifyPasswordAsync(string username, string password, string? clientAddress = null);
+
     Task<(bool Success, string? Error)> RegisterAsync(string username, string password, string email, string? fullName = null);
     /// <summary>
     /// Changes the password; this signs every session of the account out and revokes its API key. A wrong current

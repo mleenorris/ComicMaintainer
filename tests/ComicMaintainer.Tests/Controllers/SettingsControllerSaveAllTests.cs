@@ -59,6 +59,7 @@ public sealed class SettingsControllerSaveAllTests
             Suwayomi = new SuwayomiUpdate(Enabled: false),
             ErrorReporting = new ErrorReportingUpdate(Enabled: false),
             Notifications = new NotificationsUpdate(Komga: new NotificationTargetUpdate(Enabled: true)),
+            Opds = new OpdsUpdate(Enabled: true),
         };
         SettingsUpdate? saved = null;
         _settingsService
@@ -81,6 +82,7 @@ public sealed class SettingsControllerSaveAllTests
         Assert.False(saved.Suwayomi!.Enabled);
         Assert.False(saved.ErrorReporting!.Enabled);
         Assert.True(saved.Notifications!.Komga!.Enabled);
+        Assert.True(saved.Opds!.Enabled);
     }
 
     [Fact]

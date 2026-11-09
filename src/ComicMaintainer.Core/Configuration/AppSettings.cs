@@ -585,4 +585,15 @@ public class AppSettings
     /// backup). Values below 1 disable pruning. Defaults to 7.
     /// </summary>
     public int DatabaseBackupRetention { get; set; } = 7;
+
+    // ---------------------------------------------------------------------
+    // OPDS catalog
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Whether the OPDS catalog under <c>/opds/v1.2/</c> is served, so that comic apps (Panels, Chunky, KOReader and
+    /// others) can browse and read the library with HTTP Basic credentials. Off by default because it adds a way to
+    /// sign in; while off, every <c>/opds</c> route answers 404.
+    /// </summary>
+    public bool OpdsEnabled { get; set; }
 }

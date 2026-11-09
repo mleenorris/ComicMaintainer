@@ -166,6 +166,7 @@ public class SettingsController : ControllerBase
             notify_kavita_api_key_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.NotifyKavitaApiKey),
             notify_kavita_library_id = _appSettings.CurrentValue.NotifyKavitaLibraryId,
             notify_kavita_events = _appSettings.CurrentValue.NotifyKavitaEvents,
+            opds_enabled = _appSettings.CurrentValue.OpdsEnabled,
             // The settings the environment pins: one entry per field above, naming the variable.
             env_locked = EnvLockEntries(AppSettingsEnvironmentOverrides.Active())
         };
@@ -204,7 +205,8 @@ public class SettingsController : ControllerBase
             EmailRateLimit = request.EmailRateLimit,
             Suwayomi = request.Suwayomi,
             ErrorReporting = request.ErrorReporting,
-            Notifications = request.Notifications
+            Notifications = request.Notifications,
+            Opds = request.Opds
         };
 
         return await SaveAsync(
@@ -720,6 +722,7 @@ public class SettingsController : ControllerBase
         public SuwayomiUpdate? Suwayomi { get; set; }
         public ErrorReportingUpdate? ErrorReporting { get; set; }
         public NotificationsUpdate? Notifications { get; set; }
+        public OpdsUpdate? Opds { get; set; }
     }
 
     /// <summary>The series cover image limits of <see cref="AllSettingsRequest"/>, with sizes in megabytes.</summary>

@@ -266,7 +266,8 @@ showMessage('Default preferred language updated', 'success');
             notify_kavita_url: ['notifyKavitaUrl'],
             notify_kavita_api_key_set: ['notifyKavitaToken', 'notifyKavitaClearTokenCheckbox'],
             notify_kavita_library_id: ['notifyKavitaLibraryId'],
-            notify_kavita_events: ['notifyKavitaEventNewChapters', 'notifyKavitaEventLibraryChanged']
+            notify_kavita_events: ['notifyKavitaEventNewChapters', 'notifyKavitaEventLibraryChanged'],
+            opds_enabled: ['opdsEnabledCheckbox']
         });
 
         /**
@@ -425,6 +426,11 @@ showMessage('Default preferred language updated', 'success');
                         : 'Enter a password only if your Suwayomi server requires one.';
                 }
                 if (suwayomiClearPassword) suwayomiClearPassword.checked = false;
+
+                // The OPDS catalog: the feed URL is this page's own origin and base path, so it matches what the browser sees.
+                document.getElementById('opdsEnabledCheckbox').checked = !!settingsData.opds_enabled;
+                document.getElementById('opdsFeedUrl').value = window.location.origin + apiUrl('/opds/v1.2/catalog');
+                loadOpdsApiKeyStatus(afterSave);
                 const suwayomiDownloadsDirectory = document.getElementById('suwayomiDownloadsDirectory');
                 const suwayomiImportDirectory = document.getElementById('suwayomiImportDirectory');
                 if (suwayomiDownloadsDirectory) suwayomiDownloadsDirectory.value = settingsData.suwayomi_downloads_directory || '';
@@ -1046,6 +1052,65 @@ if (result.success) {
             }
         }
         
+        // The signed-in user's API key, which comic apps can send as the password (with Authelia, the only
+        // one they can send). The server shows a new key once, so it stays on this page only until the page is left.
+        let opdsHasApiKey = false;
+
+        function showCreatedApiKey(apiKey) {
+            document.getElementById('opdsApiKeyValue').value = apiKey;
+            document.getElementById('opdsApiKeyResult').hidden = !apiKey;
+        }
+
+        async function loadOpdsApiKeyStatus(keepCreatedKey) {
+            if (!keepCreatedKey) showCreatedApiKey('');
+            // An Authelia session has no password of its own here, and the server does not ask it for one.
+            document.getElementById('opdsApiKeyPasswordGroup').hidden = isAutheliaAuthenticated();
+            const status = document.getElementById('opdsApiKeyStatus');
+            try {
+                const key = await apiFetch('/api/auth/api-key');
+                opdsHasApiKey = !!key.hasApiKey;
+                document.getElementById('opdsApiKeyButton').textContent = opdsHasApiKey ? 'Replace API key' : 'Create API key';
+                if (opdsHasApiKey) {
+                    const used = key.lastUsedAt ? `last used ${new Date(key.lastUsedAt).toLocaleString()}` : 'not used yet';
+                    status.textContent = `You have an API key, created ${new Date(key.createdAt).toLocaleString()}, ${used}.`;
+                } else {
+                    status.textContent = 'You have no API key yet.';
+                }
+            } catch (error) {
+                console.warn('Could not read the API key status:', error);
+                status.textContent = 'Could not check whether you have an API key.';
+            }
+        }
+
+        async function createOpdsApiKey() {
+            const passwordInput = document.getElementById('opdsApiKeyPassword');
+            const body = {};
+            if (!isAutheliaAuthenticated()) {
+                if (!passwordInput.value) {
+                    showMessage('Enter your current password to create an API key.', 'error');
+                    passwordInput.focus();
+                    return;
+                }
+                body.currentPassword = passwordInput.value;
+            }
+            if (opdsHasApiKey && !confirm('Replace your API key?\n\nComic apps and scripts using the current key stop working until they have the new one.')) return;
+
+            const button = document.getElementById('opdsApiKeyButton');
+            button.disabled = true;
+            try {
+                const created = await apiFetch('/api/auth/api-key', { method: 'POST', body });
+                passwordInput.value = '';
+                showCreatedApiKey(created.apiKey);
+                showMessage('API key created. Copy it now: it is not shown again.', 'success');
+                await loadOpdsApiKeyStatus(true);
+            } catch (error) {
+                if (error.authHandled) return;
+                showMessage('Could not create the API key: ' + error.message, 'error', { reference: error });
+            } finally {
+                button.disabled = false;
+            }
+        }
+
         function openChangePasswordModal() {
             const modal = document.getElementById('changePasswordModal');
             const form = document.getElementById('changePasswordForm');
@@ -1478,6 +1543,8 @@ errorEl.textContent = 'An error occurred. Please try again.';
             if (notifications) {
                 settingsUpdate.notifications = notifications;
             }
+
+            settingsUpdate.opds = { enabled: unlessPinned('opds_enabled', document.getElementById('opdsEnabledCheckbox').checked) };
 
             try {
                 await saveAllSettings(settingsUpdate);

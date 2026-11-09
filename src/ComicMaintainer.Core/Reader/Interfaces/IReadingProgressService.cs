@@ -14,6 +14,12 @@ public interface IReadingProgressService
     Task<ReadingProgress?> GetProgressAsync(string userId, string contentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns the user's reading progress for each of <paramref name="contentIds"/> that has any, keyed by
+    /// content id, in one query.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, ReadingProgress>> GetProgressForContentAsync(string userId, IReadOnlyCollection<string> contentIds, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Saves (creates or updates) reading progress for the given user and content.
     /// </summary>
     Task SaveProgressAsync(ReadingProgress progress, CancellationToken cancellationToken = default);

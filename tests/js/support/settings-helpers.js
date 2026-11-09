@@ -41,6 +41,7 @@ function settingsResponse(overrides = {}) {
         suwayomi_password_set: true,
         suwayomi_downloads_directory: '/suwayomi/downloads/mangas',
         suwayomi_import_directory: 'Manga',
+        opds_enabled: true,
         default_library_view: 'series',
         allow_registration: true,
         default_preferred_language: 'ja',
@@ -84,6 +85,7 @@ function settingsRoutes(settings = {}) {
         'GET /api/settings': settingsResponse(settings),
         'GET /api/backups': { backups: [], restore_pending: false },
         'GET /api/email/status': { configured: true, from_address: 'comics@example.com', max_attachment_mb: 30 },
+        'GET /api/auth/api-key': { hasApiKey: false, createdAt: null, lastUsedAt: null, header: 'X-API-Key' },
         'GET /api/suwayomi/status': { enabled: false, connected: false }
     };
 }

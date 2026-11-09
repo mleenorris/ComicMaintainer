@@ -328,8 +328,9 @@ internal static class WebApplicationExtensions
                 }
             }
             
-            // Prevent caching for API endpoints and HTML pages
-            if (context.Request.Path.StartsWithSegments("/api"))
+            // Prevent caching for API endpoints and HTML pages. The OPDS feeds are per user too; its pages and
+            // covers set their own, private, cache policy.
+            if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments(OpdsFeatureGateMiddleware.PathPrefix))
             {
                 context.Response.Headers["Cache-Control"] = "no-store, private";
             }
@@ -423,6 +424,10 @@ internal static class WebApplicationExtensions
             }
         }));
 
+        // Before routing and authentication: while the OPDS catalog is off its routes do not exist, even to clients
+        // that send no credentials.
+        app.UseMiddleware<OpdsFeatureGateMiddleware>();
+
         app.UseRouting();
 
         // Request timeouts must run *after* routing: RequestTimeoutsMiddleware reads the
@@ -464,13 +469,14 @@ internal static class WebApplicationExtensions
                 return;
             }
 
-            // Only serve index.html for non-API and non-hub routes
+            // Only serve index.html for non-API, non-hub and non-OPDS routes
             if (context.Request.Path.StartsWithSegments("/api") ||
-                context.Request.Path.StartsWithSegments("/hubs"))
+                context.Request.Path.StartsWithSegments("/hubs") ||
+                context.Request.Path.StartsWithSegments(OpdsFeatureGateMiddleware.PathPrefix))
             {
                 context.Response.StatusCode = 404;
                 context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync("{\"error\":\"Not Found\",\"message\":\"The requested endpoint does not exist\"}");
+                await context.Response.WriteAsync(UnknownEndpointResponse.Body);
                 return;
             }
 

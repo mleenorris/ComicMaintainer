@@ -149,6 +149,18 @@ test('under a base path the app talks to its API inside it', async () => {
     assert.deepEqual(page.unmatchedRequests, []);
 });
 
+test('under a base path the Settings page shows the OPDS feed URL inside it', async () => {
+    const page = loadPage({
+        basePath: BASE,
+        url: `http://localhost${BASE}/index.html#/settings`,
+        localStorage: { jwt_token: validToken(), username: 'alice' },
+        routes: underBase({ ...bootRoutes(), ...SERIES_ROUTES, ...settingsRoutes() })
+    });
+    await page.settle();
+
+    assert.equal(page.$('#opdsFeedUrl').value, `http://localhost${BASE}/opds/v1.2/catalog`);
+});
+
 test('under a base path the Settings page keeps its requests inside it', async () => {
     const page = loadPage({
         basePath: BASE,

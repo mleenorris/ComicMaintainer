@@ -158,6 +158,9 @@ public static class AppSettingsEnvironmentOverrides
         Text("NOTIFY_KAVITA_API_KEY", o => o.NotifyKavitaApiKey, "notify_kavita_api_key_set"),
         Text("NOTIFY_KAVITA_LIBRARY_ID", o => o.NotifyKavitaLibraryId, "notify_kavita_library_id"),
         Text("NOTIFY_KAVITA_EVENTS", o => o.NotifyKavitaEvents, "notify_kavita_events"),
+
+        // OPDS catalog: it adds HTTP Basic sign-in under /opds, so an operator can pin it off.
+        Flag("OPDS_ENABLED", o => o.OpdsEnabled, "opds_enabled"),
     ];
 
     /// <summary>The overrides whose variable currently forces a value.</summary>

@@ -36,6 +36,23 @@ public class ReadingProgressService : IReadingProgressService
     }
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyDictionary<string, ReadingProgress>> GetProgressForContentAsync(string userId, IReadOnlyCollection<string> contentIds, CancellationToken cancellationToken = default)
+    {
+        if (contentIds.Count == 0)
+        {
+            return new Dictionary<string, ReadingProgress>(StringComparer.Ordinal);
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entities = await db.ReadingProgresses
+            .AsNoTracking()
+            .Where(p => p.UserId == userId && contentIds.Contains(p.ContentId))
+            .ToListAsync(cancellationToken);
+
+        return entities.Select(MapToModel).ToDictionary(p => p.ContentId, StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc/>
     public async Task SaveProgressAsync(ReadingProgress progress, CancellationToken cancellationToken = default)
     {
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);

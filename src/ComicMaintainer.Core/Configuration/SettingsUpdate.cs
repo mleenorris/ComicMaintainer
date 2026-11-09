@@ -25,7 +25,11 @@ public sealed record SettingsUpdate
     public SuwayomiUpdate? Suwayomi { get; init; }
     public ErrorReportingUpdate? ErrorReporting { get; init; }
     public NotificationsUpdate? Notifications { get; init; }
+    public OpdsUpdate? Opds { get; init; }
 }
+
+/// <summary>The OPDS catalog group of a <see cref="SettingsUpdate"/>.</summary>
+public sealed record OpdsUpdate(bool? Enabled = null);
 
 /// <summary>The database-cleanup group of a <see cref="SettingsUpdate"/>; see <see cref="DatabaseCleanupSettings"/> for the ranges.</summary>
 public sealed record DatabaseCleanupUpdate(

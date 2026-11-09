@@ -87,6 +87,35 @@ public class AuthService : IAuthService
     /// </summary>
     public async Task<(bool Success, string Token, string? Error)> LoginAsync(string username, string password, string? clientAddress = null)
     {
+        var (user, error) = await CheckSignInAsync(username, password, clientAddress);
+        if (user is null)
+        {
+            return (false, string.Empty, error);
+        }
+
+        _logger.LogInformation("{Username} signed in from {ClientAddress}", LoggingHelper.SanitizeForLog(username), DescribeClient(clientAddress));
+        var token = await GenerateJwtTokenAsync(user);
+        return (true, token, null);
+    }
+
+    /// <summary>
+    /// Checks a username and password with every rule of <see cref="LoginAsync"/> without issuing a session token, so
+    /// a client that sends its password on each request is held to the same lockout, disabled-account and
+    /// published-password rules, and fails the same way in the auth log.
+    /// </summary>
+    public async Task<ApplicationUser?> VerifyPasswordAsync(string username, string password, string? clientAddress = null)
+    {
+        var (user, _) = await CheckSignInAsync(username, password, clientAddress);
+        if (user is not null)
+        {
+            _logger.LogInformation("Verified the password of {Username} from {ClientAddress}", LoggingHelper.SanitizeForLog(username), DescribeClient(clientAddress));
+        }
+
+        return user;
+    }
+
+    private async Task<(ApplicationUser? User, string? Error)> CheckSignInAsync(string username, string password, string? clientAddress)
+    {
         var safeUsername = LoggingHelper.SanitizeForLog(username);
         var client = DescribeClient(clientAddress);
 
@@ -125,22 +154,20 @@ public class AuthService : IAuthService
                     safeUsername, client);
             }
 
-            return (false, string.Empty, PublishedPasswordError);
+            return (null, PublishedPasswordError);
         }
 
         await _userManager.ResetAccessFailedCountAsync(user);
         user.LastLoginAt = DateTime.UtcNow;
         await _userManager.UpdateAsync(user);
 
-        _logger.LogInformation("{Username} signed in from {ClientAddress}", safeUsername, client);
-        var token = await GenerateJwtTokenAsync(user);
-        return (true, token, null);
+        return (user, null);
     }
 
-    private (bool Success, string Token, string? Error) FailedSignIn(string safeUsername, string client, string reason)
+    private (ApplicationUser? User, string? Error) FailedSignIn(string safeUsername, string client, string reason)
     {
         _logger.LogWarning("Failed sign-in for {Username} from {ClientAddress}: {Reason}", safeUsername, client, reason);
-        return (false, string.Empty, InvalidCredentialsError);
+        return (null, InvalidCredentialsError);
     }
 
     private async Task RecordFailedAttemptAsync(ApplicationUser user, string safeUsername, string client)
@@ -362,8 +389,12 @@ public class AuthService : IAuthService
         var user = await _userManager.FindByIdAsync(userId);
         return user?.ApiKeyHash is null
             ? ApiKeyStatus.None
-            : new ApiKeyStatus(true, user.ApiKeyCreatedAt, user.ApiKeyLastUsedAt);
+            : new ApiKeyStatus(true, AsUtc(user.ApiKeyCreatedAt), AsUtc(user.ApiKeyLastUsedAt));
     }
+
+    // Written as UTC, but SQLite hands them back without a kind, and a caller's clock is not UTC.
+    private static DateTime? AsUtc(DateTime? value) =>
+        value is { } time ? DateTime.SpecifyKind(time, DateTimeKind.Utc) : null;
 
     private async Task<string> GenerateJwtTokenAsync(ApplicationUser user)
     {

@@ -95,6 +95,7 @@ test('saving sends every group in one request with the edited values', async () 
         // The saved settings are then reloaded from the server.
         'GET /api/backups',
         'GET /api/settings',
+        'GET /api/auth/api-key',
         'GET /api/email/status'
     ]);
     assert.deepEqual(saveBody(page, since), {
@@ -159,7 +160,8 @@ test('saving sends every group in one request with the edited values', async () 
             webhook: { enabled: false, url: null, events: '' },
             komga: { enabled: false, url: '', events: '', token: null, libraryId: '' },
             kavita: { enabled: false, url: '', events: '', token: null, libraryId: '' }
-        }
+        },
+        opds: { enabled: true }
     });
     const call = callsTo(page, SAVE_ROUTE, since)[0];
     assert.equal(call.headers['content-type'], 'application/json');
@@ -600,6 +602,24 @@ test('a pinned setting is left out of the save, and its value is not validated',
     assert.equal('staleCleanupMaxRemovalPercent' in body.databaseCleanup, false);
     assert.equal('enabled' in body.suwayomi, false);
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
+});
+
+test('the OPDS switch is saved with the rest of the page, unless the environment pins it', async () => {
+    const page = await bootSettings({ settings: { opds_enabled: false } });
+    routeSave(page);
+    assert.equal(page.$('#opdsEnabledCheckbox').checked, false);
+    page.input('#opdsEnabledCheckbox', true);
+
+    let since = await save(page);
+
+    assert.deepEqual(saveBody(page, since).opds, { enabled: true });
+
+    const pinned = await bootSettings({ settings: { env_locked: [{ field: 'opds_enabled', variable: 'OPDS_ENABLED' }] } });
+    routeSave(pinned);
+    since = await save(pinned);
+
+    assert.equal(pinned.$('#opdsEnabledCheckbox').disabled, true);
+    assert.deepEqual(saveBody(pinned, since).opds, {});
 });
 
 test('a pinned upload-size pair is not cross-checked', async () => {

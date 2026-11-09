@@ -468,6 +468,11 @@ public class SettingsService : ISettingsService
             StageNotifications(values, notifications, current);
         }
 
+        if (update.Opds is { } opds)
+        {
+            StageIfSet(values, nameof(AppSettings.OpdsEnabled), opds.Enabled);
+        }
+
         await SaveValuesAsync(values, cancellationToken);
     }
 

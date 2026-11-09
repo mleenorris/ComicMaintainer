@@ -97,6 +97,41 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task VerifyPasswordAsync_WithTheRightPassword_ReturnsTheAccountAndCountsAsASignIn()
+    {
+        var user = new ApplicationUser { Id = "reader", UserName = "reader", IsActive = true };
+        _mockUserManager.Setup(x => x.FindByNameAsync("reader")).ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "Right1234")).ReturnsAsync(true);
+
+        var verified = await _authService.VerifyPasswordAsync("reader", "Right1234", "198.51.100.1");
+
+        Assert.Same(user, verified);
+        Assert.NotNull(user.LastLoginAt);
+        _mockUserManager.Verify(x => x.ResetAccessFailedCountAsync(user), Times.Once);
+    }
+
+    [Fact]
+    public async Task VerifyPasswordAsync_WithAWrongPassword_ReturnsNull()
+    {
+        var user = new ApplicationUser { Id = "reader", UserName = "reader", IsActive = true };
+        _mockUserManager.Setup(x => x.FindByNameAsync("reader")).ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "wrong")).ReturnsAsync(false);
+
+        Assert.Null(await _authService.VerifyPasswordAsync("reader", "wrong"));
+        _mockUserManager.Verify(x => x.AccessFailedAsync(user), Times.Once);
+    }
+
+    [Fact]
+    public async Task VerifyPasswordAsync_ForADisabledAccount_ReturnsNull()
+    {
+        var user = new ApplicationUser { Id = "reader", UserName = "reader", IsActive = false };
+        _mockUserManager.Setup(x => x.FindByNameAsync("reader")).ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "Right1234")).ReturnsAsync(true);
+
+        Assert.Null(await _authService.VerifyPasswordAsync("reader", "Right1234"));
+    }
+
+    [Fact]
     public async Task LoginAsync_WithNonExistentUser_ReturnsFailure()
     {
         // Arrange

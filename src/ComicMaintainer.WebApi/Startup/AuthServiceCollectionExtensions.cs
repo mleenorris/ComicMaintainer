@@ -149,9 +149,19 @@ internal static class AuthServiceCollectionExtensions
         // account that owns it, with that account's current roles (see ApiKeyAuthenticationHandler).
         authBuilder.AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName, _ => { });
 
+        // HTTP Basic for the OPDS catalog only: registered as a scheme of its own and listed by no policy below except
+        // its own, so no other route ever checks Basic credentials or answers with a WWW-Authenticate: Basic challenge.
+        authBuilder.AddScheme<AuthenticationSchemeOptions, OpdsBasicAuthenticationHandler>(OpdsBasicAuthenticationHandler.SchemeName, _ => { });
+
         // Configure authorization policies to support multiple authentication schemes
         services.AddAuthorization(options =>
         {
+            // A named policy, because [Authorize(AuthenticationSchemes = ...)] without one is combined with the
+            // default policy and would accept (and challenge with) every scheme that one lists.
+            options.AddPolicy(OpdsBasicAuthenticationHandler.PolicyName, policy => policy
+                .AddAuthenticationSchemes(OpdsBasicAuthenticationHandler.SchemeName)
+                .RequireAuthenticatedUser());
+
             // Schemes accepted by the default and every named policy: Authelia (when enabled), session tokens in the
             // Authorization header, and API keys. A request is meant to send one of them.
             var schemes = autheliaSettings.Enabled

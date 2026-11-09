@@ -94,6 +94,23 @@ public sealed class ApiKeyAuthenticationIntegrationTests : IClassFixture<Session
     }
 
     [Fact]
+    public async Task TheStatusReportsItsTimesAsUtc()
+    {
+        var (_, session) = await _host.SignInNewUserAsync();
+        var apiKey = await CreateApiKeyAsync(session);
+
+        var (_, unused) = await SendAsync(HttpMethod.Get, "/api/auth/api-key", bearer: session);
+        Assert.Equal(JsonValueKind.Null, unused.GetProperty("lastUsedAt").ValueKind);
+
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Get, "/api/auth/user", apiKey: apiKey)).Status);
+        var (status, used) = await SendAsync(HttpMethod.Get, "/api/auth/api-key", bearer: session);
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.EndsWith("Z", used.GetProperty("createdAt").GetString(), StringComparison.Ordinal);
+        Assert.EndsWith("Z", used.GetProperty("lastUsedAt").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ARevokedOrReplacedKeyStopsWorking()
     {
         var (_, session) = await _host.SignInNewUserAsync();

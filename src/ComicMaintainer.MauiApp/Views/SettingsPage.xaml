@@ -152,7 +152,7 @@
                     <Label Text="ComicMaintainer Mobile"
                            FontSize="14"
                            TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}" />
-                    <Label Text="Version 2.0.1"
+                    <Label x:Name="VersionLabel"
                            FontSize="12"
                            TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
                     <Label Text="Manage your comic collection on the go"

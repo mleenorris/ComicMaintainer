@@ -36,6 +36,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
     private readonly string _staging;
     private readonly Mock<IFileStoreService> _store = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IEventBroadcaster> _broadcaster = new();
     private readonly ConcurrentQueue<string> _logs = new();
 
     /// <summary>Store and processor calls in the order they were made.</summary>
@@ -362,6 +363,79 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
 
         Assert.Contains(_logs, message => message.Contains("Error moving tracked file", StringComparison.Ordinal));
         Assert.DoesNotContain(_logs, message => message.Contains("Followed", StringComparison.Ordinal));
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Never);
+    }
+
+    // Clients hear about the catch-up once, however many rows it moved.
+    [Fact]
+    public async Task Startup_TrackedFilesMovedWhileDown_TellsClientsOnceForAllOfThem()
+    {
+        TrackTwoFilesMovedWhileDown();
+
+        await StartWatchingAsync();
+
+        await WaitForLogAsync("Followed 2 tracked file(s) moved while their move was not seen");
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+        _store.Verify(
+            s => s.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), true),
+            Times.Never);
+    }
+
+    // The rows that did move are news to clients, whichever move it was that failed.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Startup_OneTrackedFileCouldNotBeMoved_StillTellsClientsAboutTheOther(int failingMove)
+    {
+        TrackTwoFilesMovedWhileDown();
+        var moves = 0;
+        _store.Setup(s => s.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .Returns<string, string, CancellationToken, bool>((_, _, _, _) =>
+                Interlocked.Increment(ref moves) == failingMove
+                    ? Task.FromException(new InvalidOperationException("database is locked"))
+                    : Task.CompletedTask);
+
+        await StartWatchingAsync();
+
+        await WaitForLogAsync("Followed 1 tracked file(s) moved while their move was not seen");
+        Assert.Contains(_logs, message => message.Contains("Error moving tracked file", StringComparison.Ordinal));
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+    }
+
+    // Stopping part-way leaves the rows moved so far at their new paths, and clients have to hear that.
+    [Fact]
+    public async Task Startup_StoppedAfterATrackedFileMoved_StillTellsClients()
+    {
+        TrackTwoFilesMovedWhileDown();
+        var service = TestServices.CreateFileWatcher(
+            new TestOptionsMonitor<AppSettings>(Settings()), new QueueLogger(_logs, () => null), _store.Object, _processor.Object, _broadcaster.Object);
+        _services.Add(service);
+        _store.Setup(s => s.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .Returns<string, string, CancellationToken, bool>(async (oldPath, newPath, _, _) =>
+            {
+                _calls.Enqueue($"move {oldPath} -> {newPath}");
+                await service.StopAsync();
+            });
+
+        await service.StartAsync();
+
+        await WaitForLogAsync("Incremental scan completed");
+        Assert.Single(_calls, call => call.StartsWith("move", StringComparison.Ordinal));
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+    }
+
+    // The rows have moved by then; a client that cannot be told must not cost the rest of the scan.
+    [Fact]
+    public async Task Startup_TellingClientsAboutMovedFilesFails_StillFinishesTheScan()
+    {
+        TrackTwoFilesMovedWhileDown();
+        _broadcaster.Setup(b => b.BroadcastFileListUpdateAsync())
+            .ThrowsAsync(new InvalidOperationException("client went away"));
+
+        await StartWatchingAsync();
+
+        Assert.Contains(_logs, message => message.Contains("Failed to broadcast file list update after following moved files", StringComparison.Ordinal));
+        Assert.Contains($"scanned {_library}", _calls);
     }
 
     // The files that arrived still get processed when the queued files cannot be read.
@@ -410,6 +484,15 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
 
         await WaitForCallAsync($"process {arrived}");
         await WaitForLogAsync("Error recording whether a file waits for processing");
+    }
+
+    private void TrackTwoFilesMovedWhileDown()
+    {
+        _tracked =
+        [
+            MovedFrom(Path.Join(_library, "One Piece", "One Piece - Chapter 0001.cbz"), CreateComic("One Piece (1997)", "One Piece - Chapter 0001.cbz")),
+            MovedFrom(Path.Join(_library, "One Piece", "One Piece - Chapter 0002.cbz"), CreateComic("One Piece (1997)", "One Piece - Chapter 0002.cbz")),
+        ];
     }
 
     private static ComicFile MovedFrom(string oldPath, string newPath)
@@ -800,7 +883,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
     /// </summary>
     private async Task<FileWatcherService> StartWatchingAsync(TestOptionsMonitor<AppSettings> monitor)
     {
-        var service = TestServices.CreateFileWatcher(monitor, new QueueLogger(_logs, () => _onLog), _store.Object, _processor.Object);
+        var service = TestServices.CreateFileWatcher(monitor, new QueueLogger(_logs, () => _onLog), _store.Object, _processor.Object, _broadcaster.Object);
         _services.Add(service);
 
         await service.StartAsync();

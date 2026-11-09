@@ -553,27 +553,27 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// <summary>
     /// Moves the rows of tracked files that were moved while no event reported it to their new
     /// paths, with their processing state, user metadata edits and every user's read state.
+    /// Clients get one file list update for the lot whenever at least one row moved, including
+    /// when a later move fails or the scan is stopped part-way.
     /// </summary>
     private async Task FollowMovedFilesAsync(IReadOnlyList<(string OldPath, string NewPath)> movedFiles, CancellationToken cancellationToken)
     {
         var followed = 0;
-        for (var i = 0; i < movedFiles.Count; i++)
+        foreach (var (oldPath, newPath) in movedFiles)
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                return;
+                break;
             }
 
-            var (oldPath, newPath) = movedFiles[i];
             try
             {
-                // One file list update for the lot, not one per file.
-                await _fileStore.UpdateFilePathAsync(oldPath, newPath, cancellationToken, broadcastUpdate: i == movedFiles.Count - 1);
+                await _fileStore.UpdateFilePathAsync(oldPath, newPath, cancellationToken, broadcastUpdate: false);
                 followed++;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                return;
+                break;
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -581,9 +581,20 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             }
         }
 
-        if (followed > 0)
+        if (followed == 0)
         {
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Followed {Count} tracked file(s) moved while their move was not seen"), followed);
+            return;
+        }
+
+        _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Followed {Count} tracked file(s) moved while their move was not seen"), followed);
+
+        try
+        {
+            await _eventBroadcaster.BroadcastFileListUpdateAsync();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, LoggingHelper.WithWatcherPrefix("Failed to broadcast file list update after following moved files"));
         }
     }
 

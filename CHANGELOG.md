@@ -438,8 +438,8 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
 - First-run setup needs a one-time code and is possible only on an instance with no accounts,
   never under Authelia.
 - Account lockout, a per-client limit on authentication requests, failed attempts logged to
-  `auth.log`, one uniform error for sign-in failures, and a dummy hash for unknown and locked
-  accounts.
+  `auth.log`, one uniform error for sign-in failures, and a dummy password check for unknown and
+  locked accounts so response time does not give them away.
 - Session tokens can be revoked, are checked against the account on each request (with a short
   cache), and are never read from a URL. Event streams opened with an API key end once the key is
   revoked.
@@ -500,6 +500,8 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
 - **Offline.** Saved comics open offline after an app update. A failed update no longer replaces
   the release in control. An interrupted download is no longer shown as Saved. The first install
   no longer reloads the page.
+- **The web app manifest loads.** It was an inline `blob:` URL that the app's own Content Security
+  Policy blocked, so installing the app failed.
 - **The action menu can no longer act on a different file.** Two files could share one menu
   because their ids collided.
 - **Job progress survives a lost connection.** The event stream reconnects with backoff and a

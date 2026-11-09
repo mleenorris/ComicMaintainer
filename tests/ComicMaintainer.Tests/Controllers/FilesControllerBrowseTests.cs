@@ -68,7 +68,7 @@ public sealed class FilesControllerBrowseTests
         using var cts = new CancellationTokenSource();
         _fileStore.Setup(f => f.GetUnmarkedCountAsync(cts.Token)).ReturnsAsync(4);
         _seriesLibrary
-            .Setup(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, cts.Token))
+            .Setup(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, null, cts.Token))
             .ReturnsAsync(new SeriesSummaryResult { Page = 1, TotalPages = 3, TotalSeries = 12, Offset = 0 });
 
         var result = await _controller.GetSeries(limit: 5, cancellationToken: cts.Token);
@@ -79,14 +79,69 @@ public sealed class FilesControllerBrowseTests
         Assert.Equal(12, Prop(ok.Value, "total_series"));
         Assert.Equal(3, Prop(ok.Value, "total_pages"));
         Assert.Equal(4, Prop(ok.Value, "unmarked_count"));
-        _seriesLibrary.Verify(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, cts.Token), Times.Once);
+        _seriesLibrary.Verify(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, null, cts.Token), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetSeries_PassesTheGenreAndStatusFilters()
+    {
+        var expected = new SeriesFacetFilter("Action", "completed");
+        _seriesLibrary
+            .Setup(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, expected, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesSummaryResult { TotalSeries = 2 });
+
+        var result = await _controller.GetSeries(limit: 5, genre: " Action ", status: "completed");
+
+        Assert.Equal(2, Prop(Assert.IsType<OkObjectResult>(result.Result).Value, "total_series"));
+    }
+
+    [Fact]
+    public async Task GetSeries_WithIssues_PassesTheFiltersToo()
+    {
+        var expected = new SeriesFacetFilter(null, "none");
+        _seriesLibrary
+            .Setup(s => s.GetSeriesAsync(null, null, 1, 100, "name", "asc", expected, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesLibraryResult { TotalSeries = 3 });
+
+        var result = await _controller.GetSeries(include_issues: true, status: "none");
+
+        Assert.Equal(3, Prop(Assert.IsType<OkObjectResult>(result.Result).Value, "total_series"));
+    }
+
+    [Fact]
+    public async Task GetSeriesFacets_ReturnsWhatTheLibraryReports()
+    {
+        var facets = new SeriesFacetsResult { SeriesWithoutGenres = 4 };
+        _seriesLibrary.Setup(s => s.GetSeriesFacetsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(facets);
+
+        var result = await _controller.GetSeriesFacets();
+
+        Assert.Same(facets, Assert.IsType<OkObjectResult>(result.Result).Value);
+    }
+
+    [Fact]
+    public async Task GetSeriesFacets_LetsAFailureReachTheGlobalHandler()
+    {
+        _seriesLibrary.Setup(s => s.GetSeriesFacetsAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("snapshot missing"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeriesFacets());
+    }
+
+    [Fact]
+    public void GetSeriesFacets_RouteIsAFixedPathWithAnETag()
+    {
+        var method = typeof(ComicMaintainer.WebApi.Controllers.FilesController).GetMethod(nameof(ComicMaintainer.WebApi.Controllers.FilesController.GetSeriesFacets))!;
+
+        Assert.Equal("series/facets", ((Microsoft.AspNetCore.Mvc.HttpGetAttribute)method.GetCustomAttributes(typeof(Microsoft.AspNetCore.Mvc.HttpGetAttribute), false).Single()).Template);
+        Assert.NotEmpty(method.GetCustomAttributes(typeof(ComicMaintainer.WebApi.Infrastructure.LibraryETagAttribute), false));
     }
 
     [Fact]
     public async Task GetSeries_ExplicitOffsetAndLimit_ArePassedThrough()
     {
         _seriesLibrary
-            .Setup(s => s.GetSeriesSummariesAsync("processed", "bat", 1, 100, "name", "desc", 10, 5, It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetSeriesSummariesAsync("processed", "bat", 1, 100, "name", "desc", 10, 5, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesSummaryResult { Offset = 10, TotalSeries = 40 });
 
         var result = await _controller.GetSeries(filter: "marked", search: "bat", direction: "desc", offset: 10, limit: 5);
@@ -103,7 +158,7 @@ public sealed class FilesControllerBrowseTests
     public async Task GetSeries_NonPositiveLimit_UsesPageMode(int limit)
     {
         _seriesLibrary
-            .Setup(s => s.GetSeriesSummariesAsync(null, null, 2, 25, "name", "asc", null, null, It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetSeriesSummariesAsync(null, null, 2, 25, "name", "asc", null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesSummaryResult { Page = 2, TotalPages = 2, TotalSeries = 30 });
 
         var result = await _controller.GetSeries(page: 2, per_page: 25, offset: 50, limit: limit);
@@ -112,7 +167,7 @@ public sealed class FilesControllerBrowseTests
         Assert.Equal(2, Prop(ok.Value, "page"));
         Assert.False(HasProp(ok.Value, "offset"));
         Assert.False(HasProp(ok.Value, "limit"));
-        _seriesLibrary.Verify(s => s.GetSeriesSummariesAsync(null, null, 2, 25, "name", "asc", null, null, It.IsAny<CancellationToken>()), Times.Once);
+        _seriesLibrary.Verify(s => s.GetSeriesSummariesAsync(null, null, 2, 25, "name", "asc", null, null, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -120,7 +175,7 @@ public sealed class FilesControllerBrowseTests
     {
         _seriesLibrary
             .Setup(s => s.GetSeriesSummariesAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<SeriesFacetFilter?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("snapshot missing"));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeries());

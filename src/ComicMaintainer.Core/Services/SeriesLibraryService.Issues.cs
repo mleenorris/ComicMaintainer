@@ -135,7 +135,10 @@ public partial class SeriesLibraryService
                     Aliases = new List<string>(unfilteredAccumulator.Aliases),
                     HasExternalImage = unfilteredAccumulator.HasExternalImage,
                     ImageNormalizedKey = unfilteredAccumulator.ImageNormalizedKey,
-                    Synopsis = unfilteredAccumulator.Synopsis
+                    Synopsis = unfilteredAccumulator.Synopsis,
+                    Genres = unfilteredAccumulator.Genres,
+                    PublicationStatus = unfilteredAccumulator.PublicationStatus,
+                    SiteUrl = unfilteredAccumulator.SiteUrl
                     // Issues intentionally left empty: the active filter
                     // excludes every file in this series.
                 };

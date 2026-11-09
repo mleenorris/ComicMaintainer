@@ -56,9 +56,12 @@ public partial class FilesController
         [FromQuery] bool include_issues = false,
         [FromQuery] int? offset = null,
         [FromQuery] int? limit = null,
+        [FromQuery] string? genre = null,
+        [FromQuery] string? status = null,
         CancellationToken cancellationToken = default)
     {
         var mappedFilter = MapFilter(filter);
+        var facets = SeriesFacetFilter.Create(genre, status);
         var unmarkedCount = await _fileStore.GetUnmarkedCountAsync(cancellationToken);
 
         // Default: lightweight summary cards (no per-issue list). Issues are
@@ -67,7 +70,7 @@ public partial class FilesController
         // ?include_issues=true.
         if (include_issues)
         {
-            var fullResult = await _seriesLibrary.GetSeriesAsync(mappedFilter, search, page, per_page, sort, direction, cancellationToken);
+            var fullResult = await _seriesLibrary.GetSeriesAsync(mappedFilter, search, page, per_page, sort, direction, facets, cancellationToken);
             return Ok(new
             {
                 series = fullResult.Series,
@@ -83,6 +86,7 @@ public partial class FilesController
             mappedFilter, search, page, per_page, sort, direction,
             offsetMode ? offset ?? 0 : (int?)null,
             offsetMode ? limit : (int?)null,
+            facets,
             cancellationToken);
 
         if (offsetMode)
@@ -108,6 +112,16 @@ public partial class FilesController
             unmarked_count = unmarkedCount
         });
     }
+
+    /// <summary>
+    /// The genres and statuses in the library, for the library's filter menus, with how many
+    /// series have each and how many have no such data yet.
+    /// </summary>
+    [LibraryETag]
+    [HttpGet("series/facets")]
+    [FailureMessage("Error retrieving series filters")]
+    public async Task<ActionResult<SeriesFacetsResult>> GetSeriesFacets(CancellationToken cancellationToken = default)
+        => Ok(await _seriesLibrary.GetSeriesFacetsAsync(cancellationToken));
 
     [LibraryETag]
     [HttpGet("folders")]

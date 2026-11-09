@@ -124,6 +124,18 @@ public class SeriesLibraryDto
     /// <summary>Plain-text synopsis from external metadata; null when none.</summary>
     [JsonPropertyName("synopsis")]
     public string? Synopsis { get; set; }
+
+    /// <summary>Genres from external metadata; empty until a lookup reports any.</summary>
+    [JsonPropertyName("genres")]
+    public List<string> Genres { get; set; } = new();
+
+    /// <summary>A <see cref="SeriesPublicationStatus"/> value; null until a lookup reports one.</summary>
+    [JsonPropertyName("publication_status")]
+    public string? PublicationStatus { get; set; }
+
+    /// <summary>The series' page on the provider's website; null when unknown.</summary>
+    [JsonPropertyName("site_url")]
+    public string? SiteUrl { get; set; }
 }
 
 public class SeriesLibraryResult
@@ -189,6 +201,18 @@ public class SeriesSummaryDto
     /// <summary>Plain-text synopsis from external metadata; null when none.</summary>
     [JsonPropertyName("synopsis")]
     public string? Synopsis { get; set; }
+
+    /// <summary>Genres from external metadata; empty until a lookup reports any.</summary>
+    [JsonPropertyName("genres")]
+    public List<string> Genres { get; set; } = new();
+
+    /// <summary>A <see cref="SeriesPublicationStatus"/> value; null until a lookup reports one.</summary>
+    [JsonPropertyName("publication_status")]
+    public string? PublicationStatus { get; set; }
+
+    /// <summary>The series' page on the provider's website; null when unknown.</summary>
+    [JsonPropertyName("site_url")]
+    public string? SiteUrl { get; set; }
 }
 
 public class SeriesSummaryResult

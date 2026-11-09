@@ -342,7 +342,10 @@ public partial class SeriesLibraryService
                     Aliases = new List<string>(),
                     HasExternalImage = imageRecord is not null,
                     ImageNormalizedKey = imageRecord?.NormalizedKey ?? record?.NormalizedKey,
-                    Synopsis = record?.Synopsis
+                    Synopsis = record?.Synopsis,
+                    Genres = record?.Genres ?? new List<string>(),
+                    PublicationStatus = record?.PublicationStatus,
+                    SiteUrl = record?.SiteUrl
                 };
 
                 if (record is not null)
@@ -535,6 +538,8 @@ public partial class SeriesLibraryService
                     survivor.MetadataSource = other.MetadataSource;
                 }
 
+                PromoteProviderDetails(survivor, other);
+
                 dropped.Add(other);
 
                 _logger.LogDebug(
@@ -555,6 +560,21 @@ public partial class SeriesLibraryService
         return groups
             .Where(kvp => !dropped.Contains(kvp.Value))
             .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Gives a merged series card the provider details it lacks from the card being merged
+    /// into it, so the card keeps appearing under the genre and status filters.
+    /// </summary>
+    private static void PromoteProviderDetails(SeriesAccumulator survivor, SeriesAccumulator other)
+    {
+        if (survivor.Genres.Count == 0)
+        {
+            survivor.Genres = other.Genres;
+        }
+
+        survivor.PublicationStatus ??= other.PublicationStatus;
+        survivor.SiteUrl ??= other.SiteUrl;
     }
 
     /// <summary>
@@ -777,6 +797,15 @@ public partial class SeriesLibraryService
 
         /// <summary>Plain-text synopsis from the matched external metadata record, if any.</summary>
         public string? Synopsis { get; set; }
+
+        /// <summary>Genres from the matched external metadata record; empty when none.</summary>
+        public List<string> Genres { get; set; } = new();
+
+        /// <summary>Publication status from the matched external metadata record, if any.</summary>
+        public string? PublicationStatus { get; set; }
+
+        /// <summary>The series' page at the provider, from the matched record, if any.</summary>
+        public string? SiteUrl { get; set; }
 
         /// <summary>True when a series-level cover image is cached locally.</summary>
         public bool HasExternalImage { get; set; }

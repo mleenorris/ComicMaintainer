@@ -538,6 +538,17 @@
                         <svg class="icon" aria-hidden="true"><use href="#i-compact"/></svg> Compact
                     </button>
                 </div>
+                <div class="library-facets" id="libraryFacets" role="group" aria-label="Filter series by genre and status" hidden>
+                    <label class="library-facet" for="libraryGenreFilter">
+                        <span>Genre</span>
+                        <select id="libraryGenreFilter" name="libraryGenreFilter" onchange="setSeriesFacetFilter()"></select>
+                    </label>
+                    <label class="library-facet" for="libraryStatusFilter">
+                        <span>Status</span>
+                        <select id="libraryStatusFilter" name="libraryStatusFilter" onchange="setSeriesFacetFilter()"></select>
+                    </label>
+                    <span class="library-facets-hint" id="libraryFacetsHint" hidden>Genres and status appear here as series metadata is refreshed.</span>
+                </div>
                 <div class="file-list" id="fileList">
                     <div class="loading">
                         <div class="spinner"></div>

@@ -366,6 +366,14 @@ public class MetadataController : ControllerBase
                     source_id = x.metadata.SourceId,
                     image_url = x.metadata.ImageUrl,
                     thumbnail_url = x.metadata.ThumbnailUrl,
+                    // Sent back with apply-match, so a chosen candidate's
+                    // details are cached without asking the provider again.
+                    synopsis = x.metadata.Synopsis,
+                    site_url = x.metadata.SiteUrl,
+                    genres = x.metadata.Genres ?? new List<string>(),
+                    publication_status = x.metadata.PublicationStatus,
+                    total_chapters = x.metadata.TotalChapters,
+                    origin = x.metadata.Origin,
                     match_score = x.score,
                     // Surface the provider-supplied language tags so the
                     // manual-match UI can render each alias alongside its
@@ -487,6 +495,13 @@ public class MetadataController : ControllerBase
                     SourceId = string.IsNullOrWhiteSpace(request.SourceId) ? null : request.SourceId.Trim(),
                     ImageUrl = string.IsNullOrWhiteSpace(request.ImageUrl) ? null : request.ImageUrl,
                     ThumbnailUrl = string.IsNullOrWhiteSpace(request.ThumbnailUrl) ? null : request.ThumbnailUrl,
+                    // Passed back from the search result; the cache cleans these.
+                    Synopsis = request.Synopsis,
+                    SiteUrl = request.SiteUrl,
+                    Genres = request.Genres ?? new List<string>(),
+                    PublicationStatus = request.PublicationStatus,
+                    TotalChapters = request.TotalChapters,
+                    Origin = request.Origin,
                     // Preserve provider-supplied language tags so the cached
                     // record's LocalizedTitles list keeps per-alias language
                     // info; without this the cache falls back to untagged
@@ -748,6 +763,24 @@ public class MetadataController : ControllerBase
 
         public string? ImageUrl { get; set; }
         public string? ThumbnailUrl { get; set; }
+
+        /// <summary>The candidate's plain-text description (<c>synopsis</c> of a search result).</summary>
+        public string? Synopsis { get; set; }
+
+        /// <summary>The candidate's page at the provider (<c>site_url</c> of a search result).</summary>
+        public string? SiteUrl { get; set; }
+
+        /// <summary>The candidate's genres (<c>genres</c> of a search result).</summary>
+        public List<string>? Genres { get; set; }
+
+        /// <summary>The candidate's status (<c>publication_status</c> of a search result).</summary>
+        public string? PublicationStatus { get; set; }
+
+        /// <summary>The candidate's chapter count (<c>total_chapters</c> of a search result).</summary>
+        public int? TotalChapters { get; set; }
+
+        /// <summary>The candidate's original language (<c>origin</c> of a search result).</summary>
+        public string? Origin { get; set; }
 
         /// <summary>
         /// Optional language-tagged titles to preserve from the candidate

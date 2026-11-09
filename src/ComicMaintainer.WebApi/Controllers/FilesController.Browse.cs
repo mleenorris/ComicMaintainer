@@ -174,6 +174,7 @@ public partial class FilesController
     /// </summary>
     [LibraryETag]
     [HttpGet("folders/files")]
+    [FailureMessage("Error retrieving folder files")]
     public Task<ActionResult<object>> GetRootFolderFiles(
         [FromQuery] string? filter = null,
         [FromQuery] string? search = null,

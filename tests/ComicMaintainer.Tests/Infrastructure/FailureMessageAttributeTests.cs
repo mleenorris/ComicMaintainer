@@ -31,6 +31,7 @@ public class FailureMessageAttributeTests
     [InlineData(typeof(FilesController), nameof(FilesController.GetFiles), "Error retrieving files")]
     [InlineData(typeof(FilesController), nameof(FilesController.GetFileTags), "Error getting tags")]
     [InlineData(typeof(FilesController), nameof(FilesController.GetFolderFiles), "Error retrieving folder files")]
+    [InlineData(typeof(FilesController), nameof(FilesController.GetRootFolderFiles), "Error retrieving folder files")]
     [InlineData(typeof(FilesController), nameof(FilesController.GetFolders), "Error retrieving folders")]
     [InlineData(typeof(FilesController), nameof(FilesController.GetMetadata), "Error retrieving metadata")]
     [InlineData(typeof(FilesController), nameof(FilesController.GetSeries), "Error retrieving series library")]

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
@@ -343,6 +345,123 @@ public class AuthControllerCoverageTests
 
         Assert.IsType<UnauthorizedResult>(result);
     }
+
+    // ----- API key status and revocation ----------------------------------
+
+    [Theory]
+    [MemberData(nameof(IncompleteUsers))]
+    public async Task GetApiKeyStatus_WithoutUserId_ReturnsUnauthorized(string kind)
+    {
+        var controller = CreateController(IncompleteUser(kind));
+
+        Assert.IsType<UnauthorizedResult>(await controller.GetApiKeyStatus());
+        _authService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GetApiKeyStatus_ReportsTheAccountsKeyAndTheHeaderItIsSentIn()
+    {
+        var createdAt = new DateTime(2025, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        var usedAt = createdAt.AddDays(3);
+        _authService.Setup(s => s.GetApiKeyStatusAsync("user-1")).ReturnsAsync(new ApiKeyStatus(true, createdAt, usedAt));
+
+        var ok = Assert.IsType<OkObjectResult>(await CreateController(SignedIn()).GetApiKeyStatus());
+
+        Assert.True(Prop<bool>(ok.Value, "hasApiKey"));
+        Assert.Equal(createdAt, Prop<DateTime?>(ok.Value, "createdAt"));
+        Assert.Equal(usedAt, Prop<DateTime?>(ok.Value, "lastUsedAt"));
+        Assert.Equal(ApiKeys.HeaderName, Prop<string>(ok.Value, "header"));
+    }
+
+    [Theory]
+    [MemberData(nameof(IncompleteUsers))]
+    public async Task RevokeApiKey_WithoutUserId_ReturnsUnauthorized(string kind)
+    {
+        var controller = CreateController(IncompleteUser(kind));
+
+        Assert.IsType<UnauthorizedResult>(await controller.RevokeApiKey());
+        _authService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RevokeApiKey_WithAKey_ReturnsNoContent()
+    {
+        _authService.Setup(s => s.RevokeApiKeyAsync("user-1")).ReturnsAsync(true);
+
+        Assert.IsType<NoContentResult>(await CreateController(SignedIn()).RevokeApiKey());
+    }
+
+    [Fact]
+    public async Task RevokeApiKey_WithoutAKey_ReturnsNotFoundWithTheReason()
+    {
+        _authService.Setup(s => s.RevokeApiKeyAsync("user-1")).ReturnsAsync(false);
+
+        var notFound = Assert.IsType<NotFoundObjectResult>(await CreateController(SignedIn()).RevokeApiKey());
+
+        Assert.Equal("This account has no API key.", Prop<string>(notFound.Value, "error"));
+    }
+
+    // ----- Logout ---------------------------------------------------------
+
+    [Theory]
+    [MemberData(nameof(IncompleteUsers))]
+    public async Task Logout_WithoutUserId_ReturnsUnauthorized(string kind)
+    {
+        var controller = CreateController(IncompleteUser(kind));
+
+        Assert.IsType<UnauthorizedResult>(await controller.Logout());
+        _authService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Logout_RefusesTheSessionTokenThisRequestWasMadeWithUntilItExpires()
+    {
+        var expiresAt = new DateTimeOffset(2030, 6, 1, 12, 0, 0, TimeSpan.Zero);
+        var controller = CreateController(SignedIn(extra:
+        [
+            new Claim(JwtRegisteredClaimNames.Jti, "token-1"),
+            new Claim(JwtRegisteredClaimNames.Exp, expiresAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)),
+        ]));
+
+        Assert.IsType<NoContentResult>(await controller.Logout());
+
+        _authService.Verify(s => s.LogoutAsync("user-1", "token-1", expiresAt.UtcDateTime, false), Times.Once);
+    }
+
+    [Fact]
+    public async Task Logout_ForAllSessions_AsksForEverySessionToBeRefused()
+    {
+        var controller = CreateController(SignedIn(extra: new Claim(JwtRegisteredClaimNames.Jti, "token-1")));
+
+        Assert.IsType<NoContentResult>(await controller.Logout(new LogoutRequest(AllSessions: true)));
+
+        _authService.Verify(s => s.LogoutAsync("user-1", "token-1", It.IsAny<DateTime>(), true), Times.Once);
+    }
+
+    // A session without a usable expiry claim is still revoked, for at least as long as a session token can live.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-number")]
+    public async Task Logout_WithoutAReadableExpiry_RefusesTheTokenForADay(string? expClaim)
+    {
+        Claim[] claims = expClaim is null ? [] : [new Claim(JwtRegisteredClaimNames.Exp, expClaim)];
+        DateTime recorded = default;
+        _authService
+            .Setup(s => s.LogoutAsync("user-1", null, It.IsAny<DateTime>(), false))
+            .Callback((string _, string? _, DateTime expires, bool _) => recorded = expires)
+            .Returns(Task.CompletedTask);
+        var before = DateTime.UtcNow;
+
+        Assert.IsType<NoContentResult>(await CreateController(SignedIn(extra: claims)).Logout());
+
+        Assert.InRange(recorded, before.AddDays(1).AddSeconds(-5), DateTime.UtcNow.AddDays(1).AddSeconds(5));
+    }
+
+    private static ClaimsPrincipal IncompleteUser(string kind) => kind switch
+    {
+        "no-identity" => new ClaimsPrincipal(),
+        _ => SignedIn(userId: null, name: "reader"),
+    };
 
     // ----- GetCurrentUser -------------------------------------------------
 

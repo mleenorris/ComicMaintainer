@@ -194,6 +194,152 @@ public sealed class FileStoreServiceDirectoryMoveTests : IAsyncLifetime
         Assert.Equal(versionBefore, service.ChangeVersion);
     }
 
+    [Fact]
+    public async Task MoveDirectoryAsync_RowAtTheDestinationHasTheOnlyMetadataAndTheOlderDate_MovedRowTakesThem()
+    {
+        var oldPath = Path.Join(OldDir, "One Piece - Chapter 0001.cbz");
+        var newPath = Path.Join(NewDir, "One Piece - Chapter 0001.cbz");
+        var editedAt = T0.AddDays(2);
+        await SeedAsync(db =>
+        {
+            var moved = Row(oldPath, processed: false);
+            moved.CreatedAt = T0.AddDays(5);
+            var atDestination = Row(newPath, processed: true);
+            atDestination.CreatedAt = T0;
+            atDestination.IsProcessingPending = true;
+            atDestination.SeriesMetadataVersion = 9;
+            atDestination.Metadata = new ComicMetadata { Series = "One Piece", IsUserEdited = true };
+            atDestination.LastDbEditAt = editedAt;
+            atDestination.LastWriteAt = editedAt;
+            atDestination.MetadataSource = FileMetadataSource.UserEdit.ToString();
+            db.ComicFiles.AddRange(moved, atDestination);
+        });
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+
+        Assert.Equal(1, await service.MoveDirectoryAsync(OldDir, NewDir));
+
+        await using var db = await _factory.CreateDbContextAsync();
+        var row = Assert.Single(await db.ComicFiles.AsNoTracking().ToListAsync());
+        Assert.Equal(newPath, row.FilePath);
+        Assert.Equal(T0, row.CreatedAt);
+        Assert.Equal("One Piece", row.Metadata!.Series);
+        Assert.True(row.Metadata.IsUserEdited);
+        Assert.Equal(editedAt, row.LastDbEditAt);
+        Assert.Equal(editedAt, row.LastWriteAt);
+        Assert.Equal(FileMetadataSource.UserEdit.ToString(), row.MetadataSource);
+        Assert.Equal(9, row.SeriesMetadataVersion);
+        Assert.True(row.IsRenamed && row.IsNormalized && row.IsProcessed, "The processed state of either row counts");
+        Assert.True(row.IsProcessingPending);
+    }
+
+    [Fact]
+    public async Task MoveDirectoryAsync_ProgressAlreadyAtTheDestination_MergesToTheFurthestPosition()
+    {
+        var oldPath = Path.Join(OldDir, "One Piece - Chapter 0001.cbz");
+        var newPath = Path.Join(NewDir, "One Piece - Chapter 0001.cbz");
+        var completedEarlier = T0.AddDays(1);
+        var completedLater = T0.AddDays(2);
+        await SeedAsync(db =>
+        {
+            db.ComicFiles.Add(Row(oldPath, processed: true));
+
+            var aliceMoved = Progress("alice", oldPath, current: 12, total: 20);
+            aliceMoved.LastReadAt = T0.AddHours(1);
+            aliceMoved.CompletedAt = completedLater;
+            var aliceThere = Progress("alice", newPath, current: 5, total: 24);
+            aliceThere.LastReadAt = T0.AddHours(9);
+            aliceThere.CompletedAt = completedEarlier;
+
+            var bobMoved = Progress("bob", oldPath, current: 3, total: 20);
+            bobMoved.LastReadAt = T0.AddHours(8);
+            var bobThere = Progress("bob", newPath, current: 8, total: 20);
+            bobThere.LastReadAt = T0.AddHours(2);
+            bobThere.CompletedAt = completedEarlier;
+
+            // Nobody else's row at the destination: carol's moves.
+            db.ReadingProgresses.AddRange(aliceMoved, aliceThere, bobMoved, bobThere, Progress("carol", oldPath, current: 1, total: 20));
+        });
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+
+        Assert.Equal(1, await service.MoveDirectoryAsync(OldDir, NewDir));
+
+        await using var db = await _factory.CreateDbContextAsync();
+        var progress = await db.ReadingProgresses.AsNoTracking().ToDictionaryAsync(p => p.UserId);
+        Assert.Equal(3, progress.Count);
+        Assert.All(progress.Values, p => Assert.Equal(newPath, p.ContentId));
+
+        var alice = progress["alice"];
+        Assert.Equal(12, alice.CurrentPage);
+        Assert.Equal(24, alice.TotalPages);
+        Assert.Equal(60.0, alice.PercentComplete, precision: 3);
+        Assert.Equal(completedLater, alice.CompletedAt);
+        Assert.Equal(T0.AddHours(9), alice.LastReadAt);
+
+        // Only one side has a completion date: it is kept.
+        var bob = progress["bob"];
+        Assert.Equal(8, bob.CurrentPage);
+        Assert.Equal(completedEarlier, bob.CompletedAt);
+        Assert.Equal(T0.AddHours(8), bob.LastReadAt);
+
+        Assert.Equal(1, progress["carol"].CurrentPage);
+    }
+
+    [Fact]
+    public async Task MoveDirectoryAsync_SameDirectoryAndUnusablePaths_DoNothing()
+    {
+        var path = Path.Join(OldDir, "One Piece - Chapter 0001.cbz");
+        await SeedAsync(db => db.ComicFiles.Add(Row(path, processed: true)));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+
+        Assert.Equal(0, await service.MoveDirectoryAsync(OldDir, OldDir + Path.DirectorySeparatorChar));
+        Assert.Equal(0, await service.MoveDirectoryAsync(OldDir, "  "));
+        Assert.Equal(0, await service.MoveDirectoryAsync("bad\0path", NewDir));
+        Assert.Equal(0, await service.MoveDirectoryAsync(Path.GetPathRoot(_library)!, NewDir));
+
+        await using var db = await _factory.CreateDbContextAsync();
+        Assert.Equal(path, Assert.Single(await db.ComicFiles.AsNoTracking().ToListAsync()).FilePath);
+        Assert.True(await service.FileExistsAsync(path));
+    }
+
+    [Fact]
+    public async Task MoveDirectoryAsync_WhenTheDatabaseFails_ReportsNothingMovedAndKeepsTheInMemoryPaths()
+    {
+        var path = Path.Join(OldDir, "One Piece - Chapter 0001.cbz");
+        await SeedAsync(db => db.ComicFiles.Add(Row(path, processed: true)));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+        await DropFilesTableAsync();
+
+        Assert.Equal(0, await service.MoveDirectoryAsync(OldDir, NewDir));
+
+        Assert.True(await service.FileExistsAsync(path));
+        Assert.False(await service.FileExistsAsync(Path.Join(NewDir, Path.GetFileName(path))));
+    }
+
+    [Fact]
+    public async Task RemoveDirectoryAsync_WhenTheDatabaseFails_ReportsNothingRemovedAndKeepsTheInMemoryPaths()
+    {
+        var path = Path.Join(OldDir, "One Piece - Chapter 0001.cbz");
+        await SeedAsync(db => db.ComicFiles.Add(Row(path, processed: true)));
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+        await DropFilesTableAsync();
+
+        Assert.Equal(0, await service.RemoveDirectoryAsync(OldDir));
+
+        Assert.True(await service.FileExistsAsync(path));
+    }
+
+    private async Task DropFilesTableAsync()
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys=OFF");
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE ComicFiles");
+    }
+
     private FileStoreService CreateService(string? userId = null) =>
         TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _library, DuplicateDirectory = string.Empty }),

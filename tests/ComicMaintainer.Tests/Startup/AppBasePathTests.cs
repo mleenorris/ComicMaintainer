@@ -33,6 +33,9 @@ public class AppBasePathTests
     [InlineData("/a/./b")]
     [InlineData("/a/..")]
     [InlineData("/café")]
+    [InlineData("comics\n/")]
+    [InlineData("/comics\n/")]
+    [InlineData("/co\nmics")]
     public void Normalize_RefusesWhatCouldNotBeWrittenIntoAUrl(string configured)
     {
         Assert.Equal(string.Empty, AppBasePath.Normalize(configured));

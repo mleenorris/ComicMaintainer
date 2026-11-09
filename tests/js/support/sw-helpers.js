@@ -344,8 +344,8 @@ class FakeMessageChannel {
 }
 
 /** Network routes for one comic's info, pages and cover, as the reader API serves them. */
-function routeComic(network, filePath, { pages = 3, fileName = filePath.split(/[\\/]/).pop() } = {}) {
-    const isFor = path => call => call.path === path && call.query.filePath === filePath;
+function routeComic(network, filePath, { pages = 3, fileName = filePath.split(/[\\/]/).pop(), basePath = '' } = {}) {
+    const isFor = path => call => call.path === basePath + path && call.query.filePath === filePath;
     network.route(isFor('/api/ComicReader/info'), { filePath, fileName, pageCount: pages });
     network.route(isFor('/api/ComicReader/page'), call => image(`${fileName} page ${call.query.page}`));
     network.route(isFor('/api/ComicReader/cover'), image(`${fileName} cover`));

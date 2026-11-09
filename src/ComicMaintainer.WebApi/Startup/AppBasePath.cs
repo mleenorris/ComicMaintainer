@@ -11,8 +11,9 @@ public static partial class AppBasePath
     public const string Placeholder = "__BASE_PATH__";
 
     // RFC 3986 unreserved characters only: the value is written into HTML attributes, JavaScript
-    // strings and JSON, so anything that needs escaping in one of those is refused.
-    [GeneratedRegex(@"^(?:/(?!\.{1,2}(?:/|$))[A-Za-z0-9._~-]+)+$", RegexOptions.CultureInvariant)]
+    // strings and JSON, so anything that needs escaping in one of those is refused. \z rather than $,
+    // which would also accept a final newline.
+    [GeneratedRegex(@"\A(?:/(?!\.{1,2}(?:/|\z))[A-Za-z0-9._~-]+)+\z", RegexOptions.CultureInvariant)]
     private static partial Regex ValidBasePath();
 
     /// <summary>

@@ -19,7 +19,9 @@ const {
     image,
     makeRequest,
     navigationRequest,
-    loadServiceWorker
+    loadServiceWorker,
+    createClient,
+    routeComic
 } = require('./support/sw-helpers');
 
 const BASE = '/comics';
@@ -205,7 +207,7 @@ test('under a base path the first-run page checks its status inside it', async (
     assert.equal(page.navigations.at(-1).url, `http://localhost${BASE}/login.html`);
 });
 
-test('under a base path the reader loads its comic inside it', async () => {
+async function readerUnderBase() {
     const page = loadPage({
         html: 'reader.html',
         basePath: BASE,
@@ -216,13 +218,37 @@ test('under a base path the reader loads its comic inside it', async () => {
             [`GET ${BASE}/api/auth/user`]: { canModifyLibrary: true }
         }
     });
-
     await page.settle();
+    return page;
+}
+
+test('under a base path the reader loads its comic inside it', async () => {
+    const page = await readerUnderBase();
 
     assert.equal(page.fetchCalls.find(call => call.path.endsWith('/ComicReader/info')).path, `${BASE}/api/ComicReader/info`);
     for (const call of page.fetchCalls) {
         assert.ok(call.path.startsWith(`${BASE}/api/`), call.url);
     }
+});
+
+test('under a base path Back from the reader returns to the library inside it', async () => {
+    const page = await readerUnderBase();
+    let backs = 0;
+    page.window.history.back = () => { backs++; };
+    const backFrom = referrer => {
+        Object.defineProperty(page.document, 'referrer', { configurable: true, value: referrer });
+        const before = page.navigations.length;
+        page.run('goBack()');
+        return page.navigations.slice(before).map(navigation => navigation.url);
+    };
+
+    // Straight from the library: the browser's own Back restores it best.
+    assert.deepEqual(backFrom(`http://localhost${BASE}/`), []);
+    assert.equal(backs, 1);
+
+    // The domain root is some other site on this host, not the library.
+    assert.deepEqual(backFrom('http://localhost/'), [`http://localhost${BASE}/`]);
+    assert.equal(backs, 1);
 });
 
 test('the old jobs link redirects inside the base path', () => {
@@ -270,6 +296,29 @@ test('under a base path the worker still recognises the app\'s requests', async 
     const offline = await sw.respond(navigationRequest(`${BASE}/`));
     assert.equal(await offline.text(), 'ok');
     assert.equal(offline.status, 200);
+});
+
+test('under a base path a saved comic is downloaded inside it and read back offline', async () => {
+    const sw = await workerUnderBase();
+    await sw.activate();
+    routeComic(sw.network, 'a.cbz', { pages: 2, basePath: BASE });
+    sw.network.calls.length = 0;
+    const client = createClient();
+
+    await sw.message({ type: 'DOWNLOAD_COMIC', filePath: 'a.cbz' }, { source: client });
+
+    assert.equal(client.messages.at(-1).type, 'OFFLINE_DOWNLOAD_COMPLETE');
+    assert.deepEqual(sw.network.calls.map(call => call.path + call.search), [
+        `${BASE}/api/ComicReader/info?filePath=a.cbz`,
+        `${BASE}/api/ComicReader/page?filePath=a.cbz&page=1`,
+        `${BASE}/api/ComicReader/page?filePath=a.cbz&page=2`,
+        `${BASE}/api/ComicReader/cover?filePath=a.cbz`
+    ]);
+
+    sw.network.offline = true;
+    assert.deepEqual(await (await sw.respond(`${BASE}/api/ComicReader/info?filePath=a.cbz`)).json(), { filePath: 'a.cbz', fileName: 'a.cbz', pageCount: 2 });
+    assert.equal(await (await sw.respond(`${BASE}/api/ComicReader/page?filePath=a.cbz&page=2`)).text(), 'a.cbz page 2');
+    assert.equal(await (await sw.respond(`${BASE}/api/ComicReader/cover?filePath=a.cbz`)).text(), 'a.cbz cover');
 });
 
 test('at the domain root the worker keeps its root-relative URLs', async () => {

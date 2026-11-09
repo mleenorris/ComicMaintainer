@@ -272,6 +272,38 @@ namespace ComicMaintainer.Tests.AndroidApp
             new global::Java.IO.ConnectException(),
         ];
 
+        public static TheoryData<Exception> CertificateFailures() =>
+        [
+            // As Android raises it, unwrapped: left unrecognised it escapes every handler in the app and crashes it.
+            new global::Javax.Net.Ssl.SSLHandshakeException(),
+            new global::Java.Security.Cert.CertPathValidatorException(),
+            new System.Net.WebException("failed", new global::Javax.Net.Ssl.SSLHandshakeException()),
+            new HttpRequestException("failed", new System.Security.Authentication.AuthenticationException("untrusted")),
+        ];
+
+        [Theory]
+        [MemberData(nameof(CertificateFailures))]
+        public async Task AnUntrustedCertificate_IsExplained(Exception cause)
+        {
+            var (transport, _) = Create(_ => throw cause);
+
+            var failure = await Assert.ThrowsAsync<ApiException>(() => GetAsync(transport));
+
+            Assert.Equal(ApiErrorKind.Network, failure.Kind);
+            Assert.Equal(ApiTransport.UntrustedCertificateMessage, failure.Message);
+            Assert.Same(cause, failure.InnerException);
+        }
+
+        [Fact]
+        public async Task AnOrdinaryConnectionFailure_DoesNotBlameTheCertificate()
+        {
+            var (transport, _) = Create(_ => throw new global::Java.IO.ConnectException());
+
+            var failure = await Assert.ThrowsAsync<ApiException>(() => GetAsync(transport));
+
+            Assert.Contains("Could not reach the server", failure.Message, StringComparison.Ordinal);
+        }
+
         [Theory]
         [MemberData(nameof(ConnectionFailures))]
         public async Task AConnectionFailure_IsReportedAsOne(Exception cause)
@@ -393,8 +425,7 @@ namespace ComicMaintainer.Tests.AndroidApp
 
         // Thrown from the page's startup, a FormatException here would crash the app at every launch.
         [Theory]
-        [InlineData(CredentialKind.Session, "damaged
-token")]
+        [InlineData(CredentialKind.Session, "damaged\ntoken")]
         [InlineData(CredentialKind.ApiKey, "damaged\nkey")]
         public async Task ADamagedStoredCredential_IsDiscardedInsteadOfCrashing(CredentialKind kind, string value)
         {
@@ -692,4 +723,16 @@ namespace Java.IO
 {
     /// <summary>Stands in for the Java exceptions the Android HTTP handler fails with, which are matched by name.</summary>
     internal sealed class ConnectException : Exception;
+}
+
+namespace Java.Security.Cert
+{
+    /// <summary>Stands in for what Android raises when it cannot validate a certificate chain.</summary>
+    internal sealed class CertPathValidatorException : Exception;
+}
+
+namespace Javax.Net.Ssl
+{
+    /// <summary>Stands in for what Android raises for a self-signed certificate; javax, not java.</summary>
+    internal sealed class SSLHandshakeException : Exception;
 }

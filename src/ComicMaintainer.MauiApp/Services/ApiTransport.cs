@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 
@@ -19,6 +20,11 @@ public sealed class ApiTransport
 {
     /// <summary>The name of the <see cref="HttpClient"/> requests are sent with.</summary>
     public const string HttpClientName = "ComicMaintainerApi";
+
+    /// <summary>Shown when the HTTPS connection fails on the certificate, which a user can do something about.</summary>
+    internal const string UntrustedCertificateMessage =
+        "This device does not trust the server's HTTPS certificate. The app cannot use a self-signed certificate: " +
+        "use one from a public authority such as Let's Encrypt.";
 
     private const string ApiKeyHeader = "X-API-Key";
 
@@ -75,7 +81,9 @@ public sealed class ApiTransport
         {
             throw new ApiException(
                 ApiErrorKind.Network,
-                "Could not reach the server. Check its address and this device's network connection.",
+                IsCertificateFailure(exception)
+                    ? UntrustedCertificateMessage
+                    : "Could not reach the server. Check its address and this device's network connection.",
                 innerException: exception);
         }
     }
@@ -125,10 +133,31 @@ public sealed class ApiTransport
         "The server's answer was not what this app expects. Check that the address points to a ComicMaintainer server and that the server and app are up to date.",
         innerException: cause);
 
-    // The handler on Android reports connection problems with Java exceptions, which this code cannot name.
+    // The handler on Android reports connection problems with Java exceptions, which this code cannot name. TLS failures
+    // are in javax rather than java, and one of those is what a self-signed certificate raises.
     private static bool IsConnectionFailure(Exception exception) =>
         exception is HttpRequestException or IOException or SocketException or WebException
-        || exception.GetType().FullName?.StartsWith("Java.", StringComparison.Ordinal) == true;
+        || HasTypeNamePrefix(exception, "Java.")
+        || HasTypeNamePrefix(exception, "Javax.");
+
+    // The handler may wrap the cause, so the whole chain is searched.
+    private static bool IsCertificateFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is AuthenticationException
+                || HasTypeNamePrefix(current, "Javax.Net.Ssl.")
+                || HasTypeNamePrefix(current, "Java.Security.Cert."))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasTypeNamePrefix(Exception exception, string prefix) =>
+        exception.GetType().FullName?.StartsWith(prefix, StringComparison.Ordinal) == true;
 
     private static ApiException DescribeFailure(HttpResponseMessage response, string body)
     {

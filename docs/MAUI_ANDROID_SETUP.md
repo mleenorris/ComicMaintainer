@@ -78,6 +78,7 @@ The app returns to the sign-in page and says why:
 | The server no longer accepts this API key | The key was revoked or replaced. |
 | This server has not been set up yet | Create the administrator in a web browser. |
 | The server redirected the app to... | See [Reverse proxies](#reverse-proxies-and-single-sign-on). |
+| This device does not trust the server's HTTPS certificate | See [HTTPS certificates](#https-certificates). |
 
 A network problem does not sign you out. The app keeps your session and shows the error.
 
@@ -90,6 +91,12 @@ A network problem does not sign you out. The app keeps your session and shows th
 `http://` addresses work, because self-hosted servers are often reached that way on a home network. The app warns
 about them: anyone on the network between the device and the server can read your password and session. Use HTTPS for
 anything outside a network you trust.
+
+### HTTPS certificates
+
+The app accepts only certificates that Android trusts by default, which means one from a public authority such as
+Let's Encrypt. A self-signed certificate, or one from your own authority, fails with a message saying so, even if you
+have installed that authority on the device, because Android apps do not trust user-installed authorities by default.
 
 ### Reverse proxies and single sign-on
 

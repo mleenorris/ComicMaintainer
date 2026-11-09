@@ -93,10 +93,9 @@ public static class ArchiveEntryReader
 
     // RAR 5 block types and flags (https://www.rarlab.com/technote.htm).
     private const int Rar5SignatureLength = 8;
+    private const ulong Rar5BlockMain = 1;
     private const ulong Rar5BlockFile = 2;
     private const ulong Rar5BlockService = 3;
-    private const ulong Rar5BlockEncryption = 4;
-    private const ulong Rar5BlockEndOfArchive = 5;
     private const ulong Rar5HasExtraArea = 0x01;
     private const ulong Rar5HasDataArea = 0x02;
     private const ulong Rar5FileIsDirectory = 0x01;
@@ -207,10 +206,11 @@ public static class ArchiveEntryReader
                 return;
             }
 
-            if (block.Type == Rar5BlockEndOfArchive || block.Type == Rar5BlockEncryption)
+            if (block.Type != Rar5BlockMain && block.Type != Rar5BlockFile && block.Type != Rar5BlockService)
             {
-                // Everything after an encryption header is encrypted, and reading it needs a
-                // password this application does not have.
+                // The end of the archive, an encryption header (everything after it needs a
+                // password this application does not have) or a block type SharpCompress
+                // refuses: either way it lists no further entries.
                 return;
             }
 

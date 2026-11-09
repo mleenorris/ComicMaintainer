@@ -275,7 +275,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
             WriteVInt(file, directory ? 1UL : 0UL); // file flags
             WriteVInt(file, 5_000_000); // unpacked size
             WriteVInt(file, 0x20);
-            WriteVInt(file, (ulong)(method << 7) | ((ulong)dictionaryPower << 10));
+            WriteVInt(file, ((ulong)(uint)method << 7) | ((ulong)(uint)dictionaryPower << 10));
             WriteVInt(file, 1); // host OS
             WriteVInt(file, (ulong)name.Length);
             file.Write(name);
@@ -386,6 +386,163 @@ public sealed class ComicArchiveReaderTests : IDisposable
 
         Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.OpenForEntry(path, 1));
         Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
+    }
+
+    private static byte[] Rar5Bytes(params byte[][] blocks)
+    {
+        using var output = new MemoryStream();
+        output.Write(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 });
+        foreach (var block in blocks)
+        {
+            WriteBlock(output, block);
+        }
+
+        return output.ToArray();
+    }
+
+    private static byte[] FileHeaderBody(ulong type, ulong headerFlags, ulong fileFlags, int dictionaryPower, int method = 3, bool extraArea = false)
+    {
+        using var body = new MemoryStream();
+        WriteVInt(body, type);
+        WriteVInt(body, headerFlags);
+        if (extraArea)
+        {
+            WriteVInt(body, 0); // extra area size
+        }
+
+        if ((headerFlags & 0x02) != 0)
+        {
+            WriteVInt(body, 16); // data area size
+        }
+
+        WriteVInt(body, fileFlags);
+        WriteVInt(body, 1000); // unpacked size
+        WriteVInt(body, 0x20); // attributes
+        if ((fileFlags & 0x02) != 0)
+        {
+            body.Write(new byte[4]); // mtime
+        }
+
+        if ((fileFlags & 0x04) != 0)
+        {
+            body.Write(new byte[4]); // CRC
+        }
+
+        WriteVInt(body, ((ulong)(uint)method << 7) | ((ulong)(uint)dictionaryPower << 10));
+        return body.ToArray();
+    }
+
+    [Fact]
+    public void EnsureRarDictionaries_NothingAfterTheSignature_IsFine() =>
+        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes()), "x.cbr");
+
+    [Fact]
+    public void EnsureRarDictionaries_AHeaderSizeThatIsNotAValidNumber_StopsTheWalk()
+    {
+        // SharpCompress stops listing entries at a header like this one.
+        using var output = new MemoryStream();
+        output.Write(Rar5Bytes());
+        output.Write(new byte[] { 1, 2, 3, 4, 0xFF, 0xFF, 0xFF, 0xFF });
+
+        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(output.ToArray()), "x.cbr");
+    }
+
+    [Fact]
+    public void EnsureRarDictionaries_HeaderWithExtraAreaTimeAndCrc_IsStillParsed()
+    {
+        var body = FileHeaderBody(type: 2, headerFlags: 0x03, fileFlags: 0x06, dictionaryPower: 13, extraArea: true);
+
+        Assert.Throws<ArchiveLimitExceededException>(() =>
+            ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
+    }
+
+    [Fact]
+    public void EnsureRarDictionaries_ServiceHeaderAskingForTooMuch_IsRefused()
+    {
+        var body = FileHeaderBody(type: 3, headerFlags: 0, fileFlags: 0, dictionaryPower: 13);
+
+        Assert.Throws<ArchiveLimitExceededException>(() =>
+            ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
+    }
+
+    [Theory]
+    [InlineData(4UL)] // Encrypted headers follow: the walk has to stop.
+    [InlineData(9UL)] // SharpCompress refuses a block type it does not know.
+    public void EnsureRarDictionaries_BlocksTheWalkCannotPass_StopIt(ulong type)
+    {
+        var after = FileHeaderBody(type: 2, headerFlags: 0, fileFlags: 0, dictionaryPower: 13);
+
+        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(
+            new MemoryStream(Rar5Bytes(new byte[] { (byte)type, 0, 0 }, after)),
+            "x.cbr");
+    }
+
+    [Fact]
+    public void EnsureRarDictionaries_TruncatedFileHeader_StopsTheWalk()
+    {
+        // Declares a time and a CRC that are not there.
+        using var body = new MemoryStream();
+        WriteVInt(body, 2);
+        WriteVInt(body, 0);
+        WriteVInt(body, 0x06);
+        WriteVInt(body, 1000);
+        WriteVInt(body, 0x20);
+
+        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body.ToArray())), "x.cbr");
+    }
+
+    [Fact]
+    public void EnsureRarDictionaries_ADataAreaPastAnyFile_StopsTheWalk()
+    {
+        using var body = new MemoryStream();
+        WriteVInt(body, 2);
+        WriteVInt(body, 0x02);
+        WriteVInt(body, ulong.MaxValue >> 1); // data area size
+        WriteVInt(body, 0);
+        WriteVInt(body, 1000);
+        WriteVInt(body, 0x20);
+        WriteVInt(body, 3UL << 7);
+
+        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body.ToArray())), "x.cbr");
+    }
+
+    [Fact]
+    public void EnsureRarDictionaries_MoreHeadersThanAnArchiveCouldHold_IsRefused()
+    {
+        var mainHeader = new byte[] { 1, 0, 0 };
+        var blocks = Enumerable.Repeat(mainHeader, (2 * ArchiveEntryReader.MaxEntries) + 17).ToArray();
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() =>
+            ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(blocks)), "many.cbr"));
+
+        Assert.Contains("many.cbr", ex.Message);
+    }
+
+    [Fact]
+    public void OpenZip_MaxEntries_LimitsAGeneratedArchive()
+    {
+        var path = Zip("book.epub", ("a", new byte[1]), ("b", new byte[1]), ("c", new byte[1]));
+
+        Assert.Throws<ArchiveLimitExceededException>(() => ArchiveEntryReader.OpenZip(path, maxEntries: 2));
+        using var archive = ArchiveEntryReader.OpenZip(path, maxEntries: 3);
+        Assert.Equal(3, archive.Entries.Count);
+    }
+
+    [Fact]
+    public void EnumerateEntries_ZipFolderWithBackslashName_IsADirectory()
+    {
+        var path = Path.Join(_dir, "folders.cbz");
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            zip.CreateEntry("sub\\");
+            using var page = zip.CreateEntry("sub\\p1.jpg").Open();
+            page.Write(new byte[] { 1 });
+        }
+
+        using var archive = ComicArchiveReader.Open(path);
+
+        Assert.True(archive.EnumerateEntries().Single(e => e.Name == "sub\\").IsDirectory);
+        Assert.False(archive.EnumerateEntries().Single(e => e.Name == "sub\\p1.jpg").IsDirectory);
     }
 
     [Fact]
@@ -541,7 +698,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
     public void CopyFileEntriesTo_SolidRar_IsReadInOrder()
     {
         // The solid flag is set in the main archive header (see the conversion tests).
-        var path = Rar("book.cbr", ("p1.jpg", Bytes("one")), ("p2.jpg", Bytes("two")));
+        var path = Rar("book.cbr", ("folder", null), ("p1.jpg", Bytes("one")), ("p2.jpg", Bytes("two")));
         var bytes = File.ReadAllBytes(path);
         var flags = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(10));
         BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(10), (ushort)(flags | 0x0008));

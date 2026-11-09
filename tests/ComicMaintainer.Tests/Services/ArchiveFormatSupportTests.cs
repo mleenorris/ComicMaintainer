@@ -203,7 +203,7 @@ public sealed class ArchiveFormatSupportTests : IDisposable
 
         Assert.Contains("more than 100:1", ex.Message);
         Assert.Equal(before, File.ReadAllBytes(path));
-        Assert.Empty(Directory.GetFiles(_dir).Where(f => f != path));
+        Assert.DoesNotContain(Directory.GetFiles(_dir), f => f != path);
     }
 
     // ---- Suwayomi import check ---------------------------------------------------------------

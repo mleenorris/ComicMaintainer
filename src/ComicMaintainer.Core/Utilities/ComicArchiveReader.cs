@@ -190,7 +190,7 @@ public sealed class ComicArchiveReader : IDisposable
 
     private static void EnsureRar5VolumeWithinLimits(string volumePath)
     {
-        using var volume = new FileStream(volumePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 4096);
+        using var volume = new FileStream(volumePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096);
         Span<byte> signature = stackalloc byte[SignatureLength];
         if (volume.ReadAtLeast(signature, SignatureLength, throwOnEndOfStream: false) == SignatureLength
             && signature.StartsWith(Rar5Signature))

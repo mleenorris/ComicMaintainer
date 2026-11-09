@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true" android:label="ComicMaintainer"></application>
-    
+    <!--
+        allowBackup is off because SecureStorage's encrypted values would be backed up without their key, which stays in
+        the device's keystore: after a restore they could not be decrypted.
+        usesCleartextTraffic is on because self-hosted servers are commonly reached over plain HTTP on the home network,
+        which Android blocks by default. The app warns on any http:// address before the password is entered.
+    -->
+    <application android:allowBackup="false" android:usesCleartextTraffic="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true" android:label="ComicMaintainer"></application>
+
     <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    
-    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="35" />
+
+    <!-- API 23 is the first with the keystore SecureStorage relies on to encrypt the sign-in. -->
+    <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="35" />
 </manifest>

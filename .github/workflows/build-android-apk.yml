@@ -45,15 +45,15 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag != '' && format('refs/tags/{0}', inputs.tag) || '' }}
-      
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
-      
-      - name: Install MAUI workload
-        run: dotnet workload install maui
-      
+
+      - name: Install the Android workload
+        run: dotnet workload install maui-android
+
       - name: Get version from tag or project
         id: get_version
         shell: pwsh
@@ -65,22 +65,25 @@ jobs:
           }
           Write-Output "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $version"
-      
+
+      # The app has a solution of its own, so that the main one builds without the Android workload.
       - name: Restore dependencies
-        run: dotnet restore ComicMaintainer.sln
-      
-      - name: Build Android APK (Debug)
+        run: dotnet restore src/ComicMaintainer.Android.sln
+
+      # Publish, not build: publishing is what produces the signed package, in the publish folder.
+      - name: Build Android APK
         run: |
-          dotnet build src/ComicMaintainer.MauiApp/ComicMaintainer.MauiApp.csproj `
+          dotnet publish src/ComicMaintainer.MauiApp/ComicMaintainer.MauiApp.csproj `
             -c Release `
             -f net10.0-android `
-            /p:AndroidPackageFormat=apk
-      
+            -p:AndroidPackageFormat=apk
+
       - name: Locate APK
         id: locate_apk
         shell: pwsh
         run: |
-          $apkPath = Get-ChildItem -Path "src/ComicMaintainer.MauiApp/bin/Release/net10.0-android" -Filter "*.apk" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          # Only the signed package can be installed; the build also leaves an unsigned one next to it.
+          $apkPath = Get-ChildItem -Path "src/ComicMaintainer.MauiApp/bin/Release/net10.0-android/publish" -Filter "*-Signed.apk" -Recurse | Select-Object -First 1 -ExpandProperty FullName
           if ($apkPath) {
             Write-Host "Found APK at: $apkPath"
             $apkName = "ComicMaintainer-v${{ steps.get_version.outputs.version }}-android.apk"
@@ -90,92 +93,91 @@ jobs:
             Write-Error "APK not found"
             exit 1
           }
-      
+
       - name: Create README for Android release
         shell: pwsh
         run: |
           $readmeContent = @"
           # ComicMaintainer Android App
-          
+
           ## Installation
-          
+
           1. Download the APK file to your Android device
           2. Enable "Install from Unknown Sources" in your device settings
           3. Tap the APK file to install
           4. Open the ComicMaintainer app
-          
-          ## Initial Setup
-          
-          1. Open the app and navigate to the Settings tab
-          2. Enter your ComicMaintainer server URL
-             - Example: http://192.168.1.100:5000
-             - Make sure to include http:// or https://
-          3. Tap "Test Connection" to verify connectivity
-          4. Tap "Save Settings"
-          5. Go to the Home tab and tap "Check Connection"
-          6. Once connected, you can browse and manage your files
-          
+
+          ## Signing In
+
+          1. Open the app
+          2. Enter your ComicMaintainer server URL, including http:// or https://
+             - Example: https://comics.example.com or http://192.168.1.100:5000
+          3. Enter the username and password of your ComicMaintainer account
+             - Or turn on "Sign in with an API key" and paste a key you created
+          4. Tap "Sign in"
+
+          The app keeps your session in the device's secure storage and never stores your password.
+          When the session ends (by default after 24 hours, or when your password changes), the app
+          returns to the sign-in page and says why.
+
           ## Server Requirements
-          
+
           Your ComicMaintainer server must be:
+          - Set up already: create the administrator account in a web browser first
           - Running and accessible from your Android device
-          - On the same network (for local connections)
-          - Or accessible via a domain name (for remote connections)
-          
+
           ## Network Configuration
-          
+
           ### Local Network Access:
           - Find your server's local IP address (e.g., 192.168.1.100)
           - Use format: http://[IP-ADDRESS]:5000
-          - Ensure your Android device is on the same network
-          
+          - Plain http:// sends your password unencrypted, and the app warns about it. Use it only on a network you trust
+
           ### Remote Access:
-          - Configure port forwarding on your router (if needed)
-          - Use HTTPS for secure remote connections
-          - Format: https://your-domain.com or https://your-ip:5000
-          
+          - Use HTTPS
+          - Format: https://your-domain.com
+          - If a sign-on page such as Authelia protects the server, requests from the app must be let through to it
+
           ## Features
-          
-          - Browse comic files on your server
-          - Process individual files
-          - Filter by processing status (all, unprocessed, processed, duplicates)
+
+          - Sign in with a password or an API key
+          - Browse comic files on your server, page by page
+          - Process and delete individual files or a selection
+          - Filter by processing status (all, unmarked, marked, duplicates)
           - Search for specific files
-          - Real-time connection status
-          
+
           ## Troubleshooting
-          
+
           ### Cannot connect to server:
-          - Verify server is running (check on computer)
-          - Check IP address is correct
-          - Ensure devices are on same network
-          - Check firewall settings on server
-          - Try http instead of https (or vice versa)
-          
-          ### App crashes or errors:
-          - Clear app cache in Android settings
-          - Reinstall the app
-          - Check server logs for errors
-          
+          - On the sign-in page, tap "Test Connection"; it says what went wrong
+          - Verify server is running and the address is correct
+          - Ensure devices are on same network, and check firewall settings on server
+
+          ### "Too many requests":
+          - The server limits sign-in attempts. Wait for the time it names, then try again
+
           ## System Requirements
-          
-          - Android 5.0 (API 21) or later
+
+          - Android 6.0 (API 23) or later
           - Internet/network connectivity
-          - ~20MB storage space
-          
+
+          ## Updating
+
+          Each release is signed with a temporary key, so Android refuses to install it over an earlier
+          one. Uninstall the app first, then install the new version and sign in again.
+
           ## Security Notes
-          
-          - This APK is unsigned/self-signed
+
           - Use HTTPS when accessing over the internet
-          - Keep your server URL private
           - Only install APKs from trusted sources
-          
+
           ## Support
-          
+
           For issues and documentation, visit: https://github.com/mleenorris/ComicMaintainer
           "@
-          
+
           $readmeContent | Out-File -FilePath "ANDROID_README.txt" -Encoding UTF8
-      
+
       - name: Upload Android APK artifact
         uses: actions/upload-artifact@v7
         with:
@@ -183,7 +185,7 @@ jobs:
           path: |
             ${{ steps.locate_apk.outputs.apk_file }}
             ANDROID_README.txt
-      
+
       # The release workflow created the release with its notes; this adds the APK to it.
       - name: Attach to the GitHub release
         if: inputs.tag != ''

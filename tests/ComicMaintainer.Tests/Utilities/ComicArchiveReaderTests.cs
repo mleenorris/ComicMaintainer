@@ -518,6 +518,39 @@ public sealed class ComicArchiveReaderTests : IDisposable
         Assert.Contains("many.cbr", ex.Message);
     }
 
+    [Theory]
+    [InlineData(new byte[] { 0xFF, 0xFF, 0x01 })] // type does not fit
+    [InlineData(new byte[] { 2, 0xFF, 0xFF, 0x01 })] // header flags do not fit
+    [InlineData(new byte[] { 2, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01 })] // extra area size does not fit
+    [InlineData(new byte[] { 2, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01 })] // data size does not fit
+    [InlineData(new byte[] { 2, 0, 0xFF, 0xFF, 0xFF, 0x01 })] // file flags do not fit
+    public void EnsureRarDictionaries_MalformedFields_StopTheWalk(byte[] body) =>
+        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body)), "x.cbr");
+
+    [Fact]
+    public void Open_Rar5VolumeSet_WithinTheLimits_Opens()
+    {
+        File.WriteAllBytes(Path.Join(_dir, "fine.part2.rar"), Rar5(8));
+        var first = Path.Join(_dir, "fine.part1.rar");
+        File.WriteAllBytes(first, Rar5(8));
+
+        using var archive = ComicArchiveReader.Open(first);
+
+        Assert.Equal(ComicArchiveFormat.Rar, archive.Format);
+    }
+
+    [Fact]
+    public void Open_Rar5VolumeFollowedByAnOlderVolume_OnlyChecksRar5Headers()
+    {
+        ComicReaderServiceCoverageTests.StoredRar4.Write(Path.Join(_dir, "mixed.part2.rar"), ("p2.jpg", Bytes("two")));
+        var first = Path.Join(_dir, "mixed.part1.rar");
+        File.WriteAllBytes(first, Rar5(8));
+
+        using var archive = ComicArchiveReader.Open(first);
+
+        Assert.Equal(ComicArchiveFormat.Rar, archive.Format);
+    }
+
     [Fact]
     public void OpenZip_MaxEntries_LimitsAGeneratedArchive()
     {

@@ -118,6 +118,20 @@ public sealed class ComicArchiveReaderTests : IDisposable
     }
 
     [Fact]
+    public void Dispose_ReleasesTheFileOfASolidRarThatWasReadInOrder()
+    {
+        var path = SolidBook();
+
+        using (var archive = ComicArchiveReader.Open(path))
+        {
+            Assert.Equal(Bytes("two"), archive.GetEntryAt(1)!.ReadAllBytes(1024));
+        }
+
+        File.Delete(path);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
     public void Dispose_CanBeCalledTwice()
     {
         var archive = ComicArchiveReader.Open(Rar("book.cbr", ("p1.jpg", Bytes("page"))));

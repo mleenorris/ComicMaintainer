@@ -618,8 +618,10 @@ public static class ArchiveEntryReader
     }
 
     /// <summary>
-    /// Reads a whole SharpCompress (CBR/RAR, 7z, ...) entry under the same limits
-    /// as <see cref="ReadAllBytes(ZipArchiveEntry, long)"/>.
+    /// Reads a whole SharpCompress entry under the same limits as
+    /// <see cref="ReadAllBytes(ZipArchiveEntry, long)"/>. The entry is opened on its own, so it
+    /// must not be an entry of a solid RAR that depends on the entries before it; see
+    /// <see cref="ComicArchiveReader"/>.
     /// </summary>
     /// <exception cref="ArchiveLimitExceededException">The entry exceeds a limit.</exception>
     public static byte[] ReadAllBytes(IArchiveEntry entry, long maxBytes)

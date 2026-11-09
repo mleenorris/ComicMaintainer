@@ -134,11 +134,6 @@ public class EpubConversionService : IEpubConversionService
                 pass: 1,
                 totalPasses: BuildCompressionTiers(options?.MaxSizeBytes).Count);
 
-            if (!ComicFileExtensions.IsComicArchive(comicFilePath))
-            {
-                throw new NotSupportedException($"Unsupported comic format: {Path.GetExtension(comicFilePath)}");
-            }
-
             using var archive = ComicArchiveReader.Open(comicFilePath);
 
             // macOS resource forks are binary stubs that would otherwise be duplicate, unreadable pages.

@@ -142,16 +142,6 @@ test('getAuthHeaders for an Authelia session never sends a stored JWT', () => {
     assert.deepEqual(Object.keys(headers).sort(), ['Content-Type', 'X-Client-Session']);
 });
 
-test('handleAuthError only treats 401 as a lost session', () => {
-    const page = apiPage({ localStorage: { jwt_token: validToken() } });
-    assert.equal(page.run('handleAuthError({ status: 403 })'), false);
-    assert.equal(page.run('handleAuthError({ status: 500 })'), false);
-    assert.equal(wentToLogin(page), false);
-    assert.equal(page.run('handleAuthError({ status: 401 })'), true);
-    assert.ok(wentToLogin(page));
-    assert.equal(page.window.localStorage.getItem('jwt_token'), null);
-});
-
 test('redirectToLogin clears only the session keys and asks the service worker to drop cached images', () => {
     const page = apiPage({
         localStorage: {

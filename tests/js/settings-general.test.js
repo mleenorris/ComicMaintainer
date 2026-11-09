@@ -329,7 +329,7 @@ test('a failed load shows a retry prompt, and retrying loads the settings', asyn
         retryHidden: false
     });
     assert.deepEqual(messages(page), [
-        { type: 'error', text: 'Failed to load settings: HTTP error! status: 500 - database is locked' }
+        { type: 'error', text: 'Failed to load settings: HTTP error! status: 500' }
     ]);
     assert.equal(page.$('#messageContainer .message').getAttribute('role'), 'alert');
     // Nothing can be edited or saved until the settings are known.
@@ -494,9 +494,8 @@ test('settings checkboxes save as soon as they change', async t => {
             page.route(route, respond(500, { error: 'Failed to save setting' }));
             page.input(checkbox, !initial);
             await page.settle();
-            // The one toggle the environment can pin passes the server's reason on.
-            const reason = id === 'downloadExternalSeriesImagesCheckbox' ? 'Failed to save setting' : 'HTTP error! status: 500';
-            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}${reason}` });
+            // Every toggle passes the server's reason on.
+            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}Failed to save setting` });
             assert.equal(checkbox.checked, initial);
 
             page.route(route, networkError);
@@ -531,9 +530,8 @@ test('an unexpected failure of a checkbox quotes the reference of its request', 
             page.input(checkbox, !checkbox.checked);
             await page.settle();
 
-            // The one toggle the environment can pin passes the server's reason on.
-            const reason = id === 'downloadExternalSeriesImagesCheckbox' ? SERVER_FAILURE : 'HTTP error! status: 500';
-            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}${reason} (ref: corr-${id})` });
+            // Every toggle passes the server's reason on.
+            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}${SERVER_FAILURE} (ref: corr-${id})` });
         });
     }
 });
@@ -567,7 +565,7 @@ test('the default library view saves on change', async () => {
     page.route(route, respond(500, { error: 'nope' }));
     page.input('#defaultLibraryViewSelect', 'files');
     await page.settle();
-    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to update default library view: HTTP error! status: 500' });
+    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to update default library view: nope' });
 
     const shown = messages(page).length;
     page.route(route, 401);
@@ -647,7 +645,7 @@ test('the default view and language selects quote the reference of an unexpected
 
     page.input('#defaultLibraryViewSelect', 'files');
     await page.settle();
-    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to update default library view: HTTP error! status: 500 (ref: corr-view)' });
+    assert.deepEqual(lastMessage(page), { type: 'error', text: `Failed to update default library view: ${SERVER_FAILURE} (ref: corr-view)` });
 
     page.input('#defaultPreferredLanguageSelect', 'ko');
     await page.settle();

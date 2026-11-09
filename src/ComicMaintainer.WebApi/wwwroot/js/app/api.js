@@ -268,17 +268,6 @@
             return headers;
         }
         
-        // Helper function to handle auth errors
-        function handleAuthError(response) {
-            if (response.status === 401) {
-                // Token expired or invalid, redirect to login
-                console.log('Received 401 Unauthorized, redirecting to login');
-                redirectToLogin();
-                return true;
-            }
-            return false;
-        }
-        
         // Per-request logging is off by default: a large library makes one
         // request per cover, and a console full of these hides the real
         // errors. Run localStorage.setItem('debug_api', 'true') in the browser

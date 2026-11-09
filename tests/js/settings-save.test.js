@@ -725,12 +725,12 @@ test('Reset Filename Format puts the default format the server reports into the 
     page.route(route, respond(500, { error: 'boom' }));
     page.click('#resetFilenameFormatBtn');
     await page.settle();
-    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to reset format: HTTP error! status: 500' });
+    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to reset format: boom' });
 
     page.route(route, serverFailure('corr-format'));
     page.click('#resetFilenameFormatBtn');
     await page.settle();
-    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to reset format: HTTP error! status: 500 (ref: corr-format)' });
+    assert.deepEqual(lastMessage(page), { type: 'error', text: `Failed to reset format: ${SERVER_FAILURE} (ref: corr-format)` });
 
     page.route(route, networkError);
     page.click('#resetFilenameFormatBtn');

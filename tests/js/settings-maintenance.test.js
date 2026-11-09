@@ -257,7 +257,7 @@ test('the About dialog shows the server version', async () => {
     clearMessages(page);
     page.route('GET /api/version', respond(500, { error: 'boom' }));
     await page.run('openAboutModal()');
-    assert.deepEqual(messages(page), [{ type: 'error', text: 'Failed to load version information: HTTP error! status: 500' }]);
+    assert.deepEqual(messages(page), [{ type: 'error', text: 'Failed to load version information: boom' }]);
     assert.equal(isActive(page, 'aboutModal'), false);
 
     page.route('GET /api/version', networkError);

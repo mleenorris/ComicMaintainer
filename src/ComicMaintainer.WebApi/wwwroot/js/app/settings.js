@@ -22,19 +22,11 @@
             if (!select) return;
             const selectedView = select.value === 'series' ? 'series' : 'files';
             try {
-                const response = await fetch(apiUrl('/api/settings/default-library-view'), {
+                await apiFetch('/api/settings/default-library-view', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ view: selectedView })
+                    body: { view: selectedView }
                 });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
-                showMessage(`Default library view set to ${selectedView === 'series' ? 'Series' : 'Files (folder view)'}`, 'success');
+showMessage(`Default library view set to ${selectedView === 'series' ? 'Series' : 'Files (folder view)'}`, 'success');
             } catch (error) {
                 console.error('Failed to update default library view:', error);
                 showMessage('Failed to update default library view: ' + error.message, 'error', { reference: error });
@@ -49,19 +41,11 @@
             if (!select) return;
             const value = select.value || null;
             try {
-                const response = await fetch(apiUrl('/api/settings/default-preferred-language'), {
+                await apiFetch('/api/settings/default-preferred-language', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ language: value })
+                    body: { language: value }
                 });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw apiResponseError(response, await settingsErrorMessage(response));
-                }
-                showMessage('Default preferred language updated', 'success');
+showMessage('Default preferred language updated', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
                 }
@@ -78,23 +62,10 @@
             const enabled = document.getElementById('watcherEnableRenameCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/watcher-enable-rename'), {
+                await apiFetch('/api/settings/watcher-enable-rename', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('watcherEnableRenameCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`File rename ${statusText} successfully!`, 'success');
@@ -108,23 +79,10 @@
             const enabled = document.getElementById('watcherEnableNormalizeCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/watcher-enable-normalize'), {
+                await apiFetch('/api/settings/watcher-enable-normalize', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('watcherEnableNormalizeCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Metadata normalize ${statusText} successfully!`, 'success');
@@ -138,23 +96,10 @@
             const enabled = document.getElementById('convertRarToCbzOnWriteCheckbox').checked;
 
             try {
-                const response = await fetch(apiUrl('/api/settings/convert-rar-to-cbz-on-write'), {
+                await apiFetch('/api/settings/convert-rar-to-cbz-on-write', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                    body: { enabled: enabled }
                 });
-
-                if (handleAuthError(response)) {
-                    document.getElementById('convertRarToCbzOnWriteCheckbox').checked = !enabled;
-                    return;
-                }
-
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Convert CBR/RAR to CBZ when writing tags ${statusText} successfully!`, 'success');
@@ -168,23 +113,10 @@
             const enabled = document.getElementById('writeCoverToFirstArchiveCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/write-cover-to-first-archive'), {
+                await apiFetch('/api/settings/write-cover-to-first-archive', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('writeCoverToFirstArchiveCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Embed cover into first issue archive ${statusText} successfully!`, 'success');
@@ -198,23 +130,10 @@
             const enabled = document.getElementById('writeCoverToSeriesFolderCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/write-cover-to-series-folder'), {
+                await apiFetch('/api/settings/write-cover-to-series-folder', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('writeCoverToSeriesFolderCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Write cover into series folder ${statusText} successfully!`, 'success');
@@ -229,23 +148,10 @@
             const enabled = checkbox.checked;
 
             try {
-                const response = await fetch(apiUrl('/api/settings/allow-registration'), {
+                await apiFetch('/api/settings/allow-registration', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                    body: { enabled: enabled }
                 });
-
-                if (handleAuthError(response)) {
-                    checkbox.checked = !enabled;
-                    return;
-                }
-
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
 
                 showMessage(`Self-service registration ${enabled ? 'enabled' : 'disabled'} successfully!`, 'success');
             } catch (error) {
@@ -258,23 +164,10 @@
             const enabled = document.getElementById('downloadExternalSeriesImagesCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/download-external-series-images'), {
+                await apiFetch('/api/settings/download-external-series-images', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('downloadExternalSeriesImagesCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw apiResponseError(response, await settingsErrorMessage(response));
-                }
 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Download external series images ${statusText} successfully!`, 'success');
@@ -382,14 +275,7 @@
             (input.closest('label') || input).after(hint);
         }
 
-        /** The reason a failed settings request gave, or the HTTP status when it gave none. */
-        async function settingsErrorMessage(response) {
-            // A proxy's error page or an empty body is not JSON.
-            const result = await response.json().catch(() => null);
-            return (result && (result.error || result.message || result.title)) || `HTTP error! status: ${response.status}`;
-        }
-
-        /**
+/**
          * Fills the settings page from the server. Resolves to false when it told
          * the user the load failed (or the session expired); `afterSave` words that
          * failure for the save that came before it.
@@ -402,27 +288,10 @@
             loadBackups();
             try {
                 // Load all settings
-                const settingsUrl = apiUrl('/api/settings');
-                console.log('[SETTINGS] Fetching settings from URL:', settingsUrl);
-                
-                const settingsResponse = await fetch(settingsUrl, {
-                    headers: getAuthHeaders()
-                });
-
-                console.log('[SETTINGS] Response status:', settingsResponse.status, 'OK:', settingsResponse.ok, 'URL:', settingsResponse.url);
-
-                if (handleAuthError(settingsResponse)) return false;
-
-                if (!settingsResponse.ok) {
-                    const errorText = await settingsResponse.text();
-                    console.error('[SETTINGS] Failed to load settings. Status:', settingsResponse.status, 'Response:', errorText);
-                    throw new Error(`HTTP error! status: ${settingsResponse.status} - ${errorText}`);
-                }
-                
-                const settingsData = await settingsResponse.json();
+                const settingsData = await apiFetch('/api/settings');
                 if (loadRequest !== settingsLoadRequest) return undefined;
-                console.log('[SETTINGS] Settings data loaded:', settingsData);
-                
+                apiDebugLog('Settings loaded', settingsData);
+
                 document.getElementById('filenameFormat').value = settingsData.filename_format || '';
                 document.getElementById('currentFormat').textContent = settingsData.filename_format || '{series} - Chapter {issue}';
                 
@@ -621,14 +490,16 @@
                 applyCapabilities();
                 return true;
             } catch (error) {
+                if (error.authHandled) return false;
                 if (loadRequest !== settingsLoadRequest) return undefined;
                 console.error('[SETTINGS] Error in loadSettings():', error);
                 setSettingsLoadStatus('error', 'Settings could not be loaded. Retry before making changes.');
                 showMessage(
                     (afterSave ? 'Settings were saved, but the page could not be reloaded: ' : 'Failed to load settings: ') + error.message,
-                    afterSave ? 'warning' : 'error');
+                    afterSave ? 'warning' : 'error',
+                    { reference: error });
                 return false;
-            }
+}
         }
         
         function closeSettings() {
@@ -710,23 +581,9 @@
                 // Show a loading message
                 showMessage('Resetting database... This may take a moment.', 'info');
                 
-                const response = await fetch(apiUrl('/api/settings/reset'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    }
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    throw apiResponseError(response, await settingsErrorMessage(response));
-                }
-                
-                const result = await response.json();
-                
-                if (result.success) {
+                const result = await apiFetch('/api/settings/reset', { method: 'POST' });
+
+if (result.success) {
                     showMessage('Database reset completed successfully', 'success');
                     // Clear in-memory selection state — the file list is now empty.
                     if (typeof selectedFiles !== 'undefined' && selectedFiles && typeof selectedFiles.clear === 'function') {
@@ -785,17 +642,7 @@
                 clearChildren(contentDiv);
                 
                 const offset = (historyCurrentPage - 1) * historyPerPage;
-                const response = await fetch(apiUrl(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`), {
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`);
                 historyTotal = data.total;
                 const totalPages = Math.ceil(historyTotal / historyPerPage);
                 
@@ -822,6 +669,7 @@
                 nextBtn.disabled = historyCurrentPage >= totalPages;
                 
             } catch (error) {
+                if (error.authHandled) return;
                 loadingIndicator.style.display = 'none';
                 renderHtml(contentDiv, html`<div style="padding: 20px; color: red;">Error loading history: ${error.message}</div>`);
             }
@@ -933,14 +781,7 @@
         async function openAboutModal() {
             try {
                 // Load version
-                const response = await fetch(apiUrl('/api/version'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/version');
                 const aboutVersionElement = document.getElementById('aboutVersion');
                 if (aboutVersionElement && data.version) {
                     aboutVersionElement.textContent = `v${data.version}`;
@@ -987,21 +828,16 @@
             renderHtml(container, html`<div class="loading"><div class="spinner"></div><p>Loading diagnostics...</p></div>`);
 
             try {
-                const response = await fetch(apiUrl('/api/diagnostics'), { headers: getAuthHeaders() });
-                if (handleAuthError(response)) return;
-                if (response.status === 403) {
-                    lastDiagnostics = null;
+                lastDiagnostics = await apiFetch('/api/diagnostics');
+                renderDiagnostics(lastDiagnostics);
+            } catch (error) {
+                if (error.authHandled) return;
+                lastDiagnostics = null;
+                if (error.status === 403) {
                     renderHtml(container, html`<p class="empty-state">System diagnostics are available to administrators only.</p>`);
                     return;
                 }
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
-                lastDiagnostics = await response.json();
-                renderDiagnostics(lastDiagnostics);
-            } catch (error) {
-                lastDiagnostics = null;
-                // Rendered inline rather than as a toast: the panel is the only
+// Rendered inline rather than as a toast: the panel is the only
                 // thing on screen the user is looking at. It still carries the
                 // correlation reference so a failed snapshot is itself traceable.
                 renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, error)}</p>`);
@@ -1245,22 +1081,17 @@
             btn.textContent = 'Changing...';
             
             try {
-                const response = await fetch(apiUrl('/api/auth/change-password'), {
+                const response = await apiFetch('/api/auth/change-password', {
                     method: 'POST',
-                    headers: getAuthHeaders(),
-                    body: JSON.stringify({
+                    json: false,
+                    body: {
                         currentPassword: currentPassword,
                         newPassword: newPassword
-                    })
+                    }
                 });
-                
-                if (handleAuthError(response)) {
-                    resetButtonState();
-                    return;
-                }
-                
+
                 const data = await response.json();
-                
+
                 if (response.ok) {
                     // Changing the password signed every session out, this one included;
                     // carry on with the new session token the server returned.
@@ -1282,8 +1113,9 @@
                     errorEl.classList.add('show');
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Error changing password:', error);
-                errorEl.textContent = 'An error occurred. Please try again.';
+errorEl.textContent = 'An error occurred. Please try again.';
                 errorEl.classList.add('show');
             } finally {
                 // Re-enable button
@@ -1298,17 +1130,8 @@
             try {
                 renderHtml(logFileSelect, html`<option value="">Loading...</option>`);
                 
-                const response = await fetch(apiUrl(`/api/logs/files?type=${logType}`), {
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                
+                const data = await apiFetch(`/api/logs/files?type=${logType}`);
+
                 // Clear and populate the dropdown
                 clearChildren(logFileSelect);
                 
@@ -1336,6 +1159,7 @@
                 // Load logs for the selected file (most recent by default)
                 await loadLogs();
             } catch (error) {
+                if (error.authHandled) return;
                 renderHtml(logFileSelect, html`<option value="">Error loading files</option>`);
                 console.error('Failed to load log files:', error);
             }
@@ -1363,17 +1187,8 @@
                     url += `&filename=${encodeURIComponent(logFile)}`;
                 }
                 
-                const response = await fetch(apiUrl(url), {
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                
+                const data = await apiFetch(url);
+
                 if (data.error) {
                     logsContent.textContent = 'Error: ' + data.error;
                 } else {
@@ -1382,6 +1197,7 @@
                     logStats.textContent = `Showing ${data.shown_lines} of ${data.total_lines} total lines${fileInfo}`;
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 logsContent.textContent = 'Failed to load logs: ' + error.message;
             } finally {
                 logsLoadingIndicator.style.display = 'none';
@@ -1389,30 +1205,17 @@
         }
 
         /**
-         * Sends one Save Settings request. Throws an Error carrying the server's
-         * reason and the request's reference on failure, flagged `authHandled` after
-         * a 401 (already redirecting to login) and `nothingSaved` when the server
-         * refused the save (a 4xx). A 5xx says nothing about that: the file may
-         * already be replaced when a later step fails, and a proxy's 502/504 never
-         * saw the outcome.
+         * Sends one Save Settings request. Throws apiFetch's error on failure, with
+         * `authHandled` after a 401 (already redirecting to login), and flagged
+         * `nothingSaved` when the server refused the save (a 4xx). A 5xx says nothing
+         * about that: the file may already be replaced when a later step fails, and a
+         * proxy's 502/504 never saw the outcome. Nor does a request that got no answer.
          */
         async function saveAllSettings(body) {
-            const response = await fetch(apiUrl('/api/settings'), {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...getAuthHeaders()
-                },
-                body: JSON.stringify(body)
-            });
-            if (handleAuthError(response)) {
-                const error = new Error('Authentication required');
-                error.authHandled = true;
-                throw error;
-            }
-            if (!response.ok) {
-                const error = apiResponseError(response, await settingsErrorMessage(response));
-                error.nothingSaved = response.status < 500;
+            try {
+                await apiFetch('/api/settings', { method: 'PUT', body });
+            } catch (error) {
+                error.nothingSaved = error.status < 500;
                 throw error;
             }
         }
@@ -1667,11 +1470,7 @@
 
         async function sendErrorReportingTest() {
             try {
-                const response = await fetch(apiUrl('/api/error-reports/test'), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch('/api/error-reports/test', { method: 'POST', json: false });
                 const result = await response.json().catch(() => null);
                 if (!response.ok) {
                     showMessage((result && result.error) || `Test report failed (HTTP ${response.status})`, 'error');
@@ -1686,14 +1485,7 @@
         async function resetFilenameFormat() {
             if (!settingsLoaded || !userCapabilities.canAdminister) return;
             try {
-                const response = await fetch(apiUrl('/api/settings/filename-format'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/settings/filename-format');
                 if (!data.default) {
                     throw new Error('No default format was returned');
                 }
@@ -1717,12 +1509,11 @@
             try {
                 showMessage('Starting database cleanup...', 'info');
 
-                const post = confirmed => fetch(
-                    apiUrl('/api/settings/cleanup-database' + (confirmed ? '?confirm=true' : '')),
-                    { method: 'POST', headers: getAuthHeaders() });
+                const post = confirmed => apiFetch(
+                    '/api/settings/cleanup-database' + (confirmed ? '?confirm=true' : ''),
+                    { method: 'POST', json: false });
 
                 let response = await post(false);
-                if (handleAuthError(response)) return;
                 let result = await response.json().catch(() => ({}));
 
                 if (response.status === 409 && result.requiresConfirmation) {
@@ -1731,7 +1522,6 @@
                         return;
                     }
                     response = await post(true);
-                    if (handleAuthError(response)) return;
                     result = await response.json().catch(() => ({}));
                 }
 
@@ -1775,24 +1565,10 @@
 
         /** Fetch a /api/backups endpoint; throws an Error carrying `status` (and the response's `correlationId`) on failure. */
         async function fetchBackupsApi(path, options = {}) {
-            const response = await fetch(apiUrl(path), {
-                credentials: 'include',
-                ...options,
-                headers: options.headers || getAuthHeaders()
-            });
-            if (handleAuthError(response)) {
-                const error = new Error('Authentication required');
-                error.status = response.status;
-                error.authHandled = true;
-                throw error;
-            }
+            // The caller reads the body: a download is a blob, not JSON.
+            const response = await apiFetch(path, { ...options, json: false });
             if (!response.ok) {
-                let message = `HTTP error! status: ${response.status}`;
-                try {
-                    const body = await response.json();
-                    if (body && (body.error || body.message)) message = body.error || body.message;
-                } catch (_) { /* non-JSON error body */ }
-                throw apiResponseError(response, message);
+                throw apiResponseError(response, await apiErrorMessage(response));
             }
             return response;
         }
@@ -1962,16 +1738,11 @@
 
             const formData = new FormData();
             formData.append('file', file);
-            // Let the browser set the multipart Content-Type (with boundary);
-            // getAuthHeaders() defaults it to JSON.
-            const headers = getAuthHeaders();
-            delete headers['Content-Type'];
             try {
                 showMessage('Uploading and validating backup...', 'info');
                 const response = await fetchBackupsApi('/api/backups/upload-restore', {
                     method: 'POST',
-                    body: formData,
-                    headers
+                    body: formData
                 });
                 reportRestoreStaged(await response.json());
             } catch (error) {

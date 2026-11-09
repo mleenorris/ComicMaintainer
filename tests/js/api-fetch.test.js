@@ -193,6 +193,30 @@ test('a failure carries its status and correlation id', async () => {
     assert.equal(error.correlationId, 'corr-1');
 });
 
+test('a GlobalExceptionHandler problem document reaches the caller as its reason and reference', async () => {
+    // The document ControllerFailureResponseTests pins on the server's side.
+    const problem = {
+        type: 'https://datatracker.ietf.org/doc/html/rfc9110#section-15.6.1',
+        title: 'An unexpected error occurred.',
+        status: 500,
+        detail: 'Error retrieving processing history',
+        instance: '/api/processing-history',
+        correlationId: 'corr-9',
+        error: 'Error retrieving processing history'
+    };
+    const page = apiPage({
+        routes: { 'GET /api/thing': respond(500, problem, { 'Content-Type': 'application/problem+json', 'X-Correlation-Id': 'corr-9' }) }
+    });
+
+    const error = await failure(page);
+
+    assert.equal(error.message, 'Error retrieving processing history');
+    assert.equal(error.status, 500);
+    assert.equal(error.correlationId, 'corr-9');
+    assert.equal(error.fromServer, true);
+    assert.equal(page.window.withApiFailureReference('Could not load: ' + error.message, error), 'Could not load: Error retrieving processing history (ref: corr-9)');
+});
+
 test('a failed request that never got an answer is rejected as it is', async () => {
     const page = apiPage({ routes: { 'GET /api/thing': () => { throw new TypeError('Failed to fetch'); } } });
 
@@ -397,15 +421,13 @@ test('debug logging stays off when storage cannot be read', () => {
     assert.equal(page.run('isApiDebugEnabled()'), false);
 });
 
-// settings.js moves over when its own changes are merged; sw.js runs in the
-// service worker, which has no session of its own and no page to redirect.
-const NOT_YET_ON_API_FETCH = new Set(['js/app/settings.js']);
-
+// sw.js stays out of this: it runs in the service worker, which has no session
+// of its own and no page to redirect, and it does not live under js/.
 test('every page script makes its requests through apiFetch', () => {
     const scripts = fs.readdirSync(path.join(WWWROOT, 'js'), { recursive: true, withFileTypes: true })
         .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
         .map(entry => path.relative(WWWROOT, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'))
-        .filter(script => script !== 'js/app/api.js' && !NOT_YET_ON_API_FETCH.has(script));
+        .filter(script => script !== 'js/app/api.js');
     assert.ok(scripts.includes('js/pages/login.js') && scripts.includes('js/pages/setup.js'));
 
     for (const script of scripts) {

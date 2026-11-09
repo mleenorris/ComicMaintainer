@@ -11,6 +11,7 @@ const path = require('node:path');
 const { WWWROOT } = require('./support/sandbox');
 const { loadPage, respond } = require('./support/dom');
 const { bootRoutes, validToken } = require('./support/app');
+const { settingsRoutes } = require('./support/settings-helpers');
 const {
     APP_VERSION,
     VERSIONED_CACHE,
@@ -144,6 +145,72 @@ test('under a base path the app talks to its API inside it', async () => {
     }
     assert.equal(page.eventSources.length, 1);
     assert.match(page.eventSources[0].url, /^\/comics\/api\/events\/stream\?/);
+    assert.deepEqual(page.unmatchedRequests, []);
+});
+
+test('under a base path the Settings page keeps its requests inside it', async () => {
+    const page = loadPage({
+        basePath: BASE,
+        url: `http://localhost${BASE}/index.html#/settings`,
+        localStorage: { jwt_token: validToken(), username: 'alice' },
+        routes: underBase({
+            ...bootRoutes(),
+            ...SERIES_ROUTES,
+            ...settingsRoutes(),
+            'PUT /api/settings': {},
+            'PUT /api/settings/default-library-view': {},
+            'GET /api/settings/filename-format': { default: '{series}' },
+            'POST /api/settings/reset': { success: true },
+            'POST /api/settings/cleanup-database': { success: true, removedCount: 0 },
+            'GET /api/processing-history': { total: 0, history: [] },
+            'GET /api/version': { version: APP_VERSION },
+            'GET /api/diagnostics': {},
+            'GET /api/logs/files': { files: [] },
+            'GET /api/logs': { content: '' },
+            'POST /api/error-reports/test': {},
+            'POST /api/auth/change-password': {},
+            'POST /api/backups': { name: 'b.db' }
+        })
+    });
+    await page.settle();
+
+    for (const action of [
+        'saveAllSettings({})',
+        'updateDefaultLibraryViewFromSettings()',
+        'resetFilenameFormat()',
+        'confirmReset()',
+        'cleanupDatabaseNow()',
+        'loadProcessingHistory()',
+        'openAboutModal()',
+        'loadDiagnostics()',
+        'loadLogFiles()',
+        'sendErrorReportingTest()',
+        'createBackup()'
+    ]) {
+        await page.run(action);
+    }
+    await page.settle();
+
+    const paths = new Set(page.fetchCalls.map(call => call.path));
+    for (const path of [
+        '/api/settings',
+        '/api/settings/default-library-view',
+        '/api/settings/filename-format',
+        '/api/settings/reset',
+        '/api/settings/cleanup-database',
+        '/api/processing-history',
+        '/api/version',
+        '/api/diagnostics',
+        '/api/logs/files',
+        '/api/logs',
+        '/api/error-reports/test',
+        '/api/backups'
+    ]) {
+        assert.ok(paths.has(BASE + path), `${BASE}${path} was not requested`);
+    }
+    for (const call of page.fetchCalls) {
+        assert.ok(call.path.startsWith(`${BASE}/api/`), `${call.method} ${call.url}`);
+    }
     assert.deepEqual(page.unmatchedRequests, []);
 });
 

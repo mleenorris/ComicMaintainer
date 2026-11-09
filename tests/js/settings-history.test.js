@@ -249,7 +249,7 @@ test('an empty or failing history is explained in the panel', async () => {
 
     for (const [failure, message] of [
         [respond(500, 'Error retrieving processing history'), 'Error loading history: HTTP error! status: 500'],
-        [respond(400, 'limit must be positive'), 'Error loading history: HTTP error! status: 400'],
+        [respond(400, 'limit must be positive'), 'Error loading history: limit must be positive'],
         [() => { throw new TypeError('Failed to fetch'); }, 'Error loading history: Failed to fetch']
     ]) {
         page.route('GET /api/processing-history', failure);

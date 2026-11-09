@@ -134,13 +134,6 @@ public partial class FilesController
         });
     }
 
-    // Legacy endpoint for backward compatibility
-    [HttpPost("~/api/scan-unmarked")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    [Obsolete("Use GET /api/files/scan-unmarked instead.")]
-    [FailureMessage("Error scanning files")]
-    public async Task<ActionResult> ScanUnmarkedLegacy() => await ScanUnmarked();
-
     // RESTful endpoint: POST /api/files/{encodedFilePath}/process
     [HttpPost("{encodedFilePath}/process")]
     [FailureMessage("Error processing file")]

@@ -6,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Win32.SafeHandles;
 using System.Xml;
 using System.Xml.Linq;
-using SharpCompress.Archives;
 using SharpCompress.Common;
 using SharpCompress.Writers.Zip;
 
@@ -20,23 +19,45 @@ public partial class ComicProcessorService
     private const ComicMetadataFieldFlags NormalizedFields =
         ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Title | ComicMetadataFieldFlags.Issue;
 
-    public Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default) =>
+        (await ReadMetadataAsync(filePath, cancellationToken)).Metadata;
+
+    /// <summary>
+    /// The outcome of reading a file's metadata from its archive.
+    /// </summary>
+    /// <param name="Metadata">The metadata, or null when it could not be read.</param>
+    /// <param name="FailureReason">
+    /// Why not, when that can be told to users: see <see cref="MetadataWriteResult.FailureReason"/>.
+    /// </param>
+    private readonly record struct ArchiveMetadataRead(ComicMetadata? Metadata, string? FailureReason = null);
+
+    /// <summary>Like <see cref="GetMetadataAsync"/>, keeping the reason a read failed.</summary>
+    private async Task<ArchiveMetadataRead> ReadMetadataAsync(string filePath, CancellationToken cancellationToken)
     {
         try
         {
             if (!TryResolveAllowedPath(filePath, out var resolvedPath))
-                return Task.FromResult<ComicMetadata?>(null);
+            {
+                return default;
+            }
 
-            return GetMetadataAtResolvedPath(resolvedPath, filePath, cancellationToken);
+            return await ReadMetadataAtResolvedPathAsync(resolvedPath, filePath, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return Task.FromResult<ComicMetadata?>(null);
+            return default;
         }
     }
 
-    private Task<ComicMetadata?> GetMetadataAtResolvedPath(string resolvedPath, string fallbackFilePath, CancellationToken cancellationToken = default)
+    private async Task<ComicMetadata?> GetMetadataAtResolvedPath(string resolvedPath, string fallbackFilePath, CancellationToken cancellationToken = default) =>
+        (await ReadMetadataAtResolvedPathAsync(resolvedPath, fallbackFilePath, cancellationToken)).Metadata;
+
+    private async Task<ArchiveMetadataRead> ReadMetadataAtResolvedPathAsync(string resolvedPath, string fallbackFilePath, CancellationToken cancellationToken)
     {
         try
         {
@@ -45,16 +66,15 @@ public partial class ComicProcessorService
                 !File.Exists(resolvedPath) ||
                 !IsComicArchive(resolvedPath))
             {
-                return Task.FromResult<ComicMetadata?>(null);
+                return default;
             }
 
-            using var archive = ArchiveFactory.OpenArchive(resolvedPath);
+            using var archive = ComicArchiveReader.Open(resolvedPath);
 
-            // Look for ComicInfo.xml
-            var comicInfoEntry = FindComicInfoEntry(archive, resolvedPath);
+            var comicInfoEntry = archive.FindComicInfoEntry();
 
             var metadata = comicInfoEntry != null
-                ? ParseComicInfoXml(ReadComicInfoXml(comicInfoEntry))
+                ? ParseComicInfoXml(comicInfoEntry.ReadText())
                 : new ComicMetadata
                 {
                     // Fallback: parse from the folder and file name
@@ -62,19 +82,23 @@ public partial class ComicProcessorService
                     Issue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(fallbackFilePath))
                 };
 
-            return ComicFileExtensions.IsWritableArchive(resolvedPath)
-                ? Task.FromResult(metadata)
-                : ApplyPendingDatabaseEditAsync(fallbackFilePath, metadata, cancellationToken);
+            return new ArchiveMetadataRead(ComicFileExtensions.IsWritableArchive(resolvedPath)
+                ? metadata
+                : await ApplyPendingDatabaseEditAsync(fallbackFilePath, metadata, cancellationToken));
         }
         catch (ArchiveLimitExceededException ex)
         {
             LogArchiveRefused(fallbackFilePath, ex);
-            return Task.FromResult<ComicMetadata?>(null);
+            return new ArchiveMetadataRead(null, ex.Message);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(fallbackFilePath));
-            return Task.FromResult<ComicMetadata?>(null);
+            return new ArchiveMetadataRead(null, DescribeArchiveFailure(ex));
         }
     }
 
@@ -89,11 +113,11 @@ public partial class ComicProcessorService
                 return null;
 
             SeriesMetadata? metadata;
-            using (var archive = ArchiveFactory.OpenArchive(resolvedPath))
+            using (var archive = ComicArchiveReader.Open(resolvedPath))
             {
-                var comicInfoEntry = FindComicInfoEntry(archive, resolvedPath);
+                var comicInfoEntry = archive.FindComicInfoEntry();
                 metadata = comicInfoEntry != null
-                    ? ParseSeriesMetadataXml(ReadComicInfoXml(comicInfoEntry))
+                    ? ParseSeriesMetadataXml(comicInfoEntry.ReadText())
                     : new SeriesMetadata
                     {
                         Series = ExtractSeriesFromFilename(filePath),
@@ -326,14 +350,22 @@ public partial class ComicProcessorService
         catch (ArchiveLimitExceededException ex)
         {
             LogArchiveRefused(filePath, ex);
-            return MetadataWriteResult.Failed(filePath);
+            return MetadataWriteResult.Failed(filePath, ex.Message);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return MetadataWriteResult.Failed(filePath);
+            return MetadataWriteResult.Failed(filePath, DescribeArchiveFailure(ex));
         }
     }
+
+    /// <summary>
+    /// The reason an archive could not be read or rewritten that is safe to show users, or null.
+    /// These exceptions describe the archive itself (not a ZIP or RAR, damaged, encrypted, an
+    /// unsupported compression method); the messages of other failures can hold paths.
+    /// </summary>
+    private static string? DescribeArchiveFailure(Exception failure) =>
+        failure is ComicArchiveFormatException or InvalidDataException or SharpCompressException ? failure.Message : null;
 
     /// <summary>
     /// True when the CBR, RAR or ZIP at <paramref name="filePath"/> may be converted to CBZ: the
@@ -472,10 +504,15 @@ public partial class ComicProcessorService
             _logger.LogInformation("Successfully removed metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(result.FilePath));
             return result;
         }
+        catch (ArchiveLimitExceededException ex)
+        {
+            LogArchiveRefused(filePath, ex);
+            return MetadataWriteResult.Failed(filePath, ex.Message);
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error removing metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return MetadataWriteResult.Failed(filePath);
+            return MetadataWriteResult.Failed(filePath, DescribeArchiveFailure(ex));
         }
     }
 
@@ -656,14 +693,14 @@ public partial class ComicProcessorService
     /// </summary>
     private static XDocument? ReadComicInfoDocument(string physicalPath)
     {
-        using var archive = ArchiveFactory.OpenArchive(physicalPath);
-        var entry = FindComicInfoEntry(archive, physicalPath);
+        using var archive = ComicArchiveReader.Open(physicalPath);
+        var entry = archive.FindComicInfoEntry();
         if (entry is null)
         {
             return null;
         }
 
-        var xml = ReadComicInfoXml(entry);
+        var xml = entry.ReadText();
         try
         {
             return ComicInfoXml.Parse(xml);
@@ -677,51 +714,36 @@ public partial class ComicProcessorService
 
     private static bool HasComicInfoEntry(string physicalPath)
     {
-        using var archive = ArchiveFactory.OpenArchive(physicalPath);
-        return FindComicInfoEntry(archive, physicalPath) is not null;
+        using var archive = ComicArchiveReader.Open(physicalPath);
+        return archive.FindComicInfoEntry() is not null;
     }
-
-    private static IArchiveEntry? FindComicInfoEntry(IArchive archive, string archivePath) =>
-        ArchiveEntryReader.EnumerateEntries(archive, Path.GetFileName(archivePath)).FirstOrDefault(e =>
-            e.Key?.Equals(ComicInfoXml.EntryName, StringComparison.OrdinalIgnoreCase) == true);
 
     /// <summary>
     /// Writes a zip to <paramref name="destinationPath"/> holding every non-directory entry of
-    /// <paramref name="sourcePath"/> except ComicInfo.xml (same order, names and timestamps),
+    /// <paramref name="sourcePath"/> except its ComicInfo.xml (same order, names and timestamps),
     /// followed by <paramref name="comicInfoXml"/> as ComicInfo.xml when it is not null.
-    /// Entries are streamed one at a time, so memory use does not grow with entry or archive size.
+    /// Entries are streamed one at a time, so memory use does not grow with entry or archive size,
+    /// and under the rewrite limits of <see cref="ArchiveEntryReader"/>, so a decompression bomb
+    /// is refused before it fills the disk.
     /// Throws if any entry cannot be copied, so callers never replace the original with an
     /// archive that is missing pages. The destination is created new (never overwritten), gets
-    /// the source's Unix permissions, and is flushed to disk before this returns. A RAR source
-    /// (being converted to CBZ) is read in order when it is solid, and its entry names get ZIP's
-    /// '/' separators.
+    /// the source's Unix permissions, and is flushed to disk before this returns.
     /// </summary>
+    /// <remarks>
+    /// A write replaces the root-level ComicInfo.xml, or the nested one it was read from when
+    /// there is none at the root; a removal drops every ComicInfo.xml so none is left to be
+    /// found next time.
+    /// </remarks>
     private void RewriteArchive(string sourcePath, string destinationPath, byte[]? comicInfoXml)
     {
-        using var sourceArchive = ArchiveFactory.OpenArchive(sourcePath);
-        var normalizeSeparators = sourceArchive.Type != ArchiveType.Zip;
+        using var sourceArchive = ComicArchiveReader.Open(sourcePath);
+        var replacedEntry = comicInfoXml is null ? null : sourceArchive.FindComicInfoEntry()?.Name;
         using var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         using (var writer = new ZipWriter(destination, new ZipWriterOptions(CompressionType.Deflate) { LeaveStreamOpen = true }))
         {
-            if (sourceArchive.IsSolid)
-            {
-                // A solid archive can only be decompressed from the start.
-                using var reader = sourceArchive.ExtractAllEntries();
-                while (reader.MoveToNextEntry())
-                {
-                    if (!reader.Entry.IsDirectory)
-                    {
-                        CopyArchiveEntry(writer, reader.Entry, reader.OpenEntryStream, normalizeSeparators);
-                    }
-                }
-            }
-            else
-            {
-                foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
-                {
-                    CopyArchiveEntry(writer, entry, entry.OpenEntryStream, normalizeSeparators);
-                }
-            }
+            sourceArchive.CopyFileEntriesTo(writer, name => comicInfoXml is null
+                ? !ComicArchiveReader.IsComicInfoName(name)
+                : !ComicArchiveReader.IsRootComicInfoName(name) && !string.Equals(name, replacedEntry, StringComparison.Ordinal));
 
             if (comicInfoXml != null)
             {
@@ -734,27 +756,6 @@ public partial class ComicProcessorService
         // before it is renamed over the original, so a power loss cannot leave an empty file there.
         destination.Flush(flushToDisk: true);
         CopyUnixFileMode(sourcePath, destinationPath);
-    }
-
-    /// <summary>
-    /// Copies one file entry into <paramref name="writer"/> under its own name and timestamp,
-    /// skipping the old ComicInfo.xml. Throws for an entry without a name.
-    /// </summary>
-    private static void CopyArchiveEntry(ZipWriter writer, IEntry entry, Func<Stream> openEntryStream, bool normalizeSeparators)
-    {
-        if (entry.Key == null)
-        {
-            throw new InvalidDataException("The archive contains an entry without a name, which cannot be copied.");
-        }
-
-        var name = normalizeSeparators ? entry.Key.Replace('\\', '/') : entry.Key;
-        if (name.Equals(ComicInfoXml.EntryName, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        using var entryStream = openEntryStream();
-        writer.Write(name, entryStream, entry.LastModifiedTime);
     }
 
     /// <summary>

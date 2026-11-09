@@ -331,14 +331,17 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         var cbz = Path.Join(_root, "issue1.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
-            // Zeros, so the archive itself stays tiny. Written in small chunks so the fixture
+            // Random, so it stores at about 1:1 like a real page (the rewrite limits refuse a
+            // large entry that compresses too well). Written in small chunks so the fixture
             // doesn't need a LargeEntrySize buffer.
             var entry = zip.CreateEntry("big.bin", CompressionLevel.Fastest);
             entry.LastWriteTime = FixtureTimestamp;
             using var stream = entry.Open();
+            var random = new Random(1);
             var chunk = new byte[81920];
             for (var remaining = LargeEntrySize; remaining > 0; remaining -= chunk.Length)
             {
+                random.NextBytes(chunk);
                 stream.Write(chunk, 0, Math.Min(chunk.Length, remaining));
             }
         }
@@ -450,6 +453,29 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoveAsync_ArchiveRefusedByTheLimits_LogsWhyAndLeavesItAlone()
+    {
+        var cbz = Path.Join(_root, "refused.cbz");
+        var refused = ComicMaintainer.Tests.Utilities.ComicArchiveReaderTests.Rar5(dictionaryPower: 13);
+        File.WriteAllBytes(cbz, refused);
+        SetupFirstArchive(cbz);
+        var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
+
+        await CreateWriter(logger: logger.Object).RemoveAsync(Key);
+
+        Assert.Equal(refused, File.ReadAllBytes(cbz));
+        Assert.DoesNotContain(Directory.GetFiles(_root, "*", SearchOption.AllDirectories), ArchiveWriteRecoveryService.IsTempPath);
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state!.ToString()!.Contains("decompression dictionary")),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task RemoveAsync_LibraryThrows_IsSwallowed()
     {
         _library
@@ -494,11 +520,11 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
 
     // ---- helpers -----------------------------------------------------------------------
 
-    private SeriesArchiveCoverWriter CreateWriter()
+    private SeriesArchiveCoverWriter CreateWriter(ILogger<SeriesArchiveCoverWriter>? logger = null)
     {
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(_settings);
-        return new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, Mock.Of<ILogger<SeriesArchiveCoverWriter>>(), new FileOperationLock());
+        return new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger ?? Mock.Of<ILogger<SeriesArchiveCoverWriter>>(), new FileOperationLock());
     }
 
     private void SetupFirstArchive(string? path)

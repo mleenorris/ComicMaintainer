@@ -57,7 +57,7 @@ public sealed class ArchiveEntryReaderTests : IDisposable
             writer.Write("<ComicInfo>Caf\u00e9</ComicInfo>");
         }
 
-        using var archive = SharpCompress.Archives.Zip.ZipArchive.OpenArchive(path);
+        using var archive = ZipFile.OpenRead(path);
 
         Assert.Equal("<ComicInfo>Caf\u00e9</ComicInfo>", ArchiveEntryReader.ReadText(archive.Entries.Single()));
     }
@@ -72,7 +72,7 @@ public sealed class ArchiveEntryReaderTests : IDisposable
             entry.Write(new byte[ArchiveEntryReader.MaxComicInfoBytes + 1]);
         }
 
-        using var archive = SharpCompress.Archives.Zip.ZipArchive.OpenArchive(path);
+        using var archive = ZipFile.OpenRead(path);
 
         var ex = Assert.Throws<ArchiveLimitExceededException>(() => ArchiveEntryReader.ReadText(archive.Entries.Single()));
         Assert.Contains("ComicInfo.xml", ex.Message);

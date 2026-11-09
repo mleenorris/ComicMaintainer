@@ -4,12 +4,12 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
-using SharpCompress.Archives.Rar;
 
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Service for reading and extracting pages from comic archives (CBZ/CBR).
+/// Service for reading and extracting pages from comic archives. Archives are opened through
+/// <see cref="ComicArchiveReader"/>, so what a file is depends on its content, not its name.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -40,8 +40,8 @@ public class ComicReaderService : IComicReaderService, IDisposable
 {
     /// <summary>
     /// Version of the rules that turn an archive's entries into its page list:
-    /// which entries count as pages (<see cref="ImageExtensions"/>, directories
-    /// skipped) and the order they are read in (<see cref="NaturalStringComparer"/>).
+    /// which entries count as pages and the order they are read in, both defined by
+    /// <see cref="ComicArchiveReader.ListPages"/>.
     /// </summary>
     /// <remarks>
     /// Page N of an unchanged file is only the same image while these rules are
@@ -57,8 +57,6 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
     /// <summary>A page list nobody has asked for in this long is dropped.</summary>
     private static readonly TimeSpan PageIndexSlidingExpiration = TimeSpan.FromHours(1);
-
-    private static readonly string[] ImageExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp" };
 
     private readonly ILogger<ComicReaderService> _logger;
     private readonly MemoryCache _pageIndexes;
@@ -217,20 +215,13 @@ public class ComicReaderService : IComicReaderService, IDisposable
             return null;
         }
 
-        var extension = Path.GetExtension(filePath).ToLowerInvariant();
-        var kind = extension switch
+        if (!ComicFileExtensions.IsComicArchive(filePath))
         {
-            ".cbz" => ArchiveKind.Zip,
-            ".cbr" => ArchiveKind.Rar,
-            _ => (ArchiveKind?)null,
-        };
-        if (kind is null)
-        {
-            _logger.LogWarning("Unsupported file extension: {Extension}", LoggingHelper.SanitizeForLog(extension));
+            _logger.LogWarning("Unsupported file extension: {Extension}", LoggingHelper.SanitizeForLog(Path.GetExtension(filePath)));
             return null;
         }
 
-        var version = new FileVersion(filePath, kind.Value, info.Length, info.LastWriteTimeUtc.Ticks);
+        var version = new FileVersion(filePath, info.Length, info.LastWriteTimeUtc.Ticks);
         if (_pageIndexes.TryGetValue(filePath, out PageIndex? index)
             && index is not null
             && index.Version == version)
@@ -276,7 +267,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
         PageIndex index;
         try
         {
-            index = await Task.Run(() => version.Kind == ArchiveKind.Zip ? BuildZipIndex(version) : BuildRarIndex(version));
+            index = await Task.Run(() => BuildIndex(version));
         }
         catch (ArchiveLimitExceededException ex)
         {
@@ -315,56 +306,14 @@ public class ComicReaderService : IComicReaderService, IDisposable
         }
     }
 
-    private static PageIndex BuildZipIndex(FileVersion version)
+    private static PageIndex BuildIndex(FileVersion version)
     {
-        using var archive = ArchiveEntryReader.OpenZip(version.Path);
-        var entries = archive.Entries;
-
-        var pages = new List<(string Name, int Position)>();
-        for (var i = 0; i < entries.Count; i++)
-        {
-            var name = entries[i].FullName;
-            if (!name.EndsWith('/') && IsImageFile(name))
-            {
-                pages.Add((name, i));
-            }
-        }
-
-        return CreateIndex(version, pages);
-    }
-
-    private static PageIndex BuildRarIndex(FileVersion version)
-    {
-        using var archive = RarArchive.OpenArchive(version.Path);
-        var archiveName = Path.GetFileName(version.Path);
-
-        var pages = new List<(string Name, int Position)>();
-        var position = 0;
-        // Entries are parsed lazily, so the count is enforced while walking the
-        // headers rather than after all of them have been read.
-        foreach (var entry in archive.Entries)
-        {
-            ArchiveEntryReader.EnsureEntryCountWithinLimit(position + 1, archiveName);
-            var key = entry.Key ?? string.Empty;
-            if (!entry.IsDirectory && IsImageFile(key))
-            {
-                pages.Add((key, position));
-            }
-
-            position++;
-        }
-
-        return CreateIndex(version, pages);
-    }
-
-    private static PageIndex CreateIndex(FileVersion version, List<(string Name, int Position)> pages)
-    {
-        // OrderBy is stable, so entries with equal names keep their archive order.
-        var sorted = pages.OrderBy(p => p.Name, new NaturalStringComparer()).ToArray();
+        using var archive = ComicArchiveReader.Open(version.Path);
+        var pages = archive.ListPages();
         return new PageIndex(
             version,
-            sorted.Select(p => p.Name).ToArray(),
-            sorted.Select(p => p.Position).ToArray(),
+            pages.Select(p => p.Name).ToArray(),
+            pages.Select(p => p.Position).ToArray(),
             refusal: null);
     }
 
@@ -375,32 +324,17 @@ public class ComicReaderService : IComicReaderService, IDisposable
     /// </summary>
     private static byte[]? ReadPage(PageIndex index, int pageNumber)
     {
-        var filePath = index.Version.Path;
         var expectedName = index.Names[pageNumber - 1];
         var position = index.EntryPositions[pageNumber - 1];
 
-        if (index.Version.Kind == ArchiveKind.Zip)
-        {
-            using var archive = ArchiveEntryReader.OpenZip(filePath);
-            var entries = archive.Entries;
-            if (position >= entries.Count || !string.Equals(entries[position].FullName, expectedName, StringComparison.Ordinal))
-            {
-                return null;
-            }
-
-            return ArchiveEntryReader.ReadAllBytes(entries[position], ArchiveEntryReader.MaxPageBytes);
-        }
-
-        using var rar = RarArchive.OpenArchive(filePath);
-        // Enumerating stops at the requested entry, so early pages do not parse
-        // every header of the archive.
-        var entry = rar.Entries.ElementAtOrDefault(position);
-        if (entry is null || !string.Equals(entry.Key ?? string.Empty, expectedName, StringComparison.Ordinal))
+        using var archive = ComicArchiveReader.OpenForEntry(index.Version.Path, position);
+        var entry = archive.GetEntryAt(position);
+        if (entry is null || !string.Equals(entry.Name, expectedName, StringComparison.Ordinal))
         {
             return null;
         }
 
-        return ArchiveEntryReader.ReadAllBytes(entry, ArchiveEntryReader.MaxPageBytes);
+        return entry.ReadAllBytes(ArchiveEntryReader.MaxPageBytes);
     }
 
     /// <summary>Logs a refusal by the read limits where it is found: once per file version (and page).</summary>
@@ -412,12 +346,6 @@ public class ComicReaderService : IComicReaderService, IDisposable
     private void LogRefusedAgain(string filePath, string reason) =>
         _logger.LogDebug("Still refusing {FilePath}, unchanged since it was refused: {Reason}",
             LoggingHelper.SanitizePathForLog(filePath), LoggingHelper.SanitizeForLog(reason));
-
-    private static bool IsImageFile(string fileName)
-    {
-        var extension = Path.GetExtension(fileName).ToLowerInvariant();
-        return ImageExtensions.Contains(extension);
-    }
 
     private static string GetContentType(string fileName)
     {
@@ -433,14 +361,8 @@ public class ComicReaderService : IComicReaderService, IDisposable
         };
     }
 
-    private enum ArchiveKind
-    {
-        Zip,
-        Rar,
-    }
-
-    /// <summary>One version of an archive file: its path, format, length and last-write time.</summary>
-    private readonly record struct FileVersion(string Path, ArchiveKind Kind, long Length, long LastWriteUtcTicks);
+    /// <summary>One version of an archive file: its path, length and last-write time.</summary>
+    private readonly record struct FileVersion(string Path, long Length, long LastWriteUtcTicks);
 
     /// <summary>
     /// The image entries of one version of an archive, in reading order, with the

@@ -12,6 +12,7 @@ using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Core.Telemetry;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
@@ -552,7 +553,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(before, await File.ReadAllBytesAsync(path));
         var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
-        Assert.IsType<NotSupportedException>(error.Exception);
+        Assert.IsType<InvalidDataException>(error.Exception);
         Assert.Empty(TempFilesNextTo(path));
         _fileStore.Verify(
             f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()),
@@ -581,10 +582,11 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task MetadataRewrite_EntryWithoutName_FailsAndLeavesArchiveUntouched()
+    public async Task MetadataRewrite_FileThatIsNotAZipOrRar_FailsAndLeavesItUntouched()
     {
+        // ArchiveFactory would open this gzip file; the shared reader only opens ZIP and RAR.
         var service = CreateService();
-        var path = WriteNamelessGzipCbz("Series/nameless.cbz");
+        var path = WriteGzipNamedCbz("Series/gzip.cbz");
         var before = await File.ReadAllBytesAsync(path);
 
         var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
@@ -593,7 +595,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(before, await File.ReadAllBytesAsync(path));
         var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Equal("Error updating metadata for {FilePath}", error.Template);
-        Assert.IsType<InvalidDataException>(error.Exception);
+        Assert.IsType<ComicArchiveFormatException>(error.Exception);
         Assert.Empty(TempFilesNextTo(path));
     }
 
@@ -601,7 +603,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     public async Task RemoveMetadataAsync_ArchiveWithoutComicInfo_SucceedsWithoutRewritingIt()
     {
         var service = CreateService();
-        var path = WriteNamelessGzipCbz("Series/nameless.cbz");
+        var path = WriteCbz("Series/untagged.cbz", null);
         var before = await File.ReadAllBytesAsync(path);
 
         var result = (await service.RemoveMetadataAsync(path)).Succeeded;
@@ -764,8 +766,10 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
 
         _fileStore.Verify(f => f.MarkFileNormalizedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(f => f.MarkFileRenamedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success && e.ErrorMessage == "No metadata or series information");
-        Assert.Contains(_historyEntries, e => e.Action == "Process" && !e.Success);
+        const string reason = "'bad.cbz' is not a readable ZIP or RAR archive.";
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && !e.Success && e.ErrorMessage == reason);
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success && e.ErrorMessage == reason);
+        Assert.Contains(_historyEntries, e => e.Action == "Process" && !e.Success && e.ErrorMessage == reason);
         Assert.True(File.Exists(path));
     }
 
@@ -1606,7 +1610,9 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.True(File.Exists(numberOnly));
         _fileStore.Verify(f => f.MarkFileRenamedAsync(corrupt, false, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(f => f.MarkFileRenamedAsync(numberOnly, false, It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Equal(2, _historyEntries.Count(e => e.ErrorMessage == "No metadata or series information found"));
+        Assert.Single(_historyEntries, e => e.ErrorMessage == "No metadata or series information found");
+        Assert.Single(_historyEntries, e => e.ErrorMessage == "'bad.cbz' is not a readable ZIP or RAR archive.");
+        Assert.Equal("'bad.cbz' is not a readable ZIP or RAR archive.", job.Errors[corrupt]);
     }
 
     [Fact]
@@ -1849,7 +1855,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task NormalizeFilesAsync_UnreadableArchive_ReportsNoMetadata()
+    public async Task NormalizeFilesAsync_UnreadableArchive_ReportsWhyItCouldNotBeRead()
     {
         var service = CreateService();
         var path = WriteCorrupt("Series/bad.cbz");
@@ -1857,7 +1863,8 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.FailedFiles);
-        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == "No metadata found");
+        Assert.Equal("'bad.cbz' is not a readable ZIP or RAR archive.", job.Errors[path]);
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == "'bad.cbz' is not a readable ZIP or RAR archive.");
         _fileStore.Verify(f => f.MarkFileNormalizedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -1879,17 +1886,18 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     [Fact]
     public async Task NormalizeFilesAsync_MetadataWriteFails_ReportsFailure()
     {
-        // An archive entry without a name cannot be copied, so the rewrite fails after the
-        // file has been read and found to need normalizing.
+        // An entry stored with a compression method nothing can decompress: the rewrite fails
+        // after the file has been read and found to need normalizing.
         var service = CreateService();
-        var path = WriteNamelessGzipCbz("Series X/Series X Ch 7.cbz");
+        var path = WriteCbzWithUnreadableEntry("Series X/Series X Ch 7.cbz", Xml(null, "7", null));
         var before = await File.ReadAllBytesAsync(path);
 
         var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.FailedFiles);
         Assert.True(_logger.Has(LogLevel.Warning, "NormalizeFileAsync: Failed to normalize file: {FilePath}"));
-        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == "Failed to update metadata");
+        Assert.Contains("unsupported compression method", job.Errors[path]);
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == job.Errors[path]);
         Assert.Equal(before, await File.ReadAllBytesAsync(path));
     }
 
@@ -2300,7 +2308,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     /// A valid archive whose "unreadable.bin" entry declares the reserved compression method 11
     /// in its local and central directory headers, so no reader can decompress it.
     /// </summary>
-    private string WriteCbzWithUnreadableEntry(string relativePath, string? comicInfo = null)
+    private string WriteCbzWithUnreadableEntry(string relativePath, string? comicInfo = null, string unreadableEntry = "unreadable.bin")
     {
         var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -2312,7 +2320,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         }
 
         var bytes = File.ReadAllBytes(path);
-        var name = Encoding.UTF8.GetBytes("unreadable.bin");
+        var name = Encoding.UTF8.GetBytes(unreadableEntry);
         var patched = 0;
         for (var i = 0; i + 46 + name.Length <= bytes.Length; i++)
         {
@@ -2372,7 +2380,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     /// A ".cbz" that really is a gzip stream without a stored file name: SharpCompress opens it as
     /// an archive with a single entry whose Key is null.
     /// </summary>
-    private string WriteNamelessGzipCbz(string relativePath)
+    private string WriteGzipNamedCbz(string relativePath)
     {
         var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

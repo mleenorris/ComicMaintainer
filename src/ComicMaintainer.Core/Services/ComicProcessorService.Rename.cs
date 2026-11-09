@@ -15,7 +15,7 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class ComicProcessorService
 {
-    private async Task<bool> RenameFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
+    private async Task<BatchItemResult> RenameFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
     {
         try
         {
@@ -59,7 +59,8 @@ public partial class ComicProcessorService
             _logger.LogDebug("RenameFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             // Extract metadata from the archive
-            var metadata = await GetMetadataAtResolvedPath(resolvedPath, filePath);
+            var metadataRead = await ReadMetadataAtResolvedPathAsync(resolvedPath, filePath, cancellationToken);
+            var metadata = metadataRead.Metadata;
 
             if (metadata != null)
             {
@@ -190,8 +191,8 @@ public partial class ComicProcessorService
             {
                 _logger.LogWarning("RenameFileAsync: No metadata or series information found for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                await LogHistoryAsync(filePath, "Rename", false, NoSeriesMessage(filePath, "No metadata or series information found"), cancellationToken);
-                return false;
+                await LogHistoryAsync(filePath, "Rename", false, metadataRead.FailureReason ?? NoSeriesMessage(filePath, "No metadata or series information found"), cancellationToken);
+                return new BatchItemResult(false, metadataRead.FailureReason);
             }
         }
         // A cancelled job didn't fail this file: leave it and its stored state as they are.

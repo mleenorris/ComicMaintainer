@@ -85,9 +85,6 @@ public partial class ComicProcessorService
         }
     }
 
-    private static string ReadComicInfoXml(IArchiveEntry comicInfoEntry) =>
-        ArchiveEntryReader.ReadText(comicInfoEntry);
-
     /// <summary>
     /// Logs why an archive over the read limits was refused. A warning, because such a file is
     /// library content for the operator to deal with, not a defect of the application. The

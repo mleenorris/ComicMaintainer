@@ -57,7 +57,7 @@ public partial class ComicProcessorService
             filePaths,
             "NormalizeFilesAsync",
             "normalizing",
-            async (filePath, token) => await NormalizeFileCoreAsync(filePath, forceReprocess, token),
+            async (filePath, token) => await NormalizeFileItemAsync(filePath, forceReprocess, token),
             "Normalize failed",
             cancellationToken);
     }
@@ -81,7 +81,11 @@ public partial class ComicProcessorService
             filePaths,
             "UpdateMetadataAsync",
             "updating metadata for",
-            async (file, token) => (await UpdateMetadataCoreAsync(file, metadata, fields, token, userEdit: true)).Succeeded,
+            async (file, token) =>
+            {
+                var result = await UpdateMetadataCoreAsync(file, metadata, fields, token, userEdit: true);
+                return new BatchItemResult(result.Succeeded, result.FailureReason);
+            },
             "Update metadata failed",
             cancellationToken);
     }
@@ -97,7 +101,7 @@ public partial class ComicProcessorService
                 var removed = await RemoveMetadataCoreAsync(filePath, token);
                 if (!removed.Succeeded)
                 {
-                    return false;
+                    return new BatchItemResult(false, removed.FailureReason);
                 }
 
                 // Mark the file (at its new path, when a CBR/RAR became a CBZ) as
@@ -243,13 +247,13 @@ public partial class ComicProcessorService
                 var normalized = await NormalizeFileWithResultAsync(filePath, true, token);
                 if (!normalized.Succeeded && !normalized.ArchiveNotWritable)
                 {
-                    return false;
+                    return new BatchItemResult(false, normalized.Error);
                 }
 
                 // A CBR/RAR/ZIP that is not rewritten while converting to CBZ is off is still
                 // renamed (a rename never rewrites the archive), but stays not normalized.
                 var renamed = await RenameFileCoreAsync(normalized.FilePath, true, token);
-                return renamed && normalized.Succeeded;
+                return new BatchItemResult(renamed.Success && normalized.Succeeded, renamed.Error ?? normalized.Error);
             },
             "Normalize and rename failed",
             cancellationToken);

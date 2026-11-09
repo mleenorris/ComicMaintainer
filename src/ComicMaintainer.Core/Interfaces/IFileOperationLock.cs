@@ -30,4 +30,7 @@ public interface IFileOperationLock
     /// <paramref name="cancellationToken"/> was cancelled before the lock was taken.
     /// </exception>
     ValueTask<IDisposable> AcquireAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>True while any file's lock is held or waited for.</summary>
+    bool HasActiveOperations => false;
 }

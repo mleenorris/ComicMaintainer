@@ -30,6 +30,9 @@ public sealed class FileOperationLock : IFileOperationLock
     }
 
     /// <inheritdoc />
+    public bool HasActiveOperations => ActiveKeyCount > 0;
+
+    /// <inheritdoc />
     public async ValueTask<IDisposable> AcquireAsync(string filePath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);

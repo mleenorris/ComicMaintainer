@@ -33,4 +33,7 @@ public interface ILibraryMutationLock
     /// lock asynchronously so no thread is blocked while another mutation runs.
     /// </summary>
     Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken cancellationToken = default);
+
+    /// <summary>True while something holds the lock.</summary>
+    bool IsHeld => false;
 }

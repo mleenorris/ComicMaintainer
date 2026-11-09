@@ -20,6 +20,8 @@ public sealed class LibraryMutationLock : ILibraryMutationLock, IDisposable
     private readonly AsyncLocal<object?> _flowToken = new();
     private object? _holderToken;
 
+    public bool IsHeld => _gate.CurrentCount == 0;
+
     public T Execute<T>(Func<T> action, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(action);

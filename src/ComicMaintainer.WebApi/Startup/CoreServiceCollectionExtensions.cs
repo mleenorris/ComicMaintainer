@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Services;
 using ComicMaintainer.Core.Services;
@@ -350,6 +351,23 @@ internal static class CoreServiceCollectionExtensions
         // behind a request that a browser or proxy will time out.
         services.AddSingleton<ICondensedBookBuildTracker, CondensedBookBuildTracker>();
 
+        // Outbound notifications and media-server rescans. The client never follows a
+        // redirect and logs nothing: its URLs can carry tokens.
+        services.AddHttpClient(NotificationHttpClient.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false })
+            .RemoveAllLoggers();
+        services.AddSingleton<NotificationHttpClient>();
+        services.AddSingleton<INotificationChannel, NtfyNotificationChannel>();
+        services.AddSingleton<INotificationChannel, GotifyNotificationChannel>();
+        services.AddSingleton<INotificationChannel, DiscordNotificationChannel>();
+        services.AddSingleton<INotificationChannel, WebhookNotificationChannel>();
+        services.AddSingleton<INotificationChannel, KomgaScanChannel>();
+        services.AddSingleton<INotificationChannel, KavitaScanChannel>();
+        services.AddSingleton<NotificationPublisher>();
+        services.AddSingleton<INotificationPublisher>(sp => sp.GetRequiredService<NotificationPublisher>());
+        services.AddSingleton<ILibraryActivityMonitor, LibraryActivityMonitor>();
+        services.AddSingleton<INotificationTester, NotificationTester>();
+
         return services;
     }
 
@@ -400,6 +418,10 @@ internal static class CoreServiceCollectionExtensions
 
         // Add hosted service that drains the background comic email delivery queue
         services.AddHostedService<ComicEmailQueueHostedService>();
+
+        // Works through the durable notification queue.
+        services.AddSingleton<NotificationDispatcher>();
+        services.AddHostedService(sp => sp.GetRequiredService<NotificationDispatcher>());
 
         // Add hosted service for database cleanup
         services.AddHostedService<DatabaseCleanupHostedService>();

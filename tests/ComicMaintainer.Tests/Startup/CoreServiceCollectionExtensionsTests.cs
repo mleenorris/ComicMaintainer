@@ -292,6 +292,30 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         Assert.Contains(services, d => d.ServiceType == typeof(IDatabaseBackupService));
     }
 
+    [Fact]
+    public void AddComicMaintainerCore_RegistersEveryNotificationTarget_AndTheClientFollowsNoRedirects()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions<ComicMaintainer.Core.Configuration.AppSettings>();
+        AddComicMaintainerCore(services);
+        using var provider = services.BuildServiceProvider();
+
+        var targets = provider.GetServices<ComicMaintainer.Core.Notifications.INotificationChannel>().Select(c => c.Target);
+        Assert.Equal(
+            ComicMaintainer.Core.Notifications.NotificationTarget.All.OrderBy(t => t, StringComparer.Ordinal),
+            targets.OrderBy(t => t, StringComparer.Ordinal));
+
+        var handler = provider.GetRequiredService<IHttpMessageHandlerFactory>()
+            .CreateHandler(ComicMaintainer.Core.Notifications.NotificationHttpClient.HttpClientName);
+        while (handler is DelegatingHandler delegating)
+        {
+            handler = delegating.InnerHandler!;
+        }
+
+        Assert.False(Assert.IsType<SocketsHttpHandler>(handler).AllowAutoRedirect);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -315,6 +339,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
 
         Assert.Contains(services, d => d.ServiceType == typeof(IScheduledJobService));
         Assert.Contains(services, d => d.ServiceType == typeof(ScheduledJobsHostedService));
+        Assert.Contains(services, d => d.ServiceType == typeof(ComicMaintainer.Core.Notifications.NotificationDispatcher));
         Assert.Contains(services, d => d.ServiceType == typeof(IScheduledJobRunner));
         var hostedServiceTypes = services
             .Where(d => d.ServiceType == typeof(IHostedService))
@@ -330,7 +355,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
             hostedServiceTypes.IndexOf(typeof(ArchiveWriteRecoveryHostedService)) is >= 0 and var sweep &&
             sweep < hostedServiceTypes.IndexOf(typeof(FileWatcherHostedService)));
         // The scheduled-jobs runner is registered through a factory so it is a single instance.
-        Assert.Equal(9, hostedServiceTypes.Count);
+        Assert.Equal(10, hostedServiceTypes.Count);
     }
 
     private static IConfiguration BuildConfiguration(params (string Key, string? Value)[] settings)

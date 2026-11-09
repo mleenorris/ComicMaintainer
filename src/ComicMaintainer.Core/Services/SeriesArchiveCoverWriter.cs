@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -48,13 +49,15 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesArchiveCoverWriter> _logger;
     private readonly IFileOperationLock _fileLock;
+    private readonly INotificationPublisher _notifications;
 
     public SeriesArchiveCoverWriter(
         ISeriesLibraryService library,
         IFileWatcherService watcher,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesArchiveCoverWriter> logger,
-        IFileOperationLock fileLock)
+        IFileOperationLock fileLock,
+        INotificationPublisher notifications)
     {
         _library = library;
         _watcher = watcher;
@@ -63,6 +66,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         // Shared with the file processor through DI, so embedding a cover never rewrites an
         // archive that is being normalized, renamed or edited at the same time.
         _fileLock = fileLock;
+        _notifications = notifications;
     }
 
     public async Task WriteAsync(
@@ -136,7 +140,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
                     coverEntryName,
                     coverBytes,
                     onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
-                    onAfterReplace: () => SuppressWatcherProcessing(archivePath));
+                    onAfterReplace: () => OnArchiveReplaced(archivePath));
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -187,7 +191,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
                     coverEntryName: null,
                     coverBytes: null,
                     onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
-                    onAfterReplace: () => SuppressWatcherProcessing(archivePath));
+                    onAfterReplace: () => OnArchiveReplaced(archivePath));
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -209,6 +213,15 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
                 LoggingHelper.SanitizePathForLog(archivePath),
                 LoggingHelper.SanitizeForLog(normalizedKey));
         }
+    }
+
+    /// <summary>Runs only when the archive really was rewritten, not when it already matched.</summary>
+    private void OnArchiveReplaced(string archivePath)
+    {
+        // Re-flag after the move: the overwrite fires its own file-system events, which may
+        // arrive slightly after the pre-move mark.
+        SuppressWatcherProcessing(archivePath);
+        _notifications.LibraryChanged();
     }
 
     private async Task<string?> ResolveFirstArchiveAsync(

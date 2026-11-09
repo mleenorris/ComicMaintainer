@@ -131,6 +131,33 @@ public static class AppSettingsEnvironmentOverrides
         Whole("ERROR_REPORTING_MAX_ISSUES_PER_DAY", o => o.ErrorReportingMaxIssuesPerDay, 0, int.MaxValue, "error_reporting_max_issues_per_day"),
         Whole("ERROR_REPORTING_DEDUPE_WINDOW_HOURS", o => o.ErrorReportingDedupeWindowHours, 1, int.MaxValue, "error_reporting_dedupe_window_hours"),
         Flag("ERROR_REPORTING_COMMENT_ON_RECURRENCE", o => o.ErrorReportingCommentOnRecurrence, "error_reporting_comment_on_recurrence"),
+
+        // Notifications and media-server rescans.
+        Flag("NOTIFY_NTFY_ENABLED", o => o.NotifyNtfyEnabled, "notify_ntfy_enabled"),
+        Text("NOTIFY_NTFY_URL", o => o.NotifyNtfyUrl, "notify_ntfy_url"),
+        Text("NOTIFY_NTFY_TOPIC", o => o.NotifyNtfyTopic, "notify_ntfy_topic"),
+        Text("NOTIFY_NTFY_TOKEN", o => o.NotifyNtfyToken, "notify_ntfy_token_set"),
+        Text("NOTIFY_NTFY_EVENTS", o => o.NotifyNtfyEvents, "notify_ntfy_events"),
+        Flag("NOTIFY_GOTIFY_ENABLED", o => o.NotifyGotifyEnabled, "notify_gotify_enabled"),
+        Text("NOTIFY_GOTIFY_URL", o => o.NotifyGotifyUrl, "notify_gotify_url"),
+        Text("NOTIFY_GOTIFY_TOKEN", o => o.NotifyGotifyToken, "notify_gotify_token_set"),
+        Text("NOTIFY_GOTIFY_EVENTS", o => o.NotifyGotifyEvents, "notify_gotify_events"),
+        Flag("NOTIFY_DISCORD_ENABLED", o => o.NotifyDiscordEnabled, "notify_discord_enabled"),
+        Text("NOTIFY_DISCORD_WEBHOOK_URL", o => o.NotifyDiscordWebhookUrl, "notify_discord_webhook_url_set"),
+        Text("NOTIFY_DISCORD_EVENTS", o => o.NotifyDiscordEvents, "notify_discord_events"),
+        Flag("NOTIFY_WEBHOOK_ENABLED", o => o.NotifyWebhookEnabled, "notify_webhook_enabled"),
+        Text("NOTIFY_WEBHOOK_URL", o => o.NotifyWebhookUrl, "notify_webhook_url_set"),
+        Text("NOTIFY_WEBHOOK_EVENTS", o => o.NotifyWebhookEvents, "notify_webhook_events"),
+        Flag("NOTIFY_KOMGA_ENABLED", o => o.NotifyKomgaEnabled, "notify_komga_enabled"),
+        Text("NOTIFY_KOMGA_URL", o => o.NotifyKomgaUrl, "notify_komga_url"),
+        Text("NOTIFY_KOMGA_API_KEY", o => o.NotifyKomgaApiKey, "notify_komga_api_key_set"),
+        Text("NOTIFY_KOMGA_LIBRARY_ID", o => o.NotifyKomgaLibraryId, "notify_komga_library_id"),
+        Text("NOTIFY_KOMGA_EVENTS", o => o.NotifyKomgaEvents, "notify_komga_events"),
+        Flag("NOTIFY_KAVITA_ENABLED", o => o.NotifyKavitaEnabled, "notify_kavita_enabled"),
+        Text("NOTIFY_KAVITA_URL", o => o.NotifyKavitaUrl, "notify_kavita_url"),
+        Text("NOTIFY_KAVITA_API_KEY", o => o.NotifyKavitaApiKey, "notify_kavita_api_key_set"),
+        Text("NOTIFY_KAVITA_LIBRARY_ID", o => o.NotifyKavitaLibraryId, "notify_kavita_library_id"),
+        Text("NOTIFY_KAVITA_EVENTS", o => o.NotifyKavitaEvents, "notify_kavita_events"),
     ];
 
     /// <summary>The overrides whose variable currently forces a value.</summary>

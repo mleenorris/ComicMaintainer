@@ -70,7 +70,8 @@ public static class TestServices
         IComicEmailService? comicEmail = null,
         ComicMaintainerMetrics? metrics = null,
         ILoggerFactory? loggerFactory = null,
-        IFileOperationLock? fileLock = null)
+        IFileOperationLock? fileLock = null,
+        ComicMaintainer.Core.Notifications.INotificationPublisher? notifications = null)
     {
         var cache = seriesMetadataCache ?? Mock.Of<ISeriesMetadataCacheService>();
         return new ComicProcessorService(
@@ -88,6 +89,7 @@ public static class TestServices
             jobRegistry ?? CreateBatchJobRegistry(settings, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: eventBroadcaster, metrics: metrics),
             comicEmail ?? Mock.Of<IComicEmailService>(),
             fileLock ?? new FileOperationLock(),
+            notifications ?? Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>(),
             metrics);
     }
 

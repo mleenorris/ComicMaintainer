@@ -463,6 +463,8 @@ public sealed partial class FolderCombineService
                 return;
             }
 
+            _owner._notifications.LibraryChanged();
+
             // Persist user-canonical / alias info on the destination series
             // and queue a normalize-then-rename batch job so every file in the
             // combined folder reflects the new series name / file format.

@@ -24,6 +24,7 @@ public sealed record SettingsUpdate
     public EmailRateLimitUpdate? EmailRateLimit { get; init; }
     public SuwayomiUpdate? Suwayomi { get; init; }
     public ErrorReportingUpdate? ErrorReporting { get; init; }
+    public NotificationsUpdate? Notifications { get; init; }
 }
 
 /// <summary>The database-cleanup group of a <see cref="SettingsUpdate"/>; see <see cref="DatabaseCleanupSettings"/> for the ranges.</summary>
@@ -78,6 +79,35 @@ public sealed record SuwayomiUpdate(
     string? Password = null,
     string? DownloadsDirectory = null,
     string? ImportDirectory = null);
+
+/// <summary>The notifications group of a <see cref="SettingsUpdate"/>: one entry per target.</summary>
+public sealed record NotificationsUpdate(
+    NotificationTargetUpdate? Ntfy = null,
+    NotificationTargetUpdate? Gotify = null,
+    NotificationTargetUpdate? Discord = null,
+    NotificationTargetUpdate? Webhook = null,
+    NotificationTargetUpdate? Komga = null,
+    NotificationTargetUpdate? Kavita = null);
+
+/// <summary>
+/// One notification target. Which fields apply depends on the target; the others are ignored.
+/// <see cref="Url"/> is the server's base URL, except for Discord and the webhook, where it is
+/// the secret webhook URL: null keeps it and an empty string clears it, as for
+/// <see cref="Token"/>, which holds the target's token or API key.
+/// </summary>
+/// <param name="Enabled">Whether the target is used.</param>
+/// <param name="Url">The target's URL.</param>
+/// <param name="Token">The target's token or API key.</param>
+/// <param name="Topic">The ntfy topic.</param>
+/// <param name="LibraryId">The library a rescan target scans; every library when empty.</param>
+/// <param name="Events">The comma-separated events the target receives; empty for none.</param>
+public sealed record NotificationTargetUpdate(
+    bool? Enabled = null,
+    string? Url = null,
+    string? Token = null,
+    string? Topic = null,
+    string? LibraryId = null,
+    string? Events = null);
 
 /// <summary>The automated error-reporting group of a <see cref="SettingsUpdate"/>.</summary>
 public sealed record ErrorReportingUpdate(

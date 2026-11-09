@@ -1159,7 +1159,8 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
                   TestServices.CreateSeriesNameResolver(settings, NullLogger<SeriesNameResolver>.Instance),
                   jobRegistry,
                   Mock.Of<IComicEmailService>(),
-                  new FileOperationLock())
+                  new FileOperationLock(),
+                  Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>())
         {
         }
 

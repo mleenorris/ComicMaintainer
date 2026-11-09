@@ -42,7 +42,7 @@ public sealed class ScheduledJobsControllerCoverageTests : IAsyncLifetime
         _factory = _provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
 
         _service = new ScheduledJobService(_factory, new IScheduledJobHandler[] { _audit, _backup }, NullLogger<ScheduledJobService>.Instance);
-        _hostedService = new ScheduledJobsHostedService(_service, _hostedLogger);
+        _hostedService = new ScheduledJobsHostedService(_service, _hostedLogger, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
         _controller = new ScheduledJobsController(_service, _hostedService, _factory, NullLogger<ScheduledJobsController>.Instance);
     }
 

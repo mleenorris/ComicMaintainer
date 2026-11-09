@@ -31,7 +31,8 @@ public class SeriesArchiveCoverWriterTests : IDisposable
             _watcher.Object,
             _settings.Object,
             new Mock<ILogger<SeriesArchiveCoverWriter>>().Object,
-            new FileOperationLock());
+            new FileOperationLock(),
+            Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
     }
 
     private string CreateCbz(string name, params string[] pageNames)

@@ -59,7 +59,8 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         _processor.Object,
         _jobRegistry.Object,
         logger ?? NullLogger<LibraryScanJobHandler>.Instance,
-        _cache.Object);
+        _cache.Object,
+        Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
     private string WriteComic(string folder, string name)
     {

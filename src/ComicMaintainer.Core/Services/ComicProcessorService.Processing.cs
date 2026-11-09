@@ -391,6 +391,12 @@ public partial class ComicProcessorService
             if (isFullyProcessed)
             {
                 await TryQueueAutomaticEmailAsync(filePath, metadata?.Series, cancellationToken);
+
+                // A forced run is reprocessing a file the library already has.
+                if (!forceReprocess)
+                {
+                    _notifications.NewChapter(NotificationSeriesTitle(filePath, metadata), NotificationChapterLabel(filePath, metadata), filePath);
+                }
             }
 
             if (isFullyProcessed)
@@ -423,6 +429,16 @@ public partial class ComicProcessorService
     }
 
     private const string DuplicateTargetMessage = "Duplicate: a file with the target name already exists";
+
+    /// <summary>The series a new chapter is announced under: its series tag, or else its folder.</summary>
+    private static string NotificationSeriesTitle(string filePath, ComicMetadata? metadata) =>
+        !string.IsNullOrWhiteSpace(metadata?.Series)
+            ? metadata.Series
+            : Path.GetFileName(Path.GetDirectoryName(filePath)) ?? Path.GetFileNameWithoutExtension(filePath);
+
+    /// <summary>The chapter as a notification names it: its number, or else its file name.</summary>
+    private static string NotificationChapterLabel(string filePath, ComicMetadata? metadata) =>
+        !string.IsNullOrWhiteSpace(metadata?.Issue) ? metadata.Issue : Path.GetFileNameWithoutExtension(filePath);
 
     /// <summary>
     /// Queues automatic email delivery for a newly processed issue. Failures are

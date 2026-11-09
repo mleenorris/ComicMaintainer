@@ -72,7 +72,8 @@ public sealed class FilesControllerMetadataTests : IDisposable
             broadcaster ?? Mock.Of<IEventBroadcaster>(),
             resolver ?? Mock.Of<ISeriesNameResolver>(),
             scheduledJobs ?? Mock.Of<IScheduledJobRunner>(),
-            new FileOperationLock());
+            new FileOperationLock(),
+            Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
     private string InRoot(params string[] parts) => Path.Join(new[] { _root }.Concat(parts).ToArray());
 
@@ -557,7 +558,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
             .UseInMemoryDatabase($"fc-n2a-patch-{Guid.NewGuid():N}")
             .Options);
         var jobService = new ScheduledJobService(dbFactory, new[] { handler.Object }, NullLogger<ScheduledJobService>.Instance);
-        var hostedService = new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance);
+        var hostedService = new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
         _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ComicFile { FilePath = path, MetadataVersion = 7 });
 
@@ -649,13 +650,13 @@ public sealed class FilesControllerMetadataTests : IDisposable
             .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesNameResolution());
         var backfill = new MetadataBackfillJobHandler(
-            _fileStore.Object, _processor.Object, _resolver.Object, NullLogger<MetadataBackfillJobHandler>.Instance);
+            _fileStore.Object, _processor.Object, _resolver.Object, new ComicMaintainer.Core.Notifications.LibraryActivityTracker(), NullLogger<MetadataBackfillJobHandler>.Instance);
         var dbFactory = new InMemoryDbFactory(new DbContextOptionsBuilder<ComicMaintainerDbContext>()
             .UseInMemoryDatabase($"fc-n2a-patch-{Guid.NewGuid():N}")
             .Options);
         var jobService = new ScheduledJobService(dbFactory, new IScheduledJobHandler[] { backfill }, NullLogger<ScheduledJobService>.Instance);
         var controller = CreateController(
-            scheduledJobs: new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance));
+            scheduledJobs: new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>()));
 
         var firstResult = await controller.PatchMetadata(
             first, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "One" } }, CancellationToken.None);

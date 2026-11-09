@@ -32,6 +32,7 @@ public sealed class FilesControllerFileLockTests : IDisposable
     private readonly Mock<ISeriesLibraryService> _seriesLibrary = new();
     private readonly Mock<ISeriesMetadataCacheService> _metadataCache = new();
     private readonly RecordingFileLock _fileLock = new();
+    private readonly Mock<ComicMaintainer.Core.Notifications.INotificationPublisher> _notifications = new();
 
     public FilesControllerFileLockTests()
     {
@@ -123,6 +124,21 @@ public sealed class FilesControllerFileLockTests : IDisposable
         _fileStore.Verify(f => f.RemoveFileAsync(comic, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DeleteFile_AsksMediaServersToRescan_OnceTheFileIsGone(bool restfulEndpoint)
+    {
+        var comic = CreateComic(Path.Join(_root, "Foo"), "Foo 001.cbz");
+        var stillThereAtTheEvent = true;
+        _notifications.Setup(n => n.LibraryChanged()).Callback(() => stillThereAtTheEvent = File.Exists(comic));
+
+        Assert.IsType<OkResult>(await DeleteAsync(CreateController(), comic, restfulEndpoint));
+
+        _notifications.Verify(n => n.LibraryChanged(), Times.Once);
+        Assert.False(stillThereAtTheEvent);
+    }
+
     [Fact]
     public async Task DeleteFile_FileRenamedByTheOperationItWaitedFor_ReturnsNotFoundAndKeepsTheRenamedFile()
     {
@@ -140,6 +156,7 @@ public sealed class FilesControllerFileLockTests : IDisposable
         Assert.IsType<NotFoundResult>(await delete);
         Assert.True(File.Exists(renamed));
         _fileStore.Verify(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _notifications.Verify(n => n.LibraryChanged(), Times.Never);
     }
 
     [Fact]
@@ -190,7 +207,8 @@ public sealed class FilesControllerFileLockTests : IDisposable
             Mock.Of<IEventBroadcaster>(),
             Mock.Of<ISeriesNameResolver>(),
             Mock.Of<IScheduledJobRunner>(),
-            _fileLock);
+            _fileLock,
+            _notifications.Object);
     }
 
     private static string CreateComic(string directory, string fileName)

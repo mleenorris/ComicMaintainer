@@ -85,7 +85,10 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
             _seriesLibrary.Object,
             _settings.Object,
             _metadataCache.Object,
-            memoryCache);
+            memoryCache,
+            notifications: _notifications.Object);
+
+    private readonly Mock<ComicMaintainer.Core.Notifications.INotificationPublisher> _notifications = new();
 
     private FilesController CreateController(IMemoryCache? memoryCache = null) =>
         CreateController(CreateService(memoryCache));
@@ -102,7 +105,8 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
             Mock.Of<IEventBroadcaster>(),
             Mock.Of<ISeriesNameResolver>(),
             Mock.Of<IScheduledJobRunner>(),
-            new ComicMaintainer.Core.Services.FileOperationLock());
+            new ComicMaintainer.Core.Services.FileOperationLock(),
+            Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
     private string Dir(string name) => Path.Join(_root, name);
 
@@ -860,6 +864,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         Assert.Equal(Dir("Foo"), Prop(accepted.Value, "destination"));
         Assert.True(File.Exists(movedPath));
         Assert.False(Directory.Exists(Dir("Foo (Old)")));
+        _notifications.Verify(n => n.LibraryChanged(), Times.Once);
         _fileStore.Verify(f => f.UpdateFilePathAsync(files[1].FilePath, movedPath, It.IsAny<CancellationToken>(), false), Times.Once);
         var (title, aliases) = SingleAliasWrite();
         Assert.Equal("Foo", title);

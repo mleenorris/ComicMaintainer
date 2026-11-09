@@ -1145,6 +1145,73 @@ namespace ComicMaintainer.Core.Migrations
                     b.ToTable("ScheduledJobs");
                 });
 
+            modelBuilder.Entity("ComicMaintainer.Core.Notifications.NotificationDeliveryEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Body")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("DueAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GroupKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ItemCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ItemsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Status", "DueAt");
+
+                    b.HasIndex("Target", "EventType", "GroupKey", "Status");
+
+                    b.ToTable("NotificationDeliveries");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.Property<int>("Id")

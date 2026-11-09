@@ -18,7 +18,7 @@ namespace ComicMaintainer.Core.Services;
 /// <see cref="ISeriesLanguagePreferenceRetagService"/>; otherwise the job
 /// only logs the mismatches and reports a count.
 /// </summary>
-public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
+public class SeriesLanguageAuditJobHandler : IScheduledJobFindingsHandler
 {
     public const string Key = "series-language-audit";
 
@@ -54,7 +54,10 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
     public ScheduledJobDefaults Defaults =>
         new(Enabled: false, IntervalMinutes: 60 * 24, OptionsJson: """{"autoCorrect":false}""");
 
-    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
+    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken) =>
+        (await ExecuteWithFindingsAsync(optionsJson, cancellationToken)).Summary;
+
+    public async Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken)
     {
         var options = ParseOptions(optionsJson);
         var globalDefault = _appSettings.CurrentValue.DefaultPreferredLanguage;
@@ -155,7 +158,7 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
             ? $"Scanned {seriesScanned} series: {seriesWithMismatch} with language mismatch ({filesWithMismatch} file(s)); flagged {seriesQueued} series for metadata backfill."
             : $"Scanned {seriesScanned} series: {seriesWithMismatch} with language mismatch ({filesWithMismatch} file(s)). Enable autoCorrect to retag.";
         _logger.LogInformation("{Summary}", summary);
-        return summary;
+        return new ScheduledJobResult(summary, seriesWithMismatch);
     }
 
     private static SeriesLanguageAuditOptions ParseOptions(string? optionsJson)

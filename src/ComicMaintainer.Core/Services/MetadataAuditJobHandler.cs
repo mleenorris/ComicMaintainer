@@ -13,7 +13,7 @@ namespace ComicMaintainer.Core.Services;
 /// row for any file with a missing chapter number or a series tag that
 /// disagrees with the resolved expected series.
 /// </summary>
-public class MetadataAuditJobHandler : IScheduledJobHandler
+public class MetadataAuditJobHandler : IScheduledJobFindingsHandler
 {
     public const string Key = "metadata-audit";
 
@@ -49,7 +49,10 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
     public ScheduledJobDefaults Defaults =>
         new(Enabled: false, IntervalMinutes: 60 * 24 * 7, OptionsJson: """{"autoCorrect":false}""");
 
-    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
+    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken) =>
+        (await ExecuteWithFindingsAsync(optionsJson, cancellationToken)).Summary;
+
+    public async Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken)
     {
         var options = ParseOptions(optionsJson);
 
@@ -176,7 +179,9 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
             }
         }
 
-        return $"Scanned {files.Count}: {seriesMismatch} series mismatch, {missingChapter} missing chapter, {unreadable} unreadable.{correctedSummary}";
+        return new ScheduledJobResult(
+            $"Scanned {files.Count}: {seriesMismatch} series mismatch, {missingChapter} missing chapter, {unreadable} unreadable.{correctedSummary}",
+            findings.Count);
     }
 
 

@@ -255,6 +255,8 @@ public partial class ComicProcessorService
 
         await LogHistoryWithChangesAsync(newPath, "Rename", true, null,
             Path.GetFileName(oldPath), Path.GetFileName(newPath), metadata, metadata, bookkeeping);
+
+        _notifications.LibraryChanged();
     }
 
     /// <summary>

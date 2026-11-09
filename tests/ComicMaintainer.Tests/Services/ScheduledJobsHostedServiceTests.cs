@@ -8,6 +8,7 @@ using ComicMaintainer.WebApi.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -693,7 +694,8 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         var handler = new TestJobHandler(JobKey, (_, _) => Task.FromResult("ok"));
         var hosted = new ScheduledJobsHostedService(
             new ScheduledJobService(_dbFactory, new[] { handler }, NullLogger<ScheduledJobService>.Instance),
-            _logger);
+            _logger,
+            Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
         var stop = await Record.ExceptionAsync(() => hosted.StopAsync(CancellationToken.None));
         var dispose = Record.Exception(hosted.Dispose);
@@ -707,7 +709,7 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         ComicMaintainerMetrics? metrics = null)
     {
         var service = new ScheduledJobService(_dbFactory, new[] { handler }, NullLogger<ScheduledJobService>.Instance);
-        var hosted = new ScheduledJobsHostedService(service, _logger, metrics);
+        var hosted = new ScheduledJobsHostedService(service, _logger, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>(), metrics);
         _hostedServices.Add(hosted);
         return (hosted, service);
     }

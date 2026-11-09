@@ -123,7 +123,7 @@ public sealed class SuwayomiDownloadImportService : ISuwayomiDownloadImportServi
 
         if (!await _gate.WaitAsync(0, cancellationToken))
         {
-            return SuwayomiImportResult.Skipped("Another Suwayomi download import is already running.");
+            return SuwayomiImportResult.Skipped("Another Suwayomi download import is already running.", alreadyRunning: true);
         }
 
         try

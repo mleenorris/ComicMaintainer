@@ -57,7 +57,8 @@ public class SettingsControllerTests
             _applicationLifetimeMock.Object,
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IEventBroadcaster>(),
-            Mock.Of<IProcessingHistoryService>());
+            Mock.Of<IProcessingHistoryService>(),
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
     }
 
     [Fact]
@@ -128,10 +129,10 @@ public class SettingsControllerTests
     // New RESTful endpoint tests
 
     [Fact]
-    public void GetAllSettings_ReturnsAllSettings()
+    public async Task GetAllSettings_ReturnsAllSettings()
     {
         // Act
-        var result = _controller.GetAllSettings();
+        var result = await _controller.GetAllSettings();
 
         // Assert
         var okResult = Assert.IsType<ActionResult<object>>(result);
@@ -176,9 +177,9 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public void GetAllSettings_IncludesConvertRarToCbzOnWrite_OnByDefault()
+    public async Task GetAllSettings_IncludesConvertRarToCbzOnWrite_OnByDefault()
     {
-        var result = _controller.GetAllSettings();
+        var result = await _controller.GetAllSettings();
 
         var okResult = Assert.IsType<ActionResult<object>>(result);
         var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
@@ -189,10 +190,10 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public void GetAllSettings_IncludesWriteCoverToFirstArchive()
+    public async Task GetAllSettings_IncludesWriteCoverToFirstArchive()
     {
         // Act
-        var result = _controller.GetAllSettings();
+        var result = await _controller.GetAllSettings();
 
         // Assert
         var okResult = Assert.IsType<ActionResult<object>>(result);
@@ -218,10 +219,10 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public void GetAllSettings_IncludesSeriesCoverAndImageSettings()
+    public async Task GetAllSettings_IncludesSeriesCoverAndImageSettings()
     {
         // Act
-        var result = _controller.GetAllSettings();
+        var result = await _controller.GetAllSettings();
 
         // Assert
         var okResult = Assert.IsType<ActionResult<object>>(result);

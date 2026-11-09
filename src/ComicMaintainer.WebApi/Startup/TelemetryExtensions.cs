@@ -81,7 +81,9 @@ internal static class TelemetryExtensions
                 .AddHttpClientInstrumentation(options =>
                 {
                     // Authelia's health is checked every 30 seconds when AUTHELIA_URL is set.
-                    options.FilterHttpRequestMessage = request => !AutheliaHealthMonitor.IsHealthCheck(request);
+                    // Notification URLs can carry tokens, so those requests are left out too.
+                    options.FilterHttpRequestMessage = request =>
+                        !AutheliaHealthMonitor.IsHealthCheck(request) && !Core.Notifications.NotificationHttpClient.IsNotificationRequest(request);
                 })
                 .AddOtlpExporter());
         }

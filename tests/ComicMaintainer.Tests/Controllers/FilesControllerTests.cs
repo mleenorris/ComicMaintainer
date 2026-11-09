@@ -74,7 +74,7 @@ public class FilesControllerTests
                 _mockSettings.Object,
                 metadataCache,
                 memoryCache),
-            Mock.Of<IEventBroadcaster>(), Mock.Of<ISeriesNameResolver>(), Mock.Of<IScheduledJobRunner>(), new FileOperationLock());
+            Mock.Of<IEventBroadcaster>(), Mock.Of<ISeriesNameResolver>(), Mock.Of<IScheduledJobRunner>(), new FileOperationLock(), Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
     }
 
     [Fact]

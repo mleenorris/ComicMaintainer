@@ -37,6 +37,7 @@ public class MetadataBackfillJobHandlerCoverageTests
         _fileStore.Object,
         _processor.Object,
         _resolver.Object,
+        new ComicMaintainer.Core.Notifications.LibraryActivityTracker(),
         NullLogger<MetadataBackfillJobHandler>.Instance);
 
     private void SetupBatch(params ComicFile[] files) =>

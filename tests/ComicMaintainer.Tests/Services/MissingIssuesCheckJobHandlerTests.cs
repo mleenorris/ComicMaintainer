@@ -109,6 +109,27 @@ public class MissingIssuesCheckJobHandlerTests
     }
 
     [Fact]
+    public async Task ExecuteWithFindingsAsync_ReportsHowManySeriesHaveGaps()
+    {
+        SetupCandidates(("a", "Alpha"), ("b", "Beta"));
+        SetupSeries("a", "Alpha", "1", "2", "4");
+        SetupSeries("b", "Beta", "1", "3");
+
+        var result = await BuildHandler().ExecuteWithFindingsAsync(null, CancellationToken.None);
+
+        Assert.Equal(2, result.Findings);
+        Assert.True(result.HasFindings);
+    }
+
+    [Fact]
+    public async Task ExecuteWithFindingsAsync_NothingMissing_HasNoFindings()
+    {
+        SetupCandidates();
+
+        Assert.False((await BuildHandler().ExecuteWithFindingsAsync(null, CancellationToken.None)).HasFindings);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_NoCandidates_ReportsNothingMissing()
     {
         SetupCandidates();

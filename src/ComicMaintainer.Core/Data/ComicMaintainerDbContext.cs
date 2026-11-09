@@ -34,6 +34,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
     public DbSet<RevokedTokenEntity> RevokedTokens { get; set; } = null!;
     public DbSet<LibraryScanEntity> LibraryScans { get; set; } = null!;
+    public DbSet<ComicMaintainer.Core.Notifications.NotificationDeliveryEntity> NotificationDeliveries { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -349,6 +350,25 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Directory).IsRequired().HasMaxLength(2048);
             entity.HasIndex(e => e.Directory).IsUnique();
+        });
+
+        // Configure NotificationDeliveryEntity
+        modelBuilder.Entity<ComicMaintainer.Core.Notifications.NotificationDeliveryEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Target).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.EventType).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.GroupKey).HasMaxLength(512);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.Body).HasMaxLength(4000);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.LastError).HasMaxLength(1024);
+            // The dispatcher's next-due read.
+            entity.HasIndex(e => new { e.Status, e.DueAt });
+            // Merging a new-chapter batch and suppressing a repeated job event.
+            entity.HasIndex(e => new { e.Target, e.EventType, e.GroupKey, e.Status });
+            // Pruning by age.
+            entity.HasIndex(e => e.CreatedAt);
         });
     }
 }

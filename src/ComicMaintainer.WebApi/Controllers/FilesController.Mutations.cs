@@ -149,6 +149,7 @@ public partial class FilesController
             // This order prevents orphaned file store entries if file deletion fails
             await _fileStore.RemoveFileAsync(filePath, CancellationToken.None);
             System.IO.File.Delete(resolvedPath);
+            _notifications.LibraryChanged();
             return true;
         }
     }

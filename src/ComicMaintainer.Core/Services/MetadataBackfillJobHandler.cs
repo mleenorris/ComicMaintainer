@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 
@@ -9,24 +10,27 @@ namespace ComicMaintainer.Core.Services;
 /// <summary>
 /// Scheduled job that writes DB-authoritative per-file metadata back to ComicInfo.xml.
 /// </summary>
-public class MetadataBackfillJobHandler : IScheduledJobHandler
+public class MetadataBackfillJobHandler : IScheduledJobFindingsHandler
 {
     public const string Key = "metadata-backfill";
 
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly ISeriesNameResolver _seriesNameResolver;
+    private readonly ILibraryActivityTracker _activity;
     private readonly ILogger<MetadataBackfillJobHandler> _logger;
 
     public MetadataBackfillJobHandler(
         IFileStoreService fileStore,
         IComicProcessorService processor,
         ISeriesNameResolver seriesNameResolver,
+        ILibraryActivityTracker activity,
         ILogger<MetadataBackfillJobHandler> logger)
     {
         _fileStore = fileStore;
         _processor = processor;
         _seriesNameResolver = seriesNameResolver;
+        _activity = activity;
         _logger = logger;
     }
 
@@ -35,8 +39,15 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
     public string Description => "Writes DB-authoritative per-file metadata changes back into each archive's ComicInfo.xml.";
     public ScheduledJobDefaults Defaults => new(Enabled: false, IntervalMinutes: 15, OptionsJson: """{"maxBatch":200}""");
 
-    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
+    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken) =>
+        (await ExecuteWithFindingsAsync(optionsJson, cancellationToken)).Summary;
+
+    public async Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken)
     {
+        // Held for the whole run: each write locks only its own file, and media servers must
+        // not be asked to scan until the last one is done.
+        using var run = _activity.BeginRun();
+
         var options = ParseOptions(optionsJson);
         var processed = 0;
         var failed = 0;
@@ -81,7 +92,9 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
         var keptInDatabase = notWritable > 0
             ? $", {notWritable} kept in the database (CBR/RAR/ZIP not converted to CBZ)"
             : string.Empty;
-        return $"Backfill: {processed} files updated, {failed} failed{keptInDatabase} (queue size was {processed + failed + notWritable}).";
+        return new ScheduledJobResult(
+            $"Backfill: {processed} files updated, {failed} failed{keptInDatabase} (queue size was {processed + failed + notWritable}).",
+            failed);
     }
 
     private enum BackfillOutcome { Written, Failed, NotWritable }

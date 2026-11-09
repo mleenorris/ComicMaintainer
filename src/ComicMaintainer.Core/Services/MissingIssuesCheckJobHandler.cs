@@ -15,7 +15,7 @@ namespace ComicMaintainer.Core.Services;
 /// are queued on the Suwayomi server, exactly as the series-detail
 /// "Download from Suwayomi" action does.
 /// </summary>
-public class MissingIssuesCheckJobHandler : IScheduledJobHandler
+public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
 {
     public const string Key = "missing-issues-check";
 
@@ -51,7 +51,10 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
     public ScheduledJobDefaults Defaults =>
         new(Enabled: false, IntervalMinutes: 60 * 24, OptionsJson: """{"autoDownload":false}""");
 
-    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
+    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken) =>
+        (await ExecuteWithFindingsAsync(optionsJson, cancellationToken)).Summary;
+
+    public async Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken)
     {
         var options = ParseOptions(optionsJson);
 
@@ -162,17 +165,19 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
             }
         }
 
-        return BuildSummary(
-            candidates.Series.Count,
-            seriesWithGaps,
-            totalMissing,
-            skippedOversizedSeries,
-            options.AutoDownload,
-            downloadEnabled,
-            queuedChapters,
-            downloadFailures,
-            sourceCheckFailures,
-            searchesCutShort);
+        return new ScheduledJobResult(
+            BuildSummary(
+                candidates.Series.Count,
+                seriesWithGaps,
+                totalMissing,
+                skippedOversizedSeries,
+                options.AutoDownload,
+                downloadEnabled,
+                queuedChapters,
+                downloadFailures,
+                sourceCheckFailures,
+                searchesCutShort),
+            seriesWithGaps.Count);
     }
 
     /// <summary>

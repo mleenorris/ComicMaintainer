@@ -464,6 +464,88 @@ public class AppSettings
     public bool ErrorReportingCommentOnRecurrence { get; set; } = true;
 
     // ---------------------------------------------------------------------
+    // Notifications and media-server rescans
+    // ---------------------------------------------------------------------
+    // One target of each type. A target does nothing until it is enabled, and the *Events
+    // lists (comma-separated, see NotificationEventType) choose what it receives. Secrets, and
+    // webhook URLs that carry a token, are never returned by the settings API or logged.
+
+    /// <summary>Send notifications to an ntfy topic.</summary>
+    public bool NotifyNtfyEnabled { get; set; }
+
+    /// <summary>Base URL of the ntfy server, e.g. <c>https://ntfy.sh</c>.</summary>
+    public string? NotifyNtfyUrl { get; set; }
+
+    /// <summary>The ntfy topic to publish to.</summary>
+    public string? NotifyNtfyTopic { get; set; }
+
+    /// <summary>Optional ntfy access token. Never returned by the settings API.</summary>
+    public string? NotifyNtfyToken { get; set; }
+
+    /// <summary>Events sent to ntfy.</summary>
+    public string NotifyNtfyEvents { get; set; } = Notifications.NotificationEventType.DefaultPushEvents;
+
+    /// <summary>Send notifications to a Gotify server.</summary>
+    public bool NotifyGotifyEnabled { get; set; }
+
+    /// <summary>Base URL of the Gotify server.</summary>
+    public string? NotifyGotifyUrl { get; set; }
+
+    /// <summary>Gotify application token. Never returned by the settings API.</summary>
+    public string? NotifyGotifyToken { get; set; }
+
+    /// <summary>Events sent to Gotify.</summary>
+    public string NotifyGotifyEvents { get; set; } = Notifications.NotificationEventType.DefaultPushEvents;
+
+    /// <summary>Send notifications to a Discord webhook.</summary>
+    public bool NotifyDiscordEnabled { get; set; }
+
+    /// <summary>Discord webhook URL. It contains the webhook's token, so it is treated as a secret.</summary>
+    public string? NotifyDiscordWebhookUrl { get; set; }
+
+    /// <summary>Events sent to Discord.</summary>
+    public string NotifyDiscordEvents { get; set; } = Notifications.NotificationEventType.DefaultPushEvents;
+
+    /// <summary>POST notifications as JSON to a webhook.</summary>
+    public bool NotifyWebhookEnabled { get; set; }
+
+    /// <summary>Webhook URL. Such URLs often contain a token, so it is treated as a secret.</summary>
+    public string? NotifyWebhookUrl { get; set; }
+
+    /// <summary>Events sent to the webhook.</summary>
+    public string NotifyWebhookEvents { get; set; } = Notifications.NotificationEventType.DefaultPushEvents;
+
+    /// <summary>Ask Komga to rescan the library when files change.</summary>
+    public bool NotifyKomgaEnabled { get; set; }
+
+    /// <summary>Base URL of the Komga server.</summary>
+    public string? NotifyKomgaUrl { get; set; }
+
+    /// <summary>API key of a Komga administrator. Never returned by the settings API.</summary>
+    public string? NotifyKomgaApiKey { get; set; }
+
+    /// <summary>The Komga library to scan; every library when empty.</summary>
+    public string? NotifyKomgaLibraryId { get; set; }
+
+    /// <summary>Events that make Komga scan.</summary>
+    public string NotifyKomgaEvents { get; set; } = Notifications.NotificationEventType.DefaultRescanEvents;
+
+    /// <summary>Ask Kavita to rescan the library when files change.</summary>
+    public bool NotifyKavitaEnabled { get; set; }
+
+    /// <summary>Base URL of the Kavita server.</summary>
+    public string? NotifyKavitaUrl { get; set; }
+
+    /// <summary>Kavita Auth Key. Never returned by the settings API.</summary>
+    public string? NotifyKavitaApiKey { get; set; }
+
+    /// <summary>The Kavita library to scan (a number); every library when empty.</summary>
+    public string? NotifyKavitaLibraryId { get; set; }
+
+    /// <summary>Events that make Kavita scan.</summary>
+    public string NotifyKavitaEvents { get; set; } = Notifications.NotificationEventType.DefaultRescanEvents;
+
+    // ---------------------------------------------------------------------
     // File cover thumbnails
     // ---------------------------------------------------------------------
 

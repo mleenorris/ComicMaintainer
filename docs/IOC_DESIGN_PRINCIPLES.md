@@ -42,15 +42,25 @@ Service resolution at runtime remains in places that the framework constructs or
 | `Startup/CoreServiceCollectionExtensions` | Registration factories (`sp => ...`), for example the database context factory. |
 | `MauiApp/Views/MainPage.xaml.cs` | The Android app's page resolves the pages it navigates to. |
 
-Static members are limited to stateless helpers (`LoggingHelper`, `LibraryPathValidator`, `ComicFileExtensions`, ...) and constants. Serilog's static `Log` is used only for messages written before the container exists.
+Static state is limited to stateless helpers (`LoggingHelper`, `LibraryPathValidator`, `ComicFileExtensions`, ...), constants, and these process-wide cases:
 
-Optional constructor parameters remain in these cases:
+| Location | Why |
+| --- | --- |
+| `Services/ProviderRateLimiter.cs` (`SharedRateLimiters`) | AniList's limit is per IP across the manga and manhwa providers, so the two services must share one limiter. |
+| `Services/AuthService` (`SetupLock`) | Serializes first-run setup, so two concurrent requests cannot both create the administrator. |
+| `Authentication/AutheliaAuthenticationHandler` (`ReportedUntrustedPeers`) | Remembers which untrusted peers were already reported at Warning, bounded so a scan cannot grow it. The handler is created per request, so this cannot live on the instance. |
+
+Serilog's static `Log` is used only for messages written before the container exists.
+
+Optional constructor parameters remain only for values that are not collaborators, or that the service can do without at no cost to its behaviour:
 
 - **`TimeProvider? timeProvider = null`**: defaults to `TimeProvider.System`; tests pass a fake clock.
-- **`ComicMaintainerMetrics? metrics = null`, `ILoggerFactory? loggerFactory = null`**: telemetry and diagnostics a service can run without.
+- **`ComicMaintainerMetrics? metrics = null`**: telemetry a service can run without.
 - **`IHostApplicationLifetime? applicationLifetime = null`**: only used to observe shutdown.
+- **Timing and tuning values** (`TimeSpan? startupDelay`, `pollInterval`, `retryDelays`, `providerCallTimeout`, ...): default to the production value; tests shorten them.
+- **`ProviderRateLimiter? rateLimiter = null`** on the metadata providers: defaults to the provider's production limiter; tests pass one with their own budget.
 
-Constructors in other services still have optional parameters for collaborators that production always registers (`ComicProcessorService`, `FileStoreService`, `SeriesLibraryService`, `SeriesMetadataRefreshJobService`, `SeriesNameResolver`, `MetadataController`, `SettingsController`, `DatabaseCleanupHostedService`, job handlers). They remain so that tests can construct these services with only the parts under test. New code should not add more: rule 3 applies to everything written from now on, and these are converted as those services are next changed.
+Every collaborator that production registers is a required parameter. `ServiceGraphTests.Constructors_DoNotDeclareCollaboratorsAsOptional` enforces this, and tests build these services through `tests/ComicMaintainer.Tests/Helpers/TestServices.cs`, which fills in inert collaborators for the ones a test does not care about.
 
 ## Review checklist
 

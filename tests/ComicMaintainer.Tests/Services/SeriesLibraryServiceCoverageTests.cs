@@ -23,10 +23,6 @@ public class SeriesLibraryServiceCoverageTests
 
     public SeriesLibraryServiceCoverageTests()
     {
-        // Version sources make snapshot caching possible; it is only enabled
-        // for services created with a user context.
-        _fileStore.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
-        _metadataCache.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
         _settings.Setup(s => s.CurrentValue).Returns(() => _appSettings);
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string? filter, CancellationToken _) => SelectFiles(filter));
@@ -50,6 +46,16 @@ public class SeriesLibraryServiceCoverageTests
         NullLogger<SeriesLibraryService>.Instance,
         resolver,
         user);
+
+    /// <summary>
+    /// Sources that report change versions make snapshot caching possible, so the tests of that
+    /// cache call this before creating the service; every other test builds each view fresh.
+    /// </summary>
+    private void ReportChangeVersions()
+    {
+        _fileStore.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
+        _metadataCache.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
+    }
 
     private void VerifyFileLoads(int times) =>
         _fileStore.Verify(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Exactly(times));
@@ -491,6 +497,7 @@ public class SeriesLibraryServiceCoverageTests
             File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1", title: "Opening"),
             File("/lib/Batman/Batman 001.cbz", series: "Batman", issue: "1"),
         };
+        ReportChangeVersions();
         var service = CreateService(user: new TestUserContextAccessor("alice"));
 
         // More distinct search views than the per-snapshot view cache holds.
@@ -519,6 +526,7 @@ public class SeriesLibraryServiceCoverageTests
             File("/lib/Specials/Annual.cbz", series: "Specials", issue: "Annual"),
             File("/lib/Specials/Holiday Special.cbz", series: "Specials", issue: "Special"),
         };
+        ReportChangeVersions();
         var service = CreateService(user: new TestUserContextAccessor("alice"));
 
         var first = await service.GetSeriesSummariesAsync(filter: "missing");
@@ -537,6 +545,7 @@ public class SeriesLibraryServiceCoverageTests
         var loads = 0;
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(() => Interlocked.Increment(ref loads) == 1 ? gate.Task : Task.FromResult(SelectFiles(null)));
+        ReportChangeVersions();
         var service = CreateService(user: new TestUserContextAccessor("alice"));
 
         // The first request holds the build lock while its file load is pending;
@@ -559,6 +568,7 @@ public class SeriesLibraryServiceCoverageTests
         var settings = new Mock<IOptionsMonitor<AppSettings>>();
         settings.Setup(s => s.CurrentValue).Returns(default(AppSettings)!);
         _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1", title: "Cached") };
+        ReportChangeVersions();
         var service = CreateService(user: new TestUserContextAccessor("alice"), settings: settings.Object);
 
         var result = await service.GetSeriesIssuesAsync("saga");

@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -30,6 +31,26 @@ public class ServiceGraphTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
+    public void Constructors_DoNotDeclareCollaboratorsAsOptional()
+    {
+        // An optional parameter hides a missing registration from the validated container and
+        // silently replaces the collaborator with nothing, so only values and telemetry may
+        // have a default (see docs/IOC_DESIGN_PRINCIPLES.md).
+        var assemblies = new[] { typeof(ComicProcessorService).Assembly, typeof(Program).Assembly };
+
+        var optionalCollaborators = assemblies
+            .SelectMany(assembly => assembly.GetTypes())
+            .Where(type => type is { IsClass: true, IsAbstract: false })
+            .SelectMany(type => type.GetConstructors())
+            .SelectMany(constructor => constructor.GetParameters())
+            .Where(parameter => parameter.HasDefaultValue && IsCollaboratorType(parameter.ParameterType))
+            .Select(parameter => $"{parameter.Member.DeclaringType!.FullName}: {parameter.Name}")
+            .ToList();
+
+        Assert.Empty(optionalCollaborators);
+    }
+
+    [Fact]
     public void ScheduledJobRunner_IsTheHostedServiceThatArmsTheTimers()
     {
         var runner = _factory.Services.GetRequiredService<IScheduledJobRunner>();
@@ -58,4 +79,7 @@ public class ServiceGraphTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.NotNull(services.GetRequiredService<IComicEmailQueue>());
         Assert.NotNull(services.GetRequiredService<IComicEmailService>());
     }
+
+    private static bool IsCollaboratorType(Type type) =>
+        type.IsInterface && type.Namespace?.StartsWith("ComicMaintainer.", StringComparison.Ordinal) == true;
 }

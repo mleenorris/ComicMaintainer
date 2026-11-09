@@ -305,6 +305,37 @@ public sealed class ArchiveWriteRecoveryServiceTests : IDisposable
         Assert.False(File.Exists(temp));
     }
 
+    // The marker only saves a later sweep; not being able to write it cannot undo this one.
+    [Fact]
+    public async Task RecoverAsync_WhenTheUpgradeMarkerCannotBeWritten_StillFinishesAndWarns()
+    {
+        var temp = Stale(ArchiveWriteRecoveryService.CreateTempPath(_library), "x");
+        Directory.CreateDirectory(MarkerPath);
+
+        var result = await CreateService().RecoverAsync();
+
+        Assert.Equal(1, result.TempFilesDeleted);
+        Assert.False(File.Exists(temp));
+        Assert.Contains(_logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("Could not record", StringComparison.Ordinal));
+    }
+
+    // A backup written after this sweep started belongs to a write still in progress.
+    [Fact]
+    public async Task RecoverAsync_LeavesABackupNewerThanTheSweepAlone()
+    {
+        var archive = Path.Join(_library, "Saga.cbz");
+        var backup = archive + ".backup";
+        File.WriteAllText(archive, "damaged");
+        File.WriteAllText(backup, "not yet a complete backup");
+        File.SetLastWriteTimeUtc(backup, Now.UtcDateTime.AddMinutes(1));
+
+        var result = await CreateService().RecoverAsync();
+
+        Assert.False(result.DidAnything);
+        Assert.Equal("damaged", File.ReadAllText(archive));
+        Assert.True(File.Exists(backup));
+    }
+
     [Fact]
     public async Task RecoverAsync_MissingDirectories_DoNothing()
     {

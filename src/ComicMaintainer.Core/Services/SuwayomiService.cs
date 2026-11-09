@@ -180,22 +180,12 @@ public class SuwayomiService : ISuwayomiService
         CancellationToken cancellationToken = default)
     {
         var series = await GetLibrarySeriesInternalAsync(cancellationToken);
-        var normalizedSeries = series
-            .Select(item => (Series: item, NormalizedTitle: Normalize(item.Title)))
-            .ToList();
-        var titleIndex = new Dictionary<string, SuwayomiSeries>(StringComparer.Ordinal);
-        foreach (var item in normalizedSeries
-                     .Where(item => item.NormalizedTitle.Length > 0)
-                     .OrderBy(item => item.Series.Title, StringComparer.OrdinalIgnoreCase))
-        {
-            titleIndex.TryAdd(item.NormalizedTitle, item.Series);
-        }
-
         return new SuwayomiLibrarySnapshot
         {
             Series = series,
-            NormalizedTitleIndex = titleIndex,
-            NormalizedSeries = normalizedSeries
+            NormalizedSeries = series
+                .Select(item => (Series: item, NormalizedTitle: Normalize(item.Title)))
+                .ToList()
         };
     }
 
@@ -308,8 +298,7 @@ public class SuwayomiService : ISuwayomiService
 
         if (seriesId is > 0)
         {
-            var series = await ResolveSeriesAsync(
-                seriesTitle, alternateTitles, seriesId, librarySnapshot, cancellationToken);
+            var series = await ResolveSeriesByIdAsync(seriesId.Value, cancellationToken);
             checkedSeriesIds.Add(series.Id);
             firstMatchedSeries = series;
             result.Series = series;
@@ -1319,89 +1308,14 @@ public class SuwayomiService : ISuwayomiService
         return null;
     }
 
-    private async Task<SuwayomiSeries> ResolveSeriesAsync(
-        string? seriesTitle,
-        IEnumerable<string>? alternateTitles,
-        int? seriesId,
-        SuwayomiLibrarySnapshot? librarySnapshot,
-        CancellationToken cancellationToken)
+    private async Task<SuwayomiSeries> ResolveSeriesByIdAsync(int seriesId, CancellationToken cancellationToken)
     {
-        if (seriesId is > 0)
-        {
-            var library = librarySnapshot?.Series
-                          ?? (await GetLibrarySeriesAsync(cancellationToken)).Series;
-            var byId = library.FirstOrDefault(s => s.Id == seriesId.Value);
-            if (byId is not null)
-            {
-                return byId;
-            }
+        var library = (await GetLibrarySeriesAsync(cancellationToken)).Series;
 
-            if (librarySnapshot is not null)
-            {
-                throw new SuwayomiException($"Suwayomi has no series with id {seriesId.Value} in the supplied library snapshot.");
-            }
-
-            // The id may belong to a series that is not in the library (or the
-            // library listing was truncated); fall back to a direct lookup.
-            return await GetSeriesByIdAsync(seriesId.Value, cancellationToken);
-        }
-
-        if (string.IsNullOrWhiteSpace(seriesTitle))
-        {
-            throw new SuwayomiException("A series title or Suwayomi series id is required.");
-        }
-
-        // Suwayomi lists a series under its source's title, which can differ
-        // from the one shown here (a localized or romanized title, say), so the
-        // series' other titles are tried as well. An exact match on any of them
-        // is better evidence than a partial match on the shown title, which is
-        // often a sequel or spin-off ("Solo Leveling: Ragnarok"), so every title
-        // is tried exactly before the shown title's partial matches. The other
-        // titles are never matched partially: a series can have dozens, and
-        // short ones such as acronyms would match unrelated series and queue
-        // their chapters.
-        var normalizedTitle = Normalize(seriesTitle);
-        var otherTitles = (alternateTitles ?? Enumerable.Empty<string>())
-            .Where(title => !string.IsNullOrWhiteSpace(title))
-            .Select(title => (Title: title.Trim(), Key: Normalize(title)))
-            .Where(other => other.Key.Length > 0 && other.Key != normalizedTitle)
-            .DistinctBy(other => other.Key)
-            .ToList();
-
-        librarySnapshot ??= await GetLibrarySeriesAsync(cancellationToken);
-        var byTitle = librarySnapshot.NormalizedTitleIndex;
-        if (byTitle.TryGetValue(normalizedTitle, out var match))
-        {
-            return match;
-        }
-
-        foreach (var other in otherTitles)
-        {
-            if (byTitle.TryGetValue(other.Key, out match))
-            {
-                _logger.LogInformation(
-                    "Matched Suwayomi series {SeriesId} ({SuwayomiTitle}) for {SeriesTitle} by its other title {OtherTitle}",
-                    match.Id,
-                    LoggingHelper.SanitizeForLog(match.Title),
-                    LoggingHelper.SanitizeForLog(seriesTitle),
-                    LoggingHelper.SanitizeForLog(other.Title));
-                return match;
-            }
-        }
-
-        var partial = RankMatches(librarySnapshot, normalizedTitle).FirstOrDefault();
-        if (partial is not null)
-        {
-            return partial;
-        }
-
-        var searched = otherTitles.Count switch
-        {
-            0 => $"'{seriesTitle}'",
-            1 => $"'{seriesTitle}' or its other title '{otherTitles[0].Title}'",
-            _ => $"'{seriesTitle}' or any of its {otherTitles.Count} other titles"
-        };
-        throw new SuwayomiException($"No series matching {searched} was found in the Suwayomi library.");
+        // The id may belong to a series that is not in the library (or the
+        // library listing was truncated); fall back to a direct lookup.
+        return library.FirstOrDefault(s => s.Id == seriesId)
+               ?? await GetSeriesByIdAsync(seriesId, cancellationToken);
     }
 
     private async Task<SuwayomiSeries> GetSeriesByIdAsync(int seriesId, CancellationToken cancellationToken)

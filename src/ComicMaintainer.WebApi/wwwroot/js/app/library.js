@@ -187,7 +187,6 @@
                 seriesLibrary = seriesLibrary.concat(newSeries);
                 seriesOffset += newSeries.length;
                 seriesTotal = data.total_series || 0;
-                totalFiles = seriesTotal;
                 unmarkedCount = data.unmarked_count || 0;
 
                 if (currentSeriesDetailId) {

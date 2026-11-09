@@ -28,9 +28,6 @@
         let seriesIssueRangeSelectArmed = false;
         let currentEditFile = null;
         let searchQuery = '';
-        let currentPage = 1;
-        let totalPages = 1;
-        let totalFiles = 0;
         let unmarkedCount = 0;
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         // Single source of truth for header-filter button labels. Used both when

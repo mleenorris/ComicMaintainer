@@ -151,13 +151,6 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         Assert.Equal(expectedError, Prop(badRequest.Value, "error"));
     }
 
-    private static void AssertStatus(ActionResult? result, int expectedStatus, object? expectedValue)
-    {
-        var objectResult = Assert.IsAssignableFrom<ObjectResult>(result);
-        Assert.Equal(expectedStatus, objectResult.StatusCode);
-        Assert.Equal(expectedValue, objectResult.Value);
-    }
-
     // ------------------------------------------------------------ groups cache
 
     [Fact]
@@ -486,14 +479,14 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
     }
 
     [Fact]
-    public async Task CombineEndpoints_GroupDiscoveryFails_Return500()
+    public async Task CombineEndpoints_GroupDiscoveryFails_Escape()
     {
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk"));
         var controller = CreateController();
         var request = new FilesController.CombineFoldersRequest { GroupKey = "foo", DestinationDirectory = Dir("Foo A") };
 
-        AssertStatus((await controller.PreviewCombineFolders(request)).Result, 500, "Error building combine preview");
-        AssertStatus((await controller.CombineFolders(request)).Result, 500, "Error combining folders");
+        await Assert.ThrowsAsync<IOException>(() => controller.PreviewCombineFolders(request));
+        await Assert.ThrowsAsync<IOException>(() => controller.CombineFolders(request));
     }
 
     [Fact]

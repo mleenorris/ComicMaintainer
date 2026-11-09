@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -16,15 +17,14 @@ namespace ComicMaintainer.WebApi.Controllers;
 public class OverviewController : ControllerBase
 {
     private readonly IOverviewService _overview;
-    private readonly ILogger<OverviewController> _logger;
 
-    public OverviewController(IOverviewService overview, ILogger<OverviewController> logger)
+    public OverviewController(IOverviewService overview)
     {
         _overview = overview;
-        _logger = logger;
     }
 
     [HttpGet]
+    [FailureMessage("Error building overview")]
     public async Task<ActionResult<OverviewResult>> Get(CancellationToken cancellationToken = default)
     {
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -33,15 +33,7 @@ public class OverviewController : ControllerBase
             return Unauthorized();
         }
 
-        try
-        {
-            var result = await _overview.GetOverviewAsync(userId, cancellationToken);
-            return Ok(result);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error building overview page");
-            return StatusCode(500, new { error = "Error building overview" });
-        }
+        var result = await _overview.GetOverviewAsync(userId, cancellationToken);
+        return Ok(result);
     }
 }

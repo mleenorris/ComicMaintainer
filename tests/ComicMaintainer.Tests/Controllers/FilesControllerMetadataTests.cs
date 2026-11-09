@@ -143,15 +143,13 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task GetMetadata_ProcessorThrows_Returns500()
+    public async Task GetMetadata_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.GetMetadataAsync(path, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("archive is corrupt"));
 
-        var result = await CreateController().GetMetadata(path);
-
-        AssertStatus(result.Result, 500, "Error retrieving metadata");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().GetMetadata(path));
     }
 
     // ---------------------------------------------------------- GetSeriesResolution
@@ -250,16 +248,14 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task GetSeriesResolution_ResolverThrows_Returns500()
+    public async Task GetSeriesResolution_ResolverThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _resolver
             .Setup(r => r.ResolveAsync(path, It.IsAny<ComicMetadata?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("resolver offline"));
 
-        var result = await CreateController(resolver: _resolver.Object).GetSeriesResolution(path, CancellationToken.None);
-
-        AssertStatus(result.Result, 500, "Error resolving series");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController(resolver: _resolver.Object).GetSeriesResolution(path, CancellationToken.None));
     }
 
     // -------------------------------------------------------------- UpdateMetadata
@@ -381,19 +377,33 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateMetadata_ProcessorThrows_Returns500AndRecordsException()
+    public async Task UpdateMetadata_ProcessorThrows_EscapesAndRecordsTheFailure()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("disk full"));
 
-        var result = await CreateController(_broadcaster.Object).UpdateMetadata(path, new ComicMetadata());
-
-        AssertStatus(result, 500, "Error updating metadata");
+        await Assert.ThrowsAsync<IOException>(() => CreateController(_broadcaster.Object).UpdateMetadata(path, new ComicMetadata()));
         var entry = SingleHistoryEntry();
         Assert.False(entry.Success);
         Assert.Equal("disk full", entry.ErrorMessage);
         _broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateMetadata_ProcessorThrowsAndHistoryFails_StillReportsTheOriginalFailure()
+    {
+        var path = InRoot("Saga 001.cbz");
+        var failure = new IOException("disk full");
+        _processor.Setup(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+        _history
+            .Setup(h => h.AddHistoryEntryAsync(It.IsAny<ProcessingHistoryEntry>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        var thrown = await Assert.ThrowsAsync<IOException>(() => CreateController(_broadcaster.Object).UpdateMetadata(path, new ComicMetadata()));
+
+        Assert.Same(failure, thrown);
     }
 
     // --------------------------------------------------------------- PatchMetadata
@@ -694,17 +704,15 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task PatchMetadata_UnexpectedFailure_Returns500()
+    public async Task PatchMetadata_UnexpectedFailure_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _fileStore
             .Setup(f => f.ApplyUserMetadataEditAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await CreateController()
-            .PatchMetadata(path, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "One" } }, CancellationToken.None);
-
-        AssertStatus(result, 500, "Error patching metadata");
+        await Assert.ThrowsAsync<IOException>(() => CreateController()
+            .PatchMetadata(path, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "One" } }, CancellationToken.None));
     }
 
     // ------------------------------------------------------------- GetFileTags
@@ -733,14 +741,12 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task GetFileTags_ProcessorThrows_Returns500()
+    public async Task GetFileTags_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.GetMetadataAsync(path, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("corrupt"));
 
-        var result = await CreateController().GetFileTags(Encode(path));
-
-        AssertStatus(result.Result, 500, "Error getting tags");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().GetFileTags(Encode(path)));
     }
 
     // ---------------------------------------------------------- UpdateFileTags
@@ -807,15 +813,13 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateFileTags_ProcessorThrows_Returns500()
+    public async Task UpdateFileTags_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("read-only"));
 
-        var result = await CreateController().UpdateFileTags(Encode(path), new ComicMetadata());
-
-        AssertStatus(result, 500, "Error updating tags");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().UpdateFileTags(Encode(path), new ComicMetadata()));
     }
 
     // ------------------------------------------------------- RemoveFileMetadata
@@ -944,15 +948,30 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoveFileMetadata_ProcessorThrows_Returns500AndRecordsException()
+    public async Task RemoveFileMetadata_ProcessorThrows_EscapesAndRecordsTheFailure()
     {
         var path = CreateRealFile("Saga 004.cbz");
         _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("locked"));
 
-        var result = await CreateController().RemoveFileMetadata(Encode(path));
-
-        AssertStatus(result, 500, "Error removing metadata");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().RemoveFileMetadata(Encode(path)));
         var entry = SingleHistoryEntry();
         Assert.Equal((path, "RemoveMetadata", false, "locked"), (entry.FilePath, entry.Action, entry.Success, entry.ErrorMessage));
+    }
+
+    [Fact]
+    public async Task RemoveFileMetadata_CancelledByTheClient_EscapesWithoutRecordingAFailure()
+    {
+        var path = CreateRealFile("Saga 005.cbz");
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => CreateController().RemoveFileMetadata(Encode(path), cts.Token));
+
+        lock (_historyEntries)
+        {
+            Assert.Empty(_historyEntries);
+        }
     }
 }

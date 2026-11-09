@@ -183,14 +183,37 @@ public class SmtpComicEmailSenderTests : IDisposable
         _settings.SmtpUsername = "reader";
         _settings.SmtpPassword = "s3cret";
 
-        await Assert.ThrowsAsync<NotSupportedException>(() => _sender.SendAsync(
+        var failure = await Assert.ThrowsAsync<NotSupportedException>(() => _sender.SendAsync(
             new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
             _guard.Token));
 
+        Assert.Equal(
+            "The mail server does not offer a secure connection. Check the SMTP port and TLS settings.",
+            SmtpComicEmailSender.DescribeFailureForUser(failure));
         Assert.Null(server.AuthPayload);
         Assert.DoesNotContain(server.Commands, c =>
             c.StartsWith("AUTH", StringComparison.OrdinalIgnoreCase)
             || c.StartsWith("MAIL", StringComparison.OrdinalIgnoreCase));
+        Assert.False(server.Message.IsCompleted);
+    }
+
+    [Fact]
+    public async Task SendAsync_WithAUsernameOnAServerOfferingNoLogin_BlamesTheLoginNotTheConnection()
+    {
+        using var server = new FakeSmtpServer { OffersLogin = false };
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+        _settings.SmtpUsername = "reader";
+        _settings.SmtpPassword = "s3cret";
+
+        var failure = await Assert.ThrowsAnyAsync<NotSupportedException>(() => _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Subject", "Body"),
+            _guard.Token));
+
+        Assert.Equal(
+            "The mail server does not accept logins on this connection. Leave the SMTP username empty if it needs no login, otherwise check the SMTP port and TLS settings.",
+            SmtpComicEmailSender.DescribeFailureForUser(failure));
+        Assert.False(SmtpComicEmailSender.IsTransient(failure, CancellationToken.None));
         Assert.False(server.Message.IsCompleted);
     }
 
@@ -403,6 +426,33 @@ public class SmtpComicEmailSenderTests : IDisposable
         Assert.Equal(expected, SmtpComicEmailSender.IsTransient(exception, CancellationToken.None));
     }
 
+    public static TheoryData<Exception, string?> FailureDescriptionCases() => new()
+    {
+        { new TransientEmailSendException("x", new TimeoutException("secret")), "The mail server did not respond in time." },
+        { new TransientEmailSendException("x", new OperationCanceledException("secret")), "The mail server did not respond in time." },
+        { new TransientEmailSendException("x", new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.UnexpectedStatusCode, (MailKit.Net.Smtp.SmtpStatusCode)451, "secret reply")), "The mail server temporarily refused the message (SMTP 451). Try again later." },
+        { new TransientEmailSendException("x", new AuthenticationException("secret", new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.UnexpectedStatusCode, (MailKit.Net.Smtp.SmtpStatusCode)454, "secret reply"))), "The mail server temporarily refused the login (SMTP 454). Try again later." },
+        { new TransientEmailSendException("x", new SocketException((int)SocketError.ConnectionRefused)), "Could not reach the mail server. Check the SMTP host and port in Settings." },
+        { new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.RecipientNotAccepted, (MailKit.Net.Smtp.SmtpStatusCode)550, "secret reply"), "The mail server refused the message (SMTP 550)." },
+        { new AuthenticationException("secret"), "The mail server rejected the login. Check the SMTP username and password in Settings." },
+        { new SslHandshakeException("secret"), "A secure connection to the mail server could not be established. Check the SMTP port and TLS settings." },
+        { new System.Security.Authentication.AuthenticationException("secret"), "A secure connection to the mail server could not be established. Check the SMTP port and TLS settings." },
+        { new NotSupportedException("secret"), "The mail server does not offer a secure connection. Check the SMTP port and TLS settings." },
+        { new MimeKit.ParseException("secret", 0, 0), "The device's email address is not valid." },
+        { new InvalidOperationException("secret"), null },
+        { new OperationCanceledException("secret"), null },
+    };
+
+    [Theory]
+    [MemberData(nameof(FailureDescriptionCases))]
+    public void DescribeFailureForUser_NamesTheFailureWithoutItsText(Exception exception, string? expected)
+    {
+        var description = SmtpComicEmailSender.DescribeFailureForUser(exception);
+
+        Assert.Equal(expected, description);
+        Assert.DoesNotContain("secret", description ?? string.Empty);
+    }
+
     [Fact]
     public void IsTransient_DoesNotRetryACancellationTheCallerAskedFor()
     {
@@ -500,6 +550,9 @@ public class SmtpComicEmailSenderTests : IDisposable
         /// <summary>Message size limit advertised with the SIZE extension; none when null.</summary>
         public long? MaxMessageSize { get; set; }
 
+        /// <summary>Whether the AUTH extension is advertised; a relay without login does not.</summary>
+        public bool OffersLogin { get; set; } = true;
+
         private async Task AcceptLoopAsync(CancellationToken token)
         {
             while (!token.IsCancellationRequested)
@@ -552,9 +605,8 @@ public class SmtpComicEmailSenderTests : IDisposable
                 switch (verb)
                 {
                     case "EHLO":
-                        await writer.WriteAsync(MaxMessageSize is long maxSize
-                            ? $"250-localhost\r\n250-SIZE {maxSize}\r\n250 AUTH PLAIN\r\n"
-                            : "250-localhost\r\n250 AUTH PLAIN\r\n");
+                        var size = MaxMessageSize is long maxSize ? $"250-SIZE {maxSize}\r\n" : string.Empty;
+                        await writer.WriteAsync($"250-localhost\r\n{size}{(OffersLogin ? "250 AUTH PLAIN" : "250 8BITMIME")}\r\n");
                         break;
                     case "AUTH":
                         var payload = parts.Length > 2 ? parts[2] : null;

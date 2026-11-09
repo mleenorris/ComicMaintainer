@@ -190,10 +190,12 @@ public class EmailController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (EmailTestFailedException ex)
         {
-            _logger.LogError(ex, "Test email to device {DeviceId} failed", deviceId);
-            return StatusCode(502, new { error = $"Failed to send test email: {ex.Message}" });
+            // Expected when the SMTP settings are wrong or the server is down: reporting that is
+            // the point of a test email, so it is a warning here, not a defect to file.
+            _logger.LogWarning(ex, "Test email to device {DeviceId} failed", deviceId);
+            return StatusCode(502, new { error = ex.Message });
         }
     }
 
@@ -421,6 +423,7 @@ public class EmailController : ControllerBase
     // Builds the entire book inside the request and then streams it: how long
     // that takes is a function of the series, not of anything we can bound.
     [DisableRequestTimeout]
+    [FailureMessage("Failed to build the condensed book")]
     public async Task<ActionResult> DownloadCondensedBook(
         [FromBody] CondenseRequest request,
         CancellationToken cancellationToken)
@@ -464,11 +467,6 @@ public class EmailController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { error = ex.Message });
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "Failed to build a condensed book for download");
-            return StatusCode(500, new { error = $"Failed to build the condensed book: {ex.Message}" });
         }
 
         // The generated book only exists for this response: delete it (and the

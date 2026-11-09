@@ -76,13 +76,6 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     private static void AssertError<T>(object? result, string expected) where T : ObjectResult =>
         Assert.Equal(expected, ErrorOf(Assert.IsType<T>(result).Value));
 
-    private static void Assert500(object? result, string expected)
-    {
-        var obj = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status500InternalServerError, obj.StatusCode);
-        Assert.Equal(expected, ErrorOf(obj.Value));
-    }
-
     private List<ReadingProgress> TrackSavedProgress()
     {
         var saved = new List<ReadingProgress>();
@@ -302,13 +295,11 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GetComicInfo_ReaderFailure_Returns500()
+    public async Task GetComicInfo_ReaderFailure_Escapes()
     {
         _reader.Setup(r => r.GetPageCountAsync(_file)).ThrowsAsync(new InvalidDataException("corrupt"));
 
-        var result = await CreateController().GetComicInfo(_file);
-
-        Assert500(result.Result, "Error reading comic file");
+        await Assert.ThrowsAsync<InvalidDataException>(() => CreateController().GetComicInfo(_file));
     }
 
     [Fact]
@@ -459,13 +450,11 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GetPage_ReaderFailure_Returns500()
+    public async Task GetPage_ReaderFailure_Escapes()
     {
         _reader.Setup(r => r.GetPageAsync(_file, 1)).ThrowsAsync(new IOException("truncated"));
 
-        var result = await CreateController().GetPage(_file, 1);
-
-        Assert500(result, "Error reading page");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().GetPage(_file, 1));
     }
 
     [Fact]
@@ -566,15 +555,13 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GetCover_CacheFailure_Returns500()
+    public async Task GetCover_CacheFailure_Escapes()
     {
         _coverCache.Setup(c => c.GetValidator(_file)).Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
         _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("cache dir unavailable"));
 
-        var result = await CreateController().GetCover(_file);
-
-        Assert500(result, "Error reading cover");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().GetCover(_file));
     }
 
     // ---- BuildCoverETag -----------------------------------------------------------------
@@ -608,24 +595,20 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GetPages_ReaderFailure_Returns500()
+    public async Task GetPages_ReaderFailure_Escapes()
     {
         _reader.Setup(r => r.GetPageNamesAsync(_file)).ThrowsAsync(new InvalidDataException("bad zip"));
 
-        var result = await CreateController().GetPages(_file);
-
-        Assert500(result.Result, "Error reading comic file");
+        await Assert.ThrowsAsync<InvalidDataException>(() => CreateController().GetPages(_file));
     }
 
     [Fact]
-    public async Task GetAdjacentFile_LibraryFailure_Returns500()
+    public async Task GetAdjacentFile_LibraryFailure_Escapes()
     {
         _library.Setup(l => l.GetAdjacentIssueAsync(_file, "prev", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db locked"));
 
-        var result = await CreateController().GetAdjacentFile(_file, "prev");
-
-        Assert500(result.Result, "Error finding adjacent file");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().GetAdjacentFile(_file, "prev"));
     }
 
     // ---- MarkAsRead ---------------------------------------------------------------------
@@ -693,14 +676,12 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task MarkAsRead_StoreFailure_Returns500WithoutTouchingUserProgress()
+    public async Task MarkAsRead_StoreFailure_EscapesWithoutTouchingUserProgress()
     {
         _fileStore.Setup(f => f.MarkFileReadAsync(_file, true, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db locked"));
 
-        var result = await CreateController(UserWithId("user-1")).MarkAsRead(_file);
-
-        Assert500(result, "Error marking file as read");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController(UserWithId("user-1")).MarkAsRead(_file));
         _progress.VerifyNoOtherCalls();
     }
 
@@ -759,7 +740,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveProgress_WriteFailure_Returns500SoTheReaderRetries()
+    public async Task SaveProgress_WriteFailure_EscapesSoTheReaderRetries()
     {
         // reader.js keeps a page whose save answered 5xx and replays it later; the
         // old path logged the failure and answered 200, so the page was lost.
@@ -767,9 +748,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         _progress.Setup(p => p.RecordPageAsync("user-2", _file, 2, 10, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("database is locked"));
 
-        var result = await CreateController(UserWithId("user-2")).SaveProgress(_file, 2);
-
-        Assert500(result, "Error saving reading progress");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController(UserWithId("user-2")).SaveProgress(_file, 2));
     }
 
     [Fact]
@@ -795,13 +774,11 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GetProgress_StoreFailure_Returns500()
+    public async Task GetProgress_StoreFailure_Escapes()
     {
         _fileStore.Setup(f => f.GetReadingProgressAsync(_file, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await CreateController().GetProgress(_file);
-
-        Assert500(result.Result, "Error getting reading progress");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().GetProgress(_file));
     }
 }

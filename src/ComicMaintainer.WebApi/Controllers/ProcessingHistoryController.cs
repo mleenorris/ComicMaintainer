@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,6 +22,7 @@ public class ProcessingHistoryController : ControllerBase
     }
 
     [HttpGet]
+    [FailureMessage("Error retrieving processing history")]
     public async Task<ActionResult<object>> GetProcessingHistory(
         [FromQuery] int limit = 50,
         [FromQuery] int offset = 0,
@@ -64,11 +66,6 @@ public class ProcessingHistoryController : ControllerBase
         {
             _logger.LogWarning(ex, "Invalid request parameters for processing history");
             return BadRequest(ex.Message);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error retrieving processing history");
-            return StatusCode(500, "Error retrieving processing history");
         }
     }
 }

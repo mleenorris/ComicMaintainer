@@ -719,7 +719,7 @@ public class SeriesMetadataRefreshJobServiceTests
 
         _cache.Verify(c => c.RefreshAsync("AoT", It.IsAny<CancellationToken>()), Times.Never);
         Assert.Equal(2, job.Failures);
-        Assert.All(job.RecentResults, r => Assert.Equal("MangaDex did not answer within 15s", r.Error));
+        Assert.All(job.RecentResults, r => Assert.Equal("MangaDex did not answer in time", r.Error));
     }
 
     [Fact]
@@ -764,7 +764,7 @@ public class SeriesMetadataRefreshJobServiceTests
     {
         _cache.Setup(c => c.RefreshAsync("Alpha", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ExternalMetadataUnavailableException(
-                "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s"));
+                "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex request timed out: api.internal:443"));
         SetupRefresh("Beta", "success");
         var service = CreateService();
 
@@ -777,7 +777,7 @@ public class SeriesMetadataRefreshJobServiceTests
         Assert.Equal(1, job.Successes);
         var failed = Assert.Single(job.RecentResults, r => r.SeriesTitle == "Alpha");
         Assert.Equal("error", failed.Status);
-        Assert.Equal("MangaDex did not answer within 15s", failed.Error);
+        Assert.Equal("MangaDex did not answer in time", failed.Error);
         Assert.Null(Assert.Single(job.RecentResults, r => r.SeriesTitle == "Beta").Error);
     }
 

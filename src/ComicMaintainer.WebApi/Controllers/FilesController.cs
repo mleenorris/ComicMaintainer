@@ -127,6 +127,23 @@ public partial class FilesController : ControllerBase
     }
 
     /// <summary>
+    /// Records a failed action in the processing history before its exception goes on to
+    /// GlobalExceptionHandler. Failing to write the row is only logged: it must not replace
+    /// the exception being reported.
+    /// </summary>
+    private async Task RecordFailureAsync(string filePath, string action, Exception failure)
+    {
+        try
+        {
+            await LogHistoryAsync(filePath, action, false, failure.Message);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Could not record the failed {Action} in the processing history", action);
+        }
+    }
+
+    /// <summary>
     /// Helper method to log processing history entries with before/after metadata
     /// </summary>
     private async Task LogHistoryWithChangesAsync(

@@ -83,20 +83,15 @@ public class ProcessingHistoryControllerTests
     }
 
     [Fact]
-    public async Task GetProcessingHistory_HandlesExceptionAndReturns500()
+    public async Task GetProcessingHistory_LetsTheExceptionEscape()
     {
         // Arrange
         _historyServiceMock
             .Setup(s => s.GetHistoryAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Database error"));
 
-        // Act
-        var result = await _controller.GetProcessingHistory(50, 0);
-
-        // Assert
-        var statusResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<ObjectResult>(statusResult.Result);
-        Assert.Equal(500, objectResult.StatusCode);
+        // Act and assert
+        await Assert.ThrowsAsync<Exception>(() => _controller.GetProcessingHistory(50, 0));
     }
 
     [Fact]

@@ -144,7 +144,7 @@ public class FilesControllerTests
     }
 
     [Fact]
-    public async Task GetFiles_WhenExceptionThrown_ReturnsInternalServerError()
+    public async Task GetFiles_WhenExceptionThrown_Escapes()
     {
         // Arrange
         _mockFileStore.Setup(fs => fs.GetFilesPageAsync(
@@ -152,12 +152,8 @@ public class FilesControllerTests
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
-        // Act
-        var result = await _controller.GetFiles();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetFiles());
     }
 
     [Fact]
@@ -292,18 +288,14 @@ public class FilesControllerTests
     }
 
     [Fact]
-    public async Task GetFileCounts_WhenExceptionThrown_ReturnsInternalServerError()
+    public async Task GetFileCounts_WhenExceptionThrown_Escapes()
     {
         // Arrange
         _mockFileStore.Setup(fs => fs.GetFileCountsAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
-        // Act
-        var result = await _controller.GetFileCounts();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetFileCounts());
     }
 
     [Fact]
@@ -878,18 +870,14 @@ public class FilesControllerTests
     }
 
     [Fact]
-    public async Task ProcessBatch_WhenExceptionThrown_ReturnsInternalServerError()
+    public async Task ProcessBatch_WhenExceptionThrown_Escapes()
     {
         // Arrange
         _mockProcessor.Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
-        // Act
-        var result = await _controller.ProcessBatch(new List<string> { Path.Join(Path.GetTempPath(), "file.cbz") });
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.ProcessBatch(new List<string> { Path.Join(Path.GetTempPath(), "file.cbz") }));
     }
 
     // MarkProcessed tests removed - processed state is now computed from renamed && normalized
@@ -1053,7 +1041,7 @@ public class FilesControllerTests
 
     [Fact]
     [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
-    public async Task DeleteFile_WhenFileStoreThrowsException_ReturnsInternalServerError()
+    public async Task DeleteFile_WhenFileStoreThrowsException_Escapes()
     {
         // Arrange
         var filePath = Path.Join(Path.GetTempPath(), $"test-exception-{Guid.NewGuid()}.cbz");
@@ -1065,13 +1053,8 @@ public class FilesControllerTests
         _mockFileStore.Setup(fs => fs.RemoveFileAsync(filePath, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
-        // Act
-        var result = await _controller.DeleteFile(filePath);
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
-        Assert.Equal("Error deleting file", statusCodeResult.Value);
+        // Act and assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.DeleteFile(filePath));
         
         // Cleanup: delete the test file if it still exists
         if (File.Exists(filePath))
@@ -1082,7 +1065,7 @@ public class FilesControllerTests
 
     [Fact]
     [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
-    public async Task DeleteFile_WhenFileDeletionThrowsIOException_ReturnsInternalServerError()
+    public async Task DeleteFile_WhenFileDeletionFails_Escapes()
     {
         // Arrange - create a file that we'll make read-only/locked to cause deletion to fail
         var testFilePath = Path.Join(Path.GetTempPath(), $"test-locked-{Guid.NewGuid()}.cbz");
@@ -1095,17 +1078,18 @@ public class FilesControllerTests
         _mockFileStore.Setup(fs => fs.RemoveFileAsync(testFilePath, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        // Act
-        var result = await _controller.DeleteFile(testFilePath);
+        // Act and assert - on Unix systems, readonly doesn't prevent deletion, so this succeeds;
+        // where the operating system refuses, the failure reaches the global handler
+        try
+        {
+            Assert.IsType<OkResult>(await _controller.DeleteFile(testFilePath));
+            Assert.False(OperatingSystem.IsWindows(), "Windows refuses to delete a read-only file");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Assert.True(OperatingSystem.IsWindows(), ex.ToString());
+        }
 
-        // Assert - on Unix systems, readonly doesn't prevent deletion, so this might succeed
-        // We accept either success or error
-        Assert.True(
-            result is OkResult || 
-            (result is ObjectResult objResult && objResult.StatusCode == 500),
-            "Expected either Ok or 500 error result"
-        );
-        
         // Cleanup - remove readonly and delete if it still exists
         if (File.Exists(testFilePath))
         {
@@ -1167,7 +1151,7 @@ public class FilesControllerTests
     }
 
     [Fact]
-    public async Task DeleteFileByEncodedPath_WhenFileStoreThrowsException_ReturnsInternalServerError()
+    public async Task DeleteFileByEncodedPath_WhenFileStoreThrowsException_Escapes()
     {
         // Arrange
         var testFilePath = Path.Join(Path.GetTempPath(), $"test-exception-{Guid.NewGuid()}.cbz");
@@ -1180,13 +1164,8 @@ public class FilesControllerTests
         _mockFileStore.Setup(fs => fs.RemoveFileAsync(testFilePath, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
-        // Act
-        var result = await _controller.DeleteFileByEncodedPath(encodedPath);
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
-        Assert.Equal("Error deleting file", statusCodeResult.Value);
+        // Act and assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.DeleteFileByEncodedPath(encodedPath));
         
         // Cleanup: delete the test file if it still exists
         if (File.Exists(testFilePath))
@@ -2244,7 +2223,7 @@ public class FilesControllerTests
             new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
         var controller = CreateController(metadataCache: mockCache.Object, memoryCache: memoryCache, fileStore: fileStore.Object);
 
-        await controller.GetCombinableFolders(cts.Token);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.GetCombinableFolders(cts.Token));
 
         var result = await controller.GetCombinableFolders();
 

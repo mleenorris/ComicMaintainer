@@ -106,7 +106,7 @@ public class SmtpComicEmailSender : IComicEmailSender
 
             if (!string.IsNullOrWhiteSpace(settings.SmtpUsername))
             {
-                await client.AuthenticateAsync(settings.SmtpUsername, settings.SmtpPassword ?? string.Empty, cancellationToken);
+                await AuthenticateAsync(client, settings.SmtpUsername, settings.SmtpPassword, cancellationToken);
             }
 
             // The advertised limit can change once authenticated, so it is read
@@ -138,6 +138,26 @@ public class SmtpComicEmailSender : IComicEmailSender
         _logger.LogInformation(
             "Sent comic email to {Recipient}",
             LoggingHelper.SanitizeForLog(message.ToAddress));
+    }
+
+    /// <summary>
+    /// Logs in. MailKit raises the same exception type for a server that offers no login as it
+    /// does for one that lacks STARTTLS, so the login step is marked here to tell them apart.
+    /// </summary>
+    private static async Task AuthenticateAsync(
+        SmtpClient client,
+        string username,
+        string? password,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await client.AuthenticateAsync(username, password ?? string.Empty, cancellationToken);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new LoginNotOfferedException(ex);
+        }
     }
 
     /// <summary>
@@ -198,6 +218,37 @@ public class SmtpComicEmailSender : IComicEmailSender
         _ => false,
     };
 
+    /// <summary>
+    /// A fixed description of a failed send for the person testing their settings, or
+    /// <c>null</c> when the exception is not a recognised transport failure. It is built
+    /// from the failure's type and SMTP status rather than its message, which can carry
+    /// host names, addresses and the server's own wording.
+    /// </summary>
+    internal static string? DescribeFailureForUser(Exception exception) => exception switch
+    {
+        TransientEmailSendException { InnerException: OperationCanceledException or TimeoutException } =>
+            "The mail server did not respond in time.",
+        TransientEmailSendException { InnerException: SmtpCommandException command } =>
+            $"The mail server temporarily refused the message (SMTP {(int)command.StatusCode}). Try again later.",
+        TransientEmailSendException { InnerException: AuthenticationException { InnerException: SmtpCommandException command } } =>
+            $"The mail server temporarily refused the login (SMTP {(int)command.StatusCode}). Try again later.",
+        TransientEmailSendException =>
+            "Could not reach the mail server. Check the SMTP host and port in Settings.",
+        SmtpCommandException command =>
+            $"The mail server refused the message (SMTP {(int)command.StatusCode}).",
+        AuthenticationException =>
+            "The mail server rejected the login. Check the SMTP username and password in Settings.",
+        SslHandshakeException or System.Security.Authentication.AuthenticationException =>
+            "A secure connection to the mail server could not be established. Check the SMTP port and TLS settings.",
+        LoginNotOfferedException =>
+            "The mail server does not accept logins on this connection. Leave the SMTP username empty if it needs no login, otherwise check the SMTP port and TLS settings.",
+        NotSupportedException =>
+            "The mail server does not offer a secure connection. Check the SMTP port and TLS settings.",
+        ParseException =>
+            "The device's email address is not valid.",
+        _ => null,
+    };
+
     private static bool IsTemporaryReply(SmtpCommandException command) =>
         (int)command.StatusCode is >= 400 and < 500;
 
@@ -211,4 +262,16 @@ public class SmtpComicEmailSender : IComicEmailSender
             "The mail server did not respond in time.",
         _ => $"Could not reach the mail server: {exception.Message}",
     };
+
+    /// <summary>
+    /// The server offers no way to log in. Still a <see cref="NotSupportedException"/> with
+    /// MailKit's message, so callers other than the settings test see the failure unchanged.
+    /// </summary>
+    private sealed class LoginNotOfferedException : NotSupportedException
+    {
+        public LoginNotOfferedException(NotSupportedException innerException)
+            : base(innerException.Message, innerException)
+        {
+        }
+    }
 }

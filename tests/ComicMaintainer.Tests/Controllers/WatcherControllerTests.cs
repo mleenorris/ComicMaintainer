@@ -2,7 +2,6 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
-using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace ComicMaintainer.Tests.Controllers;
@@ -10,14 +9,12 @@ namespace ComicMaintainer.Tests.Controllers;
 public class WatcherControllerTests
 {
     private readonly Mock<IFileWatcherService> _mockWatcher;
-    private readonly Mock<ILogger<WatcherController>> _mockLogger;
     private readonly WatcherController _controller;
 
     public WatcherControllerTests()
     {
         _mockWatcher = new Mock<IFileWatcherService>();
-        _mockLogger = new Mock<ILogger<WatcherController>>();
-        _controller = new WatcherController(_mockWatcher.Object, _mockLogger.Object);
+        _controller = new WatcherController(_mockWatcher.Object);
     }
 
     /// <summary>
@@ -75,17 +72,13 @@ public class WatcherControllerTests
     }
 
     [Fact]
-    public void GetStatus_WhenExceptionThrown_ReturnsInternalServerError()
+    public void GetStatus_WhenExceptionThrown_Escapes()
     {
         // Arrange
         _mockWatcher.Setup(w => w.IsRunning).Throws(new InvalidOperationException("Test error"));
 
-        // Act
-        var result = _controller.GetStatus();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        Assert.Throws<InvalidOperationException>(() => _controller.GetStatus());
     }
 
     // New RESTful endpoint tests
@@ -127,17 +120,13 @@ public class WatcherControllerTests
     }
 
     [Fact]
-    public void GetWatcher_WhenIsRunningThrows_ReturnsInternalServerError()
+    public void GetWatcher_WhenIsRunningThrows_Escapes()
     {
         // Arrange
         _mockWatcher.Setup(w => w.IsRunning).Throws(new InvalidOperationException("Test error"));
 
-        // Act
-        var result = _controller.GetWatcher();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        Assert.Throws<InvalidOperationException>(() => _controller.GetWatcher());
     }
 
     [Fact]

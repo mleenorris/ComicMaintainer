@@ -172,7 +172,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     // was, and the series counts as failed, not as not found.
                     _logger.LogWarning("Metadata refresh failed for {SeriesTitle}: {Reason}",
                         LoggingHelper.SanitizeForLog(title), LoggingHelper.SanitizeForLog(ex.Message));
-                    result = new RefreshResult("error", null, ex.Message, Retag: false);
+                    result = new RefreshResult("error", null, ex.UserMessage, Retag: false);
                     Remember(refreshedRecords, before, result);
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)

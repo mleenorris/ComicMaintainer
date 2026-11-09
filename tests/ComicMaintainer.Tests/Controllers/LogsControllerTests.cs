@@ -4,7 +4,6 @@ using ComicMaintainer.WebApi.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 
@@ -13,7 +12,6 @@ namespace ComicMaintainer.Tests.Controllers;
 public class LogsControllerTests : IDisposable
 {
     private readonly Mock<IOptionsMonitor<AppSettings>> _mockSettings;
-    private readonly Mock<ILogger<LogsController>> _mockLogger;
     private readonly LogsController _controller;
     private readonly string _testLogDir;
 
@@ -29,8 +27,7 @@ public class LogsControllerTests : IDisposable
         _mockSettings = new Mock<IOptionsMonitor<AppSettings>>();
         _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
-        _mockLogger = new Mock<ILogger<LogsController>>();
-        _controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
+        _controller = new LogsController(_mockSettings.Object);
     }
 
     // The logs name every user and role, failed sign-ins and client addresses, host paths and exception details.
@@ -175,7 +172,7 @@ public class LogsControllerTests : IDisposable
     }
 
     [Fact]
-    public void GetLogs_WhenExceptionThrown_ReturnsInternalServerError()
+    public void GetLogs_WhenExceptionThrown_Escapes()
     {
         // Arrange - Use invalid directory
         var settings = new AppSettings
@@ -183,14 +180,10 @@ public class LogsControllerTests : IDisposable
             ConfigDirectory = "/nonexistent/directory"
         };
         _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
-        var controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
+        var controller = new LogsController(_mockSettings.Object);
 
-        // Act
-        var result = controller.GetLogs();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        Assert.Throws<DirectoryNotFoundException>(() => controller.GetLogs());
     }
 
     [Fact]
@@ -423,7 +416,7 @@ public class LogsControllerTests : IDisposable
     }
 
     [Fact]
-    public void GetLogFiles_WhenExceptionThrown_ReturnsInternalServerError()
+    public void GetLogFiles_WhenExceptionThrown_Escapes()
     {
         // Arrange - Use invalid directory
         var settings = new AppSettings
@@ -431,14 +424,10 @@ public class LogsControllerTests : IDisposable
             ConfigDirectory = "/nonexistent/directory"
         };
         _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
-        var controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
+        var controller = new LogsController(_mockSettings.Object);
 
-        // Act
-        var result = controller.GetLogFiles();
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Act and assert
+        Assert.Throws<DirectoryNotFoundException>(() => controller.GetLogFiles());
     }
 
     [Fact]
@@ -521,14 +510,17 @@ public class LogsControllerTests : IDisposable
             ConfigDirectory = null!
         };
         _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
-        var controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
+        var controller = new LogsController(_mockSettings.Object);
 
-        // Act
-        var result = controller.GetLogs();
-
-        // Assert - Should not throw, will return error or no files message
-        var okOrErrorResult = result.Result;
-        Assert.True(okOrErrorResult is OkObjectResult || okOrErrorResult is ObjectResult);
+        // Act and assert - /Config is read instead; without one the failure reaches the global handler
+        if (Directory.Exists("/Config"))
+        {
+            Assert.IsType<OkObjectResult>(controller.GetLogs().Result);
+        }
+        else
+        {
+            Assert.Throws<DirectoryNotFoundException>(() => controller.GetLogs());
+        }
     }
 
     [Fact]

@@ -91,6 +91,7 @@ public class ComicReaderController : ControllerBase
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpGet("info")]
+    [FailureMessage("Error reading comic file")]
     public async Task<ActionResult<object>> GetComicInfo([FromQuery] string filePath)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -125,11 +126,6 @@ public class ComicReaderController : ControllerBase
         {
             return ArchiveRefused(ex);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error getting comic info for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error reading comic file" });
-        }
     }
 
     /// <summary>
@@ -146,6 +142,7 @@ public class ComicReaderController : ControllerBase
     /// <param name="filePath">Path to the comic file</param>
     /// <param name="page">Page number (1-based index)</param>
     [HttpGet("page")]
+    [FailureMessage("Error reading page")]
     public async Task<IActionResult> GetPage([FromQuery] string filePath, [FromQuery] int page = 1)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -202,11 +199,6 @@ public class ComicReaderController : ControllerBase
         {
             return ArchiveRefused(ex);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error getting page {Page} from {FilePath}", page, LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error reading page" });
-        }
     }
 
     /// <summary>
@@ -232,6 +224,7 @@ public class ComicReaderController : ControllerBase
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpGet("cover")]
+    [FailureMessage("Error reading cover")]
     public async Task<IActionResult> GetCover([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -279,11 +272,6 @@ public class ComicReaderController : ControllerBase
         {
             return ArchiveRefused(ex);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error getting cover for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error reading cover" });
-        }
     }
 
     /// <summary>
@@ -305,6 +293,7 @@ public class ComicReaderController : ControllerBase
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpGet("pages")]
+    [FailureMessage("Error reading comic file")]
     public async Task<ActionResult<object>> GetPages([FromQuery] string filePath)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -332,11 +321,6 @@ public class ComicReaderController : ControllerBase
         {
             return ArchiveRefused(ex);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error getting pages from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error reading comic file" });
-        }
     }
 
     /// <summary>
@@ -345,6 +329,7 @@ public class ComicReaderController : ControllerBase
     /// <param name="filePath">Current file path</param>
     /// <param name="direction">"next" or "prev"</param>
     [HttpGet("adjacent")]
+    [FailureMessage("Error finding adjacent file")]
     public async Task<ActionResult<object>> GetAdjacentFile([FromQuery] string filePath, [FromQuery] string direction = "next")
     {
         if (string.IsNullOrEmpty(filePath))
@@ -358,32 +343,24 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        try
+        var adjacent = await _seriesLibrary.GetAdjacentIssueAsync(filePath, direction);
+
+        if (!adjacent.Found)
         {
-            var adjacent = await _seriesLibrary.GetAdjacentIssueAsync(filePath, direction);
-
-            if (!adjacent.Found)
-            {
-                return NotFound(new { error = "Current file not found in library" });
-            }
-
-            if (!adjacent.HasAdjacent)
-            {
-                return Ok(new { hasAdjacent = false, filePath = default(string?), fileName = default(string?) });
-            }
-
-            return Ok(new
-            {
-                hasAdjacent = true,
-                filePath = adjacent.FilePath,
-                fileName = adjacent.FileName
-            });
+            return NotFound(new { error = "Current file not found in library" });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+
+        if (!adjacent.HasAdjacent)
         {
-            _logger.LogError(ex, "Error getting adjacent file for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error finding adjacent file" });
+            return Ok(new { hasAdjacent = false, filePath = default(string?), fileName = default(string?) });
         }
+
+        return Ok(new
+        {
+            hasAdjacent = true,
+            filePath = adjacent.FilePath,
+            fileName = adjacent.FileName
+        });
     }
 
     /// <summary>
@@ -391,6 +368,7 @@ public class ComicReaderController : ControllerBase
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpPost("mark-read")]
+    [FailureMessage("Error marking file as read")]
     public async Task<ActionResult> MarkAsRead([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -404,18 +382,10 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        try
-        {
-            await _fileStore.MarkFileReadAsync(filePath, true, cancellationToken);
-            await RecordCompletedAsync(filePath, resolvedPath, cancellationToken);
-            _logger.LogDebug("Marked file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return Ok();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error marking file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error marking file as read" });
-        }
+        await _fileStore.MarkFileReadAsync(filePath, true, cancellationToken);
+        await RecordCompletedAsync(filePath, resolvedPath, cancellationToken);
+        _logger.LogDebug("Marked file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+        return Ok();
     }
 
     /// <summary>
@@ -432,6 +402,7 @@ public class ComicReaderController : ControllerBase
     /// <param name="filePath">Path to the comic file</param>
     /// <param name="page">Current page number</param>
     [HttpPost("progress")]
+    [FailureMessage("Error saving reading progress")]
     public async Task<ActionResult> SaveProgress([FromQuery] string filePath, [FromQuery] int page, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -457,18 +428,10 @@ public class ComicReaderController : ControllerBase
             return Ok();
         }
 
-        try
-        {
-            var totalPages = await TryGetPageCountAsync(resolvedPath);
-            await _readingProgress.RecordPageAsync(userId, filePath, page, totalPages, cancellationToken);
-            _logger.LogDebug("Saved reading progress for {FilePath}: page {Page}", LoggingHelper.SanitizePathForLog(filePath), page);
-            return Ok();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error saving reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error saving reading progress" });
-        }
+        var totalPages = await TryGetPageCountAsync(resolvedPath);
+        await _readingProgress.RecordPageAsync(userId, filePath, page, totalPages, cancellationToken);
+        _logger.LogDebug("Saved reading progress for {FilePath}: page {Page}", LoggingHelper.SanitizePathForLog(filePath), page);
+        return Ok();
     }
 
     /// <summary>
@@ -476,6 +439,7 @@ public class ComicReaderController : ControllerBase
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpGet("progress")]
+    [FailureMessage("Error getting reading progress")]
     public async Task<ActionResult<object>> GetProgress([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -489,16 +453,8 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        try
-        {
-            var progress = await _fileStore.GetReadingProgressAsync(filePath, cancellationToken);
-            return Ok(new { currentPage = progress });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error getting reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error getting reading progress" });
-        }
+        var progress = await _fileStore.GetReadingProgressAsync(filePath, cancellationToken);
+        return Ok(new { currentPage = progress });
     }
 
     /// <summary>The caller's user id, or <c>null</c> when the principal has none.</summary>

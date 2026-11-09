@@ -54,6 +54,8 @@ public enum ExternalMetadataFailureKind
 /// </remarks>
 public sealed class ExternalMetadataUnavailableException : Exception
 {
+    private const string AggregatePrefix = "External metadata providers unavailable: ";
+
     /// <summary>Creates the failure of a single provider.</summary>
     public ExternalMetadataUnavailableException(
         string provider,
@@ -100,6 +102,26 @@ public sealed class ExternalMetadataUnavailableException : Exception
     /// <summary>The per-provider failures of an aggregate; empty for a single provider.</summary>
     public IReadOnlyList<ExternalMetadataUnavailableException> Failures { get; }
 
+    /// <summary>
+    /// What to tell the person using the app, built only from the provider names,
+    /// <see cref="Kind"/> and <see cref="RetryAfter"/>. <see cref="Exception.Message"/> belongs
+    /// in the log: it can carry the text of an inner exception or the provider's own error
+    /// wording, such as a host and port or a JSON parser's complaint.
+    /// </summary>
+    public string UserMessage => Failures.Count > 0
+        ? AggregatePrefix + string.Join("; ", Failures.Select(failure => failure.UserMessage))
+        : Kind switch
+        {
+            ExternalMetadataFailureKind.Timeout => $"{Providers[0]} did not answer in time",
+            ExternalMetadataFailureKind.RateLimited when RetryAfter is { TotalSeconds: > 0 } wait =>
+                $"{Providers[0]} is limiting requests; try again in {(int)Math.Ceiling(wait.TotalSeconds)}s",
+            ExternalMetadataFailureKind.RateLimited => $"{Providers[0]} is limiting requests; try again later",
+            ExternalMetadataFailureKind.InvalidResponse => $"{Providers[0]} returned a response that could not be read",
+            ExternalMetadataFailureKind.Configuration => $"{Providers[0]} rejected the request; check its settings",
+            ExternalMetadataFailureKind.Paced => $"{Providers[0]} is at its request pace limit; try again shortly",
+            _ => $"{Providers[0]} could not be reached or answered with an error",
+        };
+
     private static string BuildMessage(IReadOnlyCollection<ExternalMetadataUnavailableException> failures)
     {
         ArgumentNullException.ThrowIfNull(failures);
@@ -108,7 +130,6 @@ public sealed class ExternalMetadataUnavailableException : Exception
             throw new ArgumentException("At least one provider failure is required.", nameof(failures));
         }
 
-        return "External metadata providers unavailable: "
-            + string.Join("; ", failures.Select(failure => failure.Message));
+        return AggregatePrefix + string.Join("; ", failures.Select(failure => failure.Message));
     }
 }

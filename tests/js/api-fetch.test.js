@@ -232,6 +232,25 @@ test('a 403 keeps the server\'s reason, or the caller\'s wording', async () => {
     assert.equal((await failure(page, "apiFetch('/api/mute', { forbiddenMessage: 'No access' })")).message, 'No access');
 });
 
+test('a 403 with only the status word leaves the wording to the app', async () => {
+    const refusals = {
+        // What the sign-in layer really sends (JwtSessionEvents.WriteForbiddenAsync).
+        'GET /api/signed-in': respond(403, { error: 'Forbidden', message: 'Insufficient permissions' }),
+        // ASP.NET's default ProblemDetails, and a proxy's plain text.
+        'GET /api/problem': respond(403, { title: 'Forbidden', status: 403 }),
+        'GET /api/proxy': respond(403, 'Forbidden', { 'Content-Type': 'text/plain' })
+    };
+    const page = apiPage({ routes: refusals });
+
+    for (const route of Object.keys(refusals).map(key => key.split(' ')[1])) {
+        const error = await failure(page, `apiFetch('${route}')`);
+        assert.equal(error.message, 'You do not have permission to do that.', route);
+        assert.equal(error.status, 403, route);
+        assert.equal(error.fromServer, false, route);
+        assert.equal((await failure(page, `apiFetch('${route}', { forbiddenMessage: 'No access' })`)).message, 'No access', route);
+    }
+});
+
 // ── The end of a session ──────────────────────────────────────────────────
 
 test('a 401 ends the session and is flagged as handled', async () => {

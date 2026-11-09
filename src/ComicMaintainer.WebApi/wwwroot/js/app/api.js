@@ -354,6 +354,8 @@
          *    that treat some statuses specially.
          *  - errorMessage: the message for a failure the server did not explain.
          *  - forbiddenMessage: the message for a 403 the server did not explain.
+         *    A bare "Forbidden", which is all the sign-in layer sends, explains
+         *    nothing; a controller's own reason is kept.
          *  - auth: false sends no session headers and leaves a 401 to the
          *    caller, for the requests that are made without a session.
          *  - redirectOn401: false leaves a 401 to the caller but still sends
@@ -411,7 +413,9 @@
             if (!json) return response;
 
             if (!response.ok) {
-                const serverMessage = await apiErrorMessage(response);
+                const reason = await apiErrorMessage(response);
+                const isBareRefusal = response.status === 403 && reason?.toLowerCase() === 'forbidden';
+                const serverMessage = isBareRefusal ? undefined : reason;
                 const fallback = response.status === 403
                     ? forbiddenMessage
                     : errorMessage ?? `HTTP error! status: ${response.status}`;

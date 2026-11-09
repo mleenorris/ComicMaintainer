@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -17,10 +18,12 @@ public class SuwayomiDownloadImportJobHandler : IScheduledJobHandler
     private const int MaxSeriesNamedInSummary = 10;
 
     private readonly ISuwayomiDownloadImportService _importer;
+    private readonly INotificationPublisher _notifications;
 
-    public SuwayomiDownloadImportJobHandler(ISuwayomiDownloadImportService importer)
+    public SuwayomiDownloadImportJobHandler(ISuwayomiDownloadImportService importer, INotificationPublisher notifications)
     {
         _importer = importer;
+        _notifications = notifications;
     }
 
     public string JobKey => Key;
@@ -35,8 +38,32 @@ public class SuwayomiDownloadImportJobHandler : IScheduledJobHandler
     public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
     {
         var result = await _importer.ImportAsync(cancellationToken);
-        return FormatSummary(result);
+        var summary = FormatSummary(result);
+
+        // The file watcher processes what was imported, so media servers are told again then;
+        // this also covers an install whose watcher is switched off.
+        if (result.Imported.Count > 0)
+        {
+            _notifications.LibraryChanged();
+        }
+
+        if (IsFailure(result))
+        {
+            _notifications.SuwayomiImportFailed(summary);
+        }
+
+        return summary;
     }
+
+    /// <summary>
+    /// Whether a pass failed to bring chapters in that it should have. A pass that had nothing
+    /// to do, was not configured, or found another pass running did not fail; an archive that
+    /// is still downloading is picked up on a later pass.
+    /// </summary>
+    private static bool IsFailure(SuwayomiImportResult result) =>
+        result.Failed > 0
+        || result.PermissionDenied
+        || (result.SkippedReason is not null && !result.NotConfigured && !result.AlreadyRunning);
 
     public static string FormatSummary(SuwayomiImportResult result)
     {

@@ -2572,7 +2572,8 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
                   TestServices.CreateSeriesNameResolver(new TestOptionsMonitor<AppSettings>(settings), NullLogger<SeriesNameResolver>.Instance),
                   jobRegistry,
                   Mock.Of<IComicEmailService>(),
-                  new FileOperationLock())
+                  new FileOperationLock(),
+                  Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>())
         {
         }
 

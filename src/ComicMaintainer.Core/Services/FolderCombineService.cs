@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -40,6 +41,7 @@ public sealed partial class FolderCombineService : IFolderCombineService
     private readonly IMemoryCache _memoryCache;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<FolderCombineService> _logger;
+    private readonly INotificationPublisher _notifications;
     private readonly SemaphoreSlim _combinableGroupsBuildLock = new(1, 1);
 
     private sealed record CombinableGroupsCacheEntry(
@@ -58,8 +60,10 @@ public sealed partial class FolderCombineService : IFolderCombineService
         IFileOperationLock fileOperationLock,
         IMemoryCache memoryCache,
         IOptionsMonitor<AppSettings> settings,
-        ILogger<FolderCombineService> logger)
+        ILogger<FolderCombineService> logger,
+        INotificationPublisher notifications)
     {
+        _notifications = notifications;
         _fileStore = fileStore;
         _processor = processor;
         _jobRegistry = jobRegistry;

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
 using ComicMaintainer.Core.Utilities;
@@ -29,6 +30,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IScheduledJobRu
     private readonly IScheduledJobService _service;
     private readonly ILogger<ScheduledJobsHostedService> _logger;
     private readonly ComicMaintainerMetrics? _metrics;
+    private readonly INotificationPublisher _notifications;
     private readonly ConcurrentDictionary<string, JobSlot> _slots = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _shutdownCts;
     private bool _started;
@@ -36,9 +38,11 @@ public sealed class ScheduledJobsHostedService : IHostedService, IScheduledJobRu
     public ScheduledJobsHostedService(
         IScheduledJobService service,
         ILogger<ScheduledJobsHostedService> logger,
+        INotificationPublisher notifications,
         ComicMaintainerMetrics? metrics = null)
     {
         _metrics = metrics;
+        _notifications = notifications;
         _service = service;
         _logger = logger;
     }
@@ -291,9 +295,19 @@ public sealed class ScheduledJobsHostedService : IHostedService, IScheduledJobRu
             var optionsJson = view?.OptionsJson;
 
             _logger.LogInformation("Scheduled job {JobKey} starting", safeKey);
-            var summary = await handler.ExecuteAsync(optionsJson, token);
+            var result = handler is IScheduledJobFindingsHandler findingsHandler
+                ? await findingsHandler.ExecuteWithFindingsAsync(optionsJson, token)
+                : new ScheduledJobResult(await handler.ExecuteAsync(optionsJson, token));
+            var summary = result.Summary;
             stopwatch.Stop();
             _metrics?.RecordScheduledJobRun(handler.JobKey, "success", stopwatch.Elapsed);
+
+            // Raised before the outcome is recorded, so a database problem cannot lose it.
+            if (result.HasFindings)
+            {
+                _notifications.ScheduledJobFindings(handler.JobKey, handler.DisplayName, summary);
+            }
+
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Success, summary, stopwatch.ElapsedMilliseconds, token);
             _logger.LogInformation("Scheduled job {JobKey} completed in {Ms}ms: {Summary}",
@@ -311,6 +325,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IScheduledJobRu
         {
             stopwatch.Stop();
             _metrics?.RecordScheduledJobRun(handler.JobKey, "failed", stopwatch.Elapsed);
+            _notifications.ScheduledJobFailed(handler.JobKey, handler.DisplayName, ex.Message);
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Failed, ex.Message, stopwatch.ElapsedMilliseconds);
             _logger.LogError(ex, "Scheduled job {JobKey} failed", safeKey);

@@ -324,7 +324,8 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
                   TestServices.CreateSeriesNameResolver(new TestOptionsMonitor<AppSettings>(settings), NullLogger<SeriesNameResolver>.Instance),
                   Mock.Of<IBatchJobRegistry>(),
                   Mock.Of<IComicEmailService>(),
-                  new FileOperationLock())
+                  new FileOperationLock(),
+                  Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>())
         {
             _beforeReplace = beforeReplace;
         }

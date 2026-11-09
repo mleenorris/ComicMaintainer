@@ -197,6 +197,7 @@ public partial class ComicProcessorService
                         foreach (var storePath in storePaths)
                             await _fileStore.RemoveFileAsync(storePath, token);
                         DeleteFileInDirectory(directoryHandle, entryPath);
+                        _notifications.LibraryChanged();
                         await LogHistoryAsync(canonicalPath, "Delete", true, null, token);
                         return true;
                     }

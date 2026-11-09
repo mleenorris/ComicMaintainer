@@ -9,7 +9,7 @@ namespace ComicMaintainer.Core.Services;
 /// <summary>
 /// Scheduled job that writes DB-authoritative per-file metadata back to ComicInfo.xml.
 /// </summary>
-public class MetadataBackfillJobHandler : IScheduledJobHandler
+public class MetadataBackfillJobHandler : IScheduledJobFindingsHandler
 {
     public const string Key = "metadata-backfill";
 
@@ -35,7 +35,10 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
     public string Description => "Writes DB-authoritative per-file metadata changes back into each archive's ComicInfo.xml.";
     public ScheduledJobDefaults Defaults => new(Enabled: false, IntervalMinutes: 15, OptionsJson: """{"maxBatch":200}""");
 
-    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
+    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken) =>
+        (await ExecuteWithFindingsAsync(optionsJson, cancellationToken)).Summary;
+
+    public async Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken)
     {
         var options = ParseOptions(optionsJson);
         var processed = 0;
@@ -81,7 +84,9 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
         var keptInDatabase = notWritable > 0
             ? $", {notWritable} kept in the database (CBR/RAR/ZIP not converted to CBZ)"
             : string.Empty;
-        return $"Backfill: {processed} files updated, {failed} failed{keptInDatabase} (queue size was {processed + failed + notWritable}).";
+        return new ScheduledJobResult(
+            $"Backfill: {processed} files updated, {failed} failed{keptInDatabase} (queue size was {processed + failed + notWritable}).",
+            failed);
     }
 
     private enum BackfillOutcome { Written, Failed, NotWritable }

@@ -15,7 +15,7 @@ namespace ComicMaintainer.Core.Services;
 /// anything that slipped through (e.g. the watcher was disabled when the
 /// file was added, or rename previously failed transiently).
 /// </summary>
-public class FileNamingAuditJobHandler : IScheduledJobHandler
+public class FileNamingAuditJobHandler : IScheduledJobFindingsHandler
 {
     public const string Key = "file-naming-audit";
 
@@ -45,7 +45,10 @@ public class FileNamingAuditJobHandler : IScheduledJobHandler
     public ScheduledJobDefaults Defaults =>
         new(Enabled: false, IntervalMinutes: 60 * 24, OptionsJson: """{"forceReprocess":false,"autoCorrect":false}""");
 
-    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
+    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken) =>
+        (await ExecuteWithFindingsAsync(optionsJson, cancellationToken)).Summary;
+
+    public async Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken)
     {
         var options = ParseOptions(optionsJson);
 
@@ -60,12 +63,14 @@ public class FileNamingAuditJobHandler : IScheduledJobHandler
 
         if (candidates.Count == 0)
         {
-            return $"Scanned {allFiles.Count}: all files already properly named.";
+            return new ScheduledJobResult($"Scanned {allFiles.Count}: all files already properly named.");
         }
 
         if (!options.AutoCorrect)
         {
-            return $"Scanned {allFiles.Count}: {candidates.Count} file(s) appear to need renaming. Enable autoCorrect to rename.";
+            return new ScheduledJobResult(
+                $"Scanned {allFiles.Count}: {candidates.Count} file(s) appear to need renaming. Enable autoCorrect to rename.",
+                candidates.Count);
         }
 
         var jobId = await _processor.RenameFilesAsync(candidates, options.ForceReprocess, cancellationToken);
@@ -76,10 +81,13 @@ public class FileNamingAuditJobHandler : IScheduledJobHandler
 
         if (job is null)
         {
-            return $"Queued {candidates.Count} file(s) for rename evaluation; job record no longer available.";
+            return new ScheduledJobResult($"Queued {candidates.Count} file(s) for rename evaluation; job record no longer available.");
         }
 
-        return $"Evaluated {candidates.Count}/{allFiles.Count} file(s): {job.ProcessedFiles} processed, {job.FailedFiles} failed (status: {job.Status}).";
+        // What autoCorrect renamed is done with; only what it could not rename is worth a look.
+        return new ScheduledJobResult(
+            $"Evaluated {candidates.Count}/{allFiles.Count} file(s): {job.ProcessedFiles} processed, {job.FailedFiles} failed (status: {job.Status}).",
+            job.FailedFiles);
     }
 
     private static FileNamingAuditOptions ParseOptions(string? optionsJson)

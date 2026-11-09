@@ -2,6 +2,7 @@ using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -57,6 +58,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
     private readonly IBatchJobRegistry _jobRegistry;
     private readonly ISeriesMetadataCacheService _seriesCache;
     private readonly ILogger<LibraryScanJobHandler> _logger;
+    private readonly INotificationPublisher _notifications;
 
     public LibraryScanJobHandler(
         IOptionsMonitor<AppSettings> settings,
@@ -64,8 +66,10 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         IComicProcessorService processor,
         IBatchJobRegistry jobRegistry,
         ILogger<LibraryScanJobHandler> logger,
-        ISeriesMetadataCacheService seriesCache)
+        ISeriesMetadataCacheService seriesCache,
+        INotificationPublisher notifications)
     {
+        _notifications = notifications;
         _settings = settings;
         _fileStore = fileStore;
         _processor = processor;
@@ -350,7 +354,18 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             _logger.LogWarning(ex, "Library scan: failed to queue {Count} added file(s)", files.Count);
             return " [added: queue failed]";
         }
-        return (await WaitForJobAsync(jobId, files.Count, "added", cancellationToken)).Summary;
+
+        var (summary, job) = await WaitForJobAsync(jobId, files.Count, "added", cancellationToken);
+
+        // These files were not tracked before this scan, so they are new by definition.
+        foreach (var file in SucceededFiles(files, job))
+        {
+            _notifications.NewChapter(
+                Path.GetFileName(Path.GetDirectoryName(file)) ?? Path.GetFileNameWithoutExtension(file),
+                Path.GetFileNameWithoutExtension(file));
+        }
+
+        return summary;
     }
 
     private async Task<string> NormalizeFilesAndWaitAsync(

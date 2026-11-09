@@ -31,7 +31,8 @@ internal static class TestFolderCombineService
         IEventBroadcaster? eventBroadcaster = null,
         ILibraryMutationLock? libraryMutationLock = null,
         IFileOperationLock? fileOperationLock = null,
-        ILogger<FolderCombineService>? logger = null) =>
+        ILogger<FolderCombineService>? logger = null,
+        ComicMaintainer.Core.Notifications.INotificationPublisher? notifications = null) =>
         new(
             fileStore,
             processor,
@@ -44,5 +45,6 @@ internal static class TestFolderCombineService
             fileOperationLock ?? new FileOperationLock(),
             memoryCache ?? new MemoryCache(new MemoryCacheOptions()),
             settings,
-            logger ?? NullLogger<FolderCombineService>.Instance);
+            logger ?? NullLogger<FolderCombineService>.Instance,
+            notifications ?? Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 }

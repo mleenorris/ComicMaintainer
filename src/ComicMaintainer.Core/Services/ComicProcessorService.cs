@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Telemetry;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
@@ -31,6 +32,7 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly ComicMaintainerMetrics? _metrics;
     private readonly SemaphoreSlim _processingSemaphore;
     private readonly IFileOperationLock _fileLock;
+    private readonly INotificationPublisher _notifications;
     private readonly int _maxWorkers;
     private bool _disposed;
 
@@ -54,8 +56,10 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         IBatchJobRegistry jobRegistry,
         IComicEmailService comicEmail,
         IFileOperationLock fileLock,
+        INotificationPublisher notifications,
         ComicMaintainerMetrics? metrics = null)
     {
+        _notifications = notifications;
         _metrics = metrics;
         _settingsMonitor = settings;
         _logger = logger;

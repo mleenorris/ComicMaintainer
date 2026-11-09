@@ -345,6 +345,7 @@ public partial class ComicProcessorService
             await _fileStore.RecordArchiveMetadataAsync(result.FilePath, ComicInfoXml.Read(updated) ?? values, cancellationToken);
 
             _logger.LogInformation("Successfully updated metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(result.FilePath));
+            _notifications.LibraryChanged();
             return result;
         }
         catch (ArchiveLimitExceededException ex)
@@ -502,6 +503,7 @@ public partial class ComicProcessorService
             _logger.LogInformation("Removing metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             var result = await RewriteArchiveAsync(filePath, physicalPath, comicInfoXml: null, cancellationToken);
             _logger.LogInformation("Successfully removed metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(result.FilePath));
+            _notifications.LibraryChanged();
             return result;
         }
         catch (ArchiveLimitExceededException ex)

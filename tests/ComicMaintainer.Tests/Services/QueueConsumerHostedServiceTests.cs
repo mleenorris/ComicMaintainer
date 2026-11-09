@@ -46,7 +46,7 @@ public class QueueConsumerHostedServiceTests
         // decorator or any other implementation failed at construction.
         var jobs = new Mock<IScheduledJobService>();
         jobs.Setup(j => j.ListAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<ComicMaintainer.Core.Models.ScheduledJobView>());
-        using var hosted = new ScheduledJobsHostedService(jobs.Object, NullLogger<ScheduledJobsHostedService>.Instance);
+        using var hosted = new ScheduledJobsHostedService(jobs.Object, NullLogger<ScheduledJobsHostedService>.Instance, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
         await hosted.StartAsync(CancellationToken.None);
         var queued = await hosted.RunNowAsync("unknown-job");

@@ -557,7 +557,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
             .UseInMemoryDatabase($"fc-n2a-patch-{Guid.NewGuid():N}")
             .Options);
         var jobService = new ScheduledJobService(dbFactory, new[] { handler.Object }, NullLogger<ScheduledJobService>.Instance);
-        var hostedService = new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance);
+        var hostedService = new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
         _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ComicFile { FilePath = path, MetadataVersion = 7 });
 
@@ -655,7 +655,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
             .Options);
         var jobService = new ScheduledJobService(dbFactory, new IScheduledJobHandler[] { backfill }, NullLogger<ScheduledJobService>.Instance);
         var controller = CreateController(
-            scheduledJobs: new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance));
+            scheduledJobs: new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>()));
 
         var firstResult = await controller.PatchMetadata(
             first, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "One" } }, CancellationToken.None);

@@ -6,6 +6,7 @@
 // page produces.
 
 const { bootApp } = require('./app');
+const { respond } = require('./dom');
 
 const MB = 1048576;
 
@@ -141,8 +142,20 @@ function clickRendered(page, target) {
     return element;
 }
 
+// The answer GlobalExceptionHandler gives to an unexpected failure.
+const SERVER_FAILURE = 'The request could not be completed. Quote the reference below when reporting this.';
+
+function serverFailure(reference) {
+    return respond(
+        500,
+        { title: 'An error occurred while processing your request.', status: 500, detail: SERVER_FAILURE, error: SERVER_FAILURE, correlationId: reference },
+        { 'X-Correlation-Id': reference });
+}
+
 module.exports = {
     MB,
+    SERVER_FAILURE,
+    serverFailure,
     settingsResponse,
     settingsRoutes,
     bootSettings,

@@ -6,6 +6,7 @@ using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -107,9 +108,9 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
         using var request = new CancellationTokenSource();
         InterruptBeforeSecondStagedSetting(interruption, request);
 
-        var result = await _controller.UpdateExternalSeriesMetadata(NewMetadataSettings(), request.Token);
+        // The failure is left to GlobalExceptionHandler; what matters here is the untouched file.
+        await Assert.ThrowsAnyAsync<Exception>(() => _controller.UpdateExternalSeriesMetadata(NewMetadataSettings(), request.Token));
 
-        Assert.Equal(StatusCodes.Status500InternalServerError, Assert.IsType<ObjectResult>(result).StatusCode);
         Assert.Equal(SeededSettings, File.ReadAllText(_settingsPath));
     }
 
@@ -121,9 +122,9 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
         using var request = new CancellationTokenSource();
         Interrupt(interruption, request);
 
-        var result = await _controller.UpdateExternalSeriesMetadata(NewMetadataSettings(), request.Token);
+        // The failure is left to GlobalExceptionHandler; what matters here is the untouched file.
+        await Assert.ThrowsAnyAsync<Exception>(() => _controller.UpdateExternalSeriesMetadata(NewMetadataSettings(), request.Token));
 
-        Assert.Equal(StatusCodes.Status500InternalServerError, Assert.IsType<ObjectResult>(result).StatusCode);
         Assert.Equal(SeededSettings, File.ReadAllText(_settingsPath));
     }
 
@@ -135,9 +136,9 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
         using var request = new CancellationTokenSource();
         InterruptBeforeSecondStagedSetting(interruption, request);
 
-        var result = await _controller.UpdateSeriesImageLimits(NewImageLimits(), request.Token);
+        // The failure is left to GlobalExceptionHandler; what matters here is the untouched file.
+        await Assert.ThrowsAnyAsync<Exception>(() => _controller.UpdateSeriesImageLimits(NewImageLimits(), request.Token));
 
-        Assert.Equal(StatusCodes.Status500InternalServerError, Assert.IsType<ObjectResult>(result).StatusCode);
         Assert.Equal(SeededSettings, File.ReadAllText(_settingsPath));
     }
 
@@ -149,9 +150,9 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
         using var request = new CancellationTokenSource();
         Interrupt(interruption, request);
 
-        var result = await _controller.UpdateSeriesImageLimits(NewImageLimits(), request.Token);
+        // The failure is left to GlobalExceptionHandler; what matters here is the untouched file.
+        await Assert.ThrowsAnyAsync<Exception>(() => _controller.UpdateSeriesImageLimits(NewImageLimits(), request.Token));
 
-        Assert.Equal(StatusCodes.Status500InternalServerError, Assert.IsType<ObjectResult>(result).StatusCode);
         Assert.Equal(SeededSettings, File.ReadAllText(_settingsPath));
     }
 
@@ -191,7 +192,7 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
     }
 
     private sealed class InterruptibleSettingsService(TestOptionsMonitor<AppSettings> options)
-        : SettingsService(NullLogger<SettingsService>.Instance, options)
+        : SettingsService(NullLogger<SettingsService>.Instance, options, new ConfigurationBuilder().Build())
     {
         public Action<string>? OnStaging { get; set; }
 

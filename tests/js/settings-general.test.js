@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const { respond, plain } = require('./support/dom');
 const { bootApp, deferred } = require('./support/app');
 const {
-    settingsResponse, settingsRoutes, bootSettings, messages, lastMessage, clearMessages, callsTo
+    settingsResponse, settingsRoutes, bootSettings, messages, lastMessage, clearMessages, callsTo, SERVER_FAILURE, serverFailure
 } = require('./support/settings-helpers');
 
 const networkError = () => {
@@ -448,13 +448,13 @@ test('non-administrators see server-wide settings read-only', async () => {
 
 // Checkboxes that save on change: [element, method, endpoint, success label, error prefix].
 const TOGGLES = [
-    ['watcherEnableRenameCheckbox', 'POST', '/api/settings/watcher-enable-rename', 'File rename', 'Failed to update rename setting: '],
-    ['watcherEnableNormalizeCheckbox', 'POST', '/api/settings/watcher-enable-normalize', 'Metadata normalize', 'Failed to update normalize setting: '],
-    ['convertRarToCbzOnWriteCheckbox', 'POST', '/api/settings/convert-rar-to-cbz-on-write', 'Convert CBR/RAR to CBZ when writing tags', 'Failed to update CBR/RAR conversion setting: '],
-    ['writeCoverToFirstArchiveCheckbox', 'POST', '/api/settings/write-cover-to-first-archive', 'Embed cover into first issue archive', 'Failed to update cover embed setting: '],
-    ['writeCoverToSeriesFolderCheckbox', 'POST', '/api/settings/write-cover-to-series-folder', 'Write cover into series folder', 'Failed to update cover folder setting: '],
+    ['watcherEnableRenameCheckbox', 'PUT', '/api/settings/watcher-enable-rename', 'File rename', 'Failed to update rename setting: '],
+    ['watcherEnableNormalizeCheckbox', 'PUT', '/api/settings/watcher-enable-normalize', 'Metadata normalize', 'Failed to update normalize setting: '],
+    ['convertRarToCbzOnWriteCheckbox', 'PUT', '/api/settings/convert-rar-to-cbz-on-write', 'Convert CBR/RAR to CBZ when writing tags', 'Failed to update CBR/RAR conversion setting: '],
+    ['writeCoverToFirstArchiveCheckbox', 'PUT', '/api/settings/write-cover-to-first-archive', 'Embed cover into first issue archive', 'Failed to update cover embed setting: '],
+    ['writeCoverToSeriesFolderCheckbox', 'PUT', '/api/settings/write-cover-to-series-folder', 'Write cover into series folder', 'Failed to update cover folder setting: '],
     ['allowRegistrationCheckbox', 'PUT', '/api/settings/allow-registration', 'Self-service registration', 'Failed to update registration setting: '],
-    ['downloadExternalSeriesImagesCheckbox', 'POST', '/api/settings/download-external-series-images', 'Download external series images', 'Failed to update series image download setting: ']
+    ['downloadExternalSeriesImagesCheckbox', 'PUT', '/api/settings/download-external-series-images', 'Download external series images', 'Failed to update series image download setting: ']
 ];
 
 test('settings checkboxes save as soon as they change', async t => {
@@ -494,7 +494,9 @@ test('settings checkboxes save as soon as they change', async t => {
             page.route(route, respond(500, { error: 'Failed to save setting' }));
             page.input(checkbox, !initial);
             await page.settle();
-            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}HTTP error! status: 500` });
+            // The one toggle the environment can pin passes the server's reason on.
+            const reason = id === 'downloadExternalSeriesImagesCheckbox' ? 'Failed to save setting' : 'HTTP error! status: 500';
+            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}${reason}` });
             assert.equal(checkbox.checked, initial);
 
             page.route(route, networkError);
@@ -514,6 +516,24 @@ test('settings checkboxes save as soon as they change', async t => {
             assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
             assert.ok(page.navigations.length > navigations);
             assert.equal(callsTo(page, route).length, 5);
+        });
+    }
+});
+
+test('an unexpected failure of a checkbox quotes the reference of its request', async t => {
+    const page = await bootSettings();
+
+    for (const [id, method, path, label, errorPrefix] of TOGGLES) {
+        await t.test(label, async () => {
+            const checkbox = page.$(`#${id}`);
+            page.route(`${method} ${path}`, serverFailure(`corr-${id}`));
+
+            page.input(checkbox, !checkbox.checked);
+            await page.settle();
+
+            // The one toggle the environment can pin passes the server's reason on.
+            const reason = id === 'downloadExternalSeriesImagesCheckbox' ? SERVER_FAILURE : 'HTTP error! status: 500';
+            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}${reason} (ref: corr-${id})` });
         });
     }
 });
@@ -618,6 +638,20 @@ test('the default preferred language saves on change and refreshes the series li
     page.$('#defaultPreferredLanguageSelect').remove();
     await page.run('updateDefaultPreferredLanguageFromSettings()');
     assert.equal(page.fetchCalls.length, before);
+});
+
+test('the default view and language selects quote the reference of an unexpected failure', async () => {
+    const viewRoute = 'PUT /api/settings/default-library-view';
+    const languageRoute = 'PUT /api/settings/default-preferred-language';
+    const page = await bootSettings({ routes: { [viewRoute]: serverFailure('corr-view'), [languageRoute]: serverFailure('corr-language') } });
+
+    page.input('#defaultLibraryViewSelect', 'files');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to update default library view: HTTP error! status: 500 (ref: corr-view)' });
+
+    page.input('#defaultPreferredLanguageSelect', 'ko');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { type: 'error', text: `Failed to update default preferred language: ${SERVER_FAILURE} (ref: corr-language)` });
 });
 
 test('settings opens from the sidebar and Cancel returns to the previous page', async () => {

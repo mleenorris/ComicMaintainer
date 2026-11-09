@@ -109,7 +109,7 @@ public class FrontendAppShellTests
 
         Assert.Contains("id=\"settingsLoadStatus\"", html);
         Assert.Contains("id=\"settingsRetryButton\" onclick=\"loadSettings()\"", html);
-        Assert.Contains("el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister);", js);
+        Assert.Contains("el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister) || el.hasAttribute('data-env-locked');", js);
         Assert.Contains("button.disabled = !settingsLoaded || !userCapabilities.canAdminister;", js);
         Assert.Contains("if (!settingsLoaded || !userCapabilities.canAdminister) return;", js);
         Assert.Contains("setSettingsLoadStatus('error'", js);
@@ -132,26 +132,16 @@ public class FrontendAppShellTests
     {
         var js = WwwrootFiles.ReadAppScripts();
 
-        // Every Save Settings group is sent by saveSettingsGroup.
-        var helperStart = js.IndexOf("async function saveSettingsGroup(", StringComparison.Ordinal);
-        Assert.True(helperStart >= 0, "Expected the shared settings save request");
-        var requestStart = js.IndexOf("fetch(apiUrl(path)", helperStart, StringComparison.Ordinal);
-        Assert.True(requestStart >= 0, "Expected saveSettingsGroup to send the request");
+        // Save Settings sends one request for every group.
+        var helperStart = js.IndexOf("async function saveAllSettings(", StringComparison.Ordinal);
+        Assert.True(helperStart >= 0, "Expected the settings save request");
+        var requestStart = js.IndexOf("fetch(apiUrl('/api/settings')", helperStart, StringComparison.Ordinal);
+        Assert.True(requestStart >= 0, "Expected saveAllSettings to send the request");
         var requestEnd = js.IndexOf("});", requestStart, StringComparison.Ordinal);
         Assert.True(requestEnd > requestStart, "Could not find the end of the settings save request");
-        Assert.Contains("...getAuthHeaders()", js[requestStart..requestEnd]);
-
-        foreach (var path in new[]
-        {
-            "/api/settings/filename-format",
-            "/api/settings/log-max-bytes",
-            "/api/settings/issue-number-padding",
-            "/api/settings/database-cleanup",
-            "/api/settings/external-series-metadata"
-        })
-        {
-            Assert.True(js.Contains($"path: '{path}'", StringComparison.Ordinal), $"Expected a save request for {path}");
-        }
+        var request = js[requestStart..requestEnd];
+        Assert.Contains("...getAuthHeaders()", request);
+        Assert.Contains("method: 'PUT'", request);
     }
 
     [Fact]

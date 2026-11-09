@@ -347,7 +347,8 @@
                         el.disabled = !userCapabilities.canAdminister;
                         return;
                     }
-                    el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister);
+                    // A setting an environment variable pins stays read-only (see applySettingsEnvLocks).
+                    el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister) || el.hasAttribute('data-env-locked');
                 });
             }
 

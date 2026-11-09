@@ -31,9 +31,9 @@ UserSettingsBootstrap.EnsureUserSettingsFileMigrated(userSettingsPath);
 // Load user settings to get LogMaxBytes
 var logMaxBytes = UserSettingsBootstrap.LoadLogMaxBytes(userSettingsPath);
 
-// Register user-settings.json as a live (reload-on-change) configuration source so that
-// SettingsService writes are picked up at runtime by IOptionsMonitor<AppSettings>.
-// The file is intentionally optional (it may have been removed) and is reloaded on change.
+// Register user-settings.json as a live configuration source for IOptionsMonitor<AppSettings>.
+// SettingsService reloads the configuration itself after each save; reloadOnChange is for edits
+// made to the file by hand. The file is intentionally optional (it may have been removed).
 builder.Configuration.AddJsonFile(userSettingsPath, optional: true, reloadOnChange: true);
 
 // Publish the directory chosen above as AppSettings:ConfigDirectory, after every other source, so the

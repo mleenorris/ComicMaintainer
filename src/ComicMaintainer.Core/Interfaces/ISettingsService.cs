@@ -5,12 +5,27 @@ namespace ComicMaintainer.Core.Interfaces;
 /// <summary>
 /// Service for persisting and managing application settings
 /// </summary>
+/// <remarks>
+/// The group methods (external series metadata, Suwayomi, email, email rate limit and error
+/// reporting) serve the older per-group endpoints. Unless its documentation says otherwise, a
+/// null argument stands for a field the request left out and is read as blank, off or the
+/// setting's default; a setting the environment pins is left alone instead.
+/// </remarks>
 public interface ISettingsService
 {
     /// <summary>
     /// Get the current settings
     /// </summary>
     Task<AppSettings> GetSettingsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Saves every group in <paramref name="update"/> in a single atomic write, visible through
+    /// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/> before the call
+    /// returns. Nothing is saved when any value is refused.
+    /// </summary>
+    /// <exception cref="SettingsValidationException">A value is invalid; its reason says why.</exception>
+    /// <exception cref="SettingsLockedException">A value would change a setting the environment pins.</exception>
+    Task UpdateSettingsAsync(SettingsUpdate update, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update the log max bytes setting
@@ -141,12 +156,12 @@ public interface ISettingsService
     /// leaves the stored URL untouched. Values are trimmed.
     /// </summary>
     Task UpdateExternalSeriesMetadataSettingsAsync(
-        bool enabled,
+        bool? enabled,
         string? comicVineApiKey,
         string? comicVineBaseUrl,
-        bool enableMangaDex,
+        bool? enableMangaDex,
         string? mangaDexBaseUrl,
-        bool enableAniList,
+        bool? enableAniList,
         string? aniListBaseUrl,
         CancellationToken cancellationToken = default);
 
@@ -160,7 +175,7 @@ public interface ISettingsService
     /// </summary>
     /// <exception cref="ArgumentException">A value is invalid; the message says why.</exception>
     Task UpdateSuwayomiSettingsAsync(
-        bool enabled,
+        bool? enabled,
         string? baseUrl,
         string? username,
         string? password,
@@ -183,14 +198,14 @@ public interface ISettingsService
     /// </summary>
     Task UpdateEmailSettingsAsync(
         string? smtpHost,
-        int smtpPort,
+        int? smtpPort,
         string? smtpUsername,
         string? smtpPassword,
-        bool smtpUseSsl,
-        bool smtpAllowInsecure,
+        bool? smtpUseSsl,
+        bool? smtpAllowInsecure,
         string? fromAddress,
         string? fromName,
-        int maxAttachmentMegabytes,
+        int? maxAttachmentMegabytes,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -203,9 +218,9 @@ public interface ISettingsService
     /// <param name="minSecondsBetweenSends">Minimum gap between two comic emails.</param>
     /// <exception cref="ArgumentException">A value is negative or above its upper bound.</exception>
     Task UpdateEmailRateLimitSettingsAsync(
-        int maxSendsPerHour,
-        int maxSendsPerDay,
-        int minSecondsBetweenSends,
+        int? maxSendsPerHour,
+        int? maxSendsPerDay,
+        int? minSecondsBetweenSends,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -215,11 +230,11 @@ public interface ISettingsService
     /// The destination repository is fixed and is not a setting.
     /// </summary>
     Task UpdateErrorReportingSettingsAsync(
-        bool enabled,
+        bool? enabled,
         string? gitHubToken,
         string? assignee,
-        int maxIssuesPerDay,
-        int dedupeWindowHours,
-        bool commentOnRecurrence,
+        int? maxIssuesPerDay,
+        int? dedupeWindowHours,
+        bool? commentOnRecurrence,
         CancellationToken cancellationToken = default);
 }

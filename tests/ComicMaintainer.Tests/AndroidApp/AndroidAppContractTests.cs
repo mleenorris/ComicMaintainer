@@ -34,6 +34,7 @@ public sealed class AndroidAppContractTests : IClassFixture<SessionTokenIntegrat
 {
     private const string Server = "http://localhost/";
     private const string Password = SessionTokenIntegrationTests.Password;
+    private const int SqliteConstraintError = 19;
 
     private readonly SessionTokenIntegrationTests.JwtHost _host;
 
@@ -429,9 +430,10 @@ public sealed class AndroidAppContractTests : IClassFixture<SessionTokenIntegrat
     private async Task SeedAsync(params SeededFile[] files)
     {
         var contexts = _host.Factory.Services.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        await using var db = await contexts.CreateDbContextAsync();
         foreach (var file in files)
         {
+            // One context per file, because a context whose save failed still tracks the rejected row.
+            await using var db = await contexts.CreateDbContextAsync();
             db.ComicFiles.Add(new ComicFileEntity
             {
                 FilePath = file.Path,
@@ -443,9 +445,16 @@ public sealed class AndroidAppContractTests : IClassFixture<SessionTokenIntegrat
                 IsNormalized = file.IsProcessed,
                 IsDuplicate = file.IsDuplicate,
             });
-        }
 
-        await db.SaveChangesAsync();
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch (DbUpdateException exception) when (exception.InnerException is SqliteException { SqliteErrorCode: SqliteConstraintError })
+            {
+                // The server's file watcher got there first: it indexes a comic as soon as it appears in the library.
+            }
+        }
     }
 
     private string CreateComicOnDisk(string folder, string name = "Comic.cbz")

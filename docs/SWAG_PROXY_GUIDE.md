@@ -1,77 +1,71 @@
-# SWAG Proxy Configuration Quick Start
+# SWAG Proxy Quick Start
 
-This guide provides a quick start for setting up ComicMaintainer with SWAG (Secure Web Application Gateway) from linuxserver.io.
+[SWAG](https://docs.linuxserver.io/general/swag) is a linuxserver.io container that combines nginx, Let's Encrypt certificates and fail2ban. This page is the short version; the [SWAG Configuration Guide](swag-configs/README.md) has the full steps and troubleshooting.
 
-## What is SWAG?
+Both containers must be on the same Docker network, and the config files expect the app's container to be named `comicmaintainer`:
 
-SWAG is an all-in-one Docker container that provides:
-- ✅ Nginx reverse proxy
-- ✅ Automatic Let's Encrypt SSL certificates
-- ✅ Fail2ban protection
-- ✅ Easy subdomain and subfolder routing
+```bash
+docker network create swag-network
+docker network connect swag-network swag
+docker network connect swag-network comicmaintainer
+```
 
-## Quick Setup
+## Option 1: Subdomain (Recommended)
 
-### Option 1: Subdomain (Recommended)
+Access at `https://comics.yourdomain.com`.
 
-Access at: `https://comics.yourdomain.com`
+```bash
+cp docs/swag-configs/comicmaintainer.subdomain.conf /path/to/swag/config/nginx/proxy-confs/
+docker restart swag
+```
 
-1. **Copy the config file:**
-   ```bash
-   cp docs/swag-configs/comicmaintainer.subdomain.conf /path/to/swag/config/nginx/proxy-confs/
-   ```
+Do not set `BASE_PATH`.
 
-2. **Ensure containers are networked:**
-   ```bash
-   docker network create swag-network
-   docker network connect swag-network comicmaintainer
-   ```
+## Option 2: Subfolder
 
-3. **Restart SWAG:**
-   ```bash
-   docker restart swag
-   ```
+Access at `https://yourdomain.com/comics`.
 
-### Option 2: Subfolder
+```bash
+cp docs/swag-configs/comicmaintainer.subfolder.conf /path/to/swag/config/nginx/proxy-confs/
+```
 
-Access at: `https://yourdomain.com/comics`
+Add `BASE_PATH` to the ComicMaintainer container, then restart both:
 
-1. **Copy the config file:**
-   ```bash
-   cp docs/swag-configs/comicmaintainer.subfolder.conf /path/to/swag/config/nginx/proxy-confs/
-   ```
+```yaml
+environment:
+  - BASE_PATH=/comics
+```
 
-2. **Add BASE_PATH to ComicMaintainer:**
-   ```yaml
-   environment:
-     - BASE_PATH=/comics
-   ```
+```bash
+docker restart comicmaintainer swag
+```
 
-3. **Restart both containers:**
-   ```bash
-   docker restart comicmaintainer swag
-   ```
+`BASE_PATH` must match the folder, and must be unset when the app is not in a subfolder. See [Serving Under a Subfolder](REVERSE_PROXY.md#serving-under-a-subfolder-base_path).
 
-## Complete Documentation
+## Settings to Add in Either Case
 
-For detailed instructions, troubleshooting, and authentication options:
-- **[SWAG Configuration Guide](swag-configs/README.md)** - Complete setup guide
-- **[Reverse Proxy Guide](REVERSE_PROXY.md)** - General reverse proxy documentation
+```yaml
+environment:
+  - TRUSTED_PROXIES=172.18.0.0/16  # Subnet of swag-network
+```
 
-## Configuration Files
+Without `TRUSTED_PROXIES`, every client shares one limit of 10 sign-in attempts per 5 minutes, because every request comes from SWAG's address. Find the subnet with `docker network inspect swag-network`. With Authelia enabled, `AUTHELIA_TRUSTED_PROXIES` already covers this.
 
-Ready-to-use configuration files are available:
-- `docs/swag-configs/comicmaintainer.subdomain.conf` - Subdomain deployment
-- `docs/swag-configs/comicmaintainer.subfolder.conf` - Subfolder deployment
+## Things That Must Keep Working Through the Proxy
 
-Both configurations include:
-- ✅ WebSocket/SSE support for real-time updates
-- ✅ Long timeouts for batch operations
-- ✅ Optional authentication (HTTP Basic, Authelia, Authentik, LDAP)
-- ✅ Proper buffering settings
+- **Real-time updates** use Server-Sent Events at `/api/events/stream`. The config files turn proxy buffering off for this.
+- **Comic pages and covers** are sent with `Cache-Control: private`. Do not cache `/api/comicreader/page` or `/api/comicreader/cover` in a shared proxy or CDN.
+- **`/manifest.json`** must be reachable, because the browser fetches it to install the web app. It sends a cookie with that request.
+- **OPDS links** start with `BASE_PATH`, so comic apps follow them correctly in a subfolder install. See the [OPDS guide](OPDS.md), including the Authelia bypass rule.
 
-## Need Help?
+## Files
 
-- Check the [SWAG Configuration README](swag-configs/README.md) for troubleshooting
-- Review [SWAG Documentation](https://docs.linuxserver.io/general/swag)
-- Open an issue on [GitHub](https://github.com/mleenorris/ComicMaintainer/issues)
+- `docs/swag-configs/comicmaintainer.subdomain.conf`
+- `docs/swag-configs/comicmaintainer.subfolder.conf`
+
+## More Help
+
+- [SWAG Configuration Guide](swag-configs/README.md)
+- [Reverse Proxy Guide](REVERSE_PROXY.md)
+- [Authelia Integration Guide](AUTHELIA.md)
+- [ComicMaintainer issues](https://github.com/mleenorris/ComicMaintainer/issues)

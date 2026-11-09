@@ -1,28 +1,22 @@
 # Complete SWAG + ComicMaintainer Setup Example
 
-This document provides a complete, working example of a SWAG + ComicMaintainer setup.
-
-## Architecture Overview
+A step-by-step setup of SWAG and ComicMaintainer on a subdomain, from one compose file.
 
 ```
 Internet
     ↓
 Your Router (Port Forwarding: 80 → Server:80, 443 → Server:443)
     ↓
-SWAG Container (Nginx + Let's Encrypt)
+SWAG Container (nginx + Let's Encrypt)
     ↓
 ComicMaintainer Container
     ↓
 Your Comics Directory
 ```
 
-## Complete docker-compose.yml Example
-
-This is a complete, production-ready setup:
+## docker-compose.yml
 
 ```yaml
-version: '3.8'
-
 services:
   # SWAG - Secure Web Application Gateway
   swag:
@@ -36,10 +30,10 @@ services:
       - TZ=America/New_York
       - URL=yourdomain.com           # Your domain
       - SUBDOMAINS=comics            # Subdomain for ComicMaintainer
-      - VALIDATION=http              # or 'dns' with DNS API
+      - VALIDATION=http              # or 'dns' with a DNS API
       - EMAIL=your-email@example.com # For Let's Encrypt
     volumes:
-      - /path/to/swag/config:/config
+      - ~/swag/config:/config
     ports:
       - 443:443
       - 80:80
@@ -49,278 +43,190 @@ services:
 
   # ComicMaintainer
   comicmaintainer:
-    image: iceburn1/comictagger-watcher:latest
+    image: iceburn1/comicmaintainer:dotnet
     container_name: comicmaintainer
     environment:
-      - WATCHED_DIR=/watched_dir
-      - DUPLICATE_DIR=/duplicates
-      - CONFIG_DIR=/Config
-      - PUID=1000
+      - PUID=1000                    # The user that owns ~/comics
       - PGID=1000
-      # No BASE_PATH needed for subdomain setup
-      # Add BASE_PATH=/comics for subfolder setup
+      - TRUSTED_PROXIES=172.30.0.0/24  # The network below: gives each client its own sign-in limit
+      # Add BASE_PATH=/comics for a subfolder setup, with comicmaintainer.subfolder.conf
     volumes:
-      - /path/to/comics:/watched_dir
-      - /path/to/duplicates:/duplicates
-      - /path/to/config:/Config
+      - ~/comics:/watched_dir
+      - ~/duplicates:/duplicates
+      - ~/comicmaintainer-config:/Config
     networks:
       - swag-network
-    # Don't expose port 5000 to host - only accessible via SWAG
+    # Port 5000 is not published to the host: it is reachable only through SWAG
     expose:
       - 5000
     restart: unless-stopped
 
 networks:
   swag-network:
+    name: swag-network
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 ```
 
-## Directory Structure
-
-Your file system should look like this:
+## Files on the Host
 
 ```
-/home/user/
+~/
 ├── docker-compose.yml
 ├── swag/
 │   └── config/
 │       └── nginx/
 │           └── proxy-confs/
-│               └── comicmaintainer.subdomain.conf  # Your config file
-├── comics/
+│               └── comicmaintainer.subdomain.conf
+├── comics/                     # Your library
 │   ├── Series 1/
 │   │   ├── issue1.cbz
 │   │   └── issue2.cbz
 │   └── Series 2/
 │       └── issue1.cbr
-├── duplicates/           # Optional: for duplicate files
-└── comicmaintainer-config/  # Persistent data
-    ├── store/
-    │   └── comicmaintainer.db
-    ├── Log/
-    │   └── ComicMaintainer.log
-    └── config.json
+├── duplicates/                 # Files flagged as duplicates are moved here
+└── comicmaintainer-config/     # Created and filled by the app
+    ├── comicmaintainer.db      # The database
+    ├── backups/                # Automatic database backups
+    ├── user-settings.json      # Settings saved in the web interface
+    └── app.log, auth.log, ...  # Logs
 ```
 
-## Step-by-Step Setup
+## Setup
 
-### Step 1: Prepare Directories
+### Step 1: Create the Folders
 
 ```bash
-# Create all necessary directories
-mkdir -p ~/swag/config
-mkdir -p ~/comics
-mkdir -p ~/duplicates
-mkdir -p ~/comicmaintainer-config
-
-# Set proper permissions (match PUID/PGID in docker-compose.yml)
-sudo chown -R 1000:1000 ~/comics ~/duplicates ~/comicmaintainer-config
+mkdir -p ~/swag/config ~/comics ~/duplicates ~/comicmaintainer-config
 ```
+
+`PUID` and `PGID` above must be the user and group that can write to `~/comics` and `~/duplicates`. Find yours with `id -u` and `id -g`. ComicMaintainer checks this at start and logs a warning if it cannot write there.
 
 ### Step 2: Configure DNS
 
-**Option A: CNAME Record (Recommended)**
+Create a CNAME record, or an A record pointing to your server's IP:
+
 ```
 Type: CNAME
 Name: comics
 Value: yourdomain.com
-TTL: 3600
 ```
 
-**Option B: A Record**
-```
-Type: A
-Name: comics
-Value: YOUR.SERVER.IP.ADDRESS
-TTL: 3600
-```
-
-### Step 3: Start SWAG First
+### Step 3: Start SWAG
 
 ```bash
-# Start SWAG to generate initial config and certificates
-docker-compose up -d swag
+docker compose up -d swag
 
-# Wait for certificate generation (check logs)
-docker-compose logs -f swag
-
-# You should see: "Server ready"
+# Wait for certificate generation. You should see: "Server ready"
+docker compose logs -f swag
 ```
 
-### Step 4: Copy ComicMaintainer Config
+### Step 4: Copy the ComicMaintainer Config
 
 ```bash
-# Clone the repository to get config files
-git clone https://github.com/mleenorris/ComicMaintainer.git /tmp/comicmaintainer
+git clone --branch dotnet --depth 1 https://github.com/mleenorris/ComicMaintainer.git /tmp/comicmaintainer
 
-# Copy the SWAG config
 cp /tmp/comicmaintainer/docs/swag-configs/comicmaintainer.subdomain.conf \
    ~/swag/config/nginx/proxy-confs/
 
-# Restart SWAG to load the new config
 docker restart swag
 ```
 
 ### Step 5: Start ComicMaintainer
 
 ```bash
-# Start ComicMaintainer
-docker-compose up -d comicmaintainer
-
-# Verify it's running
-docker-compose ps
+docker compose up -d comicmaintainer
+docker compose ps
 ```
 
-### Step 6: Test Access
+### Step 6: Create the First Administrator
+
+Open `https://comics.yourdomain.com`. A new install has no accounts, so the setup page opens. It asks for a one-time setup code, which is in the log:
 
 ```bash
-# Test from command line
-curl -I https://comics.yourdomain.com
-
-# Should return:
-# HTTP/2 200
-# server: nginx
-# ...
+docker logs comicmaintainer 2>&1 | grep -i "setup code"
 ```
 
 ## Verification Checklist
 
-- [ ] SWAG container is running: `docker ps | grep swag`
-- [ ] ComicMaintainer container is running: `docker ps | grep comicmaintainer`
-- [ ] Both containers are on the same network: `docker network inspect swag-network`
-- [ ] DNS is resolving: `nslookup comics.yourdomain.com`
-- [ ] SSL certificate is valid: `curl -I https://comics.yourdomain.com`
-- [ ] Web interface loads: Open `https://comics.yourdomain.com` in browser
-- [ ] Can see comic files in the interface
-- [ ] Real-time updates work (check browser console for SSE connection)
+- [ ] Both containers are running: `docker compose ps`
+- [ ] Both are on the network: `docker network inspect swag-network`
+- [ ] DNS resolves: `nslookup comics.yourdomain.com`
+- [ ] The app answers through the proxy: `curl https://comics.yourdomain.com/api/version`
+- [ ] The web interface loads and shows your comics after you sign in
+- [ ] Real-time updates work: in the browser's developer tools, the Network tab shows `/api/events/stream` with status 200
 
 ## Troubleshooting
 
-### SWAG won't generate certificates
+### SWAG Won't Generate Certificates
 
-**Check DNS propagation:**
 ```bash
+# DNS should return your server's IP
 nslookup comics.yourdomain.com
-# Should return your server's IP
-```
 
-**Check SWAG logs:**
-```bash
+# Look for errors
 docker logs swag 2>&1 | grep -i "error\|fail"
 ```
 
-**Verify ports are forwarded:**
-```bash
-# From another network
-curl http://yourdomain.com
-# Should return Nginx response
-```
+Also check from another network that port 80 reaches your server.
 
 ### 502 Bad Gateway
 
-**Check container connectivity:**
 ```bash
-# Enter SWAG container
-docker exec -it swag bash
+# From inside SWAG. Should return: {"version":"..."}
+docker exec swag curl -s http://comicmaintainer:5000/api/version
 
-# Try to reach ComicMaintainer
-curl http://comicmaintainer:5000/api/version
-
-# Should return: {"version": "x.x.x"}
-```
-
-**Check ComicMaintainer logs:**
-```bash
 docker logs comicmaintainer
 ```
 
-### Real-time updates not working
+### Real-Time Updates Not Working
 
-**Check browser console:**
-- Should see successful EventSource connection to `/api/events/stream`
-
-**Verify config settings:**
 ```bash
-docker exec swag cat /config/nginx/proxy-confs/comicmaintainer.subdomain.conf | grep buffering
 # Should show: proxy_buffering off;
+docker exec swag grep buffering /config/nginx/proxy-confs/comicmaintainer.subdomain.conf
 ```
 
-## Adding Authentication
+## Adding a Sign-In in Front of the App
 
-To add HTTP Basic Authentication:
+ComicMaintainer has its own sign-in. To add two-factor authentication and single sign-on, see the [Authelia Integration Guide](../AUTHELIA.md).
 
-**1. Create password file:**
-```bash
-docker exec -it swag htpasswd -c /config/nginx/.htpasswd admin
-# Enter password when prompted
-```
-
-**2. Edit config file:**
-```bash
-docker exec -it swag nano /config/nginx/proxy-confs/comicmaintainer.subdomain.conf
-
-# Uncomment these lines in the location block:
-auth_basic "Restricted";
-auth_basic_user_file /config/nginx/.htpasswd;
-```
-
-**3. Restart SWAG:**
-```bash
-docker restart swag
-```
+Do not enable the `auth_basic` lines in the config file: they stop the app from working, as the [SWAG README](README.md#http-basic) explains.
 
 ## Updating ComicMaintainer
 
 ```bash
-# Pull latest image
-docker-compose pull comicmaintainer
-
-# Recreate container
-docker-compose up -d comicmaintainer
-
-# Check logs
-docker-compose logs -f comicmaintainer
+docker compose pull comicmaintainer
+docker compose up -d comicmaintainer
+docker compose logs -f comicmaintainer
 ```
 
-## Backup Strategy
+The database is backed up automatically before an update changes it.
 
-Important directories to backup:
-- `~/comicmaintainer-config/` - Database, logs, settings
-- `~/swag/config/` - SWAG configuration and certificates
-- `~/comics/` - Your comic files (obviously!)
+## Backups
 
-**Example backup script:**
-```bash
-#!/bin/bash
-DATE=$(date +%Y%m%d)
-tar -czf backup-comicmaintainer-${DATE}.tar.gz \
-    ~/comicmaintainer-config/ \
-    ~/swag/config/
-```
+Back up these folders:
 
-## Performance Tuning
+- `~/comicmaintainer-config/backups/`: consistent copies of the database, one a day by default
+- `~/comicmaintainer-config/`, while the container is stopped: settings, keys and logs
+- `~/swag/config/`: SWAG configuration and certificates
+- `~/comics/`: your comic files
 
-For large libraries (>5000 files):
+Do not copy `comicmaintainer.db` while the app is running. See [Backup Database](../DOCKER_DEPLOYMENT_DOTNET.md#backup-database).
 
-**1. Increase workers:**
+## Performance
+
+For large libraries on fast storage you can raise the number of files processed at once from the default of 4:
+
 ```yaml
 environment:
-  - AppSettings__MaxWorkers=8  # Increase from default 4
+  - AppSettings__MaxWorkers=8
 ```
 
-**2. Enable HTTP/2 (already enabled in SWAG by default)**
-
-## Security Recommendations
-
-1. ✅ Use strong passwords for authentication
-2. ✅ Keep SWAG and ComicMaintainer updated
-3. ✅ Enable fail2ban (included in SWAG)
-4. ✅ Use firewall to restrict SSH access
-5. ✅ Regular backups of configuration and data
-6. ✅ Monitor logs for suspicious activity
+See the [Performance Tuning Guide](../PERFORMANCE_TUNING.md).
 
 ## Support
 
 - [ComicMaintainer Issues](https://github.com/mleenorris/ComicMaintainer/issues)
 - [SWAG Documentation](https://docs.linuxserver.io/general/swag)
-- [SWAG Discord](https://discord.gg/linuxserver)

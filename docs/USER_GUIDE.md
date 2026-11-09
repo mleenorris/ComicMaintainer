@@ -6,8 +6,9 @@ How ComicMaintainer treats your files, and what the main features do. [README](.
 ## Files and formats
 
 ComicMaintainer tracks `.cbz`, `.cbr`, `.zip` and `.rar` files. It looks at the content to tell the format, so a ZIP named
-`.cbr` works. Supported containers are ZIP (Store, Deflate and Deflate64) and RAR 1.5 to 5.x. Other formats, password-protected
-archives and raw split files are refused, and the reason shows in the job result and in Processing History.
+`.cbr` works. Supported containers are ZIP (Store, Deflate and Deflate64) and RAR 1.5 to 5.x. Other formats, such as 7z or
+tar, and password-protected archives are refused, and the reason shows in the job result and in Processing History. A
+raw-split archive is not joined to its other parts, so rejoin it first. Multi-volume RAR sets work.
 
 ### Limits
 
@@ -99,7 +100,7 @@ To see the result for one file without changing anything, call `GET /api/files/s
 | --- | --- | --- |
 | Watcher | A file appears or changes, while rename or normalize is on | Processes that file. See [Background Processing](ASYNC_PROCESSING.md) |
 | Library Scan job (`library-scan`) | On its schedule, if enabled | Adds new files, reconciles deletions, and re-normalizes files whose series metadata has changed since they were last written |
-| Actions in the web interface or API | When you start them | Runs the normal pipeline. Force Reprocess includes files already done |
+| Actions in the web interface or API | When you start them | Runs the normal pipeline. The API's `forceReprocess` includes files already done |
 | Audit jobs | On their schedule, if enabled | Records findings. With `autoCorrect` on, queues the files through the normal pipeline |
 
 The Library Scan job is what picks up a change that involves no file, such as an edited alias or language preference.
@@ -138,7 +139,7 @@ Filter by all, unmarked, marked, duplicates, renamed, normalized, read, unread, 
 **Genre** and **Status** menus use the series' provider match, and a series shows these once its match has been refreshed.
 Each menu can also find series with no such data.
 
-Read state is per user. **Mark All Read** and **Mark All Unread** apply to the library, a series or a folder.
+Read state is per user. **Mark All Read** and **Mark All Unread** apply to the whole library for your account.
 
 ## External metadata
 
@@ -152,8 +153,8 @@ an API key. Lookups run from the library's **Metadata** menu, or per series unde
 - **Refreshing.** A manual match refreshes only from its own provider, by its stored id. If that provider is off or the
   entry is gone, the match is kept. An automatic match refreshed through one of its other names re-fetches its own match.
 - **Outages are not "not found".** When a provider cannot answer, existing matches are kept, a series with no match shows
-  an error, and the API answers `503`. A failing provider is left alone for 30 seconds, doubling up to an hour, or for as
-  long as its `Retry-After` asks.
+  an error, and the API answers `503`. A failing provider is left alone for 30 seconds, doubling up to an hour, or
+  longer if the provider asks for it.
 - **Rewrites are limited.** After a refresh, only files whose series differs from the resolved name are rewritten, and none
   if normalize is off.
 
@@ -202,9 +203,9 @@ Turning pages and scrolling leave them as they are. In webcomic mode the bar alo
 
 ### Offline reading
 
-Install the site as an app from your browser, then save comics for offline reading. A comic counts as saved only when the
-whole download has finished. An interrupted download shows **Resume N/M** and fetches only the missing pages. One not
-resumed within 7 days is removed.
+Click **Save offline** in the reader to keep a comic for reading with no connection. You can also install the site as an
+app from your browser. A comic counts as saved only when the whole download has finished. An interrupted download shows
+**Resume N/M** and fetches only the missing pages. One not resumed within 7 days is removed.
 
 ## Suwayomi
 

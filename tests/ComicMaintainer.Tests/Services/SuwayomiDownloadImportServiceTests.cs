@@ -11,7 +11,7 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
-public sealed class SuwayomiDownloadImportServiceTests : IDisposable
+public sealed partial class SuwayomiDownloadImportServiceTests : IDisposable
 {
     private readonly string _root;
     private readonly string _library;

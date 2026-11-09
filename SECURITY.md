@@ -91,11 +91,11 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 
 - Set a strong `JWT_SECRET` (at least 32 characters), or let the app generate and keep one in the
   config folder.
-- Pass secrets as files rather than variables where you can: `JWT_SECRET_FILE` and
-  `ADMIN_PASSWORD_FILE` read Docker or Kubernetes secrets.
+- Pass secrets as files rather than variables where you can: `JWT_SECRET_FILE`,
+  `ADMIN_PASSWORD_FILE` and `SETUP_TOKEN_FILE` read Docker or Kubernetes secrets.
 - Never commit a `.env` file with real values.
 - The config folder and the database backups in it hold password hashes and stored credentials
-  (SMTP, ComicVine). Keep them private.
+  (SMTP, ComicVine, notification tokens). Keep them private.
 
 ### Kubernetes
 
@@ -105,15 +105,94 @@ secrets from a Kubernetes Secret.
 
 ## Security Features
 
-- **Authentication and roles** for every API endpoint (JWT sign-in, or Authelia forward
-  authentication from trusted proxies only), with read-only, user and admin roles.
+### Signing In
+
+- **Authentication and roles** for every API endpoint, with read-only, user and admin roles.
+  Requests are signed in with a session token, Authelia forward authentication from trusted
+  proxies only, or an API key. HTTP Basic is accepted only on the OPDS catalog.
+- **Session tokens** are sent in the `Authorization` header and are never accepted in a URL. Each
+  is revoked by signing out, a password change, a role change, or disabling or deleting the
+  account. The event stream uses its own single-use token, valid for 60 seconds.
+- **First-run setup** requires a one-time code from the server's log, or `SETUP_TOKEN`. It is only
+  available while no account exists, and never under Authelia.
+- **Published example passwords**, such as `Admin123!`, are refused when setting a password, at
+  startup and at sign-in.
+- **Account lockout**: five wrong passwords in a row, whether at sign-in, password change or API
+  key creation, lock the account for 15 minutes.
+  There is no in-app unlock, so the lockout ends on its own. The trade-off: anyone who knows a
+  username can keep that account locked by failing repeatedly.
+- **Attempt limits**: sign-in, registration, first-run setup, password change, API key creation
+  and OPDS sign-in share a limit of 10 attempts per 5 minutes per client address. Requests over
+  it get `429` with a `Retry-After` header. Behind a reverse proxy, set `TRUSTED_PROXIES`, or all
+  clients share that one limit.
+- **Uniform failures**: every sign-in failure answers `Invalid username or password`, and failed
+  attempts are logged with the client's address to `auth.log`.
+
+### API Keys
+
+- A key acts as the account that owns it, with that account's current roles. It is shown once and
+  stored only as a SHA-256 hash.
+- Keys are accepted only in the `X-API-Key` header, never in a URL or as a bearer token. On the
+  OPDS catalog, a key can be used as the HTTP Basic password instead.
+- Creating a key requires the account's current password, except in an Authelia session, whose
+  account has no password of its own. An API key cannot create a key or change a password.
+- Changing the password or signing out of all sessions revokes the key.
+
+### OPDS Catalog
+
+The catalog is off by default and answers 404 until it is enabled. HTTP Basic is only accepted
+under `/opds`:
+
+- Attempts share the sign-in limit above, and wrong passwords count towards the account lockout.
+- A value in the exact form of a generated API key that matches no current key uses one attempt
+  but never counts towards the lockout, so a device holding an old key cannot lock out its owner.
+- Credentials are only base64-encoded, so use HTTPS.
+- With Authelia enabled only API keys are accepted, because `/opds` has to bypass Authelia.
+- OPDS clients repeat their credentials on every request, so a verified password is remembered in
+  memory for up to 5 minutes after its last use and at most 1 hour, as a salted hash and never in
+  clear. Every request still re-checks the account, so a disabled or deleted account, a password
+  change or a lockout applies at once.
+
+### Outbound Requests
+
+- **Series image downloads** are guarded against server-side request forgery. Automatic redirects
+  are off and every hop is checked again, HTTPS is never downgraded to HTTP, and the app resolves
+  the host itself when connecting, refusing private, loopback, link-local and cloud metadata
+  addresses, including IPv6 forms that embed them (IPv4-mapped and NAT64). Because the guard must
+  make the connection itself, these downloads do not use `HTTP_PROXY` or `HTTPS_PROXY`.
+- **Notification targets** may be private addresses, because a Komga or Kavita server on your LAN
+  is the normal setup. Configuring and testing them is therefore limited to administrators.
+  Redirects are not followed. Tokens, API keys and webhook URLs are write-only, are never logged,
+  are left out of traces and are masked in automated error reports. The ntfy topic is returned
+  only to administrators, because on a public ntfy server knowing it is enough to subscribe.
+
+### Your Data
+
 - **Path validation**: file paths from requests must resolve, links included, inside the watched
   or duplicates folder before any file is read, changed or deleted.
+- **Private by user**: e-reader devices, subscriptions and delivery history belong to the user who
+  created them.
+- **Private caching**: comic pages and covers are sent with `Cache-Control: private`, so shared
+  proxies and CDNs do not store them.
+- **Logs** are readable through the API by administrators only.
+- **Archive limits**: an archive that would expand or read past fixed limits is refused, so a
+  crafted file cannot exhaust memory. See the
+  [Performance Tuning Guide](docs/PERFORMANCE_TUNING.md#archive-limits).
+
+### The Application
+
 - **No external programs**: comic archives and images are read in-process (SharpCompress,
   Magick.NET), so no request reaches a shell or another program.
 - **Parameterized database access** through Entity Framework Core.
-- **Rate limiting** of signed-out requests per client.
+- **Content Security Policy** with `connect-src 'self'`, so injected markup cannot open a
+  connection to another origin. Behind a proxy that reports HTTPS, the app also sends
+  `Strict-Transport-Security`.
+- **Rate limiting** of requests per client as well as the attempt limits above.
 - **Automatic security updates** proposed by Dependabot, and the scans above.
+
+Automated error reports are off until an administrator turns them on and supplies a GitHub token.
+They are filed against the public `mleenorris/ComicMaintainer` repository, with paths, email
+addresses and credentials redacted.
 
 ## Additional Resources
 

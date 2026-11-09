@@ -57,6 +57,7 @@ function createBrowserGlobals(overrides = {}) {
 
     const document = {
         readyState: 'loading',
+        documentElement: { dataset: {} },
         addEventListener: addEventListener('document'),
         removeEventListener: noop,
         getElementById: () => null,

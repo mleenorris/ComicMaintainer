@@ -373,6 +373,13 @@ async function extend(lifetime) {
     }
 }
 
+// What the server does to sw.js, padded so that nothing after the placeholder
+// moves: coverage is merged across runs by offset, and a shifted copy of the
+// script would be counted as a second, mostly unexercised one.
+const BASE_PATH_LITERAL = "'__BASE_PATH__'";
+const fillBasePath = basePath => source =>
+    source.replace(BASE_PATH_LITERAL, `'${basePath}'`.padEnd(BASE_PATH_LITERAL.length));
+
 function loadServiceWorker({
     basePath,
     routes,
@@ -434,7 +441,7 @@ function loadServiceWorker({
         clearTimeout
     });
     context.self = context;
-    runWwwrootScript('sw.js', context, basePath ? source => source.replaceAll('__BASE_PATH__', basePath) : undefined);
+    runWwwrootScript('sw.js', context, basePath ? fillBasePath(basePath) : undefined);
 
     function dispatch(type, init = {}) {
         const lifetime = [];

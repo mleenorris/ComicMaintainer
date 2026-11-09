@@ -148,6 +148,7 @@ test('status refresh and leaving the jobs view while Run now is pending cannot r
     const messages = [];
     const sandbox = loadScripts(['js/shared.js', 'js/app/templating.js', 'js/app/scheduled-jobs.js'], {
         document: {
+            documentElement: { dataset: {} },
             getElementById: id => (id === 'scheduledJobsList' ? list : id === 'scheduled-job-library-scan' ? card : null),
             querySelector: () => null,
             querySelectorAll: () => []
@@ -207,6 +208,7 @@ test('a rejected Run now request re-enables the button', async () => {
     const messages = [];
     const sandbox = loadScripts(['js/shared.js', 'js/app/templating.js', 'js/app/scheduled-jobs.js'], {
         document: {
+            documentElement: { dataset: {} },
             getElementById: id => (id === 'scheduled-job-library-scan' ? card : null),
             querySelector: () => null,
             querySelectorAll: () => []

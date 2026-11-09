@@ -31,8 +31,8 @@ function escapeHtml(text) {
  * HtmlVersionInjectionMiddleware).
  */
 const BASE_PATH = (() => {
-    const configured = typeof document === 'undefined' ? '' : document.documentElement?.dataset?.basePath;
-    return typeof configured === 'string' && configured.startsWith('/') ? configured : '';
+    const configured = document.documentElement.dataset.basePath;
+    return configured?.startsWith('/') ? configured : '';
 })();
 
 /**

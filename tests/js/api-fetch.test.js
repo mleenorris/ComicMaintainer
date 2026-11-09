@@ -371,7 +371,9 @@ test('an Authelia session is logged under the debug flag too', () => {
 
 test('debug logging stays off when storage cannot be read', () => {
     const page = apiPage();
-    page.run("localStorage.getItem = () => { throw new Error('denied'); }");
+    // On the prototype: assigning to the storage object itself would only store
+    // an item named "getItem".
+    page.run("Storage.prototype.getItem = () => { throw new Error('denied'); }");
 
     assert.equal(page.run('isApiDebugEnabled()'), false);
 });

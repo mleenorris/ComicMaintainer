@@ -879,6 +879,15 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
+    public async Task UpdateDatabaseCleanupSettings_NullBody_ReturnsBadRequest()
+    {
+        var result = await CreateController().UpdateDatabaseCleanupSettings(null!);
+
+        Assert.Equal("Request body is required", BadRequestError(result));
+        _settingsService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task UpdateDatabaseCleanupSettings_ServiceFailure_ReachesTheGlobalHandler()
     {
         var failure = new IOException("disk full");

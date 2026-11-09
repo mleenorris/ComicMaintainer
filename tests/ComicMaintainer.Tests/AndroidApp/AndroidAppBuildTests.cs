@@ -119,6 +119,20 @@ public sealed class AndroidAppBuildTests
         Assert.Contains($">{minimum}.0</SupportedOSPlatformVersion>", project, StringComparison.Ordinal);
     }
 
+    // A font that is named but not shipped fails only on the device, as a logged warning and the system font instead.
+    [Fact]
+    public void EveryFontTheAppNames_ShipsWithIt()
+    {
+        var program = File.ReadAllText(Path.Join(AppDirectory, "MauiProgram.cs"));
+        var styles = File.ReadAllText(Path.Join(AppDirectory, "Resources", "Styles", "Styles.xaml"));
+
+        var registered = Regex.Matches(program, "AddFont\\(\"(?<file>[^\"]+)\",\\s*\"(?<alias>[^\"]+)\"\\)").ToList();
+        var used = Regex.Matches(styles, "Property=\"FontFamily\"\\s+Value=\"(?<alias>[^\"]+)\"").Select(match => match.Groups["alias"].Value);
+
+        Assert.All(registered, match => Assert.True(File.Exists(Path.Join(AppDirectory, "Resources", "Fonts", match.Groups["file"].Value)), match.Value));
+        Assert.All(used, alias => Assert.Contains(registered, match => match.Groups["alias"].Value == alias));
+    }
+
     [Fact]
     public void GeneratedSdkBackupFiles_AreIgnored()
     {

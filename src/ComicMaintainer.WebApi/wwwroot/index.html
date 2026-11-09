@@ -1695,6 +1695,12 @@
                     Comics queued for delivery, newest first, including failures and their error text. A pending delivery can be cancelled until it is handed to the mail server.
                 </p>
                 <p id="emailDeliveryHistoryRateLimit" role="status" style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;" hidden></p>
+                <p id="emailDeliveryHistoryAllUsersRow" style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;" hidden>
+                    <label>
+                        <input type="checkbox" id="emailDeliveryHistoryAllUsers" onchange="toggleEmailDeliveryHistoryAllUsers(this.checked)">
+                        Show the deliveries of all users
+                    </label>
+                </p>
                 <div id="emailDeliveryHistoryList">
                     <div class="loading"><div class="spinner"></div><p>Loading deliveries...</p></div>
                 </div>

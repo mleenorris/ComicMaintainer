@@ -605,3 +605,133 @@ test('Delete removes a subscription and reloads the list, or reports why it coul
     assert.deepEqual(messages(page).at(-1), { text: 'Failed to delete auto-send subscription: Subscription not found', type: 'error' });
     assert.equal(listRows(page, '#emailSubscriptionsList').length, 1);
 });
+
+// ── Attempts and the administrators' all-users view ───────────────────────
+
+test('Delivery History shows how many attempts a delivery took and when the next one is', async t => {
+    const page = await bootPage({
+        routes: {
+            'GET /api/email/deliveries': {
+                deliveries: [
+                    emailDelivery({ id: 1, status: 'sent', attemptCount: 1, nextAttemptAt: null }),
+                    emailDelivery({ id: 2, fileName: 'Saga 002.cbz', status: 'pending', attemptCount: 3, nextAttemptAt: '2024-03-01T10:05:00Z' }),
+                    emailDelivery({ id: 3, fileName: 'Saga 003.cbz', status: 'pending', attemptCount: 0, nextAttemptAt: 'not a date' }),
+                    emailDelivery({ id: 4, fileName: 'Saga 004.cbz', status: 'pending' })
+                ]
+            }
+        }
+    });
+    t.after(() => page.close());
+    await openHistory(page);
+
+    const rows = listRows(page, '#emailDeliveryHistoryList');
+    const retry = localDate(page, '2024-03-01T10:05:00Z');
+    assert.equal(rows[0][2], '1 attempt');
+    assert.equal(rows[1][2], squash(`3 attempts · next attempt ${retry}`));
+    assert.equal(rows[2].length, 2, 'not tried yet: nothing to say');
+    assert.equal(rows[3].length, 2);
+});
+
+test('only administrators are offered every user\'s delivery history', async t => {
+    const admin = await bootPage({ routes: { 'GET /api/email/deliveries': { deliveries: [] } } });
+    const reader = await bootPage({
+        user: { canAdminister: false, canModifyLibrary: false, roles: ['ReadOnly'] },
+        routes: { 'GET /api/email/deliveries': { deliveries: [] } }
+    });
+    t.after(() => { admin.close(); reader.close(); });
+
+    await openHistory(admin);
+    await openHistory(reader);
+
+    assert.equal(admin.$('#emailDeliveryHistoryAllUsersRow').hidden, false);
+    assert.equal(reader.$('#emailDeliveryHistoryAllUsersRow').hidden, true);
+    assert.equal(callsTo(admin, 'GET', '/api/email/deliveries')[0].query.all, undefined);
+});
+
+test('the all-users view loads every user\'s deliveries, starting from the first page', async t => {
+    const page = await bootPage({ routes: { 'GET /api/email/deliveries': pagedHistory(() => 120) } });
+    t.after(() => page.close());
+    await openHistory(page);
+    page.click('#emailDeliveryHistoryNextBtn');
+    await page.settle();
+    assert.equal(callsTo(page, 'GET', '/api/email/deliveries').at(-1).query.offset, '50');
+
+    page.input('#emailDeliveryHistoryAllUsers', true);
+    await page.settle();
+    const widened = callsTo(page, 'GET', '/api/email/deliveries').at(-1);
+    assert.equal(widened.query.all, 'true');
+    assert.equal(widened.query.offset, '0');
+
+    page.input('#emailDeliveryHistoryAllUsers', false);
+    await page.settle();
+    assert.equal(callsTo(page, 'GET', '/api/email/deliveries').at(-1).query.all, undefined);
+});
+
+test('opening the history again starts with the administrator\'s own deliveries', async t => {
+    const page = await bootPage({ routes: { 'GET /api/email/deliveries': { deliveries: [] } } });
+    t.after(() => page.close());
+    await openHistory(page);
+    page.input('#emailDeliveryHistoryAllUsers', true);
+    await page.settle();
+
+    page.run('openEmailDeliveryHistoryModal()');
+    await page.settle();
+
+    assert.equal(page.$('#emailDeliveryHistoryAllUsers').checked, false);
+    assert.equal(callsTo(page, 'GET', '/api/email/deliveries').at(-1).query.all, undefined);
+});
+
+test('in the all-users view only the administrator\'s own pending deliveries can be cancelled one by one', async t => {
+    const pending = owner => emailDelivery({ id: owner === 'user-1' ? 1 : 2, status: 'pending', ownerUserId: owner });
+    const page = await bootPage({
+        routes: { 'GET /api/email/deliveries': { deliveries: [pending('user-1'), pending('someone-else')], pending_count: 2 } }
+    });
+    t.after(() => page.close());
+    await openHistory(page);
+    assert.equal(page.$$('#emailDeliveryHistoryList button').length, 2, 'the caller\'s own history lists each with its button');
+
+    page.input('#emailDeliveryHistoryAllUsers', true);
+    await page.settle();
+
+    assert.equal(page.$$('#emailDeliveryHistoryList button').length, 1);
+});
+
+test('Cancel All Pending in the all-users view cancels every user\'s, and says so', async t => {
+    const page = await bootPage({
+        routes: {
+            'GET /api/email/deliveries': pagedHistory(() => 120, { pending_count: 3 }),
+            'POST /api/email/deliveries/cancel-pending': { cancelled: 3, stopping: 0, sending: 0 }
+        }
+    });
+    t.after(() => page.close());
+    await openHistory(page);
+    page.input('#emailDeliveryHistoryAllUsers', true);
+    await page.settle();
+
+    answerConfirms(page, true);
+    page.click('#emailDeliveryCancelAllBtn');
+    await page.settle();
+
+    assert.deepEqual(page.dialogs.map(dialog => dialog.message),
+        ['Cancel all 3 pending deliveries across all users? A delivery already being handed to the mail server is still sent.']);
+    assert.equal(callsTo(page, 'POST', '/api/email/deliveries/cancel-pending')[0].query.all, 'true');
+});
+
+test('Cancel All Pending of one pending delivery across all users names the scope', async t => {
+    const page = await bootPage({
+        routes: {
+            'GET /api/email/deliveries': { deliveries: [emailDelivery({ status: 'pending' })], total: 1, pending_count: 1 },
+            'POST /api/email/deliveries/cancel-pending': { cancelled: 1, stopping: 0, sending: 0 }
+        }
+    });
+    t.after(() => page.close());
+    await openHistory(page);
+    page.input('#emailDeliveryHistoryAllUsers', true);
+    await page.settle();
+
+    answerConfirms(page, true);
+    page.click('#emailDeliveryCancelAllBtn');
+    await page.settle();
+
+    assert.match(page.dialogs[0].message, /^Cancel the pending delivery across all users\?/);
+});

@@ -37,6 +37,8 @@
         let emailDeliveryHistoryPage = 1;
         let emailDeliveryHistoryTotal = 0;
         let emailDeliveryHistoryPendingCount = 0;
+        // Administrators can widen the history to every user's deliveries.
+        let emailDeliveryHistoryAllUsers = false;
         // Guards against an out-of-order history response overwriting a newer one.
         let emailDeliveryHistoryToken = 0;
 
@@ -489,7 +491,11 @@
             }
 
             const limit = formatFileSize(plan.max_attachment_bytes || 0);
-            const oversized = plan.oversized_book_count || 0;
+            // A book too large to build is over the attachment limit as well,
+            // but cannot be downloaded either, so it is counted on its own.
+            const unbuildable = books.filter(book => book.exceeds_book_size_limit).length;
+            const oversized = Math.max(0, (plan.oversized_book_count || 0) - unbuildable);
+            const bookLimit = formatFileSize(plan.max_book_bytes || 0);
             const formatLabel = shortEmailFormatLabel(getEmailCondenseFormat());
             const heading = `${books.length} ${formatLabel}${books.length === 1 ? '' : 's'} from ${plan.total_issues} issue${plan.total_issues === 1 ? '' : 's'} (attachment limit ${limit}).`;
 
@@ -497,7 +503,12 @@
                 <div style="margin-bottom: 8px;">${heading}</div>
                 ${oversized
                     ? html`<div style="margin-bottom: 8px; color: var(--text-warning, #d9822b);">
-                        ⚠️ ${oversized} of these book${oversized === 1 ? '' : 's'} ${oversized === 1 ? 'is' : 'are'} larger than the ${limit} attachment limit and cannot be emailed. Download ${oversized === 1 ? 'it' : 'them'} instead, or condense fewer issues per book.
+                        ⚠️ ${oversized} of these books ${oversized === 1 ? 'is' : 'are'} larger than the ${limit} attachment limit and cannot be emailed. Download ${oversized === 1 ? 'it' : 'them'} instead, or condense fewer issues per book.
+                      </div>`
+                    : ''}
+                ${unbuildable
+                    ? html`<div style="margin-bottom: 8px; color: var(--text-warning, #d9822b);">
+                        ⚠️ ${unbuildable} of these books ${unbuildable === 1 ? 'is' : 'are'} larger than the ${bookLimit} limit for a single book and cannot be built. Condense fewer issues per book.
                       </div>`
                     : ''}
                 <div id="emailCondenseBookList"></div>
@@ -522,10 +533,15 @@
             const next = Math.min(books.length, emailCondenseBooksShown + EMAIL_CONDENSE_BOOK_PAGE_SIZE);
             for (let index = emailCondenseBooksShown; index < next; index++) {
                 const book = books[index];
+                const sizeNote = book.exceeds_book_size_limit
+                    ? ' · too large to build'
+                    : (book.exceeds_attachment_limit ? ' · too large to email' : '');
                 appendHtml(list, html`
                     <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0;">
-                        <span>${book.display_name} · ${book.issue_count} issue${book.issue_count === 1 ? '' : 's'} · ~${formatFileSize(book.estimated_bytes || 0)}${book.exceeds_attachment_limit ? ' · too large to email' : ''}</span>
-                        <button class="btn btn-small" type="button" onclick="downloadCondensedBook(${index})">Download</button>
+                        <span>${book.display_name} · ${book.issue_count} issue${book.issue_count === 1 ? '' : 's'} · ~${formatFileSize(book.estimated_bytes || 0)}${sizeNote}</span>
+                        ${book.exceeds_book_size_limit
+                            ? ''
+                            : html`<button class="btn btn-small" type="button" onclick="downloadCondensedBook(${index})">Download</button>`}
                     </div>
                 `);
             }
@@ -842,10 +858,30 @@
             emailDeliveryHistoryPage = 1;
             emailDeliveryHistoryTotal = 0;
             emailDeliveryHistoryPendingCount = 0;
+            emailDeliveryHistoryAllUsers = false;
+            renderEmailDeliveryHistoryAllUsersControl();
             renderEmailDeliveryRateLimit(null);
             renderEmailDeliveryCancelAll();
             renderEmailDeliveryHistoryPaging();
             await loadEmailDeliveryHistory();
+        }
+
+        function renderEmailDeliveryHistoryAllUsersControl() {
+            const row = document.getElementById('emailDeliveryHistoryAllUsersRow');
+            const checkbox = document.getElementById('emailDeliveryHistoryAllUsers');
+            if (row) row.hidden = !userCapabilities.canAdminister;
+            if (checkbox) checkbox.checked = emailDeliveryHistoryAllUsers;
+        }
+
+        async function toggleEmailDeliveryHistoryAllUsers(checked) {
+            emailDeliveryHistoryAllUsers = !!checked;
+            emailDeliveryHistoryPage = 1;
+            await loadEmailDeliveryHistory();
+        }
+
+        // Added to a deliveries request when the history covers every user.
+        function emailDeliveryScopeQuery() {
+            return emailDeliveryHistoryAllUsers ? '&all=true' : '';
         }
 
         function closeEmailDeliveryHistoryModal() {
@@ -860,7 +896,7 @@
             setEmailDeliveryHistoryPagingEnabled(false);
             try {
                 const offset = (emailDeliveryHistoryPage - 1) * EMAIL_DELIVERY_HISTORY_PAGE_SIZE;
-                const data = await apiFetch(`/api/email/deliveries?limit=${EMAIL_DELIVERY_HISTORY_PAGE_SIZE}&offset=${offset}`);
+                const data = await apiFetch(`/api/email/deliveries?limit=${EMAIL_DELIVERY_HISTORY_PAGE_SIZE}&offset=${offset}${emailDeliveryScopeQuery()}`);
                 if (token !== emailDeliveryHistoryToken) return;
                 const deliveries = Array.isArray(data.deliveries) ? data.deliveries : [];
                 const total = Math.max(Number(data.total) || 0, offset + deliveries.length);
@@ -958,14 +994,15 @@
         /** Cancels every delivery that has not been sent yet, on every page. */
         async function cancelAllPendingEmailDeliveries() {
             const count = emailDeliveryHistoryPendingCount;
+            const scope = emailDeliveryHistoryAllUsers ? ' across all users' : '';
             const prompt = count === 1
-                ? 'Cancel the pending delivery?'
-                : `Cancel all ${count} pending deliveries?`;
+                ? `Cancel the pending delivery${scope}?`
+                : `Cancel all ${count} pending deliveries${scope}?`;
             if (!confirm(`${prompt} A delivery already being handed to the mail server is still sent.`)) return;
             const button = document.getElementById('emailDeliveryCancelAllBtn');
             if (button) button.disabled = true;
             try {
-                const result = await apiFetch('/api/email/deliveries/cancel-pending', { method: 'POST' });
+                const result = await apiFetch(`/api/email/deliveries/cancel-pending${emailDeliveryHistoryAllUsers ? '?all=true' : ''}`, { method: 'POST' });
                 const cancelled = Number(result.cancelled) || 0;
                 showMessage(describeEmailBulkCancel(result), cancelled > 0 ? 'success' : 'info');
             } catch (error) {
@@ -1001,6 +1038,23 @@
             return status || 'Unknown';
         }
 
+        /** "2 attempts · next attempt 3/1/2024, 10:05:00 AM", or '' for a delivery not tried yet. */
+        function describeEmailDeliveryAttempts(delivery) {
+            const parts = [];
+            const attempts = Number(delivery.attemptCount) || 0;
+            if (attempts > 0) parts.push(`${attempts} attempt${attempts === 1 ? '' : 's'}`);
+            const next = delivery.nextAttemptAt ? new Date(delivery.nextAttemptAt) : null;
+            if (next && !Number.isNaN(next.getTime())) parts.push(`next attempt ${next.toLocaleString()}`);
+            return parts.join(' · ');
+        }
+
+        // Only the per-delivery endpoint is scoped to the caller's own
+        // deliveries, so in the all-users view it is offered on those only.
+        function canCancelEmailDelivery(delivery) {
+            if (String(delivery.status || '').toLowerCase() !== 'pending') return false;
+            return !emailDeliveryHistoryAllUsers || delivery.ownerUserId === userCapabilities.userId;
+        }
+
         function renderEmailDeliveryHistory(deliveries) {
             const list = document.getElementById('emailDeliveryHistoryList');
             if (!list) return;
@@ -1017,7 +1071,10 @@
                     ${delivery.errorMessage
                         ? html`<div class="combine-folders-meta" style="color: var(--text-error, #d9534f);">${delivery.errorMessage}</div>`
                         : ''}
-                    ${String(delivery.status || '').toLowerCase() === 'pending'
+                    ${describeEmailDeliveryAttempts(delivery)
+                        ? html`<div class="combine-folders-meta">${describeEmailDeliveryAttempts(delivery)}</div>`
+                        : ''}
+                    ${canCancelEmailDelivery(delivery)
                         ? html`<button class="btn btn-small" type="button" data-requires-write onclick="cancelEmailDelivery('${jsArg(delivery.id)}', this)">Cancel</button>`
                         : ''}
                 </div>

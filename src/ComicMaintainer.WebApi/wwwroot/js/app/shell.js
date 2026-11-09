@@ -285,7 +285,8 @@
                 const user = await response.json();
                 userCapabilities = {
                     canModifyLibrary: user.canModifyLibrary !== false,
-                    canAdminister: user.canAdminister !== false
+                    canAdminister: user.canAdminister !== false,
+                    userId: user.userId
                 };
                 applyCapabilities();
             } catch (error) {

@@ -747,14 +747,15 @@ public partial class ComicProcessorServiceCoverageTests
     public async Task GetMetadataAsync_WhenTheStoredRecordCannotBeRead_ReturnsTheArchivesMetadata()
     {
         var service = CreateService();
-        var cbz = WriteCbz("Series/book.cbz", Xml("Archive Series", "3", null));
-        _fileStore.Setup(f => f.GetFileAsync(cbz, It.IsAny<CancellationToken>()))
+        var cbr = WriteCbr("Series/book.cbr", Xml("Archive Series", "3", null));
+        _fileStore.Setup(f => f.GetFileAsync(cbr, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("database is locked"));
 
-        var metadata = await service.GetMetadataAsync(cbz);
+        var metadata = await service.GetMetadataAsync(cbr);
 
         Assert.Equal("Archive Series", metadata!.Series);
         Assert.Equal("3", metadata.Issue);
+        _fileStore.Verify(f => f.GetFileAsync(cbr, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     /// <summary>A tracked file whose <paramref name="fields"/> were edited in the database but not written.</summary>

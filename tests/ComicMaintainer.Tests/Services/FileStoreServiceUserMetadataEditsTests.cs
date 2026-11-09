@@ -93,14 +93,17 @@ public sealed class FileStoreServiceUserMetadataEditsTests : IAsyncLifetime
         Assert.NotNull(row.LastDbEditAt);
         Assert.True(row.UpdatedAt > T0, "UpdatedAt should move to the edit's time");
 
-        // A clone, so that later changes to the caller's object cannot reach the stored record.
-        values.Title = "Changed afterwards";
-        var memory = await service.GetFileAsync(FilePath);
-        Assert.Equal("Romance Dawn", memory!.Metadata!.Title);
+        // The file list and series views are served from the in-memory copy, not from the row.
+        var memory = Assert.Single(await service.GetAllFilesAsync());
+        Assert.Equal("Romance Dawn", memory.Metadata!.Title);
         Assert.Equal(FileMetadataSource.UserEdit, memory.MetadataSource);
         Assert.Equal(1, memory.MetadataVersion);
         Assert.True(service.ChangeVersion > before, "Derived views must see the edit");
         _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+
+        // The snapshot is a copy: the edit's bookkeeping must not be written onto the caller's object.
+        Assert.False(values.IsUserEdited);
+        Assert.Equal(0, values.UserLockedFieldsMask);
     }
 
     [Fact]

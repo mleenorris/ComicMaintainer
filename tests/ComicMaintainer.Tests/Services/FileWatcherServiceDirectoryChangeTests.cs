@@ -105,6 +105,15 @@ public sealed class FileWatcherServiceDirectoryChangeTests : IDisposable
         await WaitForLogAsync("Error tracking new files in directory");
         _store.Verify(s => s.MoveDirectoryAsync(oldDir, newDir, It.IsAny<CancellationToken>()), Times.Once);
         Assert.Empty(_processed);
+
+        // The failure cost that one directory's new files, not the watcher: the next change still reaches the store.
+        var laterDir = Path.Join(_library, "Saga (2012) Complete");
+        Directory.Move(newDir, laterDir);
+
+        await WaitUntilAsync(
+            () => _store.Invocations.Any(i =>
+                i.Method.Name == nameof(IFileStoreService.MoveDirectoryAsync) && Equals(i.Arguments[0], newDir) && Equals(i.Arguments[1], laterDir)),
+            $"the files under {newDir} to be moved to {laterDir}");
     }
 
     [Fact]

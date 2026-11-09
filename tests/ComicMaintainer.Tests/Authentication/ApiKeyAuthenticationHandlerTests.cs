@@ -165,14 +165,14 @@ public sealed class ApiKeyAuthenticationHandlerTests : IAsyncLifetime
     [Fact]
     public async Task Authenticate_AKeyUsedWithinTheResolution_DoesNotWriteAgain()
     {
-        var recent = DateTime.UtcNow.AddSeconds(-10);
-        var user = await SeedOwnerAsync(lastUsed: recent);
+        var user = await SeedOwnerAsync(lastUsed: DateTime.UtcNow.AddSeconds(-10));
         SignInAs(user);
+        var factory = new Mock<IDbContextFactory<ComicMaintainerDbContext>>();
 
-        var result = await AuthenticateAsync(CreateContext(Key));
+        var result = await AuthenticateAsync(CreateContext(Key), factory.Object);
 
         Assert.True(result.Succeeded);
-        Assert.Equal(recent, await ReadLastUsedAsync(user.Id));
+        factory.Verify(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // The account was loaded before another request recorded the use: the write's own check stops a second one.
@@ -245,11 +245,14 @@ public sealed class ApiKeyAuthenticationHandlerTests : IAsyncLifetime
     public async Task Challenge_AnswersUnauthorizedWithoutWritingABody()
     {
         var context = CreateContext();
+        using var body = new MemoryStream();
+        context.Response.Body = body;
         var handler = await CreateHandlerAsync(context);
 
         await handler.ChallengeAsync(new AuthenticationProperties());
 
         Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.Equal(0, body.Length);
     }
 
     [Fact]

@@ -34,7 +34,7 @@ public partial class FilesController
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/rename-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    [Obsolete("Use POST /api/files/{encodedFilePath}/rename instead. This alias is scheduled for removal in v3.0.")]
+    [Obsolete("Use POST /api/files/{encodedFilePath}/rename instead. This alias will be removed in a future release.")]
     [FailureMessage("Error renaming file")]
     public async Task<ActionResult> RenameSingleFile([FromQuery] string filePath, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
@@ -96,7 +96,7 @@ public partial class FilesController
     // Legacy endpoint for backward compatibility: DELETE /api/delete-file?filePath=...
     [HttpDelete("~/api/delete-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    [Obsolete("Use DELETE /api/files/{encodedFilePath} instead. This alias is scheduled for removal in v3.0.")]
+    [Obsolete("Use DELETE /api/files/{encodedFilePath} instead. This alias will be removed in a future release.")]
     [FailureMessage("Error deleting file")]
     public async Task<ActionResult> DeleteFile([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {

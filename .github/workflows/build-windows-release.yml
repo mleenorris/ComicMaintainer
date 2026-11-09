@@ -151,7 +151,7 @@ jobs:
           
           ## Troubleshooting
           
-          - If the application doesn't start, check the logs in the `Config/Log` directory
+          - If the application doesn't start, check the logs in the `Config` directory
           - Ensure the WATCHED_DIR exists and you have read/write permissions
           - Check Windows Event Viewer for system errors
           

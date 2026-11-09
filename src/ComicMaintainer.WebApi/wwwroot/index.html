@@ -1070,10 +1070,10 @@
                             </label>
                             <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="2047" step="1" placeholder="5" autocomplete="off">
                             <small class="form-hint">
-                                When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
+                                A log file stops growing at this size until the next day's file starts. Each log starts a new file daily and is kept for 3 to 7 days, depending on the log. The new size only takes effect after the service restarts.
                             </small>
                             <small class="form-hint">
-                                <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
+                                <strong>Note:</strong> Can also be configured via the <code>AppSettings__LogMaxBytes</code> environment variable (in bytes).
                             </small>
                         </div>
                     </section>

@@ -9,7 +9,7 @@ namespace ComicMaintainer.Tests.Integration;
 /// <summary>
 /// The app hosted under a base path, from the outside: pages link their files under the prefix,
 /// and requests work whether the reverse proxy forwards the prefix or strips it
-/// (docs/swag-configs/comicmaintainer.subfolder.conf strips it).
+/// (docs/swag-configs/comicmaintainer.subfolder.conf forwards it).
 /// </summary>
 [Trait("Category", "Integration")]
 public class BasePathHostingTests

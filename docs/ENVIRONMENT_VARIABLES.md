@@ -302,7 +302,7 @@ These can be set with an `AppSettings__<Name>` variable. It only sets the starti
 | `AppSettings__DefaultLibraryView` | `files` | `files`, `series` | The first view of the library | Yes |
 | `AppSettings__AllowRegistration` | `false` | `true`, `false` | Lets visitors create their own accounts | Yes |
 | `AppSettings__DefaultPreferredLanguage` | Empty | `en`, `ja`, `ko`, `zh` | The language used for series names when a series has none | Yes |
-| `AppSettings__LogMaxBytes` | `10485760` | Above 0 | Size at which a log file rolls over. Read at startup | Yes |
+| `AppSettings__LogMaxBytes` | `10485760` | Above 0 | Largest size of a log file; it stops growing at this size until the next day's file starts. Read at startup | Yes |
 | `AppSettings__MaxWorkers` | `4` | 1 or more | Archives processed at once, across the watcher, API edits and every job. Read at startup | No |
 | `AppSettings__TempFileDirectory` | `/Config/temp` | Path | Scratch space for generated books. Archive rewrites use a temporary file next to the archive instead | No |
 | `AppSettings__WatcherFileStabilityDelaySeconds` | `30` | 0 or more | How long a file must stay unchanged before it is processed | No |

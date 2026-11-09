@@ -33,7 +33,6 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
     {
         ["Files"] = AuthorizationPolicies.CanModifyLibrary,
         ["Jobs"] = AuthorizationPolicies.CanModifyLibrary,
-        ["Process"] = AuthorizationPolicies.CanModifyLibrary,
         ["Metadata"] = AuthorizationPolicies.CanModifyLibrary,
         ["Status"] = AuthorizationPolicies.CanModifyLibrary,
         ["SeriesImages"] = AuthorizationPolicies.CanModifyLibrary,

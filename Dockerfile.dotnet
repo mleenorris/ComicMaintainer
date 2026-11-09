@@ -4,7 +4,7 @@ WORKDIR /app
 EXPOSE 5000
 
 # gosu switches from root to the PUID user after the entrypoint has prepared /Config, and curl runs the container
-# health check. Archives (CBZ/CBR/CB7) are read in-process by SharpCompress, so no unrar or 7-Zip tools are installed;
+# health check. Archives (ZIP and RAR) are read in-process by SharpCompress, so no unrar or 7-Zip tools are installed;
 # recommended packages are left out to keep the image, and the CVEs scanned in it, small. The upgrade applies OS
 # security fixes published since the base image was built, which the image scan in CI would otherwise fail on.
 RUN apt-get update \

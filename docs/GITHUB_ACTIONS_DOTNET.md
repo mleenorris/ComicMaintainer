@@ -53,8 +53,9 @@ for the newer push releases both.
 A commit message containing `[skip-version-bump]` or `Bump version to` gets no new version.
 It is still tested and published as `:dotnet`.
 
-To set a version by hand, such as for a major release, edit those three properties, commit with `[skip-version-bump]`,
-and create the tag and release yourself.
+To set a version by hand, such as for a major release, edit those three properties and merge without
+`[skip-version-bump]` in the head commit's message. A version with no tag yet is released exactly as it stands, with no
+bump commit. Its tag then exists, so the next push increments the patch number again.
 
 ## Docker image
 

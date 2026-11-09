@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
     # --- Container hardening --------------------------------------------------
     # The entrypoint starts as root to create the PUID/PGID user (groupadd/groupmod/
-    # useradd/usermod), fix ownership of the mounted volumes (chown/chmod) and then
+    # useradd/usermod), fix ownership of /Config (chown/chmod) and then
     # drops to that user with gosu. no-new-privileges is compatible with this:
     # gosu only *drops* privileges and is not a setuid binary.
     security_opt:

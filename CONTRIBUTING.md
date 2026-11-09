@@ -135,7 +135,8 @@ dotnet build ComicMaintainer.sln -c Release -p:StrictWarnings=true
 needs no test, say why in the description and add the `no-tests-needed` label.
 
 Merging to `dotnet` releases automatically. See [GITHUB_ACTIONS_DOTNET.md](docs/GITHUB_ACTIONS_DOTNET.md). A commit
-message containing `[skip-version-bump]` is tested and published as `:dotnet` without a new version.
+message containing `[skip-version-bump]` is tested and published as `:dotnet` without a new version. Each merge increments
+the patch number, unless the project's version has no tag yet, in which case that version is released as it stands.
 
 ## Getting help
 

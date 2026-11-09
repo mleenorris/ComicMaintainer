@@ -389,8 +389,12 @@ public class AuthService : IAuthService
         var user = await _userManager.FindByIdAsync(userId);
         return user?.ApiKeyHash is null
             ? ApiKeyStatus.None
-            : new ApiKeyStatus(true, user.ApiKeyCreatedAt, user.ApiKeyLastUsedAt);
+            : new ApiKeyStatus(true, AsUtc(user.ApiKeyCreatedAt), AsUtc(user.ApiKeyLastUsedAt));
     }
+
+    // Written as UTC, but SQLite hands them back without a kind, and a caller's clock is not UTC.
+    private static DateTime? AsUtc(DateTime? value) =>
+        value is { } time ? DateTime.SpecifyKind(time, DateTimeKind.Utc) : null;
 
     private async Task<string> GenerateJwtTokenAsync(ApplicationUser user)
     {

@@ -383,6 +383,31 @@ test('a cover candidate that cannot be downloaded is reported in the panel', asy
     assert.equal(libraryRefreshes(page), refreshes);
 });
 
+test('an expired session during a cover search only goes to the login page', async () => {
+    const page = await coverSearchPage();
+    page.route(`GET ${CANDIDATES}`, 401);
+
+    await searchCovers(page);
+
+    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+    assert.equal(providerStatus(page), 'Searching providers...', 'no "Search failed." over the redirect');
+    assert.equal(logged(page, 'searchSeriesImageCandidates failed'), false);
+});
+
+test('an expired session while applying a cover only goes to the login page', async () => {
+    const page = await coverSearchPage();
+    const before = messages(page).length;
+    page.route(`POST ${FROM_PROVIDER}`, 401);
+
+    page.click(candidateCards(page)[0]);
+    await page.settle();
+
+    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+    assert.equal(providerStatus(page), 'Downloading selected image...');
+    assert.equal(messages(page).length, before, 'no error message over the redirect');
+    assert.equal(logged(page, 'applySeriesImageCandidate failed'), false);
+});
+
 test('cover candidates without a full image, or left over in a closed modal, are not applied', async () => {
     const page = await bootSeries();
     await openManageNames(page);

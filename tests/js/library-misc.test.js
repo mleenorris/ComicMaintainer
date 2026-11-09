@@ -175,6 +175,16 @@ test('the providers modal reports a status it could not fetch', async () => {
     assert.match(String(warning.args[1]), /Failed to fetch/);
 });
 
+test('an expired session while fetching provider status only goes to the login page', async () => {
+    const page = await bootLibrary({ routes: { 'GET /api/metadata/providers': 401 } });
+    page.click(PROVIDERS_BUTTON);
+    await page.settle();
+
+    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+    assert.notEqual(widgetText(page), 'Unable to fetch provider status.');
+    assert.equal(page.consoleMessages.some(message => message.type === 'warn' && message.args[0] === 'Provider health fetch failed'), false);
+});
+
 test('refreshing before the modal was ever opened requests nothing', async () => {
     const page = await bootLibrary({ routes: { 'GET /api/metadata/providers': { providers: PROVIDERS } } });
 

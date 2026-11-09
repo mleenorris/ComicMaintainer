@@ -175,6 +175,33 @@ test('searches that were cut short are mentioned without being called failures',
     });
 });
 
+test('source failures with nothing queued are an error, and several are counted', async () => {
+    const page = await bootMissing();
+    page.route(DOWNLOAD, {
+        series: { id: 7, title: 'SAGA' },
+        queuedChapters: [],
+        // The first failure has no reason, so there is no "First failure" detail to show.
+        discoveryFailures: [{ target: 'Broken (EN)' }, { target: 'Other (EN)', error: 'site unavailable' }],
+        cutShortSearches: [{ target: 'Fuzzy (EN)' }, { target: 'Other (EN)' }]
+    });
+
+    await download(page);
+
+    assert.deepEqual(lastMessage(page), {
+        text: 'Nothing was queued on Suwayomi. 2 source checks failed. 2 searches were cut short, so a series further down the results may have been missed.',
+        type: 'error'
+    });
+});
+
+test('a source failure the server could not describe is still counted', async () => {
+    const page = await bootMissing();
+    page.route(DOWNLOAD, { series: { id: 7, title: 'SAGA' }, queuedChapters: [], discoveryFailures: [null] });
+
+    await download(page);
+
+    assert.deepEqual(lastMessage(page), { text: 'Nothing was queued on Suwayomi. 1 source check failed.', type: 'error' });
+});
+
 test('a series that has no missing issues any more asks for nothing', async () => {
     const page = await bootMissing();
     page.route(`GET ${ISSUES}`, issuesBody(seriesCard(), [issue(1), issue(2), issue(3), issue(4)]));

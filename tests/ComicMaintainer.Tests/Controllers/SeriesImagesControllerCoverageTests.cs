@@ -703,13 +703,13 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     {
         _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ExternalMetadataUnavailableException(
-                "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s"));
+                "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex request timed out: api.internal:443"));
 
         var result = await CreateController().SearchCandidates("Batman", 10, CancellationToken.None);
 
         var obj = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
-        Assert.Equal("MangaDex did not answer within 15s", obj.Value);
+        Assert.Equal("MangaDex did not answer in time", obj.Value);
     }
 
     [Fact]

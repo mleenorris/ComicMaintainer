@@ -654,7 +654,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ExternalMetadataUnavailableException(new[]
             {
-                new ExternalMetadataUnavailableException("MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s"),
+                new ExternalMetadataUnavailableException("MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex request timed out: api.internal:443"),
                 new ExternalMetadataUnavailableException("ComicVine", ExternalMetadataFailureKind.RateLimited, "ComicVine budget used up", TimeSpan.FromSeconds(90))
             }));
 
@@ -663,7 +663,9 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         var obj = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
         var body = Json(obj.Value);
-        Assert.Contains("MangaDex did not answer within 15s", (string?)body["error"]);
+        Assert.Equal(
+            "External metadata providers unavailable: MangaDex did not answer in time; ComicVine is limiting requests; try again in 90s",
+            (string?)body["error"]);
         Assert.Equal(new[] { "MangaDex", "ComicVine" }, body["providers"]!.Select(p => (string?)p));
         Assert.Equal(90, (int?)body["retry_after_seconds"]);
     }
@@ -688,13 +690,13 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     {
         _cache.Setup(c => c.RefreshAsync("Batman", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ExternalMetadataUnavailableException(
-                "ComicVine", ExternalMetadataFailureKind.Unavailable, "ComicVine answered HTTP 503 Service Unavailable"));
+                "ComicVine", ExternalMetadataFailureKind.Unavailable, "ComicVine request failed: No such host api.internal:443"));
 
         var result = await CreateController().RefreshOne("Batman", queue: false, CancellationToken.None);
 
         var obj = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
-        Assert.Equal("ComicVine answered HTTP 503 Service Unavailable", ErrorOf(obj));
+        Assert.Equal("ComicVine could not be reached or answered with an error", ErrorOf(obj));
         Assert.Null((int?)Json(obj.Value)["retry_after_seconds"]);
     }
 

@@ -274,7 +274,7 @@ public class SeriesImagesController : ControllerBase
             // No provider returned candidates and at least one could not answer.
             _logger.LogWarning(LoggingHelper.WithWebsitePrefix("Provider image search for {Query} failed: {Reason}"),
                 LoggingHelper.SanitizeForLog(query), LoggingHelper.SanitizeForLog(ex.Message));
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, ex.Message);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, ex.UserMessage);
         }
     }
 

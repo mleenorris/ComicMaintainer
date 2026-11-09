@@ -165,12 +165,13 @@ public class MetadataController : ControllerBase
     /// <summary>
     /// 503 answer for a lookup that failed because external providers could
     /// not answer (timeouts, outages, throttling), naming them so the UI can
-    /// say which one is down instead of reporting "not found".
+    /// say which one is down instead of reporting "not found". The reason is
+    /// the exception's fixed description; its raw text stays in the log.
     /// </summary>
     private ObjectResult ProvidersUnavailable(ExternalMetadataUnavailableException ex)
         => StatusCode(StatusCodes.Status503ServiceUnavailable, new
         {
-            error = ex.Message,
+            error = ex.UserMessage,
             providers = ex.Providers,
             retry_after_seconds = ex.RetryAfter is { } retryAfter ? (int?)Math.Ceiling(retryAfter.TotalSeconds) : null
         });

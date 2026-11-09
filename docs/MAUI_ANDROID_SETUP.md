@@ -180,7 +180,7 @@ source-generated (`ApiJsonContext`), because release builds trim the app.
 | `POST /api/jobs/process-selected` | Processing a selection |
 | `DELETE /api/files/{base64url path}` | Deleting one file |
 | `POST /api/jobs/delete-selected` | Deleting a selection |
-| `GET /api/jobs/{id}` | Reading a job's progress |
+| `GET /api/jobs/{id}` | Reading a job's progress (in `ApiService`; no page shows progress yet, so a selection is reported as started) |
 
 ## Tests
 

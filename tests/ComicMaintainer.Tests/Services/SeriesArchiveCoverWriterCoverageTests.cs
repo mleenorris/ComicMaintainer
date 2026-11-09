@@ -426,7 +426,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         await CreateWriter(logger: logger.Object).RemoveAsync(Key);
 
         Assert.Equal(refused, File.ReadAllBytes(cbz));
-        Assert.Single(Directory.GetFiles(_root, "*.tmp", SearchOption.AllDirectories).Where(f => f.StartsWith(cbz, StringComparison.Ordinal)).DefaultIfEmpty("none"));
+        Assert.DoesNotContain(Directory.GetFiles(_root, "*", SearchOption.AllDirectories), ArchiveWriteRecoveryService.IsTempPath);
         logger.Verify(
             l => l.Log(
                 LogLevel.Warning,

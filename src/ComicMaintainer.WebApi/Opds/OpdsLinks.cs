@@ -7,7 +7,7 @@ namespace ComicMaintainer.WebApi.Opds;
 /// them against the URL it reached the catalog at, so the public host and scheme are always its own, and the links
 /// are right whether a reverse proxy forwards or strips the base path.
 /// </summary>
-internal sealed class OpdsLinks(string basePath)
+public sealed class OpdsLinks(string basePath)
 {
     /// <summary>The route prefix of every OPDS action.</summary>
     public const string RoutePrefix = "opds/v1.2";

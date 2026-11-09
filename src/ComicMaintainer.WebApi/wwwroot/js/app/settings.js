@@ -240,7 +240,8 @@ showMessage('Default preferred language updated', 'success');
             error_reporting_assignee: ['errorReportingAssignee'],
             error_reporting_max_issues_per_day: ['errorReportingMaxPerDay'],
             error_reporting_dedupe_window_hours: ['errorReportingDedupeHours'],
-            error_reporting_comment_on_recurrence: ['errorReportingCommentCheckbox']
+            error_reporting_comment_on_recurrence: ['errorReportingCommentCheckbox'],
+            opds_enabled: ['opdsEnabledCheckbox']
         });
 
         /**
@@ -398,6 +399,10 @@ showMessage('Default preferred language updated', 'success');
                         : 'Enter a password only if your Suwayomi server requires one.';
                 }
                 if (suwayomiClearPassword) suwayomiClearPassword.checked = false;
+
+                // The OPDS catalog: the feed URL is this page's own origin and base path, so it matches what the browser sees.
+                document.getElementById('opdsEnabledCheckbox').checked = !!settingsData.opds_enabled;
+                document.getElementById('opdsFeedUrl').value = window.location.origin + apiUrl('/opds/v1.2/catalog');
                 const suwayomiDownloadsDirectory = document.getElementById('suwayomiDownloadsDirectory');
                 const suwayomiImportDirectory = document.getElementById('suwayomiImportDirectory');
                 if (suwayomiDownloadsDirectory) suwayomiDownloadsDirectory.value = settingsData.suwayomi_downloads_directory || '';
@@ -1442,6 +1447,8 @@ errorEl.textContent = 'An error occurred. Please try again.';
                     commentOnRecurrence: unlessPinned('error_reporting_comment_on_recurrence', document.getElementById('errorReportingCommentCheckbox').checked)
                 };
             }
+
+            settingsUpdate.opds = { enabled: unlessPinned('opds_enabled', document.getElementById('opdsEnabledCheckbox').checked) };
 
             try {
                 await saveAllSettings(settingsUpdate);

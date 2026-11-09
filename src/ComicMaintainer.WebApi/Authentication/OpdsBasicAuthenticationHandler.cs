@@ -51,10 +51,10 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
     public const string Challenge = "Basic realm=\"ComicMaintainer OPDS\", charset=\"UTF-8\"";
 
     /// <summary>How long a credential that passed is remembered after its last use.</summary>
-    internal static readonly TimeSpan RememberedFor = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan RememberedFor = TimeSpan.FromMinutes(5);
 
     /// <summary>How long a credential can be remembered in all, however often it is used.</summary>
-    internal static readonly TimeSpan RememberedAtMost = TimeSpan.FromHours(1);
+    public static readonly TimeSpan RememberedAtMost = TimeSpan.FromHours(1);
 
     // Far above what a person types, and the 256-bit API keys; a longer value is not worth hashing.
     private const int MaxUsernameLength = 256;

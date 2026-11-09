@@ -12,7 +12,7 @@ namespace ComicMaintainer.WebApi.Opds;
 /// <param name="Self">This feed's URL, for the <c>self</c> link.</param>
 /// <param name="Up">The parent feed, when there is one.</param>
 /// <param name="Paging">Where this feed is in a paged result, when it is one.</param>
-internal sealed record OpdsFeedInfo(
+public sealed record OpdsFeedInfo(
     string Id,
     string Title,
     string MediaType,
@@ -25,7 +25,7 @@ internal sealed record OpdsFeedInfo(
 /// <param name="ItemsPerPage">The size of a page.</param>
 /// <param name="TotalResults">How many items the whole result has.</param>
 /// <param name="PageLink">Builds the URL of another page.</param>
-internal sealed record OpdsPaging(int Page, int TotalPages, int ItemsPerPage, int TotalResults, Func<int, string> PageLink);
+public sealed record OpdsPaging(int Page, int TotalPages, int ItemsPerPage, int TotalResults, Func<int, string> PageLink);
 
 /// <summary>One comic in an acquisition feed.</summary>
 /// <param name="FileId">The opaque id of the file.</param>
@@ -39,7 +39,7 @@ internal sealed record OpdsPaging(int Page, int TotalPages, int ItemsPerPage, in
 /// <param name="PageMediaType">The OPDS-PSE stream's image type.</param>
 /// <param name="LastReadPage">The last page the user read, from 1; null when the user has no progress.</param>
 /// <param name="LastReadAt">When that was.</param>
-internal sealed record OpdsIssueEntry(
+public sealed record OpdsIssueEntry(
     int FileId,
     string Title,
     DateTimeOffset Updated,
@@ -57,7 +57,7 @@ internal sealed record OpdsIssueEntry(
 /// the OpenSearch description. Everything goes through <see cref="XElement"/>, which escapes text and attributes;
 /// characters XML cannot represent at all are removed, because metadata in comic archives can contain them.
 /// </summary>
-internal static class OpdsFeedBuilder
+public static class OpdsFeedBuilder
 {
     private static readonly XNamespace Atom = "http://www.w3.org/2005/Atom";
     private static readonly XNamespace Dc = "http://purl.org/dc/terms/";
@@ -194,7 +194,7 @@ internal static class OpdsFeedBuilder
     }
 
     /// <summary>Removes the characters XML 1.0 has no representation for, keeping surrogate pairs whole.</summary>
-    internal static string Clean(string? value)
+    public static string Clean(string? value)
     {
         if (string.IsNullOrEmpty(value))
         {

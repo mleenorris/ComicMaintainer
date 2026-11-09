@@ -572,6 +572,7 @@
                     <button type="button" class="settings-nav-link" data-settings-target="settings-covers" onclick="scrollToSettingsSection('settings-covers')"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><span>Series Covers</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-metadata" onclick="scrollToSettingsSection('settings-metadata')"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>External Series Metadata</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-suwayomi" onclick="scrollToSettingsSection('settings-suwayomi')"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Suwayomi Downloads</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-opds" onclick="scrollToSettingsSection('settings-opds')"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>OPDS Catalog</span></button>
                     <button type="button" class="settings-nav-link settings-nav-link--danger" data-settings-target="settings-danger" onclick="scrollToSettingsSection('settings-danger')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Danger Zone</span></button>
                 </nav>
                 <div class="settings-page-body" id="settingsPageBody">
@@ -1192,6 +1193,31 @@
                             <input type="text" id="suwayomiImportDirectory" name="suwayomiImportDirectory" placeholder="Library root" autocomplete="off" spellcheck="false">
                             <small class="form-hint">
                                 Where new series folders are created, relative to the watched directory (e.g. <code>Manga</code>). Leave blank for the watched directory itself. Chapters of a series the library already has go into its existing folder.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-opds" aria-labelledby="settings-opds-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-globe"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-opds-title">OPDS Catalog</h3>
+                                <p class="settings-card-desc">Browse and read the library from comic apps such as Panels, Chunky and KOReader.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="opdsEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="opdsEnabledCheckbox" name="opdsEnabledCheckbox">
+                                <span>Enable the OPDS catalog</span>
+                            </label>
+                            <small class="form-hint">
+                                Off by default, because it adds a way to sign in. While it is off, every catalog address answers as if it did not exist.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="opdsFeedUrl">Feed URL</label>
+                            <input type="text" id="opdsFeedUrl" name="opdsFeedUrl" readonly spellcheck="false" autocomplete="off">
+                            <small class="form-hint">
+                                Add this address to your comic app and sign in with your username and password. You can use your API key as the password instead (required when signing in through Authelia).
                             </small>
                         </div>
                     </section>

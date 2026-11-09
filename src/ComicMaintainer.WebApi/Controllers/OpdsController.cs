@@ -36,10 +36,10 @@ namespace ComicMaintainer.WebApi.Controllers;
 public sealed class OpdsController : ControllerBase
 {
     /// <summary>Items in one page of a paged feed.</summary>
-    internal const int PageSize = 50;
+    public const int PageSize = 50;
 
     /// <summary>The longest search term accepted.</summary>
-    internal const int MaxSearchLength = 200;
+    public const int MaxSearchLength = 200;
 
     // Archives listed at once while building a feed: a feed's first view lists up to PageSize archives.
     private const int MaxConcurrentListings = 4;

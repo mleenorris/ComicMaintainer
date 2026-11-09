@@ -40,6 +40,7 @@ function settingsResponse(overrides = {}) {
         suwayomi_password_set: true,
         suwayomi_downloads_directory: '/suwayomi/downloads/mangas',
         suwayomi_import_directory: 'Manga',
+        opds_enabled: true,
         default_library_view: 'series',
         allow_registration: true,
         default_preferred_language: 'ja',

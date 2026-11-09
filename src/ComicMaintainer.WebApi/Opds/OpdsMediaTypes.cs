@@ -3,7 +3,7 @@ using ComicMaintainer.Core.Utilities;
 namespace ComicMaintainer.WebApi.Opds;
 
 /// <summary>The media types of the OPDS catalog and of the files it links to.</summary>
-internal static class OpdsMediaTypes
+public static class OpdsMediaTypes
 {
     public const string NavigationFeed = "application/atom+xml;profile=opds-catalog;kind=navigation";
     public const string AcquisitionFeed = "application/atom+xml;profile=opds-catalog;kind=acquisition";

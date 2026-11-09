@@ -281,6 +281,38 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
     }
 
     [Fact]
+    public async Task TheOpdsCatalogIsOffUntilSwitchedOnAndSaves()
+    {
+        Assert.False(new AppSettings().OpdsEnabled);
+
+        await _service.UpdateSettingsAsync(new SettingsUpdate { Opds = new OpdsUpdate(Enabled: true) });
+
+        Assert.True(SavedSection().GetProperty(nameof(AppSettings.OpdsEnabled)).GetBoolean());
+    }
+
+    [Fact]
+    public async Task TheOpdsSwitch_WhenPinned_IsRefused()
+    {
+        _environment.Set("OPDS_ENABLED", "true");
+
+        var ex = await Assert.ThrowsAsync<SettingsLockedException>(() => _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            Opds = new OpdsUpdate(Enabled: false),
+        }));
+
+        Assert.Equal("OPDS_ENABLED", Assert.Single(ex.Overrides).Variable);
+        Assert.Contains("opds_enabled", EnvLockFields(JsonSerializer.SerializeToElement(((OkObjectResult)CreateController().GetAllSettings().Result!).Value)));
+    }
+
+    [Fact]
+    public async Task TheOpdsGroup_LeftEmpty_ChangesNothing()
+    {
+        await _service.UpdateSettingsAsync(new SettingsUpdate { Opds = new OpdsUpdate() });
+
+        Assert.False(File.Exists(SettingsFile));
+    }
+
+    [Fact]
     public async Task SingleSetting_APinnedChange_IsRefused()
     {
         _environment.Set("DOWNLOAD_EXTERNAL_SERIES_IMAGES", "false");

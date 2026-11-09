@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Core.Configuration;
 using Microsoft.AspNetCore.Authorization;
@@ -31,6 +32,8 @@ public partial class FilesController : ControllerBase
     /// </summary>
     private readonly IFileOperationLock _fileOperationLock;
 
+    private readonly INotificationPublisher _notifications;
+
     public FilesController(
         IFileStoreService fileStore,
         IComicProcessorService processor,
@@ -42,7 +45,8 @@ public partial class FilesController : ControllerBase
         IEventBroadcaster eventBroadcaster,
         ISeriesNameResolver seriesNameResolver,
         IScheduledJobRunner scheduledJobs,
-        IFileOperationLock fileOperationLock)
+        IFileOperationLock fileOperationLock,
+        INotificationPublisher notifications)
     {
         _fileStore = fileStore;
         _processor = processor;
@@ -55,6 +59,7 @@ public partial class FilesController : ControllerBase
         _seriesNameResolver = seriesNameResolver;
         _scheduledJobs = scheduledJobs;
         _fileOperationLock = fileOperationLock;
+        _notifications = notifications;
     }
 
     /// <summary>

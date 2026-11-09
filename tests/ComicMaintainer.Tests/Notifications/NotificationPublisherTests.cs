@@ -20,6 +20,18 @@ namespace ComicMaintainer.Tests.Notifications;
 
 public sealed class NotificationPublisherTests
 {
+    [Fact]
+    public void TargetVerified_ReachesTheQueue_EvenWhenNoTargetWantsAnything()
+    {
+        var publisher = Publisher(new AppSettings());
+
+        publisher.TargetVerified(NotificationTarget.Komga);
+
+        var queued = Assert.Single(Queued(publisher));
+        Assert.Equal(NotificationEventType.TargetVerified, queued.EventType);
+        Assert.Equal(NotificationTarget.Komga, queued.GroupKey);
+    }
+
     private static NotificationPublisher Publisher(AppSettings settings, ILogger<NotificationPublisher>? logger = null, TimeProvider? time = null) =>
         new(NotificationTestHttp.Options(settings), logger ?? NullLogger<NotificationPublisher>.Instance, time);
 
@@ -160,11 +172,12 @@ public sealed class LibraryActivityMonitorTests : IDisposable
     private readonly Mock<ILibraryMutationLock> _mutationLock = new();
     private readonly Mock<IBatchJobRegistry> _jobs = new();
     private readonly Mock<IFileWatcherService> _watcher = new();
+    private readonly LibraryActivityTracker _runs = new();
 
     public void Dispose() => _db.Dispose();
 
     private LibraryActivityMonitor Monitor() =>
-        new(_fileLock.Object, _mutationLock.Object, _jobs.Object, _watcher.Object, _db);
+        new(_fileLock.Object, _mutationLock.Object, _jobs.Object, _runs, _watcher.Object, _db);
 
     private void AddPendingFile()
     {
@@ -195,6 +208,21 @@ public sealed class LibraryActivityMonitorTests : IDisposable
         _mutationLock.Setup(l => l.IsHeld).Returns(true);
 
         Assert.True(await Monitor().IsBusyAsync(default));
+    }
+
+    [Fact]
+    public async Task ALongRun_KeepsTheLibraryBusy_UntilItEnds()
+    {
+        var first = _runs.BeginRun();
+        var second = _runs.BeginRun();
+        Assert.True(await Monitor().IsBusyAsync(default));
+
+        first.Dispose();
+        first.Dispose();
+        Assert.True(await Monitor().IsBusyAsync(default));
+
+        second.Dispose();
+        Assert.False(await Monitor().IsBusyAsync(default));
     }
 
     [Fact]

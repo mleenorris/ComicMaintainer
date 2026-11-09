@@ -21,7 +21,7 @@ public class SuwayomiDownloadImportJobHandlerTests
     [Fact]
     public void Handler_IsEnabledByDefaultAndRunsEveryFifteenMinutes()
     {
-        var handler = new SuwayomiDownloadImportJobHandler(Mock.Of<ISuwayomiDownloadImportService>(), Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
+        var handler = new SuwayomiDownloadImportJobHandler(Mock.Of<ISuwayomiDownloadImportService>(), Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>(), new ComicMaintainer.Core.Notifications.LibraryActivityTracker());
 
         Assert.Equal("suwayomi-download-import", handler.JobKey);
         Assert.True(handler.Defaults.Enabled);
@@ -41,7 +41,7 @@ public class SuwayomiDownloadImportJobHandlerTests
         var importer = new Mock<ISuwayomiDownloadImportService>();
         importer.Setup(i => i.ImportAsync(It.IsAny<CancellationToken>())).ReturnsAsync(result);
 
-        var summary = await new SuwayomiDownloadImportJobHandler(importer.Object, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>()).ExecuteAsync(null, CancellationToken.None);
+        var summary = await new SuwayomiDownloadImportJobHandler(importer.Object, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>(), new ComicMaintainer.Core.Notifications.LibraryActivityTracker()).ExecuteAsync(null, CancellationToken.None);
 
         Assert.Equal(
             "Imported 3 chapter(s) into 2 series folder(s) (Solo Leveling, Omniscient Reader); 1 still downloading; removed 2 empty folder(s).",

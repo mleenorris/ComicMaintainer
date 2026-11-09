@@ -33,6 +33,9 @@ public interface INotificationPublisher
 
     /// <summary>A scheduled job finished and reported something to look at.</summary>
     void ScheduledJobFindings(string jobKey, string jobName, string summary);
+
+    /// <summary>A target just accepted a test, so whatever was held back for it can go out.</summary>
+    void TargetVerified(string target);
 }
 
 /// <summary>An event on its way to the delivery queue.</summary>
@@ -96,6 +99,11 @@ public sealed class NotificationPublisher : INotificationPublisher
 
     public void ScheduledJobFindings(string jobKey, string jobName, string summary) =>
         Publish(() => new NotificationEvent(NotificationEventType.JobFindings, jobKey, jobName, summary, null));
+
+    // Not through Publish, which drops what no target has chosen. If the channel is full this
+    // is lost, and the target's pause simply runs out by itself.
+    public void TargetVerified(string target) =>
+        _events.Writer.TryWrite(new NotificationEvent(NotificationEventType.TargetVerified, target, string.Empty, null, null));
 
     private void Publish(Func<NotificationEvent> create)
     {

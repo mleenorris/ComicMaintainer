@@ -181,7 +181,8 @@ public sealed class ComicProcessorServiceFileLockTests : IDisposable
             Mock.Of<IFileWatcherService>(),
             new TestOptionsMonitor<AppSettings>(new AppSettings { WriteCoverToFirstArchive = true }),
             Mock.Of<ILogger<SeriesArchiveCoverWriter>>(),
-            fileLock);
+            fileLock,
+            Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
         var held = await fileLock.AcquireAsync(file);
         var write = writer.WriteAsync("saga", cover, "image/jpeg");

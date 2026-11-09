@@ -106,6 +106,9 @@ public sealed class NotificationDispatcher : BackgroundService
     /// <summary>Consecutive temporary failures per target, for how long to leave it alone.</summary>
     private readonly Dictionary<string, int> _consecutiveFailures = new(StringComparer.Ordinal);
 
+    /// <summary>Each target's settings when last looked at, to notice a change.</summary>
+    private readonly Dictionary<string, NotificationTargetOptions> _lastSeenOptions = new(StringComparer.Ordinal);
+
     private DateTime _lastPruneAt = DateTime.MinValue;
 
     public NotificationDispatcher(
@@ -162,6 +165,7 @@ public sealed class NotificationDispatcher : BackgroundService
     public async Task<TimeSpan> RunOnceAsync(CancellationToken cancellationToken)
     {
         await SaveRaisedEventsAsync(cancellationToken);
+        await ReleaseReconfiguredTargetsAsync(cancellationToken);
         await PruneIfDueAsync(cancellationToken);
 
         while (await DeliverNextDueAsync(cancellationToken))
@@ -236,6 +240,12 @@ public sealed class NotificationDispatcher : BackgroundService
 
     private async Task ApplyEventAsync(ComicMaintainerDbContext db, NotificationEvent notification, CancellationToken cancellationToken)
     {
+        if (notification.EventType == NotificationEventType.TargetVerified)
+        {
+            await ReleaseTargetAsync(notification.GroupKey!, cancellationToken);
+            return;
+        }
+
         var now = Now;
         if (notification.FilePath is not null && !await IsRecentlyAddedAsync(db, notification.FilePath, now, cancellationToken))
         {
@@ -306,7 +316,13 @@ public sealed class NotificationDispatcher : BackgroundService
         }
         else if (pending.AttemptCount == 0)
         {
-            pending.DueAt = Earliest(now + RescanDebounce, AsUtc(pending.CreatedAt) + RescanMaxHold);
+            // Only ever later: a rescan past its limit is already due, and pulling it back to
+            // then would cut short the wait of one that just found the library busy.
+            var pushedBack = Earliest(now + RescanDebounce, AsUtc(pending.CreatedAt) + RescanMaxHold);
+            if (pushedBack > AsUtc(pending.DueAt))
+            {
+                pending.DueAt = pushedBack;
+            }
         }
 
         // A rescan waiting to retry keeps its time; when it goes out it covers this change too.
@@ -433,6 +449,15 @@ public sealed class NotificationDispatcher : BackgroundService
 
     private async Task DeliverAsync(ComicMaintainerDbContext db, NotificationDeliveryEntity delivery, DateTime now, CancellationToken cancellationToken)
     {
+        // First, because the settings below exist only for a known target: a row left by a
+        // different version must end here instead of stopping every delivery behind it.
+        if (!_channels.TryGetValue(delivery.Target, out var channel))
+        {
+            FinishFailed(delivery, now, "Unknown notification target.");
+            await db.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
         var options = NotificationTargetOptions.For(_settings.CurrentValue, delivery.Target);
         var stillWanted = NotificationTarget.IsRescan(delivery.Target) ? options.Enabled : options.Receives(delivery.EventType);
         if (!stillWanted)
@@ -440,13 +465,6 @@ public sealed class NotificationDispatcher : BackgroundService
             // Switched off since this was queued.
             delivery.Status = NotificationDeliveryStatus.Cancelled;
             delivery.CompletedAt = now;
-            await db.SaveChangesAsync(cancellationToken);
-            return;
-        }
-
-        if (!_channels.TryGetValue(delivery.Target, out var channel))
-        {
-            FinishFailed(delivery, now, "Unknown notification target.");
             await db.SaveChangesAsync(cancellationToken);
             return;
         }
@@ -502,6 +520,46 @@ public sealed class NotificationDispatcher : BackgroundService
         }
 
         await db.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// A changed setting may be the fix for a target that kept failing, so the target gets a
+    /// fresh start. Noticed within a minute, which is the longest the loop sleeps.
+    /// </summary>
+    private async Task ReleaseReconfiguredTargetsAsync(CancellationToken cancellationToken)
+    {
+        var settings = _settings.CurrentValue;
+        foreach (var target in NotificationTarget.All.Where(_channels.ContainsKey))
+        {
+            var current = NotificationTargetOptions.For(settings, target);
+            if (_lastSeenOptions.TryGetValue(target, out var previous) && previous != current)
+            {
+                await ReleaseTargetAsync(target, cancellationToken);
+            }
+
+            // Only now, so a database failure above tries again on the next pass.
+            _lastSeenOptions[target] = current;
+        }
+    }
+
+    /// <summary>
+    /// Ends a target's pause and makes what was waiting to retry due now, so a target that has
+    /// been fixed is not left silent for hours. Batches still gathering chapters and rescans
+    /// waiting for the library keep their time: those never failed.
+    /// </summary>
+    private async Task ReleaseTargetAsync(string target, CancellationToken cancellationToken)
+    {
+        _nextSendAllowed.Remove(target);
+        _consecutiveFailures.Remove(target);
+
+        var now = Now;
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        await db.NotificationDeliveries
+            .Where(row => row.Target == target
+                && row.Status == NotificationDeliveryStatus.Pending
+                && row.AttemptCount > 0
+                && row.DueAt > now)
+            .ExecuteUpdateAsync(set => set.SetProperty(row => row.DueAt, now), cancellationToken);
     }
 
     private void ScheduleRetry(NotificationDeliveryEntity delivery, NotificationDeliveryException failure)

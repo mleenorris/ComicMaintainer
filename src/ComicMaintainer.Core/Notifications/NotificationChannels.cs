@@ -301,8 +301,10 @@ public sealed class KomgaScanChannel : NotificationChannelBase
                     .ToList()
                 : [];
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
+            // InvalidOperationException: valid JSON of the wrong shape, such as a list of numbers
+            // from something else listening at that URL.
             throw new NotificationDeliveryException("Komga's library list could not be read.", isTransient: false);
         }
 

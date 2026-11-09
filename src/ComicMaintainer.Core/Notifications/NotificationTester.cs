@@ -29,12 +29,18 @@ public sealed class NotificationTester : INotificationTester
 {
     private readonly IReadOnlyDictionary<string, INotificationChannel> _channels;
     private readonly ILibraryActivityMonitor _activity;
+    private readonly INotificationPublisher _publisher;
     private readonly TimeProvider _timeProvider;
 
-    public NotificationTester(IEnumerable<INotificationChannel> channels, ILibraryActivityMonitor activity, TimeProvider? timeProvider = null)
+    public NotificationTester(
+        IEnumerable<INotificationChannel> channels,
+        ILibraryActivityMonitor activity,
+        INotificationPublisher publisher,
+        TimeProvider? timeProvider = null)
     {
         _channels = channels.ToDictionary(channel => channel.Target, StringComparer.Ordinal);
         _activity = activity;
+        _publisher = publisher;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -64,6 +70,9 @@ public sealed class NotificationTester : INotificationTester
             [],
             _timeProvider.GetUtcNow().UtcDateTime);
         await channel.SendAsync(message, cancellationToken);
+
+        // Proof the target works again, so the queue need not sit out a long pause.
+        _publisher.TargetVerified(target);
         return true;
     }
 }

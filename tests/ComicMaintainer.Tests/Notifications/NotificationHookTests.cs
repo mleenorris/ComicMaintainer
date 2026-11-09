@@ -375,11 +375,29 @@ public sealed class JobFindingsTests
     }
 
     [Fact]
+    public async Task MetadataBackfill_KeepsTheLibraryBusy_UntilItEnds_EvenWhenItFails()
+    {
+        var tracker = new LibraryActivityTracker();
+        var handler = new MetadataBackfillJobHandler(
+            _fileStore.Object, _processor.Object, Mock.Of<ISeriesNameResolver>(), tracker, NullLogger<MetadataBackfillJobHandler>.Instance);
+        var activeDuringTheRun = false;
+        _fileStore
+            .Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => activeDuringTheRun = tracker.IsRunActive)
+            .ThrowsAsync(new IOException("database gone"));
+
+        await Assert.ThrowsAsync<IOException>(() => handler.ExecuteWithFindingsAsync(null, default));
+
+        Assert.True(activeDuringTheRun);
+        Assert.False(tracker.IsRunActive);
+    }
+
+    [Fact]
     public async Task MetadataBackfill_ReportsFailures_NotSuccesses()
     {
         var resolver = new Mock<ISeriesNameResolver>();
         resolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>())).ReturnsAsync(new SeriesNameResolution { ResolvedSeries = "S" });
-        var handler = new MetadataBackfillJobHandler(_fileStore.Object, _processor.Object, resolver.Object, NullLogger<MetadataBackfillJobHandler>.Instance);
+        var handler = new MetadataBackfillJobHandler(_fileStore.Object, _processor.Object, resolver.Object, new ComicMaintainer.Core.Notifications.LibraryActivityTracker(), NullLogger<MetadataBackfillJobHandler>.Instance);
 
         var file = new ComicFile { FilePath = "/a/x.cbz", MetadataVersion = 2, WrittenMetadataVersion = 1, Metadata = new ComicMetadata { Series = "S", Issue = "1" } };
         _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { file });
@@ -399,11 +417,50 @@ public sealed class SuwayomiNotificationHookTests
 {
     private readonly Mock<ISuwayomiDownloadImportService> _importer = new();
     private readonly Mock<INotificationPublisher> _notifications = new();
+    private readonly LibraryActivityTracker _tracker = new();
+
+    private SuwayomiDownloadImportJobHandler Handler() => new(_importer.Object, _notifications.Object, _tracker);
 
     private Task<string> RunAsync(SuwayomiImportResult result)
     {
         _importer.Setup(i => i.ImportAsync(It.IsAny<CancellationToken>())).ReturnsAsync(result);
-        return new SuwayomiDownloadImportJobHandler(_importer.Object, _notifications.Object).ExecuteAsync(null, default);
+        return Handler().ExecuteAsync(null, default);
+    }
+
+    [Fact]
+    public async Task AnImportThatThrows_RaisesAFailure_AndStillFailsTheJob()
+    {
+        _importer.Setup(i => i.ImportAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk gone"));
+
+        await Assert.ThrowsAsync<IOException>(() => Handler().ExecuteAsync(null, default));
+
+        _notifications.Verify(n => n.SuwayomiImportFailed(It.Is<string>(m => m.Contains("disk gone"))), Times.Once);
+        Assert.False(_tracker.IsRunActive);
+    }
+
+    [Fact]
+    public async Task ACancelledImport_RaisesNoFailure()
+    {
+        _importer.Setup(i => i.ImportAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new OperationCanceledException());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => Handler().ExecuteAsync(null, default));
+
+        _notifications.Verify(n => n.SuwayomiImportFailed(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task APass_KeepsTheLibraryBusy_UntilItEnds()
+    {
+        var activeDuringThePass = false;
+        _importer
+            .Setup(i => i.ImportAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => activeDuringThePass = _tracker.IsRunActive)
+            .ReturnsAsync(new SuwayomiImportResult());
+
+        await Handler().ExecuteAsync(null, default);
+
+        Assert.True(activeDuringThePass);
+        Assert.False(_tracker.IsRunActive);
     }
 
     [Fact]

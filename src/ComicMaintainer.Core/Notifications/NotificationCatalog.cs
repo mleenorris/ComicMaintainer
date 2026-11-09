@@ -50,6 +50,9 @@ public static class NotificationEventType
     /// <summary>Files in the library changed; rescan targets only.</summary>
     public const string LibraryChanged = "library-changed";
 
+    /// <summary>A target just accepted a test. For the queue itself, so no target can choose it.</summary>
+    internal const string TargetVerified = "target-verified";
+
     /// <summary>The events a target that is sent messages can receive.</summary>
     public static IReadOnlyList<string> PushEvents { get; } = [NewChapters, SuwayomiImportFailed, JobFailed, JobFindings];
 

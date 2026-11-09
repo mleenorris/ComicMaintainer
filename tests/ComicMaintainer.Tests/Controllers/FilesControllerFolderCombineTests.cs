@@ -105,7 +105,8 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
             Mock.Of<IEventBroadcaster>(),
             Mock.Of<ISeriesNameResolver>(),
             Mock.Of<IScheduledJobRunner>(),
-            new ComicMaintainer.Core.Services.FileOperationLock());
+            new ComicMaintainer.Core.Services.FileOperationLock(),
+            Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
     private string Dir(string name) => Path.Join(_root, name);
 

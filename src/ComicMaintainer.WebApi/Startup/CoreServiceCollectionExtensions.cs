@@ -365,6 +365,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<INotificationChannel, KavitaScanChannel>();
         services.AddSingleton<NotificationPublisher>();
         services.AddSingleton<INotificationPublisher>(sp => sp.GetRequiredService<NotificationPublisher>());
+        services.AddSingleton<ILibraryActivityTracker, LibraryActivityTracker>();
         services.AddSingleton<ILibraryActivityMonitor, LibraryActivityMonitor>();
         services.AddSingleton<INotificationTester, NotificationTester>();
 

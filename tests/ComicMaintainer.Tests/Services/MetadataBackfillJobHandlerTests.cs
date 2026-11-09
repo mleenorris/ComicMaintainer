@@ -27,6 +27,7 @@ public class MetadataBackfillJobHandlerTests
         _fileStore.Object,
         _processor.Object,
         _resolver.Object,
+        new ComicMaintainer.Core.Notifications.LibraryActivityTracker(),
         new Mock<ILogger<MetadataBackfillJobHandler>>().Object);
 
     [Fact]

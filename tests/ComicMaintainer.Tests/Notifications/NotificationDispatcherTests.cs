@@ -1,6 +1,9 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Notifications;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -41,13 +44,13 @@ public sealed class NotificationDispatcherTests : IDisposable
 
     public void Dispose() => _db.Dispose();
 
-    private NotificationDispatcher CreateDispatcher(IEnumerable<INotificationChannel>? channels = null) =>
+    private NotificationDispatcher CreateDispatcher(IEnumerable<INotificationChannel>? channels = null, ILibraryActivityMonitor? activity = null) =>
         new(
             _db,
             _publisher,
             channels ?? new INotificationChannel[] { _ntfy, _discord, _komga, _kavita },
             NotificationTestHttp.Options(_settings),
-            _activity.Object,
+            activity ?? _activity.Object,
             NullLogger<NotificationDispatcher>.Instance,
             _time);
 
@@ -493,6 +496,84 @@ public sealed class NotificationDispatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task Rescan_PastItsLimit_ALaterChangeDoesNotCutABusyWaitShort()
+    {
+        OnlyKomga();
+        _activity.Setup(a => a.IsBusyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var dispatcher = CreateDispatcher();
+
+        _publisher.LibraryChanged();
+        await dispatcher.RunOnceAsync(default);
+        _time.Advance(NotificationDispatcher.RescanMaxHold + TimeSpan.FromMinutes(1));
+        await dispatcher.RunOnceAsync(default);
+        var recheckAt = Now + NotificationDispatcher.BusyRecheckDelay;
+        Assert.Equal(recheckAt, Assert.Single(Rows(NotificationTarget.Komga)).DueAt);
+
+        _activity.Invocations.Clear();
+        _time.Advance(TimeSpan.FromSeconds(1));
+        _publisher.LibraryChanged();
+        await dispatcher.RunOnceAsync(default);
+
+        Assert.Equal(recheckAt, Assert.Single(Rows(NotificationTarget.Komga)).DueAt);
+        _activity.Verify(a => a.IsBusyAsync(It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Empty(_komga.Sent);
+    }
+
+    // A backfill holds a file lock only during each write and is not a batch job, so this runs
+    // the real handler and the real monitor and looks between two files.
+    [Fact]
+    public async Task Rescan_IsHeldForAWholeMetadataBackfill_AndGoesOutOnceWhenItEnds()
+    {
+        OnlyKomga();
+        var tracker = new LibraryActivityTracker();
+        var monitor = new LibraryActivityMonitor(
+            new FileOperationLock(), new LibraryMutationLock(), new Mock<IBatchJobRegistry>().Object, tracker, new Mock<IFileWatcherService>().Object, _db);
+        var dispatcher = CreateDispatcher(activity: monitor);
+
+        var files = new[] { "/l/a.cbz", "/l/b.cbz", "/l/c.cbz" }
+            .Select(path => new ComicFile { FilePath = path, MetadataVersion = 2, Metadata = new ComicMetadata { Series = "S" } })
+            .ToList();
+        var fileStore = new Mock<IFileStoreService>();
+        fileStore
+            .Setup(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+        var processor = new Mock<IComicProcessorService>();
+        processor
+            .Setup(p => p.WriteMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string path, ComicMetadata _, ComicMetadataFieldFlags _, CancellationToken _) =>
+            {
+                _publisher.LibraryChanged();
+                return new MetadataWriteResult(MetadataWriteOutcome.Written, path);
+            });
+
+        // Just after a write, no lock is held and the rescan is long overdue.
+        fileStore
+            .Setup(f => f.MarkFileBackfilledAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                _time.Advance(NotificationDispatcher.RescanMaxHold + TimeSpan.FromMinutes(1));
+                await dispatcher.RunOnceAsync(default);
+                Assert.Empty(_komga.Sent);
+            });
+        var resolver = new Mock<ISeriesNameResolver>();
+        resolver
+            .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesNameResolution());
+        var handler = new MetadataBackfillJobHandler(
+            fileStore.Object, processor.Object, resolver.Object, tracker, NullLogger<MetadataBackfillJobHandler>.Instance);
+
+        await handler.ExecuteWithFindingsAsync(null, default);
+        fileStore.Verify(f => f.MarkFileBackfilledAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        Assert.Empty(_komga.Sent);
+
+        _time.Advance(NotificationDispatcher.BusyRecheckDelay);
+        await dispatcher.RunOnceAsync(default);
+
+        Assert.Single(_komga.Sent);
+        Assert.Single(Rows(NotificationTarget.Komga));
+    }
+
+    [Fact]
     public async Task Rescan_AFailedRequest_RetriesOnItsOwnTime_AndLaterChangesJoinIt()
     {
         OnlyKomga();
@@ -755,6 +836,119 @@ public sealed class NotificationDispatcherTests : IDisposable
         Assert.Equal(Now + NotificationDispatcher.RetryDelays[0], Rows()[1].DueAt);
     }
 
+    private void MakeNtfyFailWhile(Func<bool> failing) =>
+        _ntfy.OnSend = (_, _) => failing() ? throw new NotificationDeliveryException("down", isTransient: true) : Task.CompletedTask;
+
+    [Fact]
+    public async Task ChangingATargetsSettings_EndsItsPause_AndRetriesWhatWasWaiting()
+    {
+        OnlyNtfy();
+        var failing = true;
+        MakeNtfyFailWhile(() => failing);
+        var dispatcher = CreateDispatcher();
+        QueueJobFailure(1);
+        await dispatcher.RunOnceAsync(default);
+        Assert.Empty(_ntfy.Sent);
+
+        failing = false;
+        _settings.NotifyNtfyUrl = "https://ntfy.fixed.example";
+        await dispatcher.RunOnceAsync(default);
+
+        Assert.Single(_ntfy.Sent);
+    }
+
+    [Fact]
+    public async Task ChangingAnotherTargetsSettings_LeavesThePauseAlone()
+    {
+        OnlyNtfy();
+        var failing = true;
+        MakeNtfyFailWhile(() => failing);
+        var dispatcher = CreateDispatcher();
+        QueueJobFailure(1);
+        await dispatcher.RunOnceAsync(default);
+
+        failing = false;
+        _settings.NotifyGotifyUrl = "https://gotify.example";
+        _settings.NotifyKomgaUrl = "http://komga.lan";
+        await dispatcher.RunOnceAsync(default);
+
+        Assert.Empty(_ntfy.Sent);
+    }
+
+    [Fact]
+    public async Task ASettingsChange_IsNoticedAgain_WhenTheDatabaseCouldNotTakeTheRelease()
+    {
+        OnlyNtfy();
+        var failing = true;
+        MakeNtfyFailWhile(() => failing);
+        var dispatcher = CreateDispatcher();
+        QueueJobFailure(1);
+        await dispatcher.RunOnceAsync(default);
+
+        failing = false;
+        _settings.NotifyNtfyUrl = "https://ntfy.fixed.example";
+        _db.FailNextCreations = 1;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.RunOnceAsync(default));
+
+        await dispatcher.RunOnceAsync(default);
+
+        Assert.Single(_ntfy.Sent);
+    }
+
+    [Fact]
+    public async Task ATestThatWorked_EndsTheTargetsPause_AndRetriesWhatWasWaiting()
+    {
+        OnlyNtfy();
+        var failing = true;
+        MakeNtfyFailWhile(() => failing);
+        var dispatcher = CreateDispatcher();
+        QueueJobFailure(1);
+        await dispatcher.RunOnceAsync(default);
+
+        failing = false;
+        _publisher.TargetVerified(NotificationTarget.Ntfy);
+        await dispatcher.RunOnceAsync(default);
+
+        Assert.Single(_ntfy.Sent);
+    }
+
+    [Fact]
+    public async Task EndingAPause_LeavesOtherTargetsAlone()
+    {
+        _settings.NotifyKomgaEnabled = false;
+        _settings.NotifyKavitaEnabled = false;
+        var failing = true;
+        MakeNtfyFailWhile(() => failing);
+        _discord.OnSend = (_, _) => throw new NotificationDeliveryException("down", isTransient: true);
+        var dispatcher = CreateDispatcher();
+        QueueJobFailure(1);
+        await dispatcher.RunOnceAsync(default);
+        var discordDue = Assert.Single(Rows(NotificationTarget.Discord)).DueAt;
+
+        failing = false;
+        _publisher.TargetVerified(NotificationTarget.Ntfy);
+        await dispatcher.RunOnceAsync(default);
+
+        Assert.Single(_ntfy.Sent);
+        Assert.Equal(discordDue, Assert.Single(Rows(NotificationTarget.Discord)).DueAt);
+    }
+
+    [Fact]
+    public async Task EndingAPause_LeavesBatchesStillGatheringChaptersOnTheirOwnTime()
+    {
+        OnlyNtfy();
+        var dispatcher = CreateDispatcher();
+        _publisher.NewChapter(Series, "1");
+        await dispatcher.RunOnceAsync(default);
+        var due = Assert.Single(Rows()).DueAt;
+
+        _publisher.TargetVerified(NotificationTarget.Ntfy);
+        await dispatcher.RunOnceAsync(default);
+
+        Assert.Equal(due, Assert.Single(Rows()).DueAt);
+        Assert.Empty(_ntfy.Sent);
+    }
+
     [Fact]
     public async Task TheWait_IsCappedAtAMinute_WhenNothingIsDue()
     {
@@ -808,6 +1002,20 @@ public sealed class NotificationDispatcherTests : IDisposable
         await dispatcher.RunOnceAsync(default);
 
         Assert.Equal(NotificationDeliveryStatus.Failed, Assert.Single(Rows()).Status);
+    }
+
+    // After a downgrade, say. It used to throw on every pass and stop every delivery behind it.
+    [Fact]
+    public async Task ARowForATargetThisVersionDoesNotKnow_IsFailed_AndTheRestStillGoOut()
+    {
+        OnlyNtfy();
+        SeedRow(new NotificationDeliveryEntity { Target = "matrix", EventType = NotificationEventType.JobFailed, Title = "t", DueAt = Now, CreatedAt = Now });
+        SeedRow(new NotificationDeliveryEntity { Target = NotificationTarget.Ntfy, EventType = NotificationEventType.JobFailed, Title = "t", DueAt = Now, CreatedAt = Now });
+
+        await CreateDispatcher().RunOnceAsync(default);
+
+        Assert.Equal(NotificationDeliveryStatus.Failed, Assert.Single(Rows("matrix")).Status);
+        Assert.Single(_ntfy.Sent);
     }
 
     [Fact]

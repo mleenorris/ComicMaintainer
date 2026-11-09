@@ -19,11 +19,16 @@ public class SuwayomiDownloadImportJobHandler : IScheduledJobHandler
 
     private readonly ISuwayomiDownloadImportService _importer;
     private readonly INotificationPublisher _notifications;
+    private readonly ILibraryActivityTracker _activity;
 
-    public SuwayomiDownloadImportJobHandler(ISuwayomiDownloadImportService importer, INotificationPublisher notifications)
+    public SuwayomiDownloadImportJobHandler(
+        ISuwayomiDownloadImportService importer,
+        INotificationPublisher notifications,
+        ILibraryActivityTracker activity)
     {
         _importer = importer;
         _notifications = notifications;
+        _activity = activity;
     }
 
     public string JobKey => Key;
@@ -37,7 +42,10 @@ public class SuwayomiDownloadImportJobHandler : IScheduledJobHandler
 
     public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
     {
-        var result = await _importer.ImportAsync(cancellationToken);
+        // A pass moves chapters one at a time; a scan is not asked for until it has finished.
+        using var run = _activity.BeginRun();
+
+        var result = await ImportAsync(cancellationToken);
         var summary = FormatSummary(result);
 
         // The file watcher processes what was imported, so media servers are told again then;
@@ -53,6 +61,21 @@ public class SuwayomiDownloadImportJobHandler : IScheduledJobHandler
         }
 
         return summary;
+    }
+
+    private async Task<SuwayomiImportResult> ImportAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _importer.ImportAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            // The runner reports this as a failed job too, but a target may have chosen only
+            // this event.
+            _notifications.SuwayomiImportFailed($"The import stopped unexpectedly: {ex.Message}");
+            throw;
+        }
     }
 
     /// <summary>

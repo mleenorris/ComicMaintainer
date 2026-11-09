@@ -268,6 +268,8 @@ public sealed class NotificationChannelTests
     [InlineData("{}", "no libraries")]
     [InlineData("""[{"name":"no id"}]""", "no libraries")]
     [InlineData("<html>sign in</html>", "could not be read")]
+    [InlineData("[1,2]", "could not be read")]
+    [InlineData("""[{"id":5}]""", "could not be read")]
     public async Task Komga_FailsPermanently_WhenTheLibraryListIsUnusable(string list, string reason)
     {
         var handler = new StubHttpHandler(_ => NotificationTestHttp.Response(HttpStatusCode.OK, list));
@@ -544,7 +546,7 @@ public sealed class NotificationChannelTests
     }
 
     private static NotificationTester Tester(ILibraryActivityMonitor? activity, params RecordingChannel[] channels) =>
-        new(channels, activity ?? new Mock<ILibraryActivityMonitor>().Object);
+        new(channels, activity ?? new Mock<ILibraryActivityMonitor>().Object, Mock.Of<INotificationPublisher>());
 
     [Fact]
     public async Task Tester_SendsARealMessageEvenWhenTheTargetIsDisabled()
@@ -583,6 +585,22 @@ public sealed class NotificationChannelTests
 
         Assert.Empty(komga.Sent);
         Assert.Single(ntfy.Sent);
+    }
+
+    [Fact]
+    public async Task Tester_TellsTheQueueOnlyWhenTheTargetAcceptedTheTest()
+    {
+        var publisher = new Mock<INotificationPublisher>();
+        var channel = new RecordingChannel(NotificationTarget.Ntfy);
+        var tester = new NotificationTester(new[] { channel }, new Mock<ILibraryActivityMonitor>().Object, publisher.Object);
+
+        channel.OnSend = (_, _) => throw new NotificationDeliveryException("no", isTransient: false);
+        await Assert.ThrowsAsync<NotificationDeliveryException>(() => tester.SendTestAsync(NotificationTarget.Ntfy, CancellationToken.None));
+        publisher.Verify(p => p.TargetVerified(It.IsAny<string>()), Times.Never);
+
+        channel.OnSend = null;
+        await tester.SendTestAsync(NotificationTarget.Ntfy, CancellationToken.None);
+        publisher.Verify(p => p.TargetVerified(NotificationTarget.Ntfy), Times.Once);
     }
 
     [Fact]

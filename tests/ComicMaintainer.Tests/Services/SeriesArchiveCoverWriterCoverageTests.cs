@@ -27,6 +27,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     private readonly string _source;
     private readonly Mock<ISeriesLibraryService> _library = new();
     private readonly Mock<IFileWatcherService> _watcher = new();
+    private readonly Mock<ComicMaintainer.Core.Notifications.INotificationPublisher> _notifications = new();
     private readonly AppSettings _settings = new() { WriteCoverToFirstArchive = true };
 
     public SeriesArchiveCoverWriterCoverageTests()
@@ -150,7 +151,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(_settings);
-        var writer = new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger.Object, new FileOperationLock());
+        var writer = new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger.Object, new FileOperationLock(), Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
         await writer.WriteAsync(Key, _source, "image/jpeg");
 
@@ -175,7 +176,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(_settings);
-        var writer = new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger.Object, new FileOperationLock());
+        var writer = new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger.Object, new FileOperationLock(), Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             writer.WriteAsync(Key, _source, "image/jpeg", cancellationToken: cts.Token));
@@ -401,6 +402,46 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         _watcher.Verify(w => w.SuppressProcessing(It.IsAny<string>()), Times.Never);
     }
 
+    [Fact]
+    public async Task WriteAsync_ReplacingTheArchive_AsksMediaServersToRescan()
+    {
+        SetupFirstArchive(CreateCbz("issue1.cbz", ("01.jpg", PageBytes)));
+
+        await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
+
+        _notifications.Verify(n => n.LibraryChanged(), Times.Once);
+    }
+
+    [Fact]
+    public async Task WriteAsync_ArchiveAlreadyHoldingTheCover_AsksForNoRescan()
+    {
+        SetupFirstArchive(CreateCbz("issue1.cbz", ("01.jpg", PageBytes), ("cover.jpg", NewCover)));
+
+        await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
+
+        _notifications.Verify(n => n.LibraryChanged(), Times.Never);
+    }
+
+    [Fact]
+    public async Task RemoveAsync_TakingTheCoverOut_AsksMediaServersToRescan()
+    {
+        SetupFirstArchive(CreateCbz("issue1.cbz", ("01.jpg", PageBytes), ("cover.jpg", NewCover)));
+
+        await CreateWriter().RemoveAsync(Key);
+
+        _notifications.Verify(n => n.LibraryChanged(), Times.Once);
+    }
+
+    [Fact]
+    public async Task RemoveAsync_NothingToTakeOut_AsksForNoRescan()
+    {
+        SetupFirstArchive(CreateCbz("issue1.cbz", ("01.jpg", PageBytes)));
+
+        await CreateWriter().RemoveAsync(Key);
+
+        _notifications.Verify(n => n.LibraryChanged(), Times.Never);
+    }
+
     // ---- RemoveAsync -----------------------------------------------------------------
 
     [Theory]
@@ -524,7 +565,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     {
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(_settings);
-        return new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger ?? Mock.Of<ILogger<SeriesArchiveCoverWriter>>(), new FileOperationLock());
+        return new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger ?? Mock.Of<ILogger<SeriesArchiveCoverWriter>>(), new FileOperationLock(), _notifications.Object);
     }
 
     private void SetupFirstArchive(string? path)

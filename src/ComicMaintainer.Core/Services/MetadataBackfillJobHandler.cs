@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 
@@ -16,17 +17,20 @@ public class MetadataBackfillJobHandler : IScheduledJobFindingsHandler
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly ISeriesNameResolver _seriesNameResolver;
+    private readonly ILibraryActivityTracker _activity;
     private readonly ILogger<MetadataBackfillJobHandler> _logger;
 
     public MetadataBackfillJobHandler(
         IFileStoreService fileStore,
         IComicProcessorService processor,
         ISeriesNameResolver seriesNameResolver,
+        ILibraryActivityTracker activity,
         ILogger<MetadataBackfillJobHandler> logger)
     {
         _fileStore = fileStore;
         _processor = processor;
         _seriesNameResolver = seriesNameResolver;
+        _activity = activity;
         _logger = logger;
     }
 
@@ -40,6 +44,10 @@ public class MetadataBackfillJobHandler : IScheduledJobFindingsHandler
 
     public async Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken)
     {
+        // Held for the whole run: each write locks only its own file, and media servers must
+        // not be asked to scan until the last one is done.
+        using var run = _activity.BeginRun();
+
         var options = ParseOptions(optionsJson);
         var processed = 0;
         var failed = 0;

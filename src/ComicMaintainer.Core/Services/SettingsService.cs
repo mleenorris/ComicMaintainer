@@ -294,14 +294,12 @@ public class SettingsService : ISettingsService
         // Null/empty is allowed (clears the default); otherwise validate
         // against the same allow-list the per-series API uses so the JSON
         // file never persists a code that no one will honour at read time.
-        string? normalized;
-        try
+        var normalized = Models.SeriesLanguagePreference.Normalize(language);
+        if (normalized is null && !string.IsNullOrWhiteSpace(language))
         {
-            normalized = Models.SeriesLanguagePreference.ValidateOrThrow(language);
-        }
-        catch (ArgumentException ex)
-        {
-            throw new SettingsValidationException(ex.Message, nameof(language));
+            throw new SettingsValidationException(
+                $"Unsupported language '{language}'. Allowed values: {string.Join(", ", Models.SeriesLanguagePreference.AllowedLanguages)}.",
+                nameof(language));
         }
 
         await SaveValueAsync("DefaultPreferredLanguage", normalized, cancellationToken);
@@ -900,8 +898,9 @@ public class SettingsService : ISettingsService
             // Inside the lock so concurrent saves reload in the order they wrote.
             ReloadConfiguration();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // A cancelled save is the client going away, not a failure.
             _logger.LogError(ex, "Failed to persist settings {SettingNames}", string.Join(", ", values.Keys));
             throw;
         }

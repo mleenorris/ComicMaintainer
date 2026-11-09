@@ -388,8 +388,10 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     [Fact]
     public async Task UpdateDefaultPreferredLanguageAsync_RejectsUnsupportedLanguages()
     {
-        await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateDefaultPreferredLanguageAsync("fr"));
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateDefaultPreferredLanguageAsync("fr"));
 
+        // The reason is shown to the user as it is, so it must not name a C# parameter.
+        Assert.Equal("Unsupported language 'fr'. Allowed values: en, ja, ko, zh.", ex.Reason);
         Assert.False(File.Exists(_settingsPath));
     }
 

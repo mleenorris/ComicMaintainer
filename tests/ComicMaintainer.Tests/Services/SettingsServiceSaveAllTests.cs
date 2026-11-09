@@ -266,6 +266,31 @@ public sealed class SettingsServiceSaveAllTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateSettingsAsync_AClientAbort_IsNotLoggedAsAFailureAndSavesNothing()
+    {
+        using var request = new CancellationTokenSource();
+        var service = new AbortingSettingsService(_logger, new TestOptionsMonitor<AppSettings>(_settings), _configurationRoot.Object, request);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.UpdateSettingsAsync(new SettingsUpdate { IssueNumberPadding = 5 }, request.Token));
+
+        Assert.DoesNotContain(_logger.Entries, e => e.Level >= LogLevel.Warning);
+        Assert.False(File.Exists(_settingsPath));
+        _configurationRoot.Verify(r => r.Reload(), Times.Never());
+    }
+
+    [Fact]
+    public async Task UpdateSettingsAsync_AWriteFailure_IsLoggedWithTheSettingNames()
+    {
+        // A directory where the service stages its temporary file makes the write fail.
+        Directory.CreateDirectory(_settingsPath + ".tmp");
+
+        await Assert.ThrowsAnyAsync<Exception>(() => _service.UpdateSettingsAsync(new SettingsUpdate { IssueNumberPadding = 5 }));
+
+        Assert.Contains(_logger.Entries, e => e.Level == LogLevel.Error && e.Message.Contains("IssueNumberPadding", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task UpdateSettingsAsync_IsVisibleThroughARealMonitorBeforeItReturns()
     {
         // reloadOnChange is off: only the service's own reload can make this visible.
@@ -283,5 +308,16 @@ public sealed class SettingsServiceSaveAllTests : IDisposable
         Assert.True(monitor.CurrentValue.EnableSuwayomi);
         Assert.Equal("http://suwayomi.example", monitor.CurrentValue.SuwayomiBaseUrl);
         Assert.Equal("{series} - {issue}", monitor.CurrentValue.FilenameFormat);
+    }
+
+    /// <summary>Stands in for a client that disconnects while the file is being rewritten.</summary>
+    private sealed class AbortingSettingsService(
+        ILogger<SettingsService> logger,
+        IOptionsMonitor<AppSettings> options,
+        IConfigurationRoot configuration,
+        CancellationTokenSource request)
+        : SettingsService(logger, options, configuration)
+    {
+        protected override void OnStagingSetting(string settingName) => request.Cancel();
     }
 }

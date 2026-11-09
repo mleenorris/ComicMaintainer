@@ -387,8 +387,12 @@ public partial class FileStoreService
             }
             else
             {
-                // Neither store knows the old path - ensure new path row exists
+                // Neither store knows the old path - ensure new path row exists. The email
+                // history can still name it, when the watcher saw the move as a delete and a
+                // create, or an earlier move took the row but failed before its deliveries,
+                // and nothing will come back to repoint them after this.
                 _logger.LogDebug("Old path not found in database during UpdateFilePathAsync, ensuring new path is persisted: {NewPath}", SanitizeForLogging(newPath));
+                await MoveEmailDeliveriesAsync(dbContext, oldPath, newPath, cancellationToken);
                 await AddFileAsync(newPath, cancellationToken);
                 return;
             }

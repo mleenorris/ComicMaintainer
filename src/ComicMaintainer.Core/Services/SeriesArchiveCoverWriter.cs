@@ -213,6 +213,10 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         {
             return await _library.GetFirstIssueFilePathForNormalizedKeyAsync(normalizedKey, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex,

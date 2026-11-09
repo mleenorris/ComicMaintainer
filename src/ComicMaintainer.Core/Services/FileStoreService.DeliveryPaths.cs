@@ -28,9 +28,11 @@ public partial class FileStoreService
             delivery.FilePath = newPath;
         }
 
+        // A member is compared exactly, as FilePath is above, so a search for its serialized
+        // form finds every delivery that can change.
+        var fragment = CondensedFilePathList.EncodeFragment(oldPath);
         await RepointCondensedMembersAsync(
-            dbContext,
-            oldPath,
+            dbContext.ComicEmailDeliveries.Where(d => d.CondensedFilePaths != null && d.CondensedFilePaths.Contains(fragment)),
             member => string.Equals(member, oldPath, StringComparison.Ordinal) ? newPath : member,
             cancellationToken);
 
@@ -54,30 +56,27 @@ public partial class FileStoreService
             delivery.FilePath = rebase(delivery.FilePath);
         }
 
+        // The list is JSON, so a member can only be found in SQL by its serialized form, which
+        // is compared exactly. Where the platform ignores case, a member under the directory
+        // can be spelled differently, so every condensed delivery is checked instead.
+        var candidates = dbContext.ComicEmailDeliveries.Where(d => d.CondensedFilePaths != null);
+        if (LibraryPathValidator.PathComparison == StringComparison.Ordinal)
+        {
+            var fragment = CondensedFilePathList.EncodeFragment(oldPrefix);
+            candidates = candidates.Where(d => d.CondensedFilePaths!.Contains(fragment));
+        }
+
         await RepointCondensedMembersAsync(
-            dbContext,
-            oldPrefix,
+            candidates,
             member => IsUnderPrefix(member, oldPrefix) ? rebase(member) : member,
             cancellationToken);
     }
 
     private static async Task RepointCondensedMembersAsync(
-        ComicMaintainerDbContext dbContext,
-        string pathOrPrefix,
+        IQueryable<ComicEmailDeliveryEntity> candidates,
         Func<string, string> repoint,
         CancellationToken cancellationToken)
     {
-        var candidates = dbContext.ComicEmailDeliveries.Where(d => d.CondensedFilePaths != null);
-
-        // The list is JSON, so a member can only be found in SQL by its serialized form, which
-        // is compared exactly. Where the platform ignores case, a member spelled differently
-        // would be missed, so every condensed delivery is checked instead.
-        if (LibraryPathValidator.PathComparison == StringComparison.Ordinal)
-        {
-            var fragment = CondensedFilePathList.EncodeFragment(pathOrPrefix);
-            candidates = candidates.Where(d => d.CondensedFilePaths!.Contains(fragment));
-        }
-
         foreach (var delivery in await candidates.ToListAsync(cancellationToken))
         {
             var members = CondensedFilePathList.Parse(delivery.CondensedFilePaths);

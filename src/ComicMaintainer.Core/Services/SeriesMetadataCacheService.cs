@@ -922,6 +922,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                 LoggingHelper.SanitizeForLog(entity.NormalizedKey));
         }
     }
+
     /// <summary>
     /// Manually adopt an externally-supplied candidate as the cached metadata
     /// for the series. Used to correct a wrong automatic match.

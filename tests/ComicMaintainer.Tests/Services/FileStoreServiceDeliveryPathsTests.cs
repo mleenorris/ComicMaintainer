@@ -112,6 +112,39 @@ public sealed class FileStoreServiceDeliveryPathsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_NeitherStoreKnowsTheOldPath_StillRepointsTheHistory()
+    {
+        var oldPath = Path.Join(_library, "Saga 001.cbz");
+        var newPath = Path.Join(_library, "Saga - Chapter 0001.cbz");
+        var other = Path.Join(_library, "Saga 002.cbz");
+        File.WriteAllText(newPath, "comic");
+        await SeedDeliveryAsync(oldPath);
+        await SeedDeliveryAsync(other, condensedMembers: [oldPath, other]);
+
+        await Service().UpdateFilePathAsync(oldPath, newPath);
+
+        var deliveries = await DeliveriesAsync();
+        Assert.Equal(newPath, deliveries[0].FilePath);
+        Assert.Equal(new[] { newPath, other }, CondensedFilePathList.Parse(deliveries[1].CondensedFilePaths));
+        await using var db = await _factory.CreateDbContextAsync();
+        Assert.True(await db.ComicFiles.AnyAsync(f => f.FilePath == newPath));
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_ComparesACondensedMemberExactly()
+    {
+        var (oldPath, newPath) = await TrackedMoveAsync("Saga 001.cbz", "Saga - Chapter 0001.cbz");
+        var other = Path.Join(_library, "Saga 002.cbz");
+        var recased = Path.Join(_library, "SAGA 001.cbz");
+        await SeedDeliveryAsync(other, condensedMembers: [recased, other]);
+
+        await Service().UpdateFilePathAsync(oldPath, newPath);
+
+        var delivery = Assert.Single(await DeliveriesAsync());
+        Assert.Equal(new[] { recased, other }, CondensedFilePathList.Parse(delivery.CondensedFilePaths));
+    }
+
+    [Fact]
     public async Task UpdateFilePathAsync_LeavesACondensedListThatCannotBeReadAlone()
     {
         var (oldPath, newPath) = await TrackedMoveAsync("Saga 001.cbz", "Saga - Chapter 0001.cbz");

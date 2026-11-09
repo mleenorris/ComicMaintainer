@@ -50,7 +50,6 @@ public partial class FilesController
                 return BadRequest("File path is outside the allowed directory");
             }
 
-
             // Read the file's current metadata so the resolver can also
             // evaluate the file's existing <Series> tag as a candidate.
             // Missing/unreadable metadata is fine — the resolver falls back

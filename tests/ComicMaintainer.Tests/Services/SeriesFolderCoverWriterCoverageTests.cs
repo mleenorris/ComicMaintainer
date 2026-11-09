@@ -143,6 +143,30 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
             Times.Once);
     }
 
+    [Fact]
+    public async Task WriteAsync_CancelledDuringLookup_PropagatesWithoutAWarning()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        _library
+            .Setup(l => l.GetFoldersForNormalizedKeyAsync(Key, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var logger = new Mock<ILogger<SeriesFolderCoverWriter>>();
+        var writer = new SeriesFolderCoverWriter(_library.Object, Options(), logger.Object);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            writer.WriteAsync(Key, _source, "image/jpeg", cancellationToken: cts.Token));
+
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
     // ---- WriteAsync per-folder behaviour ---------------------------------------
 
     [Fact]

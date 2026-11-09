@@ -173,6 +173,10 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
                 .Where(d => !string.IsNullOrWhiteSpace(d))
                 .ToList();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(ex,

@@ -165,6 +165,32 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_CancelledDuringLookup_PropagatesWithoutAWarning()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        _library
+            .Setup(l => l.GetFirstIssueFilePathForNormalizedKeyAsync(Key, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
+        var options = new Mock<IOptionsMonitor<AppSettings>>();
+        options.Setup(o => o.CurrentValue).Returns(_settings);
+        var writer = new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger.Object, new FileOperationLock());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            writer.WriteAsync(Key, _source, "image/jpeg", cancellationToken: cts.Token));
+
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task WriteAsync_WatcherThrows_StillEmbedsCover()
     {
         var cbz = CreateCbz("issue1.cbz", ("01.jpg", PageBytes));

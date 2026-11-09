@@ -18,6 +18,11 @@ public static class ProviderMetadataText
     /// <summary>Most genres kept for one series.</summary>
     public const int MaxGenres = 32;
 
+    // Limits on what is looked at, since a manual match passes these back through the client:
+    // how many values, and how long one may be, markup included, to be worth cleaning.
+    private const int MaxGenreCandidates = MaxGenres * 8;
+    private const int MaxRawGenreLength = MaxGenreLength * 8;
+
     /// <summary>Longest origin language tag kept; matches the database column.</summary>
     public const int MaxOriginLength = 16;
 
@@ -49,8 +54,13 @@ public static class ProviderMetadataText
     {
         var result = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var value in values ?? Enumerable.Empty<string?>())
+        foreach (var value in (values ?? Enumerable.Empty<string?>()).Take(MaxGenreCandidates))
         {
+            if (value?.Length > MaxRawGenreLength)
+            {
+                continue;
+            }
+
             // Cleaned after normalizing, because decoding entities can produce a comma or a
             // control character; normalized again to collapse the spaces that leaves.
             var genre = SynopsisTextNormalizer.Normalize(

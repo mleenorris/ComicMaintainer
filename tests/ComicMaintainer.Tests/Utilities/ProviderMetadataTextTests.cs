@@ -46,6 +46,30 @@ public class ProviderMetadataTextTests
     }
 
     [Fact]
+    public void Genres_SkipsAValueTooLongToBeAGenreWithoutCleaningIt()
+    {
+        var genres = ProviderMetadataText.Genres(new[] { new string('<', 2_000_000), "Action" });
+
+        Assert.Equal(new[] { "Action" }, genres);
+    }
+
+    [Fact]
+    public void Genres_CleansAValueWhoseMarkupMakesItLong()
+    {
+        var genres = ProviderMetadataText.Genres(new[] { $"<span class=\"{new string('x', 400)}\">Action</span>" });
+
+        Assert.Equal(new[] { "Action" }, genres);
+    }
+
+    [Fact]
+    public void Genres_LooksAtABoundedNumberOfValues()
+    {
+        var values = Enumerable.Repeat("   ", 1000).Append("Action");
+
+        Assert.Empty(ProviderMetadataText.Genres(values));
+    }
+
+    [Fact]
     public void Genres_OfNothingIsEmpty()
     {
         Assert.Empty(ProviderMetadataText.Genres(null));

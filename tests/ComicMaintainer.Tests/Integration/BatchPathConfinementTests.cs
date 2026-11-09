@@ -68,6 +68,19 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
         Assert.True(json.RootElement.GetProperty("total_items").GetInt32() >= 0);
     }
 
+    // The web app's remove-metadata-all sends a JSON Content-Type with no body.
+    [Theory]
+    [MemberData(nameof(LibraryWideRoutes))]
+    public async Task LibraryWideRoutesAcceptAnEmptyJsonBody(string url)
+    {
+        using var response = await _host.PostAsync(url, string.Empty);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(json.RootElement.GetProperty("job_id").TryGetGuid(out _));
+        Assert.True(json.RootElement.GetProperty("total_items").GetInt32() >= 0);
+    }
+
     [Fact]
     public async Task SelectedRouteBindsTheMobileAppsBodyAndAnswersInItsNames()
     {

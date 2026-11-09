@@ -226,11 +226,14 @@ public class JobsControllerBatchTests
     [InlineData("process", "/c/../Config/victim.txt")]
     [InlineData("rename", "/c-private/a.cbz")]
     [InlineData("normalize", "../../etc/passwd")]
-    [InlineData("remove-metadata", "/c/a.cbz/")]
-    [InlineData("update-metadata", "/c/a.cbz/.")]
+    [InlineData("remove-metadata", "/elsewhere/a.cbz")]
+    [InlineData("update-metadata", "/elsewhere/a.cbz")]
+    [InlineData("delete", "/elsewhere/a.cbz")]
     [InlineData("delete", "/c/series/..")]
     [InlineData("delete", "/c/missing/../a.cbz")]
-    public async Task SelectedScope_APathOutsideTheLibrary_RejectsTheWholeBatch(string operation, string path)
+    [InlineData("delete", "/c/a.cbz/")]
+    [InlineData("delete", "/c/a.cbz/.")]
+    public async Task SelectedScope_APathItsJobWouldRefuse_RejectsTheWholeBatch(string operation, string path)
     {
         var request = new JobsController.BatchJobRequest
         {
@@ -244,14 +247,33 @@ public class JobsControllerBatchTests
         VerifyNothingQueued();
     }
 
-    [Fact]
-    public async Task SelectedScope_ALinkOutsideTheLibraryToAComicInIt_RejectsTheWholeBatch()
+    [Theory]
+    [InlineData("process", "/c/series/../a.cbz")]
+    [InlineData("rename", "/c/missing/../a.cbz")]
+    [InlineData("normalize", "/c/a.cbz/.")]
+    [InlineData("remove-metadata", "/c/a.cbz/")]
+    [InlineData("update-metadata", "/c/series/../a.cbz")]
+    public async Task SelectedScope_APathOnlyTheEntryRuleRefuses_IsQueuedForOtherOperations(string operation, string path)
     {
-        if (!OperatingSystem.IsLinux())
+        var request = new JobsController.BatchJobRequest
         {
-            return;
-        }
+            Files = new() { "/c/a.cbz", path },
+            Metadata = new ComicMetadata { Series = "Series" }
+        };
 
+        var result = await _controller.StartBatchJob(operation, "selected", request);
+
+        Assert.Equal(2, Response(result).TotalItems);
+        Assert.Equal(new[] { "/c/a.cbz", path }, _queued);
+    }
+
+    // A link outside the library leading into it: the jobs that follow links work on the file
+    // it leads to, which is in the library, but deleting would remove the link outside it.
+    [SymbolicLinkTheory]
+    [InlineData("delete", true)]
+    [InlineData("process", false)]
+    public async Task SelectedScope_ALinkOutsideTheLibraryToAComicInIt_FollowsEachOperationsRule(string operation, bool rejected)
+    {
         var root = Path.Join(Path.GetTempPath(), "jobs-batch-" + Guid.NewGuid().ToString("N"));
         try
         {
@@ -264,7 +286,42 @@ public class JobsControllerBatchTests
             var controller = CreateController(new AppSettings { WatchedDirectory = library });
 
             var result = await controller.StartBatchJob(
-                "delete", "selected", new JobsController.BatchJobRequest { Files = new() { comic, link } });
+                operation, "selected", new JobsController.BatchJobRequest { Files = new() { comic, link } });
+
+            if (rejected)
+            {
+                Assert.Equal(JobsController.OutsideAllowedDirectoryError, ErrorOf(result));
+                VerifyNothingQueued();
+            }
+            else
+            {
+                Assert.Equal(new[] { comic, link }, _queued);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [SymbolicLinkTheory]
+    [InlineData("process")]
+    [InlineData("delete")]
+    public async Task SelectedScope_ALinkInTheLibraryLeadingOutOfIt_RejectsTheWholeBatch(string operation)
+    {
+        var root = Path.Join(Path.GetTempPath(), "jobs-batch-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var library = Directory.CreateDirectory(Path.Join(root, "library")).FullName;
+            var outside = Directory.CreateDirectory(Path.Join(root, "outside")).FullName;
+            var secret = Path.Join(outside, "secret.cbz");
+            File.WriteAllText(secret, "keep me");
+            var link = Path.Join(library, "escape.cbz");
+            File.CreateSymbolicLink(link, secret);
+            var controller = CreateController(new AppSettings { WatchedDirectory = library });
+
+            var result = await controller.StartBatchJob(
+                operation, "selected", new JobsController.BatchJobRequest { Files = new() { link } });
 
             Assert.Equal(JobsController.OutsideAllowedDirectoryError, ErrorOf(result));
             VerifyNothingQueued();

@@ -36,7 +36,7 @@ public class JobsController : ControllerBase
                 BatchScope.Selected,
                 batch => batch.Processor.UpdateMetadataAsync(batch.Files, batch.Request.Metadata!, MetadataFields(batch.Request)),
                 ValidateMetadataEdit),
-            ["delete"] = new(BatchScope.Selected, batch => batch.Processor.DeleteFilesAsync(batch.Files)),
+            ["delete"] = new(BatchScope.Selected, batch => batch.Processor.DeleteFilesAsync(batch.Files), ActsOnEntry: true),
         };
 
     private readonly IComicProcessorService _processor;
@@ -175,7 +175,7 @@ public class JobsController : ControllerBase
 
         request ??= new BatchJobRequest();
 
-        var (files, selectionError) = await SelectFilesAsync(batchScope, request, cancellationToken);
+        var (files, selectionError) = await SelectFilesAsync(batchOperation, batchScope, request, cancellationToken);
         if (selectionError != null)
         {
             return BadRequest(new { error = selectionError });
@@ -207,6 +207,7 @@ public class JobsController : ControllerBase
     /// how the duplicates view deletes them, but must be in the library.
     /// </summary>
     private async Task<(IReadOnlyList<string> Files, string? Error)> SelectFilesAsync(
+        BatchOperation operation,
         BatchScope scope,
         BatchJobRequest request,
         CancellationToken cancellationToken)
@@ -231,20 +232,25 @@ public class JobsController : ControllerBase
                     return (named, NoFilesSpecifiedError);
                 }
 
-                return (named, FindPathOutsideLibrary(named) == null ? null : OutsideAllowedDirectoryError);
+                return (named, FindPathOutsideLibrary(named, operation) == null ? null : OutsideAllowedDirectoryError);
         }
     }
 
     /// <summary>
-    /// The first of <paramref name="files"/> the batch jobs would refuse to touch, checked with
-    /// their own rule, or null when all are in the library. Rejecting a whole request here
-    /// stops any file of it being acted on.
+    /// The first of <paramref name="files"/> that the <paramref name="operation"/>'s job would
+    /// refuse to touch, or null when it would accept them all. This is the check the job makes
+    /// per file, so no request is refused over a file its job would have taken, and rejecting
+    /// the whole request here stops any file of it being acted on.
     /// </summary>
-    private string? FindPathOutsideLibrary(IEnumerable<string> files)
+    private string? FindPathOutsideLibrary(IEnumerable<string> files, BatchOperation operation)
     {
         var settings = _settings.CurrentValue;
-        var outside = files.FirstOrDefault(file =>
-            !LibraryPathValidator.TryResolveEntryWithin(file, out _, settings.WatchedDirectory, settings.DuplicateDirectory));
+
+        // One instance for the whole request, since a selection can be the entire library.
+        var roots = new LibraryRoots(settings.WatchedDirectory, settings.DuplicateDirectory);
+        var outside = files.FirstOrDefault(file => operation.ActsOnEntry
+            ? !roots.TryResolveEntryWithin(file, out _)
+            : !roots.TryResolveWithin(file, out _));
 
         if (outside != null)
         {
@@ -365,10 +371,15 @@ public class JobsController : ControllerBase
     /// <param name="Scopes">The scopes the operation is offered for.</param>
     /// <param name="Start">Queues the job.</param>
     /// <param name="Validate">Checks operation-specific input; returns the problem, or null.</param>
+    /// <param name="ActsOnEntry">
+    /// The job affects the directory entry a path names rather than what it leads to, as
+    /// deleting does, so named files are held to the stricter rule for entries.
+    /// </param>
     private sealed record BatchOperation(
         BatchScope Scopes,
         Func<BatchInvocation, Task<Guid>> Start,
-        Func<BatchJobRequest, string?>? Validate = null);
+        Func<BatchJobRequest, string?>? Validate = null,
+        bool ActsOnEntry = false);
 
     private sealed record BatchInvocation(
         IComicProcessorService Processor,

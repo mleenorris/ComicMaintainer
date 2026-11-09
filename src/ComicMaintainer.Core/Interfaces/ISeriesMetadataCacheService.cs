@@ -31,6 +31,15 @@ public interface ISeriesMetadataCacheService
     Task<SeriesMetadataCacheRecord?> GetByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Loads the record that owns a title: of every record known by that title, the most
+    /// authoritative, which is the one the library displays. Unlike
+    /// <see cref="GetByTitleAsync"/>, a record keyed by exactly that title gets no preference,
+    /// so a stale "not_found" sibling cannot hide the series' match. Returns null when no
+    /// record is known by the title.
+    /// </summary>
+    Task<SeriesMetadataCacheRecord?> GetAuthoritativeByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Replaces the user-managed alias list for a series key. Returns the
     /// updated record. Aliases form the candidate pool the user can pick the
     /// displayed series name from (see <see cref="SetSeriesNameAsync"/>).

@@ -319,7 +319,11 @@
                                 has_external_image: data.has_external_image,
                                 external_image_url: data.external_image_url,
                                 issue_count: data.issue_count,
-                                total_size: data.total_size
+                                total_size: data.total_size,
+                                synopsis: data.synopsis,
+                                genres: data.genres,
+                                publication_status: data.publication_status,
+                                site_url: data.site_url
                             }
                         );
                     }
@@ -934,6 +938,33 @@
             `;
         }
 
+        // The provider's page for a series, when its address is an http(s)
+        // one. escapeHtml alone would let a javascript: link through.
+        function seriesSiteLink(url) {
+            return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : '';
+        }
+
+        // Genres, status and provider link shown on the series page. A matched
+        // series that has none of them yet gets them at its next refresh, and
+        // says so; a series with no match has nothing to wait for.
+        function renderSeriesDetails(series) {
+            const genres = Array.isArray(series.genres) ? series.genres : [];
+            const status = series.publication_status ? seriesStatusLabel(series.publication_status) : '';
+            const link = seriesSiteLink(series.site_url);
+            if (!genres.length && !status && !link) {
+                return series.metadata_source
+                    ? '<div class="series-detail-details-pending">Genres and status are not available yet. They are added the next time this series\' metadata is refreshed.</div>'
+                    : '';
+            }
+            return `
+                <div class="series-detail-details">
+                    ${status ? `<span class="series-detail-chip series-detail-chip--status">${escapeHtml(status)}</span>` : ''}
+                    ${genres.map(genre => `<span class="series-detail-chip">${escapeHtml(genre)}</span>`).join('')}
+                    ${link ? `<a class="series-detail-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">View on ${escapeHtml(series.metadata_source || 'provider')}</a>` : ''}
+                </div>
+            `;
+        }
+
         // Expands/collapses a clamped synopsis block.
         function toggleSeriesSynopsis(btn) {
             const block = btn.closest('[data-synopsis-block]');
@@ -1030,6 +1061,7 @@
                                 <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
                                 ${series.aliases?.length ? html`<div class="series-detail-meta">Also known as: ${series.aliases.join(', ')}</div>` : ''}
                                 ${series.metadata_source ? html`<div class="series-detail-meta">Source: ${series.metadata_source}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
+                                ${rawHtml(renderSeriesDetails(series))}
                                 ${rawHtml(renderSeriesSynopsis(series))}
                                 <div class="series-detail-actions">
                                     ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">${uiIcon('book-open')} Read First Issue</button>` : ''}

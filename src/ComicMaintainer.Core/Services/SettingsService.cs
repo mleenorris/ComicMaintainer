@@ -587,6 +587,7 @@ public class SettingsService : ISettingsService
         StageIfNotBlank(values, "MangaDexBaseUrl", metadata.MangaDexBaseUrl);
         StageIfSet(values, "EnableAniListMetadata", metadata.EnableAniList);
         StageIfNotBlank(values, "AniListBaseUrl", metadata.AniListBaseUrl);
+        StageIfSet(values, "FillComicInfoFromProviders", metadata.FillComicInfoFromProviders);
     }
 
     private static void StageSuwayomi(Dictionary<string, object?> values, SuwayomiUpdate suwayomi, AppSettings current)

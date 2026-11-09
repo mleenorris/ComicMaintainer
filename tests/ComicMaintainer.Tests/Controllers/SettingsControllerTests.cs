@@ -231,6 +231,7 @@ public class SettingsControllerTests
         var type = objectResult.Value!.GetType();
         Assert.NotNull(type.GetProperty("write_cover_to_series_folder"));
         Assert.NotNull(type.GetProperty("download_external_series_images"));
+        Assert.NotNull(type.GetProperty("fill_comicinfo_from_providers"));
         Assert.NotNull(type.GetProperty("series_image_max_bytes"));
         Assert.NotNull(type.GetProperty("series_image_max_download_bytes"));
         Assert.NotNull(type.GetProperty("series_image_max_dimension"));

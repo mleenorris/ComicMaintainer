@@ -39,7 +39,7 @@ public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
     /// </summary>
     private static readonly TimeSpan RateLimitEnvelopeBackoff = TimeSpan.FromMinutes(15);
 
-    private const string FieldList = "id,name,aliases,image,deck,description";
+    private const string FieldList = "id,name,aliases,image,deck,description,site_detail_url,count_of_issues";
 
     // ComicVine status_code values (https://comicvine.gamespot.com/api/documentation).
     private const int StatusOk = 1;
@@ -260,6 +260,10 @@ public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
             ImageUrl = imageUrl,
             ThumbnailUrl = thumbnailUrl,
             Synopsis = ExtractSynopsis(item),
+            // ComicVine volumes have no genre, status or origin. Without a status the issue
+            // count, which is only a count so far, is never written as a series total.
+            SiteUrl = ProviderMetadataText.HttpUrl(ReadString(item, "site_detail_url")),
+            TotalChapters = ReadPositiveInt(item, "count_of_issues"),
             LocalizedTitles = localizedTitles
         };
     }

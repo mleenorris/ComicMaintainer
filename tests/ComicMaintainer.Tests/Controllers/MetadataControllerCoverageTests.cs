@@ -688,6 +688,39 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_ReturnsEachCandidatesDetails()
+    {
+        _external.Setup(e => e.SearchSeriesAsync("Berserk", 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ExternalSeriesMetadata>
+            {
+                new()
+                {
+                    CanonicalTitle = "Berserk",
+                    Source = "AniListManga",
+                    Synopsis = "Guts fights.",
+                    SiteUrl = "https://anilist.co/manga/30002",
+                    Genres = new List<string> { "Action" },
+                    PublicationStatus = SeriesPublicationStatus.Completed,
+                    TotalChapters = 364,
+                    Origin = "ja"
+                },
+                new() { CanonicalTitle = "Berserk 2", Source = "ComicVine", Genres = null! }
+            });
+
+        var result = await CreateController().Search("Berserk", 10, CancellationToken.None);
+
+        var results = Json(Assert.IsType<OkObjectResult>(result.Result).Value)["results"]!;
+        var candidate = results[0]!;
+        Assert.Equal("Guts fights.", (string?)candidate["synopsis"]);
+        Assert.Equal("https://anilist.co/manga/30002", (string?)candidate["site_url"]);
+        Assert.Equal("Action", (string?)candidate["genres"]![0]);
+        Assert.Equal(SeriesPublicationStatus.Completed, (string?)candidate["publication_status"]);
+        Assert.Equal(364, (int?)candidate["total_chapters"]);
+        Assert.Equal("ja", (string?)candidate["origin"]);
+        Assert.Empty(results[1]!["genres"]!);
+    }
+
+    [Fact]
     public async Task RefreshOne_ProvidersUnavailable_Returns503AndKeepsTheRecord()
     {
         _cache.Setup(c => c.RefreshAsync("Batman", It.IsAny<CancellationToken>()))
@@ -893,6 +926,49 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         Assert.Equal(
             new (string, string?)[] { ("進撃の巨人", "ja"), ("Attack on Titan", null), ("L'Attaque des Titans", null) },
             _appliedMatch.LocalizedTitles.Select(t => (t.Title, t.Language)));
+    }
+
+    [Fact]
+    public async Task ApplyMatch_PassesTheCandidatesDetailsToTheCache()
+    {
+        SetupApplyMatch("Berserk");
+
+        var result = await CreateController().ApplyMatch(
+            "Berserk",
+            new MetadataController.ApplyMatchRequest
+            {
+                CanonicalTitle = "Berserk",
+                Source = "AniListManga",
+                Synopsis = "Guts fights.",
+                SiteUrl = "https://anilist.co/manga/30002",
+                Genres = new() { "Action", "Drama" },
+                PublicationStatus = "completed",
+                TotalChapters = 364,
+                Origin = "ja"
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal("Guts fights.", _appliedMatch!.Synopsis);
+        Assert.Equal("https://anilist.co/manga/30002", _appliedMatch.SiteUrl);
+        Assert.Equal(new[] { "Action", "Drama" }, _appliedMatch.Genres);
+        Assert.Equal("completed", _appliedMatch.PublicationStatus);
+        Assert.Equal(364, _appliedMatch.TotalChapters);
+        Assert.Equal("ja", _appliedMatch.Origin);
+    }
+
+    [Fact]
+    public async Task ApplyMatch_WithoutDetailsPassesNoGenres()
+    {
+        SetupApplyMatch("Saga");
+
+        await CreateController().ApplyMatch(
+            "Saga",
+            new MetadataController.ApplyMatchRequest { CanonicalTitle = "Saga", Genres = null },
+            CancellationToken.None);
+
+        Assert.Empty(_appliedMatch!.Genres);
+        Assert.Null(_appliedMatch.SiteUrl);
     }
 
     [Fact]

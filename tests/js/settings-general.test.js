@@ -51,6 +51,7 @@ function formValues(page) {
         mangaDexBaseUrl: value('mangaDexBaseUrl'),
         aniList: checked('enableAniListMetadata'),
         aniListBaseUrl: value('aniListBaseUrl'),
+        fillComicInfo: checked('fillComicInfoFromProvidersCheckbox'),
         suwayomi: checked('enableSuwayomiCheckbox'),
         suwayomiBaseUrl: value('suwayomiBaseUrl'),
         suwayomiUsername: value('suwayomiUsername'),
@@ -134,6 +135,7 @@ test('the settings page fills every group from GET /api/settings', async () => {
         mangaDexBaseUrl: 'https://mangadex.example',
         aniList: false,
         aniListBaseUrl: 'https://anilist.example/graphql',
+        fillComicInfo: true,
         suwayomi: true,
         suwayomiBaseUrl: 'http://suwayomi.local:4567',
         suwayomiUsername: 'reader',
@@ -781,4 +783,10 @@ test('the section highlight is skipped where IntersectionObserver is unavailable
     assert.equal(page.evaluate('settingsLoaded'), true);
     assert.equal(page.intersectionObservers.length, observers);
     assert.deepEqual(page.errors, []);
+});
+
+test('the ComicInfo fill checkbox shows the saved value', async () => {
+    const page = await bootSettings({ settings: { fill_comicinfo_from_providers: false } });
+
+    assert.equal(page.$('#fillComicInfoFromProvidersCheckbox').checked, false);
 });

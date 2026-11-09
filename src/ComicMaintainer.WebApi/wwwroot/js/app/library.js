@@ -30,14 +30,19 @@
             return isMobilePortrait() ? 'list' : 'compact';
         }
 
+        function isLibraryPageActive() {
+            return typeof currentView === 'undefined' || currentView === 'library';
+        }
+
         function updateSeriesLayoutButtons() {
             const toggle = document.getElementById('seriesLayoutToggle');
             const mobileToolbar = document.getElementById('seriesLayoutToolbarMobile');
             // The layout toggle only applies to the full library grid/list — not
             // the overview page or a single series' page.
-            const onLibraryPage = typeof currentView === 'undefined' || currentView === 'library';
+            const onLibraryPage = isLibraryPageActive();
             if (toggle) toggle.hidden = !onLibraryPage;
             if (mobileToolbar) mobileToolbar.hidden = !onLibraryPage;
+            syncLibraryFacetsVisibility();
             if (!onLibraryPage) return;
             const effective = getEffectiveSeriesLayout();
             document.getElementById('seriesLayoutListBtn')?.classList.toggle('active', effective === 'list');
@@ -181,6 +186,12 @@
                 if (sortDirection !== 'asc') {
                     path += `&direction=${encodeURIComponent(sortDirection)}`;
                 }
+                if (seriesGenreFilter) {
+                    path += `&genre=${encodeURIComponent(seriesGenreFilter)}`;
+                }
+                if (seriesStatusFilter) {
+                    path += `&status=${encodeURIComponent(seriesStatusFilter)}`;
+                }
 
                 const data = await apiFetch(path, { signal: controller ? controller.signal : undefined });
                 const newSeries = data.series || [];
@@ -201,6 +212,9 @@
 
                 if (refresh) {
                     loadLibraryHealth();
+                }
+                if (refresh || !libraryFacets) {
+                    loadLibraryFacets();
                 }
             } catch (error) {
                 // Superseded by a newer reload (see seriesLoadController); the
@@ -227,6 +241,80 @@
                     waiters.forEach(resolve => resolve(reload));
                 }
             }
+        }
+
+        // ── Genre and status filters ──────────────────────────────────────
+        // '' selects every series; SERIES_FACET_NO_DATA the series a provider
+        // has not reported that value for.
+        const SERIES_FACET_NO_DATA = 'none';
+        const SERIES_STATUS_LABELS = Object.freeze({
+            ongoing: 'Ongoing',
+            completed: 'Completed',
+            hiatus: 'On hiatus',
+            cancelled: 'Cancelled',
+            upcoming: 'Not yet released'
+        });
+        let seriesGenreFilter = '';
+        let seriesStatusFilter = '';
+        // The last GET /api/files/series/facets answer; null until one arrives.
+        let libraryFacets = null;
+
+        function seriesStatusLabel(status) {
+            return SERIES_STATUS_LABELS[status] || status;
+        }
+
+        // The filters are an extra: if they cannot be loaded the library still
+        // works, so this stays quiet and the bar stays as it was.
+        async function loadLibraryFacets() {
+            try {
+                libraryFacets = await apiFetch('/api/files/series/facets');
+            } catch (_error) {
+                return;
+            }
+            renderLibraryFacets();
+        }
+
+        function syncLibraryFacetsVisibility() {
+            const bar = document.getElementById('libraryFacets');
+            if (bar) bar.hidden = !libraryFacets || !isLibraryPageActive();
+        }
+
+        // Fills one filter menu. Provider text goes through html``, which
+        // escapes it, and each option's value is the text itself.
+        function renderFacetSelect(id, allLabel, entries, noDataCount, selected, labelFor) {
+            const select = document.getElementById(id);
+            const items = entries.map(entry => ({ value: entry.value, label: `${labelFor(entry.value)} (${entry.count})` }));
+            if (noDataCount > 0) {
+                items.push({ value: SERIES_FACET_NO_DATA, label: `No data yet (${noDataCount})` });
+            }
+            // A selection the library no longer holds stays listed, so the
+            // menu keeps describing what the list below it shows.
+            if (selected && !items.some(item => item.value === selected)) {
+                items.push({ value: selected, label: labelFor(selected) });
+            }
+            renderHtml(select, html`<option value="">${allLabel}</option>${items.map(item => html`<option value="${item.value}">${item.label}</option>`)}`);
+            select.value = selected;
+            // Off when there is nothing to choose, but never while a filter
+            // is applied: that would leave no way to clear it.
+            select.disabled = entries.length === 0 && !selected;
+        }
+
+        function renderLibraryFacets() {
+            const { genres, statuses, series_without_genres: noGenres, series_without_status: noStatus } = libraryFacets;
+            renderFacetSelect('libraryGenreFilter', 'All genres', genres, noGenres, seriesGenreFilter,
+                genre => (genre === SERIES_FACET_NO_DATA ? 'No data yet' : genre));
+            renderFacetSelect('libraryStatusFilter', 'Any status', statuses, noStatus, seriesStatusFilter,
+                status => (status === SERIES_FACET_NO_DATA ? 'No data yet' : seriesStatusLabel(status)));
+            // Nothing to choose from yet: say why rather than show empty menus.
+            document.getElementById('libraryFacetsHint').hidden = genres.length > 0 || statuses.length > 0;
+            syncLibraryFacetsVisibility();
+        }
+
+        function setSeriesFacetFilter() {
+            seriesGenreFilter = document.getElementById('libraryGenreFilter').value;
+            seriesStatusFilter = document.getElementById('libraryStatusFilter').value;
+            currentSeriesDetailTitleKeys = null;
+            loadActiveLibraryView();
         }
 
         // Keeps the infinite-scroll sentinel at the end of the series list and
@@ -695,7 +783,7 @@
                     <div class="empty-state">
                         <div class="empty-state-icon">${uiIcon('image')}</div>
                         <h2>No series found</h2>
-                        <p>${searchQuery || filterMode !== 'all' ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
+                        <p>${searchQuery || filterMode !== 'all' || seriesGenreFilter || seriesStatusFilter ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
                         ${renderSuwayomiSearchOffer(searchQuery)}
                     </div>
                 `);

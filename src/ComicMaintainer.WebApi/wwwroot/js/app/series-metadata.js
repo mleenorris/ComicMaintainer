@@ -1188,6 +1188,14 @@
                         sourceId: result.source_id || null,
                         imageUrl: result.image_url || null,
                         thumbnailUrl: result.thumbnail_url || null,
+                        // The candidate's details, so they are cached with the
+                        // match. The server cleans them; absent ones are left out.
+                        synopsis: result.synopsis,
+                        siteUrl: result.site_url,
+                        genres: result.genres,
+                        publicationStatus: result.publication_status,
+                        totalChapters: result.total_chapters,
+                        origin: result.origin,
                         // Forward the provider's per-title language tags so
                         // the cached record preserves them and the per-series
                         // preferred-language resolver can later swap the

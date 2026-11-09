@@ -28,13 +28,20 @@ public abstract class AniListSeriesMetadataProviderBase : ExternalSeriesMetadata
     private static readonly TimeSpan RecentSuccessWindow = TimeSpan.FromMinutes(5);
 
     // The fields read for every candidate: the title in romaji/english/native
-    // plus synonyms for a rich alias list, the description and cover images.
+    // plus synonyms for a rich alias list, the description, cover images, and
+    // the details that fill ComicInfo and the library filters. Version 2 of
+    // status is the one that reports HIATUS.
     private const string MediaFields = """
               id
               title { romaji english native }
               synonyms
               description(asHtml: false)
               coverImage { extraLarge large medium }
+              siteUrl
+              genres
+              status(version: 2)
+              chapters
+              countryOfOrigin
         """;
 
     // Lightweight query used for the reachability probe. Asks for a single
@@ -291,9 +298,44 @@ public abstract class AniListSeriesMetadataProviderBase : ExternalSeriesMetadata
             ImageUrl = imageUrl,
             ThumbnailUrl = thumbnailUrl,
             Synopsis = ExtractSynopsis(item),
+            SiteUrl = ProviderMetadataText.HttpUrl(ReadString(item, "siteUrl")),
+            Genres = ExtractGenres(item),
+            PublicationStatus = MapStatus(ReadString(item, "status")),
+            TotalChapters = ReadPositiveInt(item, "chapters"),
+            Origin = MapCountryToLanguage(ReadString(item, "countryOfOrigin")),
             LocalizedTitles = localizedTitles
         };
     }
+
+    private static List<string> ExtractGenres(JsonElement media)
+        => media.TryGetProperty("genres", out var genres) && genres.ValueKind == JsonValueKind.Array
+            ? ProviderMetadataText.Genres(genres.EnumerateArray()
+                .Where(genre => genre.ValueKind == JsonValueKind.String)
+                .Select(genre => genre.GetString()))
+            : new List<string>();
+
+    /// <summary>Maps an AniList <c>MediaStatus</c> to a <see cref="SeriesPublicationStatus"/> value.</summary>
+    private static string? MapStatus(string? status) => status switch
+    {
+        "FINISHED" => SeriesPublicationStatus.Completed,
+        "RELEASING" => SeriesPublicationStatus.Ongoing,
+        "HIATUS" => SeriesPublicationStatus.Hiatus,
+        "CANCELLED" => SeriesPublicationStatus.Cancelled,
+        "NOT_YET_RELEASED" => SeriesPublicationStatus.Upcoming,
+        _ => null
+    };
+
+    /// <summary>
+    /// The original language of a series from AniList's <c>countryOfOrigin</c>; null for a
+    /// country AniList does not catalogue manga from, whose language would be a guess.
+    /// </summary>
+    private static string? MapCountryToLanguage(string? country) => country switch
+    {
+        "JP" => "ja",
+        "KR" => "ko",
+        "CN" or "TW" => "zh",
+        _ => null
+    };
 
     /// <summary>Reads the AniList <c>description</c> field as plain text.</summary>
     private static string? ExtractSynopsis(JsonElement media)

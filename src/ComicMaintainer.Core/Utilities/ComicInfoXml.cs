@@ -78,11 +78,7 @@ public static class ComicInfoXml
     public static XDocument Merge(XDocument? existing, ComicMetadata metadata, ComicMetadataFieldFlags fields)
     {
         ArgumentNullException.ThrowIfNull(metadata);
-        var document = existing is { Root: not null }
-            ? new XDocument(existing)
-            : new XDocument(new XElement("ComicInfo",
-                new XAttribute(XNamespace.Xmlns + "xsi", "http://www.w3.org/2001/XMLSchema-instance"),
-                new XAttribute(XNamespace.Xmlns + "xsd", "http://www.w3.org/2001/XMLSchema")));
+        var document = CopyOrCreate(existing);
         var root = document.Root!;
 
         if (fields.HasFlag(ComicMetadataFieldFlags.Title)) SetElement(root, "Title", metadata.Title);
@@ -103,6 +99,30 @@ public static class ComicInfoXml
             SetElement(root, "Tags", JoinList(metadata.Tags));
         }
 
+        return document;
+    }
+
+    /// <summary>
+    /// Returns a copy of <paramref name="existing"/> (or a new document when there is none) with
+    /// <paramref name="values"/> set on the elements that have no value. An element that holds
+    /// anything, including text the application would not write itself, is left exactly as it
+    /// is, and every other element is kept, so running this again changes nothing.
+    /// </summary>
+    /// <remarks>
+    /// <c>Unknown</c> in Manga and <c>-1</c> in Count are the schema's defaults, which taggers
+    /// write to mean "not set", so they count as empty.
+    /// </remarks>
+    public static XDocument FillEmptyFields(XDocument? existing, ProviderComicInfoFields values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        var document = CopyOrCreate(existing);
+        var root = document.Root!;
+
+        FillIfEmpty(root, "Summary", values.Summary);
+        FillIfEmpty(root, "Count", values.Count?.ToString(System.Globalization.CultureInfo.InvariantCulture), unsetValue: "-1");
+        FillIfEmpty(root, "Genre", values.Genre);
+        FillIfEmpty(root, "Web", values.Web);
+        FillIfEmpty(root, "Manga", values.Manga, unsetValue: "Unknown");
         return document;
     }
 
@@ -131,6 +151,27 @@ public static class ComicInfoXml
         }
 
         return stream.ToArray();
+    }
+
+    private static XDocument CopyOrCreate(XDocument? existing) =>
+        existing is { Root: not null }
+            ? new XDocument(existing)
+            : new XDocument(new XElement("ComicInfo",
+                new XAttribute(XNamespace.Xmlns + "xsi", "http://www.w3.org/2001/XMLSchema-instance"),
+                new XAttribute(XNamespace.Xmlns + "xsd", "http://www.w3.org/2001/XMLSchema")));
+
+    private static void FillIfEmpty(XElement root, string name, string? value, string? unsetValue = null)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var current = root.Element(root.Name.Namespace + name)?.Value.Trim();
+        if (string.IsNullOrEmpty(current) || string.Equals(current, unsetValue, StringComparison.OrdinalIgnoreCase))
+        {
+            SetElement(root, name, value);
+        }
     }
 
     /// <summary>

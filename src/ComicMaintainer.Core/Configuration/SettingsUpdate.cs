@@ -43,7 +43,8 @@ public sealed record ExternalSeriesMetadataUpdate(
     bool? EnableMangaDex = null,
     string? MangaDexBaseUrl = null,
     bool? EnableAniList = null,
-    string? AniListBaseUrl = null);
+    string? AniListBaseUrl = null,
+    bool? FillComicInfoFromProviders = null);
 
 /// <summary>The series cover image limits of a <see cref="SettingsUpdate"/>, in bytes and pixels.</summary>
 public sealed record SeriesImageLimitsUpdate(

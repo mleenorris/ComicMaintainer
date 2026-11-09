@@ -538,6 +538,17 @@
                         <svg class="icon" aria-hidden="true"><use href="#i-compact"/></svg> Compact
                     </button>
                 </div>
+                <div class="library-facets" id="libraryFacets" role="group" aria-label="Filter series by genre and status" hidden>
+                    <label class="library-facet" for="libraryGenreFilter">
+                        <span>Genre</span>
+                        <select id="libraryGenreFilter" name="libraryGenreFilter" onchange="setSeriesFacetFilter()"></select>
+                    </label>
+                    <label class="library-facet" for="libraryStatusFilter">
+                        <span>Status</span>
+                        <select id="libraryStatusFilter" name="libraryStatusFilter" onchange="setSeriesFacetFilter()"></select>
+                    </label>
+                    <span class="library-facets-hint" id="libraryFacetsHint" hidden>Genres and status appear here as series metadata is refreshed.</span>
+                </div>
                 <div class="file-list" id="fileList">
                     <div class="loading">
                         <div class="spinner"></div>
@@ -1138,6 +1149,15 @@
                         <div class="form-group">
                             <label for="aniListBaseUrl">AniList GraphQL Endpoint</label>
                             <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="fillComicInfoFromProvidersCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="fillComicInfoFromProvidersCheckbox" name="fillComicInfoFromProviders">
+                                <span>Fill empty ComicInfo fields from the matched provider</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When a file is processed, adds the series' summary, genres, web link, total count (finished series only) and right-to-left reading (Japanese origin only) where the file has none. Values already in a file are never changed, and existing files are only updated when they are next processed.
+                            </small>
                         </div>
                     </section>
                     <section class="settings-card" id="settings-suwayomi" aria-labelledby="settings-suwayomi-title">

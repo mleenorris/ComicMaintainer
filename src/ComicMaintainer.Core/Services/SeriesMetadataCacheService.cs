@@ -99,6 +99,19 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         return entity is null ? null : ToRecord(entity);
     }
 
+    public async Task<SeriesMetadataCacheRecord?> GetAuthoritativeByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return null;
+        }
+
+        var titleIndex = await GetTitleIndexAsync(cancellationToken);
+        return titleIndex.TryGetValue(NormalizeKey(seriesTitle), out var ownerKey)
+            ? await GetAsync(ownerKey, cancellationToken)
+            : null;
+    }
+
     /// <summary>
     /// Resolves the cache entity for a free-form series title. Tries an exact
     /// normalized-key lookup first, then falls back to every record's known
@@ -411,12 +424,20 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                 CreatedAt = now,
                 UpdatedAt = now
             };
+            if (lookup is not null)
+            {
+                ApplyProviderDetails(entity, lookup);
+            }
+
             db.SeriesMetadataCache.Add(entity);
         }
         else
         {
             if (lookup is not null)
             {
+                // Before Source and SourceId change: it compares them with the lookup's.
+                ApplyProviderDetails(entity, lookup);
+
                 var canonicalTitle = string.IsNullOrWhiteSpace(lookup.CanonicalTitle) ? entity.CanonicalTitle : lookup.CanonicalTitle;
                 var aliases = lookup.Aliases?.ToList() ?? new List<string>();
                 var localizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(lookup));
@@ -982,14 +1003,17 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                 LastLookupUtc = now,
                 LookupStatus = lookupStatus,
                 LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match)),
-                Synopsis = SynopsisTextNormalizer.Normalize(match.Synopsis),
                 CreatedAt = now,
                 UpdatedAt = now
             };
+            ApplyProviderDetails(entity, match);
             db.SeriesMetadataCache.Add(entity);
         }
         else
         {
+            // Before Source and SourceId change: it compares them with the match's.
+            ApplyProviderDetails(entity, match);
+
             // The provider canonical title is always refreshed; the user's
             // chosen display name (SeriesName) is independent and sticky.
             entity.CanonicalTitle = match.CanonicalTitle;
@@ -999,14 +1023,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             entity.LastLookupUtc = now;
             entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match));
             entity.LookupStatus = lookupStatus;
-            // Refresh the synopsis when the provider returned one; preserve the
-            // existing synopsis when this match carries none (e.g. a manual
-            // match selected from a candidate without a description).
-            var normalizedSynopsis = SynopsisTextNormalizer.Normalize(match.Synopsis);
-            if (!string.IsNullOrWhiteSpace(normalizedSynopsis))
-            {
-                entity.Synopsis = normalizedSynopsis;
-            }
             entity.UpdatedAt = now;
             BumpMetadataVersion(entity);
         }
@@ -1050,6 +1066,11 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.LookupStatus = "cleared";
         entity.LocalizedTitlesJson = null;
         entity.Synopsis = null;
+        entity.SiteUrl = null;
+        entity.GenresJson = null;
+        entity.PublicationStatus = null;
+        entity.TotalChapters = null;
+        entity.Origin = null;
 
         // Revert the provider-derived canonical title to the normalized key
         // so the UI shows a recognisable placeholder rather than a stale
@@ -1099,7 +1120,12 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             PreferredLanguage = entity.PreferredLanguage,
             LocalizedTitles = DeserializeLocalizedTitles(entity.LocalizedTitlesJson),
             MetadataVersion = entity.MetadataVersion,
-            Synopsis = entity.Synopsis
+            Synopsis = entity.Synopsis,
+            SiteUrl = entity.SiteUrl,
+            Genres = DeserializeGenres(entity.GenresJson),
+            PublicationStatus = entity.PublicationStatus,
+            TotalChapters = entity.TotalChapters,
+            Origin = entity.Origin
         };
 
         // Compute the single authoritative name via the shared resolver so
@@ -1125,6 +1151,68 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         if (entity.MetadataVersion < int.MaxValue)
         {
             entity.MetadataVersion++;
+        }
+    }
+
+    /// <summary>
+    /// Stores what a lookup says about the series beyond its names. Values are cleaned here
+    /// because a manual match passes them back through the client. A value the lookup does not
+    /// carry is kept when the lookup is the same provider entry, and dropped when it is a
+    /// different one, where the old value would describe another series.
+    /// </summary>
+    /// <remarks>
+    /// Never bumps <see cref="SeriesMetadataCacheEntity.MetadataVersion"/>. These values only
+    /// fill empty ComicInfo fields when a file is next processed; a bump would send every file
+    /// of the series through the library scan's retag pass each time a refresh brought a new
+    /// genre or status, and would re-mark the existing library as entries filled in after
+    /// the upgrade.
+    /// </remarks>
+    private static void ApplyProviderDetails(SeriesMetadataCacheEntity entity, ExternalSeriesMetadata lookup)
+    {
+        var otherEntry = IsDifferentEntry(entity, lookup);
+        var genres = ProviderMetadataText.Genres(lookup.Genres);
+
+        entity.Synopsis = SynopsisTextNormalizer.Normalize(lookup.Synopsis) ?? (otherEntry ? null : entity.Synopsis);
+        entity.SiteUrl = ProviderMetadataText.HttpUrl(lookup.SiteUrl) ?? (otherEntry ? null : entity.SiteUrl);
+        entity.GenresJson = genres.Count > 0 ? JsonSerializer.Serialize(genres) : (otherEntry ? null : entity.GenresJson);
+        entity.PublicationStatus = SeriesPublicationStatus.Normalize(lookup.PublicationStatus) ?? (otherEntry ? null : entity.PublicationStatus);
+        entity.TotalChapters = lookup.TotalChapters > 0 ? lookup.TotalChapters : (otherEntry ? null : entity.TotalChapters);
+        entity.Origin = ProviderMetadataText.PrimaryLanguage(lookup.Origin) ?? (otherEntry ? null : entity.Origin);
+    }
+
+    /// <summary>
+    /// True when the record holds a match and <paramref name="lookup"/> is another provider's,
+    /// or another entry at the same provider. An unmatched record has nothing to contradict,
+    /// and a missing id cannot tell two entries apart.
+    /// </summary>
+    private static bool IsDifferentEntry(SeriesMetadataCacheEntity entity, ExternalSeriesMetadata lookup)
+    {
+        if (string.IsNullOrWhiteSpace(entity.Source))
+        {
+            return false;
+        }
+
+        return !string.Equals(entity.Source, lookup.Source, StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(entity.SourceId)
+                && !string.IsNullOrWhiteSpace(lookup.SourceId)
+                && !string.Equals(entity.SourceId, lookup.SourceId, StringComparison.Ordinal));
+    }
+
+    /// <summary>Reads <see cref="SeriesMetadataCacheEntity.GenresJson"/>; never throws.</summary>
+    private static List<string> DeserializeGenres(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<string>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+        }
+        catch (JsonException)
+        {
+            return new List<string>();
         }
     }
 

@@ -87,6 +87,7 @@ public class SettingsController : ControllerBase
             mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
             enable_anilist_metadata = _appSettings.CurrentValue.EnableAniListMetadata,
             anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl,
+            fill_comicinfo_from_providers = _appSettings.CurrentValue.FillComicInfoFromProviders,
             enable_suwayomi = _appSettings.CurrentValue.EnableSuwayomi,
             suwayomi_base_url = _appSettings.CurrentValue.SuwayomiBaseUrl,
             suwayomi_username = _appSettings.CurrentValue.SuwayomiUsername,

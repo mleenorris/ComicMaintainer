@@ -34,6 +34,7 @@ function settingsResponse(overrides = {}) {
         mangadex_base_url: 'https://mangadex.example',
         enable_anilist_metadata: false,
         anilist_base_url: 'https://anilist.example/graphql',
+        fill_comicinfo_from_providers: true,
         enable_suwayomi: true,
         suwayomi_base_url: 'http://suwayomi.local:4567',
         suwayomi_username: 'reader',

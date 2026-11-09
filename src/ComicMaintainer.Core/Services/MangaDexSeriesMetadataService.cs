@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Telemetry;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
@@ -18,6 +19,7 @@ namespace ComicMaintainer.Core.Services;
 public class MangaDexSeriesMetadataService : ExternalSeriesMetadataProviderBase
 {
     private const string MangaDexCdnBase = "https://uploads.mangadex.org";
+    private const string MangaDexSiteBase = "https://mangadex.org";
 
     private readonly Lazy<ProviderRateLimiter> _rateLimiter;
 
@@ -184,9 +186,58 @@ public class MangaDexSeriesMetadataService : ExternalSeriesMetadataProviderBase
             ImageUrl = imageUrl,
             ThumbnailUrl = thumbnailUrl,
             Synopsis = ExtractSynopsis(attributes),
+            SiteUrl = BuildSiteUrl(item),
+            Genres = ExtractGenres(attributes),
+            PublicationStatus = SeriesPublicationStatus.Normalize(ReadString(attributes, "status")),
+            TotalChapters = ParseLastChapter(ReadString(attributes, "lastChapter")),
+            Origin = ProviderMetadataText.PrimaryLanguage(ReadString(attributes, "originalLanguage")),
             LocalizedTitles = localizedTitles
         };
     }
+
+    /// <summary>The API has no site link; a title's page is addressed by its id.</summary>
+    private static string? BuildSiteUrl(JsonElement item)
+        => ReadId(item) is { } id ? ProviderMetadataText.HttpUrl($"{MangaDexSiteBase}/title/{Uri.EscapeDataString(id)}") : null;
+
+    /// <summary>
+    /// The names of the tags in MangaDex's <c>genre</c> group, in English when offered. Tags in
+    /// the theme, format and content groups are not genres.
+    /// </summary>
+    private static List<string> ExtractGenres(JsonElement attributes)
+    {
+        if (!attributes.TryGetProperty("tags", out var tags) || tags.ValueKind != JsonValueKind.Array)
+        {
+            return new List<string>();
+        }
+
+        var names = new List<string?>();
+        foreach (var tag in tags.EnumerateArray().Where(tag => tag.ValueKind == JsonValueKind.Object))
+        {
+            if (!tag.TryGetProperty("attributes", out var tagAttributes)
+                || !string.Equals(ReadString(tagAttributes, "group"), "genre", StringComparison.OrdinalIgnoreCase)
+                || !tagAttributes.TryGetProperty("name", out var name)
+                || name.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            names.Add(ReadString(name, "en")
+                ?? name.EnumerateObject().Where(entry => entry.Value.ValueKind == JsonValueKind.String)
+                    .Select(entry => entry.Value.GetString())
+                    .FirstOrDefault());
+        }
+
+        return ProviderMetadataText.Genres(names);
+    }
+
+    /// <summary>
+    /// The last chapter number as a total. MangaDex keeps it as text and it may be blank or a
+    /// half chapter such as "107.5", neither of which is a reliable count.
+    /// </summary>
+    private static int? ParseLastChapter(string? lastChapter)
+        => int.TryParse(lastChapter, NumberStyles.None, CultureInfo.InvariantCulture, out var chapter) && chapter > 0
+            ? chapter
+            : null;
 
     /// <summary>
     /// Reads the MangaDex localized <c>description</c> object, preferring the

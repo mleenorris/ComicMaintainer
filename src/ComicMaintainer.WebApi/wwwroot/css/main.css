@@ -1587,6 +1587,80 @@
             text-decoration: underline;
         }
 
+        /* ── Series details from the provider (genres, status, link) ── */
+        .series-detail-details {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+            font-size: 12px;
+        }
+
+        .series-detail-chip {
+            padding: 2px 8px;
+            border: 1px solid var(--border-input);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary, var(--text-muted));
+            overflow-wrap: anywhere;
+        }
+
+        .series-detail-chip--status {
+            border-color: var(--accent-primary);
+            color: var(--accent-text);
+            font-weight: 600;
+        }
+
+        .series-detail-link {
+            color: var(--accent-text);
+        }
+
+        /* ── Genre and status filters (library page) ── */
+        .library-facets {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 16px;
+            padding: 8px 0;
+            font-size: var(--text-md);
+            color: var(--text-muted);
+        }
+
+        .library-facets[hidden],
+        .library-facets-hint[hidden] {
+            display: none;
+        }
+
+        .library-facet {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .library-facet select {
+            max-width: min(220px, 60vw);
+            min-height: var(--control-height);
+            padding: 6px 10px;
+            border: 1px solid var(--border-input);
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: var(--text-md);
+            background: var(--bg-raised);
+            color: var(--text-primary);
+        }
+
+        .library-facets-hint {
+            font-size: 12px;
+        }
+
+        .series-detail-details-pending {
+            margin-top: 6px;
+            color: var(--text-muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
         /* ── Overview page (home) ── */
         .overview-rows {
             display: flex;

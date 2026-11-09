@@ -161,7 +161,7 @@ public class FilesControllerTests
     [Fact]
     public async Task GetSeries_DefaultMode_ReturnsSummariesWithoutIssues()
     {
-        _mockSeriesLibrary.Setup(service => service.GetSeriesSummariesAsync("processed", null, 1, 100, "name", "asc", null, null, It.IsAny<CancellationToken>()))
+        _mockSeriesLibrary.Setup(service => service.GetSeriesSummariesAsync("processed", null, 1, 100, "name", "asc", null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesSummaryResult
             {
                 Series = new List<SeriesSummaryDto>
@@ -193,13 +193,13 @@ public class FilesControllerTests
         Assert.Single(returnedSeries);
         Assert.Equal("Batman", returnedSeries[0].Title);
         // GetSeriesAsync (the heavier, issues-included path) must not be called by default.
-        _mockSeriesLibrary.Verify(s => s.GetSeriesAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _mockSeriesLibrary.Verify(s => s.GetSeriesAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<SeriesFacetFilter?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task GetSeries_WithIncludeIssues_ReturnsFullPayloadForBackCompat()
     {
-        _mockSeriesLibrary.Setup(service => service.GetSeriesAsync("processed", null, 1, 100, "name", "asc", It.IsAny<CancellationToken>()))
+        _mockSeriesLibrary.Setup(service => service.GetSeriesAsync("processed", null, 1, 100, "name", "asc", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesLibraryResult
             {
                 Series = new List<SeriesLibraryDto>

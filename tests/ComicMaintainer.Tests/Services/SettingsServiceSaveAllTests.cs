@@ -310,6 +310,36 @@ public sealed class SettingsServiceSaveAllTests : IDisposable
         Assert.Equal("{series} - {issue}", monitor.CurrentValue.FilenameFormat);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpdateSettingsAsync_SavesFillComicInfoFromProviders(bool enabled)
+    {
+        await _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(FillComicInfoFromProviders: enabled)
+        });
+
+        Assert.Equal(enabled, SavedSection().GetProperty("FillComicInfoFromProviders").GetBoolean());
+    }
+
+    [Fact]
+    public async Task UpdateSettingsAsync_LeavesFillComicInfoFromProvidersAloneWhenItIsOmitted()
+    {
+        await _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(Enabled: true)
+        });
+
+        Assert.False(SavedSection().TryGetProperty("FillComicInfoFromProviders", out _));
+    }
+
+    [Fact]
+    public void FillComicInfoFromProviders_IsOnByDefault()
+    {
+        Assert.True(new AppSettings().FillComicInfoFromProviders);
+    }
+
     /// <summary>Stands in for a client that disconnects while the file is being rewritten.</summary>
     private sealed class AbortingSettingsService(
         ILogger<SettingsService> logger,

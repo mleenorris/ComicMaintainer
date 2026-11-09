@@ -116,7 +116,8 @@ test('saving sends every group in one request with the edited values', async () 
             enableMangaDex: true,
             mangaDexBaseUrl: 'https://api.mangadex.org',
             enableAniList: true,
-            aniListBaseUrl: 'https://anilist.example/graphql'
+            aniListBaseUrl: 'https://anilist.example/graphql',
+            fillComicInfoFromProviders: true
         },
         seriesImageLimits: { maxMB: 4, maxDownloadMB: 4, maxDimension: 1024 },
         email: {
@@ -267,7 +268,8 @@ test('the stored ComicVine API key is kept unless a new key is typed or "clear" 
         enableMangaDex: true,
         mangaDexBaseUrl: 'https://mangadex.example',
         enableAniList: false,
-        aniListBaseUrl: 'https://anilist.example/graphql'
+        aniListBaseUrl: 'https://anilist.example/graphql',
+        fillComicInfoFromProviders: true
     });
     page.input('#comicVineApiKey', '   ');
     since = await save(page);
@@ -776,4 +778,26 @@ test('Send Test Report reports what the server said', async () => {
     await page.settle();
     assert.deepEqual(messages(page), []);
     assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+});
+
+test('the ComicInfo fill setting is saved with the metadata group', async () => {
+    const page = await bootSettings();
+    routeSave(page);
+
+    page.input('#fillComicInfoFromProvidersCheckbox', false);
+    const since = await save(page);
+
+    assert.equal(saveBody(page, since).externalSeriesMetadata.fillComicInfoFromProviders, false);
+});
+
+test('a ComicInfo fill setting pinned by the environment is left out of the save', async () => {
+    const page = await bootSettings({
+        settings: { env_locked: [{ field: 'fill_comicinfo_from_providers', variable: 'FILL_COMICINFO_FROM_PROVIDERS' }] }
+    });
+    routeSave(page);
+
+    assert.equal(page.$('#fillComicInfoFromProvidersCheckbox').disabled, true);
+    const since = await save(page);
+
+    assert.equal(saveBody(page, since).externalSeriesMetadata.fillComicInfoFromProviders, undefined);
 });

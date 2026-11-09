@@ -725,6 +725,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("GenresJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ImageContentType")
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
@@ -753,8 +756,16 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<int>("MetadataVersion")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Origin")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PreferredLanguage")
                         .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublicationStatus")
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("RemoteImageUrl")
@@ -763,6 +774,10 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.Property<string>("SeriesName")
                         .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SiteUrl")
+                        .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Source")
@@ -775,6 +790,9 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.Property<string>("Synopsis")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("TotalChapters")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");

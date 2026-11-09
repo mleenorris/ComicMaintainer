@@ -268,23 +268,30 @@ public sealed class ComicProcessorServiceComicInfoMergeTests : IDisposable
         Assert.Equal("Action", info.Element("Genre")?.Value);
     }
 
+    private BatchJobRegistry? _jobRegistryInstance;
+
+    private BatchJobRegistry Jobs => _jobRegistryInstance ??= new BatchJobRegistry(
+        new TestOptionsMonitor<AppSettings>(_settings),
+        NullLogger<BatchJobRegistry>.Instance);
+
     private ComicProcessorService CreateService()
     {
         var service = TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<ComicProcessorService>.Instance,
             _fileStore.Object,
-            Mock.Of<IProcessingHistoryService>());
+            Mock.Of<IProcessingHistoryService>(),
+            jobRegistry: Jobs);
         _services.Add(service);
         return service;
     }
 
-    private static async Task<ProcessingJob> WaitForJobAsync(ComicProcessorService service, Guid jobId)
+    private async Task<ProcessingJob> WaitForJobAsync(ComicProcessorService service, Guid jobId)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
         while (DateTime.UtcNow < deadline)
         {
-            var job = service.GetJob(jobId);
+            var job = Jobs.GetJob(jobId);
             if (job is { IsTerminal: true })
             {
                 return job;

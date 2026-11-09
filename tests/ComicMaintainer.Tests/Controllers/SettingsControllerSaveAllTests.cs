@@ -26,7 +26,7 @@ public sealed class SettingsControllerSaveAllTests
             new TestOptionsMonitor<AppSettings>(new AppSettings()),
             NullLogger<SettingsController>.Instance,
             Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>(),
-            Mock.Of<IComicProcessorService>(),
+            Mock.Of<IBatchJobRegistry>(),
             Mock.Of<IFileStoreService>(),
             _settingsService.Object,
             Mock.Of<IHostApplicationLifetime>(),

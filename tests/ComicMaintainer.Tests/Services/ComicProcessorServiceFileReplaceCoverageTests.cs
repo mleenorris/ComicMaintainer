@@ -322,7 +322,7 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
                   Mock.Of<IEventBroadcaster>(),
                   Mock.Of<ISeriesMetadataCacheService>(),
                   TestServices.CreateSeriesNameResolver(new TestOptionsMonitor<AppSettings>(settings), NullLogger<SeriesNameResolver>.Instance),
-                  Mock.Of<IJobStateStore>(),
+                  Mock.Of<IBatchJobRegistry>(),
                   Mock.Of<IComicEmailService>(),
                   new FileOperationLock())
         {

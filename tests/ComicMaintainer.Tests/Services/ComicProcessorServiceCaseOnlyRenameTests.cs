@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using System.IO.Compression;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
@@ -129,13 +130,20 @@ public sealed class ComicProcessorServiceCaseOnlyRenameTests : IDisposable
         Assert.False(ComicProcessorService.IsSameFileUnderAnotherCase(source, Path.Join(_root, "b", "SAGA 1.cbz"), new[] { "Saga 1.cbz" }));
     }
 
+    private BatchJobRegistry? _jobRegistryInstance;
+
+    private BatchJobRegistry Jobs => _jobRegistryInstance ??= new BatchJobRegistry(
+        new TestOptionsMonitor<AppSettings>(_settings),
+        NullLogger<BatchJobRegistry>.Instance);
+
     private ComicProcessorService CreateService() =>
         TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             Mock.Of<ILogger<ComicProcessorService>>(),
             _fileStore.Object,
             Mock.Of<IProcessingHistoryService>(),
-            externalSeriesMetadata: Mock.Of<IExternalSeriesMetadataService>());
+            externalSeriesMetadata: Mock.Of<IExternalSeriesMetadataService>(),
+            jobRegistry: Jobs);
 
     private string[] ListNames(string folder) =>
         Directory.EnumerateFiles(Path.Join(_root, folder)).Select(p => Path.GetFileName(p)!).Order(StringComparer.Ordinal).ToArray();
@@ -173,12 +181,12 @@ public sealed class ComicProcessorServiceCaseOnlyRenameTests : IDisposable
         return path;
     }
 
-    private static async Task<ProcessingJob> WaitForJobAsync(ComicProcessorService service, Guid jobId)
+    private async Task<ProcessingJob> WaitForJobAsync(ComicProcessorService service, Guid jobId)
     {
         var deadline = DateTime.UtcNow + JobTimeout;
         while (true)
         {
-            var job = service.GetJob(jobId);
+            var job = Jobs.GetJob(jobId);
             if (job is { Status: not (JobStatus.Queued or JobStatus.Running) })
             {
                 return job;

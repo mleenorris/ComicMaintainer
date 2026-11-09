@@ -4,7 +4,6 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Telemetry;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
-using System.Collections.Concurrent;
 using System.Xml.Linq;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Zip;
@@ -27,20 +26,7 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly ISeriesMetadataCacheService _seriesMetadataCache;
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesNameResolver _seriesNameResolver;
-    private readonly IJobStateStore _jobStateStore;
-    private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
-    private readonly ConcurrentDictionary<Guid, object> _jobSyncLocks = new();
-    private readonly ConcurrentDictionary<Guid, JobStatus> _lastPersistedStatus = new();
-    private readonly ConcurrentDictionary<Guid, DateTime> _lastPersistedAt = new();
-    private readonly ConcurrentDictionary<Guid, bool> _persistedTerminalJobs = new();
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _jobPersistenceLocks = new();
-    private readonly ConcurrentDictionary<Guid, bool> _deletedPersistedJobs = new();
-
-    /// <summary>
-    /// Minimum spacing between durable progress writes for a job that has not changed status.
-    /// </summary>
-    private static readonly TimeSpan JobPersistenceInterval = TimeSpan.FromSeconds(5);
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly IComicEmailService _comicEmail;
     private readonly ComicMaintainerMetrics? _metrics;
     private readonly SemaphoreSlim _processingSemaphore;
@@ -65,7 +51,7 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         IEventBroadcaster eventBroadcaster,
         ISeriesMetadataCacheService seriesMetadataCache,
         ISeriesNameResolver seriesNameResolver,
-        IJobStateStore jobStateStore,
+        IBatchJobRegistry jobRegistry,
         IComicEmailService comicEmail,
         IFileOperationLock fileLock,
         ComicMaintainerMetrics? metrics = null)
@@ -78,7 +64,7 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         _eventBroadcaster = eventBroadcaster;
         _seriesMetadataCache = seriesMetadataCache;
         _seriesNameResolver = seriesNameResolver;
-        _jobStateStore = jobStateStore;
+        _jobRegistry = jobRegistry;
         _comicEmail = comicEmail;
         _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
@@ -94,11 +80,8 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
 
         if (disposing)
         {
-            foreach (var cancellationTokenSource in _jobCancellationTokens.Values)
-            {
-                TryCancel(cancellationTokenSource);
-            }
-
+            // The jobs still running hold slots of the semaphore that is about to go away.
+            _jobRegistry.CancelActiveJobs();
             _processingSemaphore.Dispose();
         }
 

@@ -242,6 +242,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ILibraryMutationLock, LibraryMutationLock>();
         services.AddSingleton<ISeriesNameResolver, SeriesNameResolver>();
         services.AddSingleton<IJobStateStore, JobStateStore>();
+        services.AddSingleton<IBatchJobRegistry, BatchJobRegistry>();
         services.AddSingleton<IComicProcessorService, ComicProcessorService>();
         services.AddSingleton<ArchiveWriteRecoveryService>();
         services.AddSingleton<IFileWatcherService, FileWatcherService>();

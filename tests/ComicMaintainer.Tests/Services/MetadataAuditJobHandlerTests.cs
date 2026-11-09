@@ -56,6 +56,7 @@ public class MetadataAuditJobHandlerTests
         var handler = new MetadataAuditJobHandler(
             fileStore.Object,
             processor.Object,
+            Mock.Of<IBatchJobRegistry>(),
             factory,
             new Mock<ILogger<MetadataAuditJobHandler>>().Object,
             resolver.Object);
@@ -104,6 +105,7 @@ public class MetadataAuditJobHandlerTests
         var handler = new MetadataAuditJobHandler(
             fileStore.Object,
             processor.Object,
+            Mock.Of<IBatchJobRegistry>(),
             factory,
             new Mock<ILogger<MetadataAuditJobHandler>>().Object,
             resolver.Object);

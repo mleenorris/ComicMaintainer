@@ -13,6 +13,7 @@ public class LibraryScanJobHandlerTests : IDisposable
     private readonly string _watchDir;
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<ISeriesMetadataCacheService> _cache = new();
     private readonly Mock<IOptionsMonitor<AppSettings>> _options = new();
     private readonly AppSettings _settings;
@@ -38,6 +39,7 @@ public class LibraryScanJobHandlerTests : IDisposable
         _options.Object,
         _fileStore.Object,
         _processor.Object,
+        _jobRegistry.Object,
         new Mock<ILogger<LibraryScanJobHandler>>().Object,
         _cache.Object);
 
@@ -64,7 +66,7 @@ public class LibraryScanJobHandlerTests : IDisposable
         var jobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
                   .ReturnsAsync(jobId);
-        _processor.Setup(p => p.GetJob(jobId)).Returns(CompletedJob(1));
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(CompletedJob(1));
 
         var handler = BuildHandler();
         var summary = await handler.ExecuteAsync(null, CancellationToken.None);
@@ -145,7 +147,7 @@ public class LibraryScanJobHandlerTests : IDisposable
         _processor.Setup(p => p.NormalizeFilesAsync(
             It.Is<IEnumerable<string>>(p => p.Contains(trackedFile)), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(jobId);
-        _processor.Setup(p => p.GetJob(jobId)).Returns(CompletedJob(1));
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(CompletedJob(1));
 
         var handler = BuildHandler();
         var summary = await handler.ExecuteAsync(null, CancellationToken.None);
@@ -208,7 +210,7 @@ public class LibraryScanJobHandlerTests : IDisposable
         var jobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
                   .ReturnsAsync(jobId);
-        _processor.Setup(p => p.GetJob(jobId)).Returns(CompletedJob(1));
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(CompletedJob(1));
         return jobId;
     }
 

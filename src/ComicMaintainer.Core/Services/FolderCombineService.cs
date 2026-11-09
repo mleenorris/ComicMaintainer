@@ -30,6 +30,7 @@ public sealed partial class FolderCombineService : IFolderCombineService
 
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesLibraryService _seriesLibrary;
     private readonly ISeriesMetadataCacheService _metadataCache;
@@ -48,6 +49,7 @@ public sealed partial class FolderCombineService : IFolderCombineService
     public FolderCombineService(
         IFileStoreService fileStore,
         IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         IProcessingHistoryService historyService,
         ISeriesLibraryService seriesLibrary,
         ISeriesMetadataCacheService metadataCache,
@@ -60,6 +62,7 @@ public sealed partial class FolderCombineService : IFolderCombineService
     {
         _fileStore = fileStore;
         _processor = processor;
+        _jobRegistry = jobRegistry;
         _historyService = historyService;
         _seriesLibrary = seriesLibrary;
         _metadataCache = metadataCache;

@@ -40,7 +40,7 @@ public sealed class FilesControllerFileActionsTests
             _seriesLibrary.Object,
             _logger.Object,
             _settings.Object,
-            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, _history.Object, _seriesLibrary.Object, _settings.Object),
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, Mock.Of<IBatchJobRegistry>(), _history.Object, _seriesLibrary.Object, _settings.Object),
             Mock.Of<IEventBroadcaster>(), Mock.Of<ISeriesNameResolver>(), Mock.Of<IScheduledJobRunner>(), new FileOperationLock());
     }
 

@@ -29,7 +29,7 @@ public class SeriesImagesController : ControllerBase
     private readonly ISeriesImageStore _imageStore;
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ISeriesCoverArtifactWriter _coverArtifacts;
-    private readonly IComicProcessorService _processor;
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly ILogger<SeriesImagesController> _logger;
 
     public SeriesImagesController(
@@ -38,7 +38,7 @@ public class SeriesImagesController : ControllerBase
         ISeriesImageStore imageStore,
         IExternalSeriesMetadataService externalMetadata,
         ISeriesCoverArtifactWriter coverArtifacts,
-        IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         ILogger<SeriesImagesController> logger)
     {
         _cache = cache;
@@ -46,7 +46,7 @@ public class SeriesImagesController : ControllerBase
         _imageStore = imageStore;
         _externalMetadata = externalMetadata;
         _coverArtifacts = coverArtifacts;
-        _processor = processor;
+        _jobRegistry = jobRegistry;
         _logger = logger;
     }
 
@@ -444,7 +444,7 @@ public class SeriesImagesController : ControllerBase
             });
         }
 
-        var jobId = await _processor.RunCustomBatchJobAsync(
+        var jobId = await _jobRegistry.RunCustomBatchJobAsync(
             operationName: operationName,
             trackedItems: embeddableTitles,
             itemOperation: (title, token) =>

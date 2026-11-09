@@ -23,6 +23,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
     private readonly AppSettings _settings;
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<ISeriesMetadataCacheService> _cache = new();
 
     public LibraryScanJobHandlerCoverageTests()
@@ -56,6 +57,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         new TestOptionsMonitor<AppSettings>(_settings),
         _fileStore.Object,
         _processor.Object,
+        _jobRegistry.Object,
         logger ?? NullLogger<LibraryScanJobHandler>.Instance,
         _cache.Object);
 
@@ -102,7 +104,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         _processor.Setup(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<string>, CancellationToken>((paths, _) => capture?.Invoke(paths.ToList()))
             .ReturnsAsync(jobId);
-        _processor.Setup(p => p.GetJob(jobId)).Returns(job);
+        _jobRegistry.SetupWait(jobId, job);
         return jobId;
     }
 
@@ -112,7 +114,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => capture?.Invoke(paths.ToList()))
             .ReturnsAsync(jobId);
-        _processor.Setup(p => p.GetJob(jobId)).Returns(job);
+        _jobRegistry.SetupWait(jobId, job);
         return jobId;
     }
 
@@ -250,7 +252,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
 
         Assert.Equal("Library scan: +1 added, -0 removed, 0 stale retagged. [added: queue failed]", summary);
-        _processor.Verify(p => p.GetJob(It.IsAny<Guid>()), Times.Never);
+        _jobRegistry.Verify(p => p.WaitForCompletionAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -419,14 +421,14 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
         var jobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(jobId);
-        _processor.Setup(p => p.GetJob(jobId))
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>()))
             .Callback(() => cts.Cancel())
-            .Returns(new ProcessingJob { JobId = jobId, Status = JobStatus.Running });
+            .ThrowsAsync(new OperationCanceledException());
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => CreateHandler().ExecuteAsync(null, cts.Token));
 
-        _processor.Verify(p => p.GetJob(jobId), Times.Once);
+        _jobRegistry.Verify(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>()), Times.Once);
         _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -445,7 +447,7 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
 
         // A job queued with the cancelled token would just be cancelled straight away.
         _processor.Verify(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
-        _processor.Verify(p => p.GetJob(It.IsAny<Guid>()), Times.Never);
+        _jobRegistry.Verify(p => p.WaitForCompletionAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -524,8 +526,6 @@ public class LibraryScanJobHandlerCoverageTests : IDisposable
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => CreateHandler().ExecuteAsync(null, cts.Token));
-
-        _processor.Verify(p => p.GetJob(It.IsAny<Guid>()), Times.Never);
     }
 
     [Theory]

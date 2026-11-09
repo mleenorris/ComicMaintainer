@@ -16,6 +16,7 @@ public class FilesControllerTests
 {
     private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<IComicProcessorService> _mockProcessor;
+    private readonly Mock<IBatchJobRegistry> _mockJobRegistry = new();
     private readonly Mock<IProcessingHistoryService> _mockHistoryService;
     private readonly Mock<ISeriesLibraryService> _mockSeriesLibrary;
     private readonly Mock<ILogger<FilesController>> _mockLogger;
@@ -41,7 +42,7 @@ public class FilesControllerTests
         // Make RunCustomBatchJobAsync execute the supplied per-item callback
         // and post-loop hook inline so combine-folders tests can observe the
         // moves synchronously the way the pre-job implementation behaved.
-        _mockProcessor.RunCustomBatchJobsInline();
+        _mockJobRegistry.RunCustomBatchJobsInline();
 
         _controller = CreateController();
     }
@@ -67,6 +68,7 @@ public class FilesControllerTests
             TestFolderCombineService.Create(
                 store,
                 _mockProcessor.Object,
+                _mockJobRegistry.Object,
                 _mockHistoryService.Object,
                 _mockSeriesLibrary.Object,
                 _mockSettings.Object,

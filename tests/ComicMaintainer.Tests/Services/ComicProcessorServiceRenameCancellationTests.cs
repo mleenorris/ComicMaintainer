@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using System.IO.Compression;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
@@ -107,7 +108,7 @@ public sealed class ComicProcessorServiceRenameCancellationTests : IDisposable
         CancelWhenTheRowIsMoved(() =>
         {
             jobStarted.Task.Wait(JobTimeout);
-            service.CancelJob(jobId);
+            Jobs.CancelJob(jobId);
         });
 
         jobId = await service.RenameFilesAsync(new[] { file });
@@ -161,13 +162,20 @@ public sealed class ComicProcessorServiceRenameCancellationTests : IDisposable
     private static Task Observe(CancellationToken token) =>
         token.IsCancellationRequested ? Task.FromCanceled(token) : Task.CompletedTask;
 
+    private BatchJobRegistry? _jobRegistryInstance;
+
+    private BatchJobRegistry Jobs => _jobRegistryInstance ??= new BatchJobRegistry(
+        new TestOptionsMonitor<AppSettings>(_settings),
+        NullLogger<BatchJobRegistry>.Instance);
+
     private ComicProcessorService CreateService() =>
         TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             Mock.Of<ILogger<ComicProcessorService>>(),
             _fileStore.Object,
             _history.Object,
-            externalSeriesMetadata: Mock.Of<IExternalSeriesMetadataService>());
+            externalSeriesMetadata: Mock.Of<IExternalSeriesMetadataService>(),
+            jobRegistry: Jobs);
 
     private string CreateArchive(string folder, string fileName, string series, string number)
     {
@@ -188,12 +196,12 @@ public sealed class ComicProcessorServiceRenameCancellationTests : IDisposable
         return path;
     }
 
-    private static async Task<ProcessingJob> WaitForJobAsync(ComicProcessorService service, Guid jobId)
+    private async Task<ProcessingJob> WaitForJobAsync(ComicProcessorService service, Guid jobId)
     {
         var deadline = DateTime.UtcNow + JobTimeout;
         while (true)
         {
-            var job = service.GetJob(jobId);
+            var job = Jobs.GetJob(jobId);
             if (job is { Status: not (JobStatus.Queued or JobStatus.Running) })
             {
                 return job;

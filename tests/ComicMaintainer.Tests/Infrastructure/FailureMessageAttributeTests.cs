@@ -46,7 +46,6 @@ public class FailureMessageAttributeTests
     [InlineData(typeof(FilesController), nameof(FilesController.ProcessBatch), "Error starting batch processing")]
     [InlineData(typeof(FilesController), nameof(FilesController.ProcessFile), "Error processing file")]
     [InlineData(typeof(FilesController), nameof(FilesController.ProcessFileByEncodedPath), "Error processing file")]
-    [InlineData(typeof(FilesController), nameof(FilesController.ProcessSingleFile), "Error processing file")]
     [InlineData(typeof(FilesController), nameof(FilesController.RemoveFileMetadata), "Error removing metadata")]
     [InlineData(typeof(FilesController), nameof(FilesController.RenameFileByEncodedPath), "Error renaming file")]
     [InlineData(typeof(FilesController), nameof(FilesController.RenameSingleFile), "Error renaming file")]

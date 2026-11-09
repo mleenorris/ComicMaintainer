@@ -51,11 +51,10 @@ public class LibraryScanJobHandler : IScheduledJobHandler
 {
     public const string Key = "library-scan";
 
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
-
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly ISeriesMetadataCacheService _seriesCache;
     private readonly ILogger<LibraryScanJobHandler> _logger;
 
@@ -63,12 +62,14 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         IOptionsMonitor<AppSettings> settings,
         IFileStoreService fileStore,
         IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         ILogger<LibraryScanJobHandler> logger,
         ISeriesMetadataCacheService seriesCache)
     {
         _settings = settings;
         _fileStore = fileStore;
         _processor = processor;
+        _jobRegistry = jobRegistry;
         _logger = logger;
         _seriesCache = seriesCache;
     }
@@ -389,16 +390,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
 
     private async Task<(string Summary, ProcessingJob? Job)> WaitForJobAsync(Guid jobId, int requested, string label, CancellationToken cancellationToken)
     {
-        ProcessingJob? job = null;
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            job = _processor.GetJob(jobId);
-            if (job is null) break;
-            if (job.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled) break;
-            await Task.Delay(PollInterval, cancellationToken);
-        }
-        // A cancelled scan throws rather than reporting a job it never polled as "evicted".
-        cancellationToken.ThrowIfCancellationRequested();
+        var job = await _jobRegistry.WaitForCompletionAsync(jobId, cancellationToken);
         var summary = job switch
         {
             null => $" [{label}: queued (job record evicted)]",

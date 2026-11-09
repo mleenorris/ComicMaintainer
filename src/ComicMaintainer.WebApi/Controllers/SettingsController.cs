@@ -26,7 +26,7 @@ public class SettingsController : ControllerBase
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<SettingsController> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
-    private readonly IComicProcessorService _processorService;
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly IFileStoreService _fileStore;
     private readonly ISettingsService _settingsService;
     private readonly IHostApplicationLifetime _applicationLifetime;
@@ -38,7 +38,7 @@ public class SettingsController : ControllerBase
         IOptionsMonitor<AppSettings> appSettings, 
         ILogger<SettingsController> logger,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
-        IComicProcessorService processorService,
+        IBatchJobRegistry jobRegistry,
         IFileStoreService fileStore,
         ISettingsService settingsService,
         IHostApplicationLifetime applicationLifetime,
@@ -49,7 +49,7 @@ public class SettingsController : ControllerBase
         _appSettings = appSettings;
         _logger = logger;
         _dbContextFactory = dbContextFactory;
-        _processorService = processorService;
+        _jobRegistry = jobRegistry;
         _fileStore = fileStore;
         _settingsService = settingsService;
         _applicationLifetime = applicationLifetime;
@@ -567,17 +567,9 @@ public class SettingsController : ControllerBase
         _logger.LogWarning("Database reset requested - this will delete all processing data");
 
         // Cancel all active jobs before the data they work on is deleted.
-        var activeJobs = _processorService.GetAllJobs()
-            .Where(j => j.Status == Core.Models.JobStatus.Running || j.Status == Core.Models.JobStatus.Queued)
-            .ToList();
-
-        foreach (var job in activeJobs)
-        {
-            _logger.LogInformation("Cancelling job {JobId} due to reset", job.JobId);
-            // Cooperative: the job stops at its next cancellation check.
-            // CancelJob returns (and logs) false when the job already finished.
-            _processorService.CancelJob(job.JobId);
-        }
+        // Cooperative: each job stops at its next cancellation check.
+        var cancelledJobs = _jobRegistry.CancelActiveJobs();
+        _logger.LogInformation("Cancelled {Count} active job(s) due to reset", cancelledJobs);
 
         // Clear all database tables
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);

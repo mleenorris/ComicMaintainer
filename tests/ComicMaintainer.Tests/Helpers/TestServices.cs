@@ -66,7 +66,7 @@ public static class TestServices
         IExternalSeriesMetadataService? externalSeriesMetadata = null,
         ISeriesMetadataCacheService? seriesMetadataCache = null,
         ISeriesNameResolver? seriesNameResolver = null,
-        IJobStateStore? jobStateStore = null,
+        IBatchJobRegistry? jobRegistry = null,
         IComicEmailService? comicEmail = null,
         ComicMaintainerMetrics? metrics = null,
         ILoggerFactory? loggerFactory = null,
@@ -85,7 +85,7 @@ public static class TestServices
                 loggerFactory?.CreateLogger<SeriesNameResolver>() ?? NullLogger<SeriesNameResolver>.Instance,
                 cache,
                 externalSeriesMetadata),
-            jobStateStore ?? Mock.Of<IJobStateStore>(),
+            jobRegistry ?? new BatchJobRegistry(settings, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: eventBroadcaster, metrics: metrics),
             comicEmail ?? Mock.Of<IComicEmailService>(),
             fileLock ?? new FileOperationLock(),
             metrics);

@@ -3,7 +3,8 @@ using ComicMaintainer.Core.Models;
 namespace ComicMaintainer.Core.Interfaces;
 
 /// <summary>
-/// Service for processing comic files
+/// Per-file comic operations, singly or as batch jobs. Batch jobs run in, and are tracked by,
+/// <see cref="IBatchJobRegistry"/>.
 /// </summary>
 public interface IComicProcessorService
 {
@@ -26,16 +27,6 @@ public interface IComicProcessorService
     /// Process multiple comic files as a batch job, optionally forcing reprocessing.
     /// </summary>
     Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Get job status
-    /// </summary>
-    ProcessingJob? GetJob(Guid jobId);
-
-    /// <summary>
-    /// Get currently active job, if any
-    /// </summary>
-    ProcessingJob? GetActiveJob();
 
     /// <summary>
     /// Get metadata from a comic file
@@ -143,55 +134,6 @@ public interface IComicProcessorService
     Task<Guid> DeleteFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Generic background job entry point used by callers that need to run a
-    /// custom per-item operation through the standard job pipeline (i.e.
-    /// surface progress + completion via <c>job_updated</c> / <c>file_processed</c>
-    /// SSE events and the existing UI progress modal).
-    /// </summary>
-    /// <param name="operationName">Stable identifier used in log messages.</param>
-    /// <param name="trackedItems">
-    ///   The list of items the job will iterate over. Typically file paths,
-    ///   but can be any string identifier — the job's <see cref="ProcessingJob.Files"/>
-    ///   list mirrors this collection so the UI can render per-item progress.
-    /// </param>
-    /// <param name="itemOperation">
-    ///   Per-item operation invoked once per <paramref name="trackedItems"/>
-    ///   entry. Returning <c>false</c> increments the job's failure count and
-    ///   records <paramref name="failureMessage"/> as the error for that item.
-    ///   It runs without the per-file <see cref="IFileOperationLock"/>: an item
-    ///   that moves, rewrites or deletes an archive itself must hold that file's
-    ///   lock while it does, and must not call a public file operation of this
-    ///   service on the same file meanwhile (the lock is not reentrant).
-    /// </param>
-    /// <param name="failureMessage">Error string recorded when <paramref name="itemOperation"/> returns false.</param>
-    /// <param name="postLoopAsync">
-    ///   Optional cleanup / follow-up work that runs after the per-item loop
-    ///   completes but before the job is marked <c>Completed</c>. Exceptions
-    ///   from this hook flip the job to <c>Failed</c>.
-    /// </param>
-    Task<Guid> RunCustomBatchJobAsync(
-        string operationName,
-        IEnumerable<string> trackedItems,
-        Func<string, CancellationToken, Task<bool>> itemOperation,
-        string failureMessage,
-        Func<CancellationToken, Task>? postLoopAsync = null,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Same as the other <c>RunCustomBatchJobAsync</c> overload, but the
-    /// post-loop hook also receives an <see cref="IBatchJobReport"/> to report
-    /// problems with things that were not tracked items (for example a source
-    /// folder that had to be kept).
-    /// </summary>
-    Task<Guid> RunCustomBatchJobAsync(
-        string operationName,
-        IEnumerable<string> trackedItems,
-        Func<string, CancellationToken, Task<bool>> itemOperation,
-        string failureMessage,
-        Func<IBatchJobReport, CancellationToken, Task> postLoopAsync,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Normalize metadata and then rename multiple comic files as a single batch job.
     /// For each file, normalization is performed first (so the series name reflects the
     /// containing folder) and the rename step uses the freshly normalized metadata.
@@ -199,26 +141,4 @@ public interface IComicProcessorService
     /// in the database are still updated to match the new folder.
     /// </summary>
     Task<Guid> NormalizeAndRenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Get all jobs
-    /// </summary>
-    IEnumerable<ProcessingJob> GetAllJobs();
-
-    /// <summary>
-    /// Delete a job from the job history
-    /// </summary>
-    Task<bool> DeleteJobAsync(Guid jobId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Cancel a running job
-    /// </summary>
-    bool CancelJob(Guid jobId);
-
-    /// <summary>
-    /// Add jobs recovered from durable storage to the in-memory job list, so the API can still
-    /// answer for jobs that were created before the process restarted. Jobs already present in
-    /// memory are left untouched.
-    /// </summary>
-    void RestoreJobs(IEnumerable<ProcessingJob> jobs);
 }

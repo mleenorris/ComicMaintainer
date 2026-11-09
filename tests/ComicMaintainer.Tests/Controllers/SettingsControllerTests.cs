@@ -18,7 +18,7 @@ public class SettingsControllerTests
     private readonly Mock<IOptionsMonitor<AppSettings>> _appSettingsMock;
     private readonly Mock<ILogger<SettingsController>> _loggerMock;
     private readonly Mock<IDbContextFactory<ComicMaintainer.Core.Data.ComicMaintainerDbContext>> _dbContextFactoryMock;
-    private readonly Mock<IComicProcessorService> _processorServiceMock;
+    private readonly Mock<IBatchJobRegistry> _jobRegistryMock;
     private readonly Mock<IFileStoreService> _fileStoreMock;
     private readonly Mock<ISettingsService> _settingsServiceMock;
     private readonly Mock<IHostApplicationLifetime> _applicationLifetimeMock;
@@ -42,7 +42,7 @@ public class SettingsControllerTests
         
         _loggerMock = new Mock<ILogger<SettingsController>>();
         _dbContextFactoryMock = new Mock<IDbContextFactory<ComicMaintainer.Core.Data.ComicMaintainerDbContext>>();
-        _processorServiceMock = new Mock<IComicProcessorService>();
+        _jobRegistryMock = new Mock<IBatchJobRegistry>();
         _fileStoreMock = new Mock<IFileStoreService>();
         _settingsServiceMock = new Mock<ISettingsService>();
         _applicationLifetimeMock = new Mock<IHostApplicationLifetime>();
@@ -51,7 +51,7 @@ public class SettingsControllerTests
             _appSettingsMock.Object, 
             _loggerMock.Object,
             _dbContextFactoryMock.Object,
-            _processorServiceMock.Object,
+            _jobRegistryMock.Object,
             _fileStoreMock.Object,
             _settingsServiceMock.Object,
             _applicationLifetimeMock.Object,

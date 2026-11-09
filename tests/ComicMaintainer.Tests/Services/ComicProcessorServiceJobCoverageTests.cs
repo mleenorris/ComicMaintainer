@@ -27,6 +27,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     private readonly string _library;
     private readonly AppSettings _settings;
     private readonly HookLogger _logger = new();
+    private BatchJobRegistry _jobs = null!;
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IProcessingHistoryService> _history = new();
     private readonly Mock<IEventBroadcaster> _broadcaster = new();
@@ -645,7 +646,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         var service = CreateService();
         var seen = new ConcurrentQueue<string>();
 
-        var jobId = await service.RunCustomBatchJobAsync(
+        var jobId = await _jobs.RunCustomBatchJobAsync(
             "CustomOp",
             new[] { "a", null!, string.Empty, "   ", "b" },
             (item, _) =>
@@ -673,7 +674,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         var service = CreateService();
         var invoked = false;
 
-        var jobId = await service.RunCustomBatchJobAsync(
+        var jobId = await _jobs.RunCustomBatchJobAsync(
             "CustomOp",
             null!,
             (_, _) =>
@@ -698,9 +699,9 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         var newest = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Interrupted, StartTime = new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc) };
         var middle = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Failed, StartTime = new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc) };
 
-        service.RestoreJobs(new[] { older, newest, middle });
+        _jobs.RestoreJobs(new[] { older, newest, middle });
 
-        Assert.Equal(new[] { newest.JobId, middle.JobId, older.JobId }, service.GetAllJobs().Select(j => j.JobId));
+        Assert.Equal(new[] { newest.JobId, middle.JobId, older.JobId }, _jobs.GetJobSummaries().Select(j => j.JobId));
     }
 
     [Fact]
@@ -708,7 +709,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     {
         var service = CreateService();
 
-        Assert.False(await service.DeleteJobAsync(Guid.NewGuid()));
+        Assert.False(await _jobs.DeleteJobAsync(Guid.NewGuid()));
     }
 
     [Fact]
@@ -716,13 +717,13 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     {
         var service = CreateService();
         var running = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Running, StartTime = DateTime.UtcNow };
-        service.RestoreJobs(new[] { running });
+        _jobs.RestoreJobs(new[] { running });
 
-        var deleted = await service.DeleteJobAsync(running.JobId);
+        var deleted = await _jobs.DeleteJobAsync(running.JobId);
 
         Assert.False(deleted);
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot delete active job: {JobId}"));
-        Assert.NotNull(service.GetJob(running.JobId));
+        Assert.NotNull(_jobs.GetJob(running.JobId));
     }
 
     [Fact]
@@ -730,7 +731,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     {
         var service = CreateService();
 
-        Assert.False(service.CancelJob(Guid.NewGuid()));
+        Assert.False(_jobs.CancelJob(Guid.NewGuid()));
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot cancel job {JobId}: no active cancellation token found"));
     }
 
@@ -740,7 +741,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         var service = CreateService();
         var (jobId, itemToken) = await StartBlockedJobAsync(service);
 
-        Assert.True(service.CancelJob(jobId));
+        Assert.True(_jobs.CancelJob(jobId));
         var job = await WaitForJobAsync(service, jobId);
 
         Assert.True(itemToken.IsCancellationRequested);
@@ -767,7 +768,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
             }
         };
 
-        var cancelled = service.CancelJob(jobId);
+        var cancelled = _jobs.CancelJob(jobId);
 
         Assert.False(cancelled);
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot cancel job {JobId}: no active cancellation token found"));
@@ -784,7 +785,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         var itemInvoked = false;
         var postLoopInvoked = false;
 
-        var jobId = await service.RunCustomBatchJobAsync(
+        var jobId = await _jobs.RunCustomBatchJobAsync(
             "CustomOp",
             new[] { "only-item" },
             (_, _) =>
@@ -829,15 +830,16 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task Dispose_WithoutManagedDisposal_LeavesRunningJobsAlone()
     {
+        _jobs = new BatchJobRegistry(new TestOptionsMonitor<AppSettings>(_settings), _logger, eventBroadcaster: _broadcaster.Object);
         var service = new UnmanagedDisposeService(
-            new TestOptionsMonitor<AppSettings>(_settings), _logger, _fileStore.Object, _history.Object, _broadcaster.Object);
+            new TestOptionsMonitor<AppSettings>(_settings), _logger, _fileStore.Object, _history.Object, _broadcaster.Object, _jobs);
         _services.Add(service);
         var (jobId, itemToken) = await StartBlockedJobAsync(service);
 
         service.DisposeUnmanagedOnly();
 
         Assert.False(itemToken.IsCancellationRequested);
-        Assert.True(service.CancelJob(jobId));
+        Assert.True(_jobs.CancelJob(jobId));
         var job = await WaitForJobAsync(service, jobId);
         Assert.Equal(JobStatus.Cancelled, job.Status);
     }
@@ -903,7 +905,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
             .Returns(Task.CompletedTask);
         var service = CreateService(store.Object);
 
-        var jobId = await service.RunCustomBatchJobAsync(
+        var jobId = await _jobs.RunCustomBatchJobAsync(
             "CustomOp",
             new[] { "first", "second" },
             (_, _) => Task.FromResult(true),
@@ -915,13 +917,13 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         Assert.Contains(JobStatus.Running, statuses);
         Assert.Equal(JobStatus.Completed, statuses.Last());
         Assert.Single(statuses, s => s == JobStatus.Completed);
-        Assert.Equal(JobStatus.Completed, service.GetJob(jobId)!.Status);
+        Assert.Equal(JobStatus.Completed, _jobs.GetJob(jobId)!.Status);
     }
 
     private async Task<(Guid JobId, CancellationToken ItemToken)> StartBlockedJobAsync(ComicProcessorService service)
     {
         var started = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var jobId = await service.RunCustomBatchJobAsync(
+        var jobId = await _jobs.RunCustomBatchJobAsync(
             "BlockingOp",
             new[] { "only-item" },
             async (_, token) =>
@@ -945,7 +947,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         Action? onCancelled = null)
     {
         var held = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var jobId = await service.RunCustomBatchJobAsync(
+        var jobId = await _jobs.RunCustomBatchJobAsync(
             "HeldOp",
             new[] { "only-item" },
             (_, _) => Task.FromResult(true),
@@ -1001,13 +1003,15 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
 
     private ComicProcessorService CreateService(IJobStateStore? jobStateStore = null, IFileStoreService? fileStore = null)
     {
+        var settings = new TestOptionsMonitor<AppSettings>(_settings);
+        _jobs = new BatchJobRegistry(settings, _logger, jobStateStore, _broadcaster.Object);
         var service = TestServices.CreateComicProcessor(
-            new TestOptionsMonitor<AppSettings>(_settings),
+            settings,
             _logger,
             fileStore ?? _fileStore.Object,
             _history.Object,
             eventBroadcaster: _broadcaster.Object,
-            jobStateStore: jobStateStore);
+            jobRegistry: _jobs);
         _services.Add(service);
         return service;
     }
@@ -1018,7 +1022,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     private async Task<ProcessingJob> WaitForJobAsync(ComicProcessorService service, Guid jobId)
     {
         await JobSignal(jobId).Task.WaitAsync(TimeSpan.FromSeconds(30));
-        return service.GetJob(jobId)!;
+        return _jobs.GetJob(jobId)!;
     }
 
     private string WriteCbz(string relativePath, string? comicInfoXml)
@@ -1143,7 +1147,8 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
             ILogger<ComicProcessorService> logger,
             IFileStoreService fileStore,
             IProcessingHistoryService historyService,
-            IEventBroadcaster eventBroadcaster)
+            IEventBroadcaster eventBroadcaster,
+            IBatchJobRegistry jobRegistry)
             : base(
                   settings,
                   logger,
@@ -1152,7 +1157,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
                   eventBroadcaster,
                   Mock.Of<ISeriesMetadataCacheService>(),
                   TestServices.CreateSeriesNameResolver(settings, NullLogger<SeriesNameResolver>.Instance),
-                  Mock.Of<IJobStateStore>(),
+                  jobRegistry,
                   Mock.Of<IComicEmailService>(),
                   new FileOperationLock())
         {
@@ -1163,7 +1168,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
 
     private sealed record LogEntry(LogLevel Level, string Template, IReadOnlyDictionary<string, object?> Properties, Exception? Exception);
 
-    private sealed class HookLogger : ILogger<ComicProcessorService>
+    private sealed class HookLogger : ILogger<ComicProcessorService>, ILogger<BatchJobRegistry>
     {
         public ConcurrentQueue<LogEntry> Entries { get; } = new();
 

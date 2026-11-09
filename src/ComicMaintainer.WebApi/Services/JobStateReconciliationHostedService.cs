@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Services;
 
 namespace ComicMaintainer.WebApi.Services;
 
@@ -8,7 +9,7 @@ namespace ComicMaintainer.WebApi.Services;
 /// <remarks>
 /// Any job the database still records as queued or running cannot actually be running: the
 /// process that owned it is gone. Such jobs are marked interrupted and loaded back into the
-/// processor so that a client still polling a job id from before the restart gets a real
+/// job registry so that a client still polling a job id from before the restart gets a real
 /// answer instead of a 404 and an indefinitely stalled progress bar.
 ///
 /// Interrupted jobs are deliberately not resumed. The batch operations are not transactional,
@@ -17,23 +18,17 @@ namespace ComicMaintainer.WebApi.Services;
 /// </remarks>
 public class JobStateReconciliationHostedService : IHostedService
 {
-    /// <summary>Terminal jobs older than this are removed at startup.</summary>
-    private static readonly TimeSpan JobRetention = TimeSpan.FromDays(7);
-
-    /// <summary>Terminal jobs kept regardless of age, so recent history is never empty.</summary>
-    private const int JobRetentionCount = 50;
-
     private readonly IJobStateStore _jobStateStore;
-    private readonly IComicProcessorService _processor;
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly ILogger<JobStateReconciliationHostedService> _logger;
 
     public JobStateReconciliationHostedService(
         IJobStateStore jobStateStore,
-        IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         ILogger<JobStateReconciliationHostedService> logger)
     {
         _jobStateStore = jobStateStore;
-        _processor = processor;
+        _jobRegistry = jobRegistry;
         _logger = logger;
     }
 
@@ -51,13 +46,13 @@ public class JobStateReconciliationHostedService : IHostedService
             }
 
             await _jobStateStore.PruneAsync(
-                DateTime.UtcNow - JobRetention,
-                JobRetentionCount,
+                DateTime.UtcNow - BatchJobRetention.MaxAge,
+                BatchJobRetention.KeepMostRecent,
                 cancellationToken);
 
             var jobs = await _jobStateStore.GetAllAsync(cancellationToken);
 
-            _processor.RestoreJobs(jobs);
+            _jobRegistry.RestoreJobs(jobs);
 
             _logger.LogInformation("Restored {Count} persisted job record(s)", jobs.Count);
         }

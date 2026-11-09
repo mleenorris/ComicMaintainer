@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using System.IO.Compression;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
@@ -194,13 +195,20 @@ public sealed class ComicProcessorServiceFileLockTests : IDisposable
         Assert.Contains("cover.jpg", ListEntries(file));
     }
 
+    private BatchJobRegistry? _jobRegistryInstance;
+
+    private BatchJobRegistry Jobs => _jobRegistryInstance ??= new BatchJobRegistry(
+        new TestOptionsMonitor<AppSettings>(_settings),
+        NullLogger<BatchJobRegistry>.Instance);
+
     private ComicProcessorService CreateService() =>
         TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             Mock.Of<ILogger<ComicProcessorService>>(),
             _fileStore.Object,
             Mock.Of<IProcessingHistoryService>(),
-            externalSeriesMetadata: _external.Object);
+            externalSeriesMetadata: _external.Object,
+            jobRegistry: Jobs);
 
     private TaskCompletionSource BlockExternalLookups()
     {
@@ -264,12 +272,12 @@ public sealed class ComicProcessorServiceFileLockTests : IDisposable
         }
     }
 
-    private static async Task<ProcessingJob> WaitForJobAsync(ComicProcessorService service, Guid jobId)
+    private async Task<ProcessingJob> WaitForJobAsync(ComicProcessorService service, Guid jobId)
     {
         var deadline = DateTime.UtcNow + CompletionTimeout;
         while (true)
         {
-            var job = service.GetJob(jobId);
+            var job = Jobs.GetJob(jobId);
             if (job is { Status: not (JobStatus.Queued or JobStatus.Running) })
             {
                 return job;

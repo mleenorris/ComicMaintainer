@@ -22,8 +22,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     private readonly Mock<ISeriesLibraryService> _library = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
-    private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<ISeriesCoverArtifactWriter> _coverArtifacts = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly string _dir;
     private readonly CancellationTokenSource _cts = new();
 
@@ -69,7 +69,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
             _imageStore.Object,
             _external.Object,
             _coverArtifacts.Object,
-            _processor.Object,
+            _jobRegistry.Object,
             NullLogger<SeriesImagesController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }
@@ -122,7 +122,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     private JobCapture CaptureJob(Guid jobId)
     {
         var capture = new JobCapture();
-        _processor.Setup(p => p.RunCustomBatchJobAsync(
+        _jobRegistry.Setup(p => p.RunCustomBatchJobAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),
                 It.IsAny<Func<string, CancellationToken, Task<bool>>>(),

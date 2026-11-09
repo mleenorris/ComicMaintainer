@@ -53,7 +53,7 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
             options,
             NullLogger<SettingsController>.Instance,
             Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>(),
-            Mock.Of<IComicProcessorService>(),
+            Mock.Of<IBatchJobRegistry>(),
             Mock.Of<IFileStoreService>(),
             _settingsService,
             Mock.Of<IHostApplicationLifetime>(),

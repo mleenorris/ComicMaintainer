@@ -137,7 +137,7 @@ public partial class FilesController
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/scan-unmarked")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    [Obsolete("Use POST /api/files/scan-unmarked instead. This alias is scheduled for removal in v3.0.")]
+    [Obsolete("Use GET /api/files/scan-unmarked instead.")]
     [FailureMessage("Error scanning files")]
     public async Task<ActionResult> ScanUnmarkedLegacy() => await ScanUnmarked();
 
@@ -153,24 +153,6 @@ public partial class FilesController
         if (!IsPathSafe(filePath))
         {
             _logger.LogWarning("Attempt to process file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
-            return BadRequest("File path is outside the allowed directory");
-        }
-
-        var success = await _processor.ProcessFileAsync(filePath, forceReprocess);
-        return success ? Ok() : BadRequest("Failed to process file");
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("~/api/process-file")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    [Obsolete("Use POST /api/files/{encodedFilePath}/process instead. This alias is scheduled for removal in v3.0.")]
-    [FailureMessage("Error processing file")]
-    public async Task<ActionResult> ProcessSingleFile([FromQuery] string filePath, [FromQuery] bool forceReprocess = false)
-    {
-        // Validate path is within watched directory to prevent path traversal attacks
-        if (!IsPathSafe(filePath))
-        {
-            _logger.LogWarning("Attempt to process file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
             return BadRequest("File path is outside the allowed directory");
         }
 

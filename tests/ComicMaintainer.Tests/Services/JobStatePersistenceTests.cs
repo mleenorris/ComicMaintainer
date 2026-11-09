@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging.Abstractions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
@@ -44,6 +45,13 @@ public class JobStatePersistenceTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    private BatchJobRegistry? _jobs;
+
+    private BatchJobRegistry Jobs => _jobs ??= new BatchJobRegistry(
+        new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
+        NullLogger<BatchJobRegistry>.Instance,
+        _jobStateStore.Object);
+
     private ComicProcessorService CreateProcessor()
     {
         return TestServices.CreateComicProcessor(
@@ -51,18 +59,18 @@ public class JobStatePersistenceTests : IDisposable
             new Mock<ILogger<ComicProcessorService>>().Object,
             _fileStore.Object,
             _history.Object,
-            jobStateStore: _jobStateStore.Object);
+            jobRegistry: Jobs);
     }
 
     private static async Task<ProcessingJob?> WaitForTerminalAsync(
-        IComicProcessorService processor,
+        IBatchJobRegistry jobs,
         Guid jobId,
         int timeoutMs = 10000)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
         while (DateTime.UtcNow < deadline)
         {
-            var job = processor.GetJob(jobId);
+            var job = jobs.GetJob(jobId);
             if (job != null && job.IsTerminal)
             {
                 return job;
@@ -70,7 +78,7 @@ public class JobStatePersistenceTests : IDisposable
             await Task.Delay(25);
         }
 
-        return processor.GetJob(jobId);
+        return jobs.GetJob(jobId);
     }
 
     [Fact]
@@ -92,7 +100,7 @@ public class JobStatePersistenceTests : IDisposable
             .Returns(Task.CompletedTask);
 
         var jobId = await processor.ProcessFilesAsync(new List<string>());
-        var job = await WaitForTerminalAsync(processor, jobId);
+        var job = await WaitForTerminalAsync(Jobs, jobId);
         await terminalSaved.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.NotNull(job);
@@ -114,7 +122,7 @@ public class JobStatePersistenceTests : IDisposable
             .Returns(Task.CompletedTask);
 
         var jobId = await processor.ProcessFilesAsync(new List<string>());
-        await WaitForTerminalAsync(processor, jobId);
+        await WaitForTerminalAsync(Jobs, jobId);
 
         Assert.NotEmpty(saved);
         Assert.All(saved, j => Assert.False(string.IsNullOrWhiteSpace(j.OperationName)));
@@ -129,7 +137,7 @@ public class JobStatePersistenceTests : IDisposable
             .ThrowsAsync(new InvalidOperationException("database unavailable"));
 
         var jobId = await processor.ProcessFilesAsync(new List<string>());
-        var job = await WaitForTerminalAsync(processor, jobId);
+        var job = await WaitForTerminalAsync(Jobs, jobId);
 
         // Job history is observability; losing it must never fail the user's batch.
         Assert.NotNull(job);
@@ -156,7 +164,7 @@ public class JobStatePersistenceTests : IDisposable
             .Returns(Task.CompletedTask);
 
         var jobId = await processor.ProcessFilesAsync(new List<string>());
-        await WaitForTerminalAsync(processor, jobId);
+        await WaitForTerminalAsync(Jobs, jobId);
 
         // Give any straggling fire-and-forget write a chance to land.
         await Task.Delay(250);
@@ -172,10 +180,9 @@ public class JobStatePersistenceTests : IDisposable
     [Fact]
     public void RestoreJobs_MakesPreRestartJobsVisibleAgain()
     {
-        var processor = CreateProcessor();
         var jobId = Guid.NewGuid();
 
-        processor.RestoreJobs(new[]
+        Jobs.RestoreJobs(new[]
         {
             new ProcessingJob
             {
@@ -188,7 +195,7 @@ public class JobStatePersistenceTests : IDisposable
             }
         });
 
-        var job = processor.GetJob(jobId);
+        var job = Jobs.GetJob(jobId);
 
         Assert.NotNull(job);
         Assert.Equal(JobStatus.Interrupted, job!.Status);
@@ -198,19 +205,18 @@ public class JobStatePersistenceTests : IDisposable
     [Fact]
     public void RestoreJobs_DoesNotOverwriteAJobAlreadyInMemory()
     {
-        var processor = CreateProcessor();
         var jobId = Guid.NewGuid();
 
-        processor.RestoreJobs(new[]
+        Jobs.RestoreJobs(new[]
         {
             new ProcessingJob { JobId = jobId, Status = JobStatus.Completed, TotalFiles = 3 }
         });
-        processor.RestoreJobs(new[]
+        Jobs.RestoreJobs(new[]
         {
             new ProcessingJob { JobId = jobId, Status = JobStatus.Interrupted, TotalFiles = 99 }
         });
 
-        var job = processor.GetJob(jobId);
+        var job = Jobs.GetJob(jobId);
 
         Assert.NotNull(job);
         Assert.Equal(JobStatus.Completed, job!.Status);
@@ -220,34 +226,31 @@ public class JobStatePersistenceTests : IDisposable
     [Fact]
     public void RestoredInterruptedJob_IsNotReportedAsActive()
     {
-        var processor = CreateProcessor();
-
-        processor.RestoreJobs(new[]
+        Jobs.RestoreJobs(new[]
         {
             new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Interrupted }
         });
 
         // Otherwise the UI would show a permanently stalled progress bar.
-        Assert.Null(processor.GetActiveJob());
+        Assert.Null(Jobs.GetActiveJob());
     }
 
     [Fact]
     public async Task DeleteJob_RemovesInterruptedJobFromMemoryAndStorage()
     {
-        var processor = CreateProcessor();
         var jobId = Guid.NewGuid();
         _jobStateStore
             .Setup(s => s.DeleteAsync(jobId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
-        processor.RestoreJobs(new[]
+        Jobs.RestoreJobs(new[]
         {
             new ProcessingJob { JobId = jobId, Status = JobStatus.Interrupted }
         });
 
         // An interrupted job is terminal, so the user must be able to dismiss it.
-        Assert.True(await processor.DeleteJobAsync(jobId));
-        Assert.Null(processor.GetJob(jobId));
+        Assert.True(await Jobs.DeleteJobAsync(jobId));
+        Assert.Null(Jobs.GetJob(jobId));
     }
 
     [Fact]
@@ -272,17 +275,16 @@ public class JobStatePersistenceTests : IDisposable
             .Setup(s => s.PruneAsync(It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(0);
 
-        var processor = CreateProcessor();
         var service = new JobStateReconciliationHostedService(
             _jobStateStore.Object,
-            processor,
+            Jobs,
             new Mock<ILogger<JobStateReconciliationHostedService>>().Object);
 
         await service.StartAsync(CancellationToken.None);
 
         _jobStateStore.Verify(s => s.MarkInterruptedAsync(It.IsAny<CancellationToken>()), Times.Once);
 
-        var restored = processor.GetJob(interrupted.JobId);
+        var restored = Jobs.GetJob(interrupted.JobId);
         Assert.NotNull(restored);
         Assert.Equal(JobStatus.Interrupted, restored!.Status);
         Assert.Equal(3, restored.ProcessedFiles);
@@ -304,7 +306,7 @@ public class JobStatePersistenceTests : IDisposable
 
         var service = new JobStateReconciliationHostedService(
             _jobStateStore.Object,
-            CreateProcessor(),
+            Jobs,
             new Mock<ILogger<JobStateReconciliationHostedService>>().Object);
 
         await service.StartAsync(CancellationToken.None);
@@ -323,7 +325,7 @@ public class JobStatePersistenceTests : IDisposable
 
         var service = new JobStateReconciliationHostedService(
             _jobStateStore.Object,
-            CreateProcessor(),
+            Jobs,
             new Mock<ILogger<JobStateReconciliationHostedService>>().Object);
 
         // The application is perfectly usable without job history, so startup must continue.

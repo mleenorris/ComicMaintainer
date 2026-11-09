@@ -31,6 +31,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
     private readonly string _root = Path.Join(AppContext.BaseDirectory, "fc-n2a-tests", Guid.NewGuid().ToString("N"));
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<IProcessingHistoryService> _history = new();
     private readonly Mock<ISeriesLibraryService> _seriesLibrary = new();
     private readonly Mock<ISeriesMetadataCacheService> _metadataCache = new();
@@ -62,7 +63,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
 
         // Run the per-item operation and post-loop hook inline so the effects of a
         // combine job are observable as soon as the action returns.
-        _jobReport = _processor.RunCustomBatchJobsInline();
+        _jobReport = _jobRegistry.RunCustomBatchJobsInline();
     }
 
     private readonly RecordingBatchJobReport _jobReport;
@@ -79,6 +80,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         TestFolderCombineService.Create(
             _fileStore.Object,
             _processor.Object,
+            _jobRegistry.Object,
             _history.Object,
             _seriesLibrary.Object,
             _settings.Object,
@@ -698,7 +700,7 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
         Assert.Equal(alreadyInPlace.FilePath, Prop(skipped, "destinationPath"));
         Assert.Equal("skipped", Prop(skipped, "status"));
         Assert.Equal("Source and destination are the same file.", Prop(skipped, "reason"));
-        _processor.Verify(p => p.RunCustomBatchJobAsync(
+        _jobRegistry.Verify(p => p.RunCustomBatchJobAsync(
             It.IsAny<string>(),
             It.IsAny<IEnumerable<string>>(),
             It.IsAny<Func<string, CancellationToken, Task<bool>>>(),

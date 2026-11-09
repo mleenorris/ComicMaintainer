@@ -19,20 +19,20 @@ public class FileNamingAuditJobHandler : IScheduledJobHandler
 {
     public const string Key = "file-naming-audit";
 
-    // Poll the spawned rename batch job at this cadence while waiting for completion.
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
-
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly ILogger<FileNamingAuditJobHandler> _logger;
 
     public FileNamingAuditJobHandler(
         IFileStoreService fileStore,
         IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         ILogger<FileNamingAuditJobHandler> logger)
     {
         _fileStore = fileStore;
         _processor = processor;
+        _jobRegistry = jobRegistry;
         _logger = logger;
     }
 
@@ -70,26 +70,9 @@ public class FileNamingAuditJobHandler : IScheduledJobHandler
 
         var jobId = await _processor.RenameFilesAsync(candidates, options.ForceReprocess, cancellationToken);
 
-        // Poll until the spawned batch job reaches a terminal state so the scheduled-job's
-        // last-run status reflects the actual outcome rather than the queue submission.
-        ProcessingJob? job = null;
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            job = _processor.GetJob(jobId);
-            if (job is null)
-            {
-                // Job record was evicted before we observed completion; treat as success
-                // since the rename pipeline only persists state on success.
-                break;
-            }
-            if (job.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled)
-            {
-                break;
-            }
-            await Task.Delay(PollInterval, cancellationToken);
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
+        // Wait until the spawned batch job finishes so the scheduled job's last-run status
+        // reflects the actual outcome rather than the queue submission.
+        var job = await _jobRegistry.WaitForCompletionAsync(jobId, cancellationToken);
 
         if (job is null)
         {

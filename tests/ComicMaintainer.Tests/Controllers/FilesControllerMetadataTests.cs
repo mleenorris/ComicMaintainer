@@ -68,7 +68,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
             _seriesLibrary.Object,
             NullLogger<FilesController>.Instance,
             _settings.Object,
-            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, _history.Object, _seriesLibrary.Object, _settings.Object),
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, Mock.Of<IBatchJobRegistry>(), _history.Object, _seriesLibrary.Object, _settings.Object),
             broadcaster ?? Mock.Of<IEventBroadcaster>(),
             resolver ?? Mock.Of<ISeriesNameResolver>(),
             scheduledJobs ?? Mock.Of<IScheduledJobRunner>(),

@@ -215,24 +215,22 @@ public class JobStateStoreCoverageTests : IAsyncLifetime
             OperationName = "ProcessAll",
             StartTime = DateTime.UtcNow
         });
-        using var processor = TestServices.CreateComicProcessor(
+        using var jobs = new BatchJobRegistry(
             new TestOptionsMonitor<AppSettings>(new AppSettings()),
-            NullLogger<ComicProcessorService>.Instance,
-            Mock.Of<IFileStoreService>(),
-            Mock.Of<IProcessingHistoryService>(),
-            jobStateStore: _store);
+            NullLogger<BatchJobRegistry>.Instance,
+            _store);
         var reconciliation = new JobStateReconciliationHostedService(
             _store,
-            processor,
+            jobs,
             NullLogger<JobStateReconciliationHostedService>.Instance);
 
         await reconciliation.StartAsync(CancellationToken.None);
         try
         {
-            Assert.Equal(JobStatus.Interrupted, processor.GetJob(jobId)?.Status);
-            Assert.Null(processor.GetActiveJob());
-            Assert.True(await processor.DeleteJobAsync(jobId));
-            Assert.Null(processor.GetJob(jobId));
+            Assert.Equal(JobStatus.Interrupted, jobs.GetJob(jobId)?.Status);
+            Assert.Null(jobs.GetActiveJob());
+            Assert.True(await jobs.DeleteJobAsync(jobId));
+            Assert.Null(jobs.GetJob(jobId));
             Assert.Empty(await _store.GetAllAsync());
         }
         finally

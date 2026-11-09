@@ -391,6 +391,23 @@ namespace ComicMaintainer.Tests.AndroidApp
             Assert.NotNull(_store.Stored);
         }
 
+        // Thrown from the page's startup, a FormatException here would crash the app at every launch.
+        [Theory]
+        [InlineData(CredentialKind.Session, "not a valid bearer token")]
+        [InlineData(CredentialKind.ApiKey, "damaged\nkey")]
+        public async Task ADamagedStoredCredential_IsDiscardedInsteadOfCrashing(CredentialKind kind, string value)
+        {
+            _settings.ServerUrl = Server;
+            _store.Stored = new ApiCredential(kind, value, Server);
+            var handler = new StubHandler(_ => throw new InvalidOperationException("no request expected"));
+
+            Assert.Equal(SessionRestoreResult.SignedOut, await Create(handler).RestoreAsync());
+
+            Assert.Empty(handler.Requests);
+            Assert.Null(_store.Stored);
+            Assert.Single(_ended);
+        }
+
         [Fact]
         public async Task ACredentialIsNeverSentToAnotherServer()
         {
@@ -413,6 +430,25 @@ namespace ComicMaintainer.Tests.AndroidApp
 
             Assert.Equal(ApiErrorKind.InvalidAddress, failure.Kind);
             Assert.Empty(handler.Requests);
+        }
+
+        // A line break makes the HTTP client throw a FormatException, which would crash the app on a bad paste.
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        [InlineData("cm_two words")]
+        [InlineData("cm_line\nbreak")]
+        [InlineData("cm_ключ")]
+        public async Task AnApiKeyThatCannotBeAHeader_IsRefusedWithoutARequest(string key)
+        {
+            var handler = new StubHandler(_ => throw new InvalidOperationException("no request expected"));
+
+            var failure = await Assert.ThrowsAsync<ApiException>(() => Create(handler).SignInWithApiKeyAsync(Server, key));
+
+            Assert.Equal(ApiErrorKind.Unauthorized, failure.Kind);
+            Assert.Equal(SessionManager.InvalidApiKeyMessage, failure.Message);
+            Assert.Empty(handler.Requests);
+            Assert.Null(_store.Stored);
         }
 
         [Fact]

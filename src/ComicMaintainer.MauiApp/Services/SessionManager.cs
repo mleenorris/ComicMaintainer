@@ -107,7 +107,15 @@ public sealed class SessionManager : ISessionManager
     public async Task SignInWithApiKeyAsync(string serverUrl, string apiKey, CancellationToken cancellationToken = default)
     {
         var server = ParseServer(serverUrl);
-        var credential = new ApiCredential(CredentialKind.ApiKey, apiKey.Trim(), server);
+        var key = apiKey.Trim();
+
+        // The key is pasted by hand and goes into an HTTP header, which cannot carry spaces, line breaks or non-ASCII text.
+        if (key.Length == 0 || key.Any(character => character is <= ' ' or > '~'))
+        {
+            throw new ApiException(ApiErrorKind.Unauthorized, InvalidApiKeyMessage);
+        }
+
+        var credential = new ApiCredential(CredentialKind.ApiKey, key, server);
 
         AccountInfo account;
         try

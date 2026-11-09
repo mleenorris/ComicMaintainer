@@ -52,14 +52,7 @@ public sealed class ApiTransport
         CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(method, new Uri(new Uri(serverUrl), relativeUri)) { Content = content };
-        if (credential?.Kind == CredentialKind.Session)
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.Value);
-        }
-        else if (credential?.Kind == CredentialKind.ApiKey)
-        {
-            request.Headers.Add(ApiKeyHeader, credential.Value);
-        }
+        AttachCredential(request, credential);
 
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (timeout is { } limit)
@@ -104,6 +97,27 @@ public sealed class ApiTransport
         }
 
         throw UnreadableResponse(null);
+    }
+
+    // A value that cannot be a header (a damaged stored credential, say) counts as refused, so that it is discarded.
+    // Left to propagate, it would crash the app at every start, before the user could sign in again.
+    private static void AttachCredential(HttpRequestMessage request, ApiCredential? credential)
+    {
+        try
+        {
+            if (credential?.Kind == CredentialKind.Session)
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.Value);
+            }
+            else if (credential?.Kind == CredentialKind.ApiKey)
+            {
+                request.Headers.Add(ApiKeyHeader, credential.Value);
+            }
+        }
+        catch (FormatException exception)
+        {
+            throw new ApiException(ApiErrorKind.Unauthorized, "The saved sign-in is damaged. Sign in again.", innerException: exception);
+        }
     }
 
     private static ApiException UnreadableResponse(Exception? cause) => new(

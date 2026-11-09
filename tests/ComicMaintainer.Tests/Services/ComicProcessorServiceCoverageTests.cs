@@ -1616,6 +1616,20 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task RenameFilesAsync_FileOutsideTheLibrary_IsRefusedAndLeftWhereItIs()
+    {
+        var service = CreateService();
+        var outside = WriteCbzAt(Path.Join(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+
+        var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { outside }));
+
+        Assert.Equal(1, job.FailedFiles);
+        Assert.True(File.Exists(outside));
+        Assert.True(_logger.Has(LogLevel.Warning, "RenameFileAsync: File is outside the allowed directories: {FilePath}"));
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success && e.ErrorMessage == "File is outside the allowed directories");
+    }
+
+    [Fact]
     public async Task RenameFilesAsync_FileStoreThrows_FailsWithError()
     {
         _fileStore.Setup(f => f.IsFileRenamedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))

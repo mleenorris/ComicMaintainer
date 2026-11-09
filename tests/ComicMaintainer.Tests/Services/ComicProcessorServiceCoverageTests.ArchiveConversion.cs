@@ -721,6 +721,42 @@ public partial class ComicProcessorServiceCoverageTests
         _fileStore.Verify(f => f.MarkFileBackfilledAsync(cbz, pending.MetadataVersion, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // The archive is already correct at this point: only the bookkeeping is left, and it is retried on the next write.
+    [Fact]
+    public async Task ApplyMetadataEditAsync_WhenThePendingEditCannotBeMarkedWritten_StillSucceeds()
+    {
+        var service = CreateService();
+        var cbr = WriteCbr("Series/book.cbr", Xml("Old", "3", null));
+        var cbz = Path.ChangeExtension(cbr, ".cbz");
+        var pending = PendingEdit(cbr, new ComicMetadata { Publisher = "Kept Publisher" }, ComicMetadataFieldFlags.Publisher);
+        _fileStore.Setup(f => f.GetFileAsync(cbr, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
+        _fileStore.Setup(f => f.MarkFileBackfilledAsync(cbz, pending.MetadataVersion, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        var result = await service.ApplyMetadataEditAsync(cbr, new ComicMetadata { Series = "Newest" }, ComicMetadataFieldFlags.Series);
+
+        Assert.Equal(cbz, result.FilePath);
+        var info = ReadComicInfo(cbz)!;
+        Assert.Equal("Newest", info.Element("Series")?.Value);
+        Assert.Equal("Kept Publisher", info.Element("Publisher")?.Value);
+        Assert.True(_logger.Has(LogLevel.Warning, "Wrote the metadata kept in the database into {FilePath} but could not mark it written"));
+    }
+
+    // A stored record that cannot be read just means the file shows what its archive says.
+    [Fact]
+    public async Task GetMetadataAsync_WhenTheStoredRecordCannotBeRead_ReturnsTheArchivesMetadata()
+    {
+        var service = CreateService();
+        var cbz = WriteCbz("Series/book.cbz", Xml("Archive Series", "3", null));
+        _fileStore.Setup(f => f.GetFileAsync(cbz, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        var metadata = await service.GetMetadataAsync(cbz);
+
+        Assert.Equal("Archive Series", metadata!.Series);
+        Assert.Equal("3", metadata.Issue);
+    }
+
     /// <summary>A tracked file whose <paramref name="fields"/> were edited in the database but not written.</summary>
     private static ComicFile PendingEdit(string path, ComicMetadata stored, ComicMetadataFieldFlags fields)
     {

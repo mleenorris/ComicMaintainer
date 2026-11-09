@@ -1,4 +1,4 @@
-// Helpers shared by index.html (the library SPA) and reader.html.
+// Helpers shared by every page of the app.
 //
 // Classic (non-module) script loaded before each page's own code, so its
 // top-level declarations are globals. Keep it free of page-specific state and

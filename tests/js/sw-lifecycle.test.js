@@ -43,7 +43,7 @@ function scriptsOfflineDocumentsLoad(pages = OFFLINE_DOCUMENTS) {
 function stylesheetsOfflineDocumentsLink(pages = OFFLINE_DOCUMENTS) {
     const sheets = new Set(pages.flatMap(page =>
         [...fs.readFileSync(path.join(WWWROOT, page), 'utf8')
-            .matchAll(/<link\s+rel="stylesheet"\s+href="\/(css\/[^"?]+\.css)\?v=__APP_VERSION__"/g)]
+            .matchAll(/<link\s+rel="stylesheet"\s+href="__BASE_PATH__\/(css\/[^"?]+\.css)\?v=__APP_VERSION__"/g)]
             .map(match => match[1])));
     return [...sheets].map(path => absolute(`/${path}?v=${APP_VERSION}`)).sort();
 }

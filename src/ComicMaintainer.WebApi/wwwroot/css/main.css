@@ -2346,25 +2346,6 @@
             box-sizing: border-box;
         }
         
-        /* Center Size, Modified, and Actions columns */
-        
-        /* Wrapper around a folder's header + contents. Purely a rendering
-           unit: renderFileList() reuses the whole section unchanged when the
-           folder's markup has not changed, so it must not introduce any layout
-           of its own. */
-        
-        /* Grid layout: checkbox (30px) + spacer for toggle button alignment (40px) + file info (1fr) + size + date + actions */
-        
-        /* Spacer element to align with header's toggle button column (40px)
-           No explicit styling needed - grid-template-columns handles sizing */
-        .grid-spacer {
-            /* Intentionally empty - exists only for grid alignment */
-        }
-        
-        /* Center Size, Modified, and Actions columns in file items */
-        
-        /* File status background colors */
-        
         .file-actions {
             display: flex;
             gap: 5px;
@@ -3719,10 +3700,6 @@
                 min-height: 0;
                 flex: none;
             }
-            
-            /* Hide Size column and Modified column on mobile */
-            
-            /* Hide Size and Modified columns on mobile */
             
             .file-actions {
                 flex-direction: column;

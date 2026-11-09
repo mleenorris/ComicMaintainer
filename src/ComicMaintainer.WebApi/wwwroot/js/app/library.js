@@ -294,7 +294,9 @@
             }
             renderHtml(select, html`<option value="">${allLabel}</option>${items.map(item => html`<option value="${item.value}">${item.label}</option>`)}`);
             select.value = selected;
-            select.disabled = entries.length === 0;
+            // Off when there is nothing to choose, but never while a filter
+            // is applied: that would leave no way to clear it.
+            select.disabled = entries.length === 0 && !selected;
         }
 
         function renderLibraryFacets() {

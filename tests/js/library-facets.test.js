@@ -114,6 +114,10 @@ test('a selection the library no longer holds stays listed and selected', async 
     assert.equal(page.$('#libraryGenreFilter').value, 'Action');
     assert.deepEqual(optionTexts(page, 'libraryStatusFilter'), ['Any status', 'Completed']);
     assert.equal(page.$('#libraryStatusFilter').value, 'completed');
+
+    // The menus stay usable, or the filter could not be cleared.
+    assert.equal(page.$('#libraryGenreFilter').disabled, false);
+    assert.equal(page.$('#libraryStatusFilter').disabled, false);
 });
 
 test('a selected "no data" value that no longer applies keeps its label', async () => {

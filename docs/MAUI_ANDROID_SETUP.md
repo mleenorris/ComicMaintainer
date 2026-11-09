@@ -1,450 +1,190 @@
-# .NET MAUI Android App Setup Guide
+# Android App
 
-This guide explains how to add a .NET MAUI Android app project to the ComicMaintainer solution.
+ComicMaintainer has a small .NET MAUI app for Android. It is a client of your server: it signs in over the REST API
+and works on the library the server holds. It stores no comics on the device and contains no server code.
 
-## Prerequisites
+The web interface does far more, and installs on Android as a PWA with offline reading. Use the app if you want a
+native way to browse the library and process or delete files.
 
-- .NET 10.0 SDK or later
-- .NET MAUI workload installed
-- Android SDK (automatically installed with MAUI workload)
-- Visual Studio 2022 (Windows/Mac) or Visual Studio Code with C# Dev Kit
+## What the app does
 
-## Installing .NET MAUI Workload
+- Signs in with a password or an API key
+- Lists the library, page by page, with search
+- Filters by all, unmarked, marked or duplicates
+- Processes or deletes one file or a selection
 
-If you haven't installed the .NET MAUI workload yet, run:
+It has no comic reader, no offline mode, no metadata editing and no iOS version. Read-only accounts can browse, and
+are told they lack permission if they try to process or delete.
+
+## Requirements
+
+- Android 6.0 (API 23) or later
+- A ComicMaintainer 3.x server the device can reach, already set up. A new server has no accounts: create the
+  administrator in a web browser first, and the app says so if you try to sign in before that.
+
+## Installing
+
+1. Download `ComicMaintainer-vX.Y.Z-android.apk` from
+   [GitHub Releases](https://github.com/mleenorris/ComicMaintainer/releases).
+2. Allow installing from unknown sources for your browser or file manager.
+3. Open the APK.
+
+**Updating:** release APKs are signed with a temporary key that differs on every build, so Android refuses to install
+one over another. Uninstall the app first, then install the new version and sign in again.
+
+## Signing in
+
+Enter the server's full address, including `http://` or `https://`. A server at a sub-path works too, such as
+`https://example.com/comics`.
+
+### With a password
+
+Enter your username and password. The app sends the password once to get a session token, and never stores it.
+
+A session lasts 24 hours by default (`JwtSettings:ExpirationMinutes` on the server). There is no refresh: when it
+ends, sign in again.
+
+### With an API key
+
+An API key lasts until it is revoked, so you do not have to sign in every day. The app only uses a key you already
+have; it never creates one, because creating a key replaces the account's previous one.
+
+The web interface has no page for API keys yet, so create one through the API. It needs your current password, and the
+key is shown only once:
 
 ```bash
-dotnet workload install maui
+TOKEN=$(curl -s https://comics.example.com/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"YOU","password":"YOUR_PASSWORD"}' | jq -r .token)
+
+curl -s https://comics.example.com/api/auth/api-key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"currentPassword":"YOUR_PASSWORD"}'
 ```
 
-This will install:
-- .NET MAUI framework
-- Android SDK and emulators
-- iOS SDK (on Mac)
-- Windows App SDK (on Windows)
+Then turn on **Sign in with an API key** and paste it. Changing your password or signing out of all sessions revokes
+the key. Signing out of the app leaves it valid on the server.
 
-## Creating the MAUI Project
+### When sign-in fails or a session ends
 
-### Option 1: Using .NET CLI
+The app returns to the sign-in page and says why:
 
-1. Navigate to the solution directory:
+| What you see | What it means |
+| --- | --- |
+| Invalid username or password | The credentials are wrong, or the account is locked out after repeated failures. The server does not say which. |
+| Too many requests. Please try again in N minutes. | Each client gets 10 sign-in attempts per 5 minutes. Wait for the time shown. |
+| Your session has ended | The token expired, the password or roles changed, the account was disabled, or you signed out of all sessions elsewhere. |
+| The server no longer accepts this API key | The key was revoked or replaced. |
+| This server has not been set up yet | Create the administrator in a web browser. |
+| The server redirected the app to... | See [Reverse proxies](#reverse-proxies-and-single-sign-on). |
+
+A network problem does not sign you out. The app keeps your session and shows the error.
+
+## Connecting
+
+**Settings > Test Connection** checks that the address really is a ComicMaintainer server, without needing an account.
+
+### Plain HTTP
+
+`http://` addresses work, because self-hosted servers are often reached that way on a home network. The app warns
+about them: anyone on the network between the device and the server can read your password and session. Use HTTPS for
+anything outside a network you trust.
+
+### Reverse proxies and single sign-on
+
+The app does not follow redirects, so that a credential is never carried to another address. If the server redirects
+`http` to `https`, enter the `https` address.
+
+The app cannot complete a sign-on page such as Authelia. If one protects the server, the proxy has to pass the app's
+requests through to ComicMaintainer without redirecting them. Then sign in with a password or API key as usual.
+
+## Security
+
+- The session token or API key is kept in Android's SecureStorage, encrypted with a key held by the Android Keystore.
+- The app's data is excluded from Android backups, since the encrypted values could not be decrypted on restore.
+- A credential is tied to the server that issued it. Changing the server signs you out, and ends the session on the old
+  server if it can be reached.
+- Signing out ends the session on the server. If the server cannot be reached, the app says so, and the token stays valid
+  there until it expires.
+
+## Building
+
+You need the .NET 10 SDK, the Android workload, a JDK and the Android SDK:
+
 ```bash
-cd /path/to/ComicMaintainer
+dotnet workload install maui-android
+
+# Installs the JDK and Android SDK, if you do not have them. This accepts the Android SDK license.
+dotnet build src/ComicMaintainer.MauiApp -t:InstallAndroidDependencies -f net10.0-android \
+  -p:AndroidSdkDirectory=$HOME/android-sdk -p:JavaSdkDirectory=$HOME/jdk -p:AcceptAndroidSDKLicenses=true
 ```
 
-2. Create the MAUI project:
+The app has its own solution, `ComicMaintainer.Android.sln`, so that `ComicMaintainer.sln` builds without any of this.
+Open it in Visual Studio, or from the command line:
+
 ```bash
-dotnet new maui -n ComicMaintainer.MauiApp -o src/ComicMaintainer.MauiApp
+# Debug build
+dotnet build ComicMaintainer.Android.sln
+
+# Run on a connected device or emulator
+dotnet build src/ComicMaintainer.MauiApp -t:Run -f net10.0-android
+
+# Release APK: bin/Release/net10.0-android/publish/com.comicmaintainer.app-Signed.apk
+dotnet publish src/ComicMaintainer.MauiApp -c Release -f net10.0-android -p:AndroidPackageFormat=apk
 ```
 
-3. Add the project to the solution:
-```bash
-dotnet sln add src/ComicMaintainer.MauiApp/ComicMaintainer.MauiApp.csproj
-```
+To sign with a key of your own, add `-p:AndroidKeyStore=true -p:AndroidSigningKeyStore=...`,
+`-p:AndroidSigningKeyAlias=...`, `-p:AndroidSigningKeyPass=...` and `-p:AndroidSigningStorePass=...`.
 
-4. Add reference to the Core library:
-```bash
-cd src/ComicMaintainer.MauiApp
-dotnet add reference ../ComicMaintainer.Core/ComicMaintainer.Core.csproj
-```
+### Releases
 
-### Option 2: Using Visual Studio
+`.github/workflows/build-android-apk.yml` builds the APK. The release workflow (`version-bump.yml`) calls it with each
+new release tag and it attaches the APK to that release. A tag pushed by a workflow cannot start another workflow, so
+this workflow has no tag trigger. You can also run it by hand: with a tag to rebuild that release's APK, or without one
+to build the selected branch and keep the APK as a workflow artifact.
 
-1. Open `ComicMaintainer.sln` in Visual Studio
-2. Right-click on the solution → Add → New Project
-3. Select ".NET MAUI App" template
-4. Name it "ComicMaintainer.MauiApp"
-5. Choose location: `src/ComicMaintainer.MauiApp`
-6. Right-click on the MAUI project → Add → Project Reference
-7. Select "ComicMaintainer.Core"
-
-## Project Structure
-
-After creation, your MAUI project should look like:
+## Project layout
 
 ```
 src/ComicMaintainer.MauiApp/
-├── MauiProgram.cs              # App startup and DI configuration
-├── App.xaml                     # Application definition
-├── App.xaml.cs
-├── AppShell.xaml                # App navigation shell
-├── AppShell.xaml.cs
-├── MainPage.xaml                # Main page UI
-├── MainPage.xaml.cs
-├── Platforms/                   # Platform-specific code
-│   ├── Android/
-│   ├── iOS/
-│   ├── MacCatalyst/
-│   └── Windows/
-├── Resources/                   # App resources
-│   ├── AppIcon/
-│   ├── Images/
-│   ├── Fonts/
-│   └── Styles/
-└── ComicMaintainer.MauiApp.csproj
+├── Models/              # The API's JSON, as the app reads it
+├── Services/            # HTTP, sign-in and session handling (no MAUI types)
+│   └── Platform/        # SecureStorage, Preferences, dialogs and navigation (MAUI)
+├── ViewModels/          # Page logic (no MAUI types)
+├── Views/               # LoginPage, MainPage (the library), SettingsPage
+└── Platforms/Android/   # Manifest and Android entry points
 ```
 
-## Configuring the MAUI App
+The app does not reference `ComicMaintainer.Core`, which would pull the server and its database into the APK. JSON is
+source-generated (`ApiJsonContext`), because release builds trim the app.
 
-### 1. Update MauiProgram.cs
+### API endpoints the app uses
 
-Replace the default `MauiProgram.cs` with:
+| Endpoint | Used for |
+| --- | --- |
+| `GET /api/version` | Testing the connection (no account needed) |
+| `GET /api/auth/setup-required` | Recognising a server with no accounts (no account needed) |
+| `POST /api/auth/login` | Signing in with a password |
+| `GET /api/auth/user` | Checking a session or API key, and naming the account |
+| `POST /api/auth/logout` | Ending the session on the server |
+| `GET /api/files` | Listing the library (`page`, `per_page`, `filter`, `search`) |
+| `POST /api/files/process?filePath=` | Processing one file |
+| `POST /api/jobs/process-selected` | Processing a selection |
+| `DELETE /api/files/{base64url path}` | Deleting one file |
+| `POST /api/jobs/delete-selected` | Deleting a selection |
+| `GET /api/jobs/{id}` | Reading a job's progress |
 
-```csharp
-using ComicMaintainer.Core.Configuration;
-using ComicMaintainer.Core.Interfaces;
-using ComicMaintainer.Core.Services;
-using Microsoft.Extensions.Logging;
+## Tests
 
-namespace ComicMaintainer.MauiApp;
-
-public static class MauiProgram
-{
-    public static MauiApp CreateMauiApp()
-    {
-        var builder = MauiApp.CreateBuilder();
-        builder
-            .UseMauiApp<App>()
-            .ConfigureFonts(fonts =>
-            {
-                fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
-                fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
-            });
-
-        // Configure app settings
-        builder.Services.Configure<AppSettings>(options =>
-        {
-            // For mobile, we'll use app-specific storage
-            var appDataPath = FileSystem.AppDataDirectory;
-            options.WatchedDirectory = Path.Combine(appDataPath, "watched");
-            options.DuplicateDirectory = Path.Combine(appDataPath, "duplicates");
-            options.ConfigDirectory = Path.Combine(appDataPath, "config");
-        });
-
-        // Register services
-        builder.Services.AddSingleton<IFileStoreService, FileStoreService>();
-        builder.Services.AddSingleton<IComicProcessorService, ComicProcessorService>();
-        builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
-
-        // Register pages
-        builder.Services.AddSingleton<MainPage>();
-
-#if DEBUG
-        builder.Logging.AddDebug();
-#endif
-
-        return builder.Build();
-    }
-}
-```
-
-### 2. Update MainPage.xaml
-
-Replace the default `MainPage.xaml` with a comic file browser UI:
-
-```xml
-<?xml version="1.0" encoding="utf-8" ?>
-<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="ComicMaintainer.MauiApp.MainPage"
-             Title="Comic Maintainer">
-
-    <ScrollView>
-        <VerticalStackLayout Spacing="25" Padding="30,0" VerticalOptions="Center">
-            
-            <Label 
-                Text="Comic Maintainer"
-                SemanticProperties.HeadingLevel="Level1"
-                FontSize="32"
-                HorizontalOptions="Center" />
-
-            <Label 
-                Text="Manage your comic collection on the go"
-                SemanticProperties.HeadingLevel="Level2"
-                SemanticProperties.Description="Welcome message"
-                FontSize="18"
-                HorizontalOptions="Center" />
-
-            <Button 
-                x:Name="BrowseBtn"
-                Text="Browse Comics"
-                SemanticProperties.Hint="Browse comic files"
-                Clicked="OnBrowseClicked"
-                HorizontalOptions="Center" />
-
-            <Button 
-                x:Name="ProcessBtn"
-                Text="Process All"
-                SemanticProperties.Hint="Process all unprocessed comics"
-                Clicked="OnProcessClicked"
-                HorizontalOptions="Center" />
-
-            <Button 
-                x:Name="SettingsBtn"
-                Text="Settings"
-                SemanticProperties.Hint="Open settings"
-                Clicked="OnSettingsClicked"
-                HorizontalOptions="Center" />
-
-            <Label x:Name="StatusLabel"
-                   Text=""
-                   FontSize="14"
-                   HorizontalOptions="Center" />
-
-        </VerticalStackLayout>
-    </ScrollView>
-
-</ContentPage>
-```
-
-### 3. Update MainPage.xaml.cs
-
-```csharp
-using ComicMaintainer.Core.Interfaces;
-
-namespace ComicMaintainer.MauiApp;
-
-public partial class MainPage : ContentPage
-{
-    private readonly IFileStoreService _fileStore;
-    private readonly IComicProcessorService _processor;
-    private readonly IFileWatcherService _watcher;
-
-    public MainPage(
-        IFileStoreService fileStore,
-        IComicProcessorService processor,
-        IFileWatcherService watcher)
-    {
-        InitializeComponent();
-        _fileStore = fileStore;
-        _processor = processor;
-        _watcher = watcher;
-        
-        // Start file watcher
-        Task.Run(async () => await _watcher.StartAsync());
-    }
-
-    private async void OnBrowseClicked(object sender, EventArgs e)
-    {
-        try
-        {
-            var files = await _fileStore.GetAllFilesAsync();
-            var fileCount = files.Count();
-            StatusLabel.Text = $"Found {fileCount} comic files";
-            
-            // TODO: Navigate to file browser page
-            await DisplayAlert("Browse", $"Found {fileCount} files", "OK");
-        }
-        catch (Exception ex)
-        {
-            await DisplayAlert("Error", $"Failed to browse files: {ex.Message}", "OK");
-        }
-    }
-
-    private async void OnProcessClicked(object sender, EventArgs e)
-    {
-        try
-        {
-            var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
-            var fileList = files.Select(f => f.FilePath).ToList();
-            
-            if (!fileList.Any())
-            {
-                await DisplayAlert("Info", "No unprocessed files found", "OK");
-                return;
-            }
-
-            var jobId = await _processor.ProcessFilesAsync(fileList);
-            StatusLabel.Text = $"Processing job started: {jobId}";
-            
-            // TODO: Navigate to job status page
-            await DisplayAlert("Processing", $"Started processing {fileList.Count} files", "OK");
-        }
-        catch (Exception ex)
-        {
-            await DisplayAlert("Error", $"Failed to start processing: {ex.Message}", "OK");
-        }
-    }
-
-    private async void OnSettingsClicked(object sender, EventArgs e)
-    {
-        // TODO: Navigate to settings page
-        await DisplayAlert("Settings", "Settings page coming soon", "OK");
-    }
-}
-```
-
-## Android-Specific Configuration
-
-### 1. Update AndroidManifest.xml
-
-Add required permissions in `Platforms/Android/AndroidManifest.xml`:
-
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true"></application>
-    
-    <!-- Permissions -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    
-    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34" />
-</manifest>
-```
-
-### 2. Request Runtime Permissions
-
-Add permission handling code in `Platforms/Android/MainActivity.cs`:
-
-```csharp
-using Android.App;
-using Android.Content.PM;
-using Android.OS;
-
-namespace ComicMaintainer.MauiApp;
-
-[Activity(Theme = "@style/Maui.SplashTheme", MainLauncher = true, ConfigurationChanges = ConfigChanges.ScreenSize | ConfigChanges.Orientation | ConfigChanges.UiMode | ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize | ConfigChanges.Density)]
-public class MainActivity : MauiAppCompatActivity
-{
-    protected override void OnCreate(Bundle? savedInstanceState)
-    {
-        base.OnCreate(savedInstanceState);
-        
-        // Request storage permissions for Android 6.0+
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
-        {
-            RequestPermissions(new[] {
-                Android.Manifest.Permission.ReadExternalStorage,
-                Android.Manifest.Permission.WriteExternalStorage
-            }, 0);
-        }
-    }
-}
-```
-
-## Building and Running
-
-### Build the Android App
+`Models`, `Services` (except `Platform`), `ViewModels` and `Extensions` are free of MAUI types and are compiled into
+`tests/ComicMaintainer.Tests` as well, so they run without the Android workload. `AndroidApp/AndroidAppContractTests`
+runs that code against the real server pipeline, so a change to a route, parameter or JSON field that the app depends on
+fails the test suite:
 
 ```bash
-# Build for Android
-dotnet build src/ComicMaintainer.MauiApp -f net10.0-android
-
-# Build release version
-dotnet build src/ComicMaintainer.MauiApp -f net10.0-android -c Release
+dotnet test tests/ComicMaintainer.Tests --filter "FullyQualifiedName~AndroidApp"
 ```
 
-### Run on Emulator
-
-```bash
-# List available emulators
-dotnet build -t:Run -f net10.0-android
-
-# Or use Visual Studio:
-# 1. Set ComicMaintainer.MauiApp as startup project
-# 2. Select Android Emulator from device dropdown
-# 3. Press F5 to run
-```
-
-### Deploy to Physical Device
-
-1. Enable Developer Mode on your Android device
-2. Enable USB Debugging
-3. Connect device via USB
-4. Run:
-```bash
-dotnet build -t:Run -f net10.0-android
-```
-
-## Creating APK for Distribution
-
-### Debug APK
-```bash
-dotnet build src/ComicMaintainer.MauiApp -f net10.0-android -c Release
-```
-
-The APK will be in:
-```
-src/ComicMaintainer.MauiApp/bin/Release/net10.0-android/
-```
-
-### Signed Release APK
-
-1. Create a keystore:
-```bash
-keytool -genkey -v -keystore comicmaintainer.keystore -alias comicmaintainer -keyalg RSA -keysize 2048 -validity 10000
-```
-
-2. Update the `.csproj` file:
-```xml
-<PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(TargetFramework)' == 'net10.0-android'">
-    <AndroidKeyStore>true</AndroidKeyStore>
-    <AndroidSigningKeyStore>comicmaintainer.keystore</AndroidSigningKeyStore>
-    <AndroidSigningKeyAlias>comicmaintainer</AndroidSigningKeyAlias>
-    <AndroidSigningKeyPass>your-password</AndroidSigningKeyPass>
-    <AndroidSigningStorePass>your-password</AndroidSigningStorePass>
-</PropertyGroup>
-```
-
-3. Build signed APK:
-```bash
-dotnet publish src/ComicMaintainer.MauiApp -f net10.0-android -c Release
-```
-
-## Testing the App
-
-### Unit Tests
-
-Create a test project:
-```bash
-dotnet new xunit -n ComicMaintainer.MauiApp.Tests -o tests/ComicMaintainer.MauiApp.Tests
-dotnet sln add tests/ComicMaintainer.MauiApp.Tests/ComicMaintainer.MauiApp.Tests.csproj
-```
-
-### Integration with Web API
-
-The mobile app can connect to the Web API running on your local network or cloud:
-
-```csharp
-// In MauiProgram.cs, add HTTP client
-builder.Services.AddHttpClient("ComicMaintainerApi", client =>
-{
-    client.BaseAddress = new Uri("http://your-server:5000");
-});
-```
-
-## Next Steps
-
-1. **File Browser Page**: Create a page to browse and manage comic files
-2. **Job Status Page**: Show real-time progress of batch processing jobs
-3. **Settings Page**: Configure app settings and server connection
-4. **File Viewer**: Integrate a comic reader to view comics in the app
-5. **Sync with Server**: Sync with the Web API for centralized management
-
-## Troubleshooting
-
-### MAUI Workload Not Found
-```bash
-dotnet workload restore
-dotnet workload install maui
-```
-
-### Android SDK Issues
-```bash
-# Update Android SDK
-dotnet build -t:InstallAndroidPlatform -f net10.0-android
-```
-
-### Build Errors
-- Clean and rebuild: `dotnet clean && dotnet build`
-- Delete `bin` and `obj` folders
-- Clear NuGet cache: `dotnet nuget locals all --clear`
-
-## Resources
-
-- [.NET MAUI Documentation](https://docs.microsoft.com/dotnet/maui/)
-- [.NET MAUI Android Guide](https://docs.microsoft.com/dotnet/maui/android/)
-- [MAUI Community Toolkit](https://github.com/CommunityToolkit/Maui)
+Keep MAUI types out of those folders, or the test project stops compiling. The pages and `Services/Platform` are not
+covered by automated tests.

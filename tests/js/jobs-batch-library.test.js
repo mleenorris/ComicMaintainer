@@ -313,7 +313,7 @@ test('Remove Metadata All sends JSON with the session cookie and handles empty a
 test('read-only users get no batch menus, and a refused start reports the failure', async (t) => {
     const page = await h.bootJobsApp(t, {
         user: { canModifyLibrary: false, canAdminister: false },
-        routes: { 'POST /api/jobs/process-unmarked': respond(403, { error: 'Forbidden' }) }
+        routes: { 'POST /api/jobs/process-unmarked': respond(403, { error: 'Forbidden', message: 'Insufficient permissions' }) }
     });
 
     assert.ok(page.document.body.classList.contains('user-read-only'));
@@ -326,7 +326,7 @@ test('read-only users get no batch menus, and a refused start reports the failur
     // through is refused and reported like any other failed start.
     page.run('processUnmarkedFiles()');
     await page.settle();
-    assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to start processing: Forbidden' }]);
+    assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to start processing: You do not have permission to do that.' }]);
     assert.equal(h.progressView(page).open, false);
     assert.equal(h.loginRedirects(page), 0);
     assert.deepEqual(page.errors, []);

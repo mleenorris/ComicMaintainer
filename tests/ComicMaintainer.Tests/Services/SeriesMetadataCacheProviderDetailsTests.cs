@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -242,6 +243,61 @@ public sealed class SeriesMetadataCacheProviderDetailsTests : IDisposable
         Assert.Null(record.PublicationStatus);
         Assert.Null(record.TotalChapters);
         Assert.Null(record.Origin);
+    }
+
+    [Fact]
+    public async Task AnOversizedFloodPassedBackThroughTheClientIsBounded()
+    {
+        var flood = new string('<', 2_000_000);
+
+        var record = await _service.ApplyExternalMatchAsync("Berserk", new ExternalSeriesMetadata
+        {
+            CanonicalTitle = "Berserk",
+            Source = "AniListManga",
+            Synopsis = flood,
+            Genres = Enumerable.Repeat(flood, 100).Append("Action").ToList()
+        }).WaitAsync(TimeSpan.FromSeconds(60));
+
+        Assert.True(record.Synopsis!.Length <= SynopsisTextNormalizer.MaxSynopsisLength);
+        Assert.Equal(new[] { "Action" }, record.Genres);
+    }
+
+    [Fact]
+    public async Task ALongSynopsisIsCutBeforeItIsStored()
+    {
+        var record = await _service.ApplyExternalMatchAsync("Berserk", new ExternalSeriesMetadata
+        {
+            CanonicalTitle = "Berserk",
+            Source = "AniListManga",
+            Synopsis = string.Join(' ', Enumerable.Repeat("word", 20_000))
+        });
+
+        Assert.True(record.Synopsis!.Length <= SynopsisTextNormalizer.MaxSynopsisLength);
+        Assert.EndsWith("word...", record.Synopsis);
+    }
+
+    [Fact]
+    public async Task GetAuthoritativeByTitle_PrefersTheMatchOverAStaleRecordKeyedByTheTitle()
+    {
+        // Both are known by "Berserk": the first by its key, the second by a localized title.
+        await SeedLegacyAsync("Berserk", status: "not_found", source: null, sourceId: null);
+        await SeedLegacyAsync("Berserk Deluxe");
+
+        var byExactKey = await _service.GetByTitleAsync("Berserk");
+        var owner = await _service.GetAuthoritativeByTitleAsync("Berserk");
+
+        Assert.Equal("not_found", byExactKey!.LookupStatus);
+        Assert.Equal(_service.NormalizeKey("Berserk Deluxe"), owner!.NormalizedKey);
+    }
+
+    [Theory]
+    [InlineData("  ")]
+    [InlineData("Nothing Known By This")]
+    public async Task GetAuthoritativeByTitle_IsNullForATitleNoRecordHolds(string title)
+    {
+        await SeedLegacyAsync();
+
+        Assert.Null(await _service.GetAuthoritativeByTitleAsync(title));
     }
 
     [Fact]

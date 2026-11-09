@@ -29,6 +29,14 @@ public partial class ComicProcessorService
         try
         {
             var record = await _seriesMetadataCache.GetByTitleAsync(series, cancellationToken);
+
+            // A lookup that found nothing can be a stale sibling, keyed by this name, of the
+            // record holding the series' match. The library shows that match; so do the files.
+            if (record is not null && LookupFoundNothing(record))
+            {
+                record = await _seriesMetadataCache.GetAuthoritativeByTitleAsync(series, cancellationToken);
+            }
+
             if (record is null || !IsProviderMatch(record))
             {
                 return null;
@@ -65,6 +73,15 @@ public partial class ComicProcessorService
     private static bool IsProviderMatch(SeriesMetadataCacheRecord record) =>
         string.Equals(record.LookupStatus, "success", StringComparison.OrdinalIgnoreCase)
         || string.Equals(record.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when the record says only that a lookup came back empty. Metadata the user cleared
+    /// or manages is a decision about the series, not a missing answer.
+    /// </summary>
+    private static bool LookupFoundNothing(SeriesMetadataCacheRecord record) =>
+        string.IsNullOrEmpty(record.LookupStatus)
+        || string.Equals(record.LookupStatus, "not_found", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(record.LookupStatus, "error", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Fills the empty ComicInfo fields of a file normalize has nothing to change in, so a file

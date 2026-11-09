@@ -99,6 +99,19 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         return entity is null ? null : ToRecord(entity);
     }
 
+    public async Task<SeriesMetadataCacheRecord?> GetAuthoritativeByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return null;
+        }
+
+        var titleIndex = await GetTitleIndexAsync(cancellationToken);
+        return titleIndex.TryGetValue(NormalizeKey(seriesTitle), out var ownerKey)
+            ? await GetAsync(ownerKey, cancellationToken)
+            : null;
+    }
+
     /// <summary>
     /// Resolves the cache entity for a free-form series title. Tries an exact
     /// normalized-key lookup first, then falls back to every record's known

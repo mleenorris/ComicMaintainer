@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text;
 using System.Xml.Linq;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
@@ -7,6 +8,7 @@ using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using StoredRar4 = ComicMaintainer.Tests.Services.ComicReaderServiceCoverageTests.StoredRar4;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -23,6 +25,7 @@ public sealed class ComicProcessorServiceProviderFillTests : IDisposable
     private readonly AppSettings _settings;
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<ISeriesMetadataCacheService> _cache = new();
+    private readonly Mock<IProcessingHistoryService> _history = new();
     private readonly List<ComicProcessorService> _services = new();
 
     private SeriesMetadataCacheRecord _record = new()
@@ -79,7 +82,7 @@ public sealed class ComicProcessorServiceProviderFillTests : IDisposable
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<ComicProcessorService>.Instance,
             _fileStore.Object,
-            Mock.Of<IProcessingHistoryService>(),
+            _history.Object,
             seriesMetadataCache: _cache.Object,
             seriesNameResolver: resolver.Object,
             jobRegistry: Jobs);
@@ -99,6 +102,17 @@ public sealed class ComicProcessorServiceProviderFillTests : IDisposable
 
         using var page = zip.CreateEntry("page001.jpg").Open();
         page.Write(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
+        return path;
+    }
+
+    private string WriteCbr(string comicInfo, string relativePath = "Berserk/Berserk - Chapter 0001.cbr")
+    {
+        var path = Path.GetFullPath(Path.Join(_root, relativePath));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        StoredRar4.Write(
+            path,
+            ("page001.jpg", new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }),
+            ("ComicInfo.xml", Encoding.UTF8.GetBytes(comicInfo)));
         return path;
     }
 
@@ -177,6 +191,92 @@ public sealed class ComicProcessorServiceProviderFillTests : IDisposable
         var info = ReadComicInfo(path);
         AssertFilled(info);
         Assert.Equal("Berserk", info.Element("Series")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AlreadyNormalizedCbr_BecomesAFilledCbzAndTheRowFollowsIt()
+    {
+        var cbr = WriteCbr(Normalized);
+        var cbz = Path.ChangeExtension(cbr, ".cbz");
+
+        Assert.True(await CreateService().ProcessFileAsync(cbr));
+
+        Assert.False(File.Exists(cbr));
+        AssertFilled(ReadComicInfo(cbz));
+        _fileStore.Verify(f => f.UpdateFilePathAsync(cbr, cbz, It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(cbz, true, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.SetFileSeriesMetadataVersionAsync(cbz, 7, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.SetFileSeriesMetadataVersionAsync(cbr, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // Converting and filling changed the file, so the run has a history entry.
+        _history.Verify(
+            h => h.AddHistoryEntryAsync(
+                It.Is<ProcessingHistoryEntry>(entry => entry.Action == "Process" && entry.Success && entry.FilePath == cbz),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AlreadyNormalizedCbr_IsRenamedAsTheCbz()
+    {
+        _settings.WatcherEnableRename = true;
+        var cbr = WriteCbr(Normalized, "Berserk/Berserk Ch 1.cbr");
+        var cbz = Path.ChangeExtension(cbr, ".cbz");
+        var renamed = Path.Join(_root, "Berserk", "Berserk - Chapter 0001.cbz");
+
+        Assert.True(await CreateService().ProcessFileAsync(cbr));
+
+        Assert.False(File.Exists(cbr));
+        Assert.False(File.Exists(cbz));
+        AssertFilled(ReadComicInfo(renamed));
+        _fileStore.Verify(f => f.UpdateFilePathAsync(cbr, cbz, It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
+        _fileStore.Verify(f => f.UpdateFilePathAsync(cbz, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
+        _fileStore.Verify(f => f.SetFileSeriesMetadataVersionAsync(renamed, 7, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NormalizeFilesAsync_AlreadyNormalizedCbr_BecomesAFilledCbzAndTheRowFollowsIt()
+    {
+        var cbr = WriteCbr(Normalized);
+        var cbz = Path.ChangeExtension(cbr, ".cbz");
+
+        var job = await NormalizeAsync(cbr);
+
+        Assert.Equal(0, job.FailedFiles);
+        Assert.False(File.Exists(cbr));
+        AssertFilled(ReadComicInfo(cbz));
+        _fileStore.Verify(f => f.UpdateFilePathAsync(cbr, cbz, It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
+        _fileStore.Verify(f => f.SetFileSeriesMetadataVersionAsync(cbz, 7, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.SetFileSeriesMetadataVersionAsync(cbr, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        _history.Verify(
+            h => h.AddHistoryEntryAsync(
+                It.Is<ProcessingHistoryEntry>(entry => entry.Action == "Normalize" && entry.Success && entry.FilePath == cbz),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WithConversionOffAnAlreadyNormalizedCbrIsLeftAsItIs(bool throughProcessFile)
+    {
+        _settings.ConvertRarToCbzOnWrite = false;
+        var cbr = WriteCbr(Normalized);
+        var before = await File.ReadAllBytesAsync(cbr);
+
+        if (throughProcessFile)
+        {
+            Assert.True(await CreateService().ProcessFileAsync(cbr));
+        }
+        else
+        {
+            Assert.Equal(0, (await NormalizeAsync(cbr)).FailedFiles);
+        }
+
+        Assert.Equal(before, await File.ReadAllBytesAsync(cbr));
+        Assert.False(File.Exists(Path.ChangeExtension(cbr, ".cbz")));
+        _fileStore.Verify(f => f.UpdateFilePathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
+        _fileStore.Verify(f => f.SetFileSeriesMetadataVersionAsync(cbr, 7, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -305,6 +405,63 @@ public sealed class ComicProcessorServiceProviderFillTests : IDisposable
         Assert.True(await CreateService().ProcessFileAsync(path));
 
         Assert.Equal(before, await File.ReadAllBytesAsync(path));
+    }
+
+    [Theory]
+    [InlineData("not_found")]
+    [InlineData("error")]
+    [InlineData(null)]
+    public async Task ALookupThatFoundNothingGivesWayToTheMatchThatOwnsTheTitle(string? status)
+    {
+        var match = _record;
+        _cache.Setup(c => c.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord { NormalizedKey = "berserk", CanonicalTitle = "Berserk", LookupStatus = status });
+        _cache.Setup(c => c.GetAuthoritativeByTitleAsync("Berserk", It.IsAny<CancellationToken>())).ReturnsAsync(match);
+        var path = WriteArchive(Normalized);
+
+        Assert.True(await CreateService().ProcessFileAsync(path));
+
+        AssertFilled(ReadComicInfo(path));
+    }
+
+    [Fact]
+    public async Task WhenTheOwnerOfTheTitleHasNoMatchEitherNothingIsFilled()
+    {
+        _record.LookupStatus = "not_found";
+        _cache.Setup(c => c.GetAuthoritativeByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(_record);
+        var path = WriteArchive(Normalized);
+        var before = await File.ReadAllBytesAsync(path);
+
+        Assert.True(await CreateService().ProcessFileAsync(path));
+
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+    }
+
+    [Theory]
+    [InlineData("cleared")]
+    [InlineData("manual")]
+    public async Task MetadataTheUserClearedOrManagesIsNotReplacedByASibling(string status)
+    {
+        var sibling = new SeriesMetadataCacheRecord { NormalizedKey = "other", LookupStatus = "success", Synopsis = "A sibling's text." };
+        _record.LookupStatus = status;
+        _cache.Setup(c => c.GetAuthoritativeByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(sibling);
+        var path = WriteArchive(Normalized);
+        var before = await File.ReadAllBytesAsync(path);
+
+        Assert.True(await CreateService().ProcessFileAsync(path));
+
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+        _cache.Verify(c => c.GetAuthoritativeByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ASuccessfulLookupDoesNotConsultTheTitleIndex()
+    {
+        var path = WriteArchive(Normalized);
+
+        Assert.True(await CreateService().ProcessFileAsync(path));
+
+        _cache.Verify(c => c.GetAuthoritativeByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

@@ -9,7 +9,8 @@ namespace ComicMaintainer.Tests.AndroidApp;
 /// </summary>
 public sealed class AndroidAppBuildTests
 {
-    private const string ProjectPath = @"src\ComicMaintainer.MauiApp\ComicMaintainer.MauiApp.csproj";
+    private const string AppSolutionPath = "src/ComicMaintainer.Android.sln";
+    private const string ProjectPath = @"ComicMaintainer.MauiApp\ComicMaintainer.MauiApp.csproj";
 
     private static string RepositoryRoot
     {
@@ -37,10 +38,19 @@ public sealed class AndroidAppBuildTests
         Assert.DoesNotContain("MauiApp", solution, StringComparison.Ordinal);
     }
 
+    // A second solution beside it would make the documented bare "dotnet build" and "dotnet test" fail with MSB1011.
+    [Fact]
+    public void TheRepositoryRoot_HoldsOnlyTheMainSolution()
+    {
+        var solution = Assert.Single(Directory.GetFiles(RepositoryRoot, "*.sln"));
+
+        Assert.Equal("ComicMaintainer.sln", Path.GetFileName(solution));
+    }
+
     // The command line skips a line it does not expect, but other tools that read solution files are stricter.
     [Theory]
     [InlineData("ComicMaintainer.sln")]
-    [InlineData("ComicMaintainer.Android.sln")]
+    [InlineData(AppSolutionPath)]
     public void ASolution_ClosesEachProjectExactlyOnce(string solutionFile)
     {
         var lines = File.ReadAllLines(Path.Join(RepositoryRoot, solutionFile));
@@ -51,7 +61,7 @@ public sealed class AndroidAppBuildTests
     [Fact]
     public void TheAppHasASolutionOfItsOwn()
     {
-        var solution = File.ReadAllText(Path.Join(RepositoryRoot, "ComicMaintainer.Android.sln"));
+        var solution = File.ReadAllText(Path.Join(RepositoryRoot, AppSolutionPath));
 
         Assert.Contains(ProjectPath, solution, StringComparison.Ordinal);
     }
@@ -69,7 +79,7 @@ public sealed class AndroidAppBuildTests
     {
         var workflow = ReadWorkflow();
 
-        Assert.Contains("dotnet restore ComicMaintainer.Android.sln", workflow, StringComparison.Ordinal);
+        Assert.Contains($"dotnet restore {AppSolutionPath}", workflow, StringComparison.Ordinal);
         Assert.DoesNotMatch(@"ComicMaintainer\.sln", workflow);
     }
 

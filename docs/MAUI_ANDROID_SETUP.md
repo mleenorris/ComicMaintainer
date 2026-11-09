@@ -127,12 +127,12 @@ dotnet build src/ComicMaintainer.MauiApp -t:InstallAndroidDependencies -f net10.
   -p:AndroidSdkDirectory=$HOME/android-sdk -p:JavaSdkDirectory=$HOME/jdk -p:AcceptAndroidSDKLicenses=true
 ```
 
-The app has its own solution, `ComicMaintainer.Android.sln`, so that `ComicMaintainer.sln` builds without any of this.
+The app has its own solution, `src/ComicMaintainer.Android.sln`, so that `ComicMaintainer.sln` builds without any of this.
 Open it in Visual Studio, or from the command line:
 
 ```bash
 # Debug build
-dotnet build ComicMaintainer.Android.sln
+dotnet build src/ComicMaintainer.Android.sln
 
 # Run on a connected device or emulator
 dotnet build src/ComicMaintainer.MauiApp -t:Run -f net10.0-android

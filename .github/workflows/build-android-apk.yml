@@ -68,7 +68,7 @@ jobs:
 
       # The app has a solution of its own, so that the main one builds without the Android workload.
       - name: Restore dependencies
-        run: dotnet restore ComicMaintainer.Android.sln
+        run: dotnet restore src/ComicMaintainer.Android.sln
 
       # Publish, not build: publishing is what produces the signed package, in the publish folder.
       - name: Build Android APK

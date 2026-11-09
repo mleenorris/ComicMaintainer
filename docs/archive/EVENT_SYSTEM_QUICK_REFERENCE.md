@@ -114,7 +114,7 @@ docker restart comictagger-watcher
 
 ## 📖 Documentation Links
 
-- **[EVENT_BROADCASTING_SYSTEM.md](EVENT_BROADCASTING_SYSTEM.md)** - Complete system documentation
+- **[EVENT_BROADCASTING_SYSTEM.md](../EVENT_BROADCASTING_SYSTEM.md)** - Complete system documentation
 - **[EVENT_SYSTEM_IMPROVEMENTS_SUMMARY.md](EVENT_SYSTEM_IMPROVEMENTS_SUMMARY.md)** - Before/after comparison
 - **[EVENT_SYSTEM_FLOW_DIAGRAMS.md](EVENT_SYSTEM_FLOW_DIAGRAMS.md)** - Visual flow diagrams
 

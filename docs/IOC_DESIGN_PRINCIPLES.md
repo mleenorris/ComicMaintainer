@@ -28,6 +28,17 @@ Where one service needs to hand work to another that (indirectly) depends on it,
 
 Do not break a new cycle with a `Func<T>`, `Lazy<T>` or `IServiceScopeFactory` lookup. Those hide the dependency from the container, so a wrong registration only shows up when the code path runs.
 
+## Locks shared between services
+
+Exclusion between services goes through injected singletons, not static fields:
+
+| Service | Guards |
+| --- | --- |
+| `IFileOperationLock` | One archive at a time, across the watcher, batch jobs, API metadata edits and the series cover writer |
+| `ILibraryMutationLock` | Creating and removing library folders, across the Suwayomi importer and folder combine |
+
+Folder combine itself lives in the Core service `IFolderCombineService`, so its controller action stays thin.
+
 ## Deliberate exceptions
 
 Service resolution at runtime remains in places that the framework constructs or calls outside dependency injection. Each resolves only framework-owned or request-scoped services:

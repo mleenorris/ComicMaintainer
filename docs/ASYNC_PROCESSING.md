@@ -1,286 +1,107 @@
-# Asynchronous File Processing
+# Background Processing
 
-This document describes the asynchronous file processing feature implemented for ComicMaintainer.
+Files are processed in two ways: the watcher handles files as they appear, and batch jobs run work you start from the
+web interface or the API. Both run in the background, so the web interface stays responsive.
 
-## Overview
+## The watcher
 
-The application now supports asynchronous file processing, allowing multiple files to be processed concurrently in the background. This significantly improves performance for large libraries and keeps the web interface responsive during processing operations.
+`FileWatcherService` watches `WATCHED_DIR`. It runs while **rename** or **normalize** is on at **Settings > Watcher**
+(`WatcherEnableRename`, `WatcherEnableNormalize`).
 
-## Architecture
+When a file appears or changes, the watcher waits until it has stopped changing (`WatcherFileStabilityDelaySeconds`,
+30 by default), then processes it. A burst of events for one file becomes one run. A file queued this way is flagged in
+the database, so a restart does not lose it.
 
-### Components
+### Catching up at start
 
-1. **Job Manager** (`job_manager.py`)
-   - Manages background processing jobs
-   - Uses ThreadPoolExecutor for concurrent execution (default: 4 workers)
-   - Tracks job status (queued, processing, completed, failed, cancelled)
-   - Provides job lifecycle management (create, start, monitor, cancel, delete)
-   - Automatic cleanup of old completed jobs (after 1 hour)
-   - Job state stored in SQLite database (`job_store.py`) for cross-process sharing
+Every start, restart of the watcher, or change of the watched directory reconciles the library with the disk:
 
-2. **API Endpoints** (`web_app.py`)
-   - `POST /api/jobs/process-all` - Start processing all files
-   - `POST /api/jobs/process-selected` - Start processing selected files
-   - `GET /api/jobs/<job_id>` - Get job status and results
-   - `GET /api/jobs` - List all jobs
-   - `DELETE /api/jobs/<job_id>` - Delete a job
-   - `POST /api/jobs/<job_id>/cancel` - Cancel a running job
+- Tracked files that moved or changed case while the app was down are matched to their new paths, and keep their state.
+- Files flagged as waiting are queued again.
+- New files are processed, but only if this directory has been scanned to the end before. A directory never fully
+  scanned, such as on the first start, only has its files added. Process them from the file list when you are ready.
+- If none of the tracked files are found under the directory, such as when another volume is mounted there, whatever is
+  found is added without processing.
+- If the directory holds no comics while rows remain, the scan record is cleared, so the library's return is not treated
+  as new arrivals.
 
-3. **Web UI** (`templates/index.html`)
-   - Uses async endpoints by default for "Process All" and "Process Selected" buttons
-   - Polls job status every 500ms for progress updates
-   - Displays real-time progress in modal
-   - **Automatically resumes active jobs on page load** - if you close the browser and return, the job will continue from where it left off
-   - Maintains backward compatibility with streaming endpoints
+The `LibraryScans` table records the last directory scanned completely.
 
-## Key Features
+Folders renamed, moved or deleted outside the app are followed live. Rows, read status, reader progress, metadata edits
+and field locks move with a folder. A deleted folder's rows are removed.
 
-### Concurrent Processing
-- Multiple files are processed simultaneously using a thread pool
-- Default of 4 concurrent workers (configurable in job_manager.py)
-- I/O-bound operations (reading/writing comic archives) benefit from parallelism
+A failed watcher is recreated, with delays growing to at most a minute. After a watcher error or buffer overflow, a
+recovery scan queues untracked files and files still waiting. It does not retry every unprocessed file; use **Process
+Unmarked** for that.
 
-### Non-Blocking Operations
-- Processing jobs run in background threads
-- Web interface remains fully responsive during processing
-- Multiple jobs can run simultaneously
+On volumes where file events do not arrive reliably, such as some network shares, enable the **Library Scan** scheduled
+job.
 
-### Progress Tracking
-- Real-time progress updates via polling
-- Detailed results for each processed file
-- Success/failure tracking with error messages
+## Batch jobs
 
-### Job Management
-- Jobs persist in SQLite database (survive server restarts and page reloads)
-- Can query job status at any time
-- Can cancel running jobs
-- Automatic cleanup of old completed jobs (after 24 hours)
-- **Active jobs automatically resume when you reload the page** - stored in browser localStorage
+### Starting a job
 
-## Job Resumption on Page Load
+Jobs start with `POST /api/jobs/{operation}-{scope}`:
 
-When you start a batch processing job, the job ID is stored in the browser's localStorage. If you close the browser tab or refresh the page while a job is running, the application will automatically:
+| Operation | `selected` | `all` | `unmarked` |
+| --- | --- | --- | --- |
+| `process` | Yes | Yes | Yes |
+| `rename` | Yes | Yes | Yes |
+| `normalize` | Yes | Yes | Yes |
+| `remove-metadata` | Yes | Yes | |
+| `update-metadata` | Yes | | |
+| `delete` | Yes | | |
 
-1. Check localStorage for any active job ID
-2. Query the server for the job's current status
-3. Resume displaying progress if the job is still running
-4. Show completion/failure messages if the job finished while you were away
-5. Clean up localStorage once the job is complete
+`selected` takes a body such as `{"files": ["/watched_dir/a.cbz"]}`. The `all` and `unmarked` scopes need no body, and
+leave out files marked as duplicates. The answer carries the job id and item count, as `job_id` and `total_items`.
 
-This means you can:
-- Close your browser and come back later - the job continues on the server
-- Refresh the page without losing progress
-- Open multiple tabs - they'll all show the same job progress
+Add `?forceReprocess=true` to reprocess files already marked as done. See [API.md](API.md) for the details and errors.
 
-**Example behavior:**
-- Start "Process All Files" (100 files)
-- Close the browser after 30 seconds
-- Wait 1 minute
-- Reopen the page
-- Progress modal will automatically appear showing current status (e.g., "Processing... 75/100")
+### Following a job
 
-## Usage
+| Request | Answer |
+| --- | --- |
+| `GET /api/jobs/{id}` | Status, counts, the result for each file, and `reported_problems` |
+| `GET /api/jobs` | Every job |
+| `GET /api/active-job` | The running job, or the last one a restart interrupted |
+| `POST /api/jobs/{id}/cancel` | Cancels a running job |
+| `DELETE /api/jobs/{id}` | Forgets a finished job |
 
-### Page Refresh During Processing
+A job is `queued`, `running`, `completed`, `failed`, `cancelled` or `interrupted`. One failed file does not stop a job:
+it is counted in `failed_items` and its reason is in `results`.
 
-If you attempt to refresh or close the page while a batch job is running:
-- A warning dialog will appear to prevent accidental navigation
-- You can choose to stay on the page and continue monitoring
-- If you proceed with navigation, the job continues running in the background
-- When you return, the job automatically resumes polling and shows current progress
-- Job state is preserved in localStorage and SQLite database
+The web interface gets progress from the [event stream](EVENT_BROADCASTING_SYSTEM.md). If the stream is down, it polls
+the active job every 5 seconds. Reloading the page picks up the running job from `/api/active-job`, and the browser warns
+before you leave a page that is following one.
 
-**Note:** The warning only appears when a job is actively running. Once a job completes, the warning is automatically cleared.
+### After a restart
 
-### Starting a Job
+A job that was queued or running when the process stopped is marked `interrupted`. It is not resumed: the operations are
+not transactional, and running one again could repeat its effects. Start it again if you need to.
 
-**Process all files:**
-```javascript
-const response = await fetch('/api/jobs/process-all', {
-    method: 'POST'
-});
-const { job_id, total_items } = await response.json();
-```
+Finished jobs are kept for 7 days, and the newest 50 for longer.
 
-**Process selected files:**
-```javascript
-const response = await fetch('/api/jobs/process-selected', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-        files: ['path/to/file1.cbz', 'path/to/file2.cbz']
-    })
-});
-const { job_id, total_items } = await response.json();
-```
+## How many files run at once
 
-### Monitoring Progress
+`MaxWorkers` (`AppSettings__MaxWorkers`, default 4, read at startup) is one limit shared by the watcher, API metadata
+edits and every running job. Several jobs at once share those workers, so each may finish later. One archive is never
+processed by two operations at the same time.
 
-```javascript
-async function pollJobStatus(jobId) {
-    while (true) {
-        const response = await fetch(`/api/jobs/${jobId}`);
-        const status = await response.json();
-        
-        console.log(`Progress: ${status.processed_items}/${status.total_items}`);
-        
-        if (status.status === 'completed') {
-            console.log('Job completed!');
-            break;
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-}
-```
+Use a lower value on slow or network storage. See [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md).
 
-### Job Status Response
+## Stale-entry cleanup
 
-```json
-{
-    "job_id": "uuid-here",
-    "status": "processing",
-    "total_items": 100,
-    "processed_items": 45,
-    "progress": 0.45,
-    "results": [
-        {
-            "item": "file1.cbz",
-            "success": true,
-            "error": null,
-            "details": {
-                "original": "/path/to/file1.cbz",
-                "final": "/path/to/renamed_file1.cbz"
-            }
-        }
-    ],
-    "error": null,
-    "created_at": 1234567890.0,
-    "started_at": 1234567891.0,
-    "completed_at": null
-}
-```
+A cleanup waits while the watcher is scanning, so a file that moved while the app was down is followed instead of
+removed. This includes the cleanup two minutes after a start. The manual cleanup endpoints therefore take longer during
+a scan. See [DATABASE.md](DATABASE.md#stale-entries-and-unmounted-shares).
 
-## Performance Benefits
+## Where to look in the code
 
-### Before (Synchronous Processing)
-- Files processed one at a time
-- Web request blocks until all files complete
-- Processing 100 files × 2 seconds each = 200 seconds
-- Web interface unresponsive during processing
-
-### After (Asynchronous Processing)
-- Files processed concurrently (4 at a time by default)
-- Web request returns immediately with job ID
-- Processing 100 files ÷ 4 workers × 2 seconds each = 50 seconds
-- Web interface remains fully responsive
-- **~75% faster for large batches**
-
-## Backward Compatibility
-
-The original synchronous/streaming endpoints remain available:
-- `/api/process-all?stream=true`
-- `/api/process-selected?stream=true`
-
-These can still be used if needed, but the async endpoints are recommended for better performance and user experience.
-
-## Deployment Architecture
-
-The application uses:
-- **Multiple Gunicorn worker processes** in the Python version (the .NET version runs a single process)
-- **4 ThreadPoolExecutor threads per worker** (configurable) - Provides concurrent file processing
-- **SQLite database** - Shared job state storage across all worker processes
-
-Job state is stored in a SQLite database (`/app/cache/jobs.db`), which enables:
-- Multiple Gunicorn workers can safely share job information
-- Jobs survive server restarts
-- No "Job not found" errors when different workers handle different requests
-- Better scalability with horizontal scaling of workers
-
-## Configuration
-
-### Web Server Workers
-
-The .NET version runs a single web server process, so there is nothing to tune; the Python version's `GUNICORN_WORKERS` is not read.
-
-### Adjusting Thread Pool Size
-
-The number of files processed concurrently can be configured using the `AppSettings__MaxWorkers` environment variable (read at startup):
-
-```bash
-docker run -d \
-  -v <host_dir_to_watch>:/watched_dir \
-  -e WATCHED_DIR=/watched_dir \
-  -e AppSettings__MaxWorkers=8 \
-  -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
-```
-
-**Default:** 4 workers
-
-**Recommendations:**
-- For CPU-bound systems: 2-4 threads
-- For systems with fast storage: 4-8 threads
-- For systems with slow storage: 2-4 threads
-
-### Adjusting Polling Interval
-
-To change how often the UI polls for updates, modify `templates/index.html`:
-
-```javascript
-const pollInterval = 500; // milliseconds
-```
-
-**Recommendations:**
-- Faster polling (250-500ms): More responsive, more API calls
-- Slower polling (1000-2000ms): Less responsive, fewer API calls
-
-## Testing
-
-### Unit Tests
-```bash
-python3 /tmp/test_job_manager.py
-```
-
-### API Tests
-```bash
-python3 /tmp/test_async_api.py
-```
-
-### Integration Tests
-```bash
-python3 /tmp/test_integration.py
-```
-
-## Technical Details
-
-### Thread Safety
-- Job state protected by threading locks
-- Thread-safe job creation and updates
-- Safe for multiple concurrent web requests
-
-### Error Handling
-- Individual file errors don't stop the job
-- Failed files tracked in results
-- Job continues processing remaining files
-- Fatal errors mark job as failed
-
-### Persistence and Storage
-- Job state stored in SQLite database (`/Config/jobs.db`)
-- Jobs survive server restarts
-- **Active jobs automatically resume when you reload the browser page** - job ID stored in localStorage
-- Old completed jobs automatically cleaned up after 24 hours
-- Can manually delete jobs via API
-- Thread-safe database access with WAL mode for concurrent operations
-- Multiple Gunicorn workers share job state via database
-
-## Future Enhancements
-
-Potential improvements for future versions:
-- [x] Persistent job storage (survive server restarts) - ✅ Implemented with SQLite
-- [x] Multi-worker support - ✅ Implemented with shared SQLite backend
-- [ ] Job priority levels
-- [ ] Configurable worker pools per job type
-- [ ] WebSocket support for push notifications
-- [ ] Job scheduling and queuing
-- [ ] Resource throttling and rate limiting
+| Part | Location |
+| --- | --- |
+| Watcher | `src/ComicMaintainer.Core/Services/FileWatcherService.cs` |
+| Job state, cancellation and retention | `Services/BatchJobRegistry.cs`, `Services/JobStateStore.cs`, `Services/BatchJobRetention.cs` |
+| Job operations | `Services/ComicProcessorService.BatchJobs.cs` |
+| Per-file lock | `Services/FileOperationLock.cs` |
+| Marking interrupted jobs at start | `src/ComicMaintainer.WebApi/Services/JobStateReconciliationHostedService.cs` |
+| Routes | `src/ComicMaintainer.WebApi/Controllers/JobsController.cs` |

@@ -49,8 +49,11 @@ ends, sign in again.
 An API key lasts until it is revoked, so you do not have to sign in every day. The app only uses a key you already
 have; it never creates one, because creating a key replaces the account's previous one.
 
-The web interface has no page for API keys yet, so create one through the API. It needs your current password, and the
-key is shown only once:
+To create a key, sign in to the web interface, open **Settings > OPDS Catalog**, enter your current password and click
+**Create API key**. The key is shown only once. An account has one key, so creating a new one ends the old one, in the
+app and in any comic app that uses it.
+
+You can also create one through the API:
 
 ```bash
 TOKEN=$(curl -s https://comics.example.com/api/auth/login \

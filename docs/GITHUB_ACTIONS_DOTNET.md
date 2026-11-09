@@ -1,266 +1,166 @@
-# GitHub Actions Workflow - .NET Docker Build
+# GitHub Actions
 
-This document describes the GitHub Actions workflow for building and publishing the .NET version of ComicMaintainer to Docker Hub.
+How the repository is tested and released. The workflows are in `.github/workflows/`.
 
-## Workflow File
+## Overview
 
-`.github/workflows/docker-publish-dotnet.yml`
+| Workflow | File | Runs on |
+| --- | --- | --- |
+| Release | `version-bump.yml` | Every push to `dotnet` |
+| .NET Tests | `test-dotnet.yml` | Pull requests into `dotnet`, by hand, and called by Release |
+| Integration Tests (E2E Container) | `integration-tests-e2e.yml` | Pull requests into `dotnet`, by hand, and called by Release |
+| Build and Push .NET Docker Image | `docker-publish-dotnet.yml` | Called by Release, and by hand |
+| Build Windows Release | `build-windows-release.yml` | Called by Release, and by hand |
+| Build Android APK | `build-android-apk.yml` | Called by Release, and by hand |
+| PR Test Check | `pr-test-check.yml` | Pull requests into `dotnet` |
+| Security Vulnerability Scanning | `security-scan.yml` | Pull requests, pushes to `dotnet`, weekly and by hand |
+| CodeQL Advanced Security Scanning | `codeql-analysis.yml` | Pull requests, pushes to `dotnet`, weekly and by hand |
+| Claude Code, Claude Code Review | `claude.yml`, `claude-code-review.yml` | `@claude` mentions; pull request updates |
+| Cleanup Copilot Branches | `cleanup-copilot-branches.yml` | Pull request closed; deletes `copilot/` branches |
 
-## Triggers
+[Dependabot](../.github/dependabot.yml) proposes dependency updates.
 
-The workflow is triggered on:
+## Pull requests
 
-- **Completion of the "Automatic Version Bump" workflow** (`workflow_run`) on the `dotnet` branch:
-  - A merge to `dotnet` starts `.github/workflows/version-bump.yml`, which commits the next
-    version to `ComicMaintainer.WebApi.csproj`, tags it and creates the GitHub release.
-  - The image is built only after that run finishes, from the commit the bump tagged as the
-    release, so it carries the version of that release. The bump records that commit in a
-    `release-commit` artifact, because `dotnet` already holds a later commit when another merge
-    lands before the bump finishes.
-  - It is built whatever the outcome of the bump. When the bump recorded no release, for example
-    because it was skipped with `[skip-version-bump]`, the newest commit on `dotnet` is built.
+A pull request into `dotnet` runs these. See [TESTING_POLICY.md](TESTING_POLICY.md) for what each one requires.
 
-- **Pull Request** to branch:
-  - `dotnet`
+- **.NET Tests**: `unit-tests` runs the JavaScript tests and the .NET unit tests on Linux with the coverage gates, and
+  builds `src/` with warnings as errors. `windows-tests` runs the whole suite on Windows, `file-operation-tests` runs
+  the delete-job tests on macOS, and `integration-tests` runs `Category=Integration`.
+- **Integration Tests (E2E Container)**: builds the `linux/amd64` image, runs `scripts/container-smoke-test.sh`, and scans
+  the image with Trivy. A fixable critical or high vulnerability fails the check.
+- **PR Test Check**: fails when server or web UI code changed without a change under `tests/`.
+- **Security scanning and CodeQL**: see [Security scans](#security-scans).
 
-- **Manual run** (`workflow_dispatch`), run on `dotnet`:
-  - With **version** empty, it republishes the newest commit on `dotnet`, e.g. after a failed push
-    to Docker Hub. Start a new run rather than re-running an old one: a re-run builds the commit
-    its first attempt built, which `dotnet` may have moved past.
-  - With **version** set, it rebuilds that release and pushes only its version tag. See
-    [Backfilling a version tag](#backfilling-a-version-tag).
+## Release
 
-The image is deliberately not built on the push to `dotnet`. That push is the merge commit, which
-still holds the previous version, and the bump commit cannot start a build of its own: commits
-pushed by a workflow with `GITHUB_TOKEN` do not trigger other workflows. Building on push
-therefore published every image one version behind the newest release.
+A push to `dotnet` starts one Release run. Only a commit that passed its tests is released.
 
-Only one publish runs at a time. A publish triggered while another is running waits for it
-instead of cancelling it, because a cancelled publish would never push its release's version
-tag. Only one publish can wait, and a newer one replaces it, so the newest build is always the
-last to push `dotnet`. When several releases are merged while a publish is running, the ones in
-between are not published; backfill them if you need their version tags. Backfills and pull
-request builds never wait for, or hold up, a publish.
+1. `tests` and `container-tests` run `test-dotnet.yml` and `integration-tests-e2e.yml` for the pushed commit.
+2. `bump-version` checks the commit is still the newest on `dotnet`. It raises the patch number of `<Version>`,
+   `<AssemblyVersion>` and `<FileVersion>` in `ComicMaintainer.WebApi.csproj`, and pushes the bump commit and the
+   `vX.Y.Z` tag together. It then creates a GitHub release with generated notes.
+3. `publish-image` calls `docker-publish-dotnet.yml` with the release commit, or the tested commit when no version was
+   released.
+4. `windows-release` and `android-release` call their workflows with the tag, and attach the downloads to the release.
 
-## Docker Image Tags
+Workflows are called directly because a tag pushed with `GITHUB_TOKEN` cannot start another workflow.
 
-Images are pushed to `iceburn1/comicmaintainer` on Docker Hub with these tags:
+Releases run one at a time, in push order. A newer push waits instead of cancelling a running release, and replaces any
+older push that is still waiting. If `dotnet` has moved past the tested commit, that run releases nothing, and the run
+for the newer push releases both.
+
+A commit message containing `[skip-version-bump]` or `Bump version to` gets no new version.
+It is still tested and published as `:dotnet`.
+
+To set a version by hand, such as for a major release, edit those three properties, commit with `[skip-version-bump]`,
+and create the tag and release yourself.
+
+## Docker image
+
+`docker-publish-dotnet.yml` builds `Dockerfile.dotnet` for `linux/amd64` and `linux/arm64`.
 
 | Tag | Image | Moves |
-|-----|-------|-------|
-| `dotnet` | The newest build of the `dotnet` branch | On every publish of the newest commit on `dotnet` |
-| `X.Y.Z`, e.g. `2.0.404` | That release | Never, except when the release is republished or backfilled |
+| --- | --- | --- |
+| `dotnet` | The newest commit on `dotnet` | On every publish of that commit |
+| `X.Y.Z`, such as `3.0.0` | That release | Only when the release is republished or backfilled |
 
-The version tag is the three-part `<Version>` from `ComicMaintainer.WebApi.csproj`. The web
-interface shows the four-part assembly version, so `2.0.404.0` there is the tag `2.0.404`.
+The version tag is the three-part `<Version>`. The web interface shows the four-part assembly version, so `3.0.0.0`
+there is the tag `3.0.0`.
 
-A version tag is pushed only when the commit being built is the one the version bump tagged
-`vX.Y.Z`. A later commit, such as a merge whose bump was skipped with `[skip-version-bump]`,
-still carries the previous version number, so its build updates `dotnet` only and the run shows
-the notice "This commit is not the vX.Y.Z release, so only :dotnet is published". This keeps
-each version tag on the code of its release.
+Each platform is built on a runner of its own architecture, so `arm64` runs natively. Each image is started and smoke
+tested, then pushed by digest with no tag. Only when every platform has passed are the tags created, as one multi-platform
+image.
 
-A release is built from the commit its version bump tagged even when more commits have reached
-`dotnet` since, for example because another pull request was merged while the bump was
-finishing.
+The publish decides which tags a commit gets:
 
-The `dotnet` tag only takes the newest commit on the `dotnet` branch, so it never goes back to an
-older build, even when an old run is re-run. A re-run builds the same commit as its first
-attempt. A publish that the branch has moved past leaves the tag to the publish of the newer
-commits:
+- A commit that is the newest on `dotnet` and carries a `vX.Y.Z` tag gets `dotnet` and `X.Y.Z`.
+- A commit that is the newest on `dotnet` with no such tag, such as a `[skip-version-bump]` push, gets `dotnet` only. The
+  run shows "This commit is not the vX.Y.Z release, so only :dotnet is published".
+- A release that `dotnet` has moved past gets `X.Y.Z` only.
+- Any other commit publishes nothing, and the run says so.
 
-- For a release, it pushes only the version tag and shows the notice "dotnet has moved on since
-  vX.Y.Z, so only :X.Y.Z is published".
-- For any other commit, it skips the build and shows the notice "Nothing is published, because
-  this commit is neither the newest on dotnet nor the vX.Y.Z release".
+Publishes that move `dotnet` run one at a time and never cancel each other, so the newest commit is always the last to
+move the tag.
 
-Version tags started with the release that added them. Earlier releases have no tag until they
-are backfilled.
+### Publishing by hand
+
+Run the workflow from the Actions tab on the `dotnet` branch:
+
+- With **version** empty, it republishes the newest commit on `dotnet`, for example after a failed push to Docker Hub.
+  Start a new run rather than re-running an old one, which builds its original commit again.
+- With **version** set, it backfills a release. See below.
 
 ### Backfilling a version tag
 
 To publish the tag of an earlier release:
 
-1. Go to Actions → "Build and Push .NET Docker Image" → Run workflow
-2. Leave the branch on `dotnet` and enter the release in **version**, such as `2.0.399` (not
-   `v2.0.399` or `2.0.399.0`)
+1. Go to Actions > "Build and Push .NET Docker Image" > Run workflow.
+2. Leave the branch on `dotnet` and enter the release in **version**, such as `2.0.399`. Do not add a `v` or a fourth
+   part.
 
-The run checks out the release's `v2.0.399` git tag, checks that its `.csproj` holds that version,
-and builds and pushes `iceburn1/comicmaintainer:2.0.399` only. It never touches `dotnet`.
+The run checks out the release's `v2.0.399` git tag, checks that its `.csproj` holds that version, and pushes
+`iceburn1/comicmaintainer:2.0.399` only. It never touches `dotnet`.
 
-- The image is rebuilt from the release's source with today's base images, so it is not
-  byte-for-byte the image that was published at the time. Backfilling a version that already
-  has a tag replaces it with such a rebuild.
-- Releases before 2.0.288 were published for `linux/amd64` only and are rebuilt for that
-  platform only.
+The image is rebuilt from the release's source with today's base images, so it is not byte-for-byte the image first
+published. Releases before 2.0.288 were `linux/amd64` only and are rebuilt for that platform only.
 
-To tag the exact image that was published instead, copy its digest from the release's publish
-run (the "Image digest" step and the run summary list it; older runs show it in the "Build and
-push" step's log, and GitHub keeps run logs for 90 days by default), then, with push access to
-the repository:
+To tag the exact image that was published instead, copy its digest from that release's publish run, then, with push
+access:
 
 ```bash
 docker buildx imagetools create -t iceburn1/comicmaintainer:2.0.399 \
   iceburn1/comicmaintainer@sha256:<digest>
 ```
 
-## Workflow Steps
+### Required secrets
 
-1. **Validate requested version** - Manual backfills only: checks that **version** looks like `2.0.399`
-2. **Download release record** - After a version bump only: downloads the bump's
-   `release-commit` artifact, which holds the commit it tagged. A bump that recorded no release
-   leaves none
-3. **Read release record** - Checks that the record holds a commit hash
-4. **Checkout code** - Retrieves the release's `vX.Y.Z` tag for a backfill, the recorded release
-   commit after a version bump, and otherwise the newest commit of the branch
-5. **Set up .NET** - Installs .NET 10.0 SDK
-6. **Get version** - Reads `<Version>` from `ComicMaintainer.WebApi.csproj`. Fails if it is
-   missing or malformed, or for a backfill, if it is not the requested version
-7. **Determine Docker tags and platforms** - `dotnet` if the commit is still the newest on the
-   `dotnet` branch, and `X.Y.Z` if it is that release's tagged commit; a backfill gets only
-   `X.Y.Z`. A commit that gets neither skips the remaining steps. Fails if a recorded release
-   commit is not tagged with its version
-8. **Cache Docker layers** - Caches build layers for faster subsequent builds
-9. **Set up QEMU** - Lets the runner execute the arm64 image's package installation
-10. **Set up Docker Buildx** - Configures Docker for multi-platform builds
-11. **Log in to Docker Hub** - Authenticates with Docker Hub (not for pull requests)
-12. **Build and push** - Builds the Docker image using `Dockerfile.dotnet` and pushes to Docker Hub
-13. **Image digest** - Lists the pushed digest and tags in the run summary
+| Secret | Used for |
+| --- | --- |
+| `DOCKER_USERNAME` | Docker Hub user |
+| `DOCKER_PASSWORD` | Docker Hub password or, better, an access token |
+| `CODECOV_TOKEN` | Optional: uploads coverage on pushes to `dotnet` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | The two Claude workflows |
 
-## Required Secrets
+## Windows and Android downloads
 
-The workflow requires the following secrets to be configured in the GitHub repository:
+`build-windows-release.yml` publishes self-contained `win-x64` and `win-x86` builds as ZIP files. `build-android-apk.yml`
+publishes the signed APK from `src/ComicMaintainer.Android.sln`.
 
-- `DOCKER_USERNAME` - Docker Hub username
-- `DOCKER_PASSWORD` - Docker Hub password or access token
+Both attach their files to the release of the tag they are given. Run either by hand with a tag to rebuild a release's
+downloads, or with no tag to build the selected branch and keep the result as a workflow artifact without publishing
+anything.
 
-### Setting up Secrets
+## Security scans
 
-1. Go to your GitHub repository
-2. Navigate to Settings → Secrets and variables → Actions
-3. Click "New repository secret"
-4. Add the following secrets:
-   - Name: `DOCKER_USERNAME`, Value: Your Docker Hub username
-   - Name: `DOCKER_PASSWORD`, Value: Your Docker Hub password or access token
+| Scan | Runs on | Fails on |
+| --- | --- | --- |
+| NuGet packages, in `security-scan.yml` | Pull requests, pushes to `dotnet`, weekly | A high or critical advisory in a shipped package, direct or transitive, through `scripts/check-vulnerable-packages.js` |
+| Image built for the change, in `integration-tests-e2e.yml` | Pull requests, pushes to `dotnet` | A fixable critical or high vulnerability |
+| No-cache rebuild, and the published `:dotnet` image, in `security-scan.yml` | Weekly, on Monday at 9:00 UTC, and by hand | A fixable critical or high vulnerability |
+| CodeQL for C#, JavaScript and workflow files | Pull requests, pushes to `dotnet`, weekly | See [CODEQL_CONFIGURATION.md](CODEQL_CONFIGURATION.md) |
 
-**Note**: It's recommended to use a Docker Hub access token instead of your password for better security.
-
-## Version Management
-
-The version is defined in the `src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj` file:
-
-```xml
-<PropertyGroup>
-  <Version>1.0.0</Version>
-  <AssemblyVersion>1.0.0.0</AssemblyVersion>
-  <FileVersion>1.0.0.0</FileVersion>
-</PropertyGroup>
-```
-
-The patch version is bumped automatically on every merge to `dotnet`, and the image is published
-afterwards with the new version (see [Triggers](#triggers)).
-
-To set a version by hand:
-1. Edit the `<Version>`, `<AssemblyVersion>` and `<FileVersion>` tags in the .csproj file
-2. Commit with `[skip-version-bump]` in the message so the automatic bump leaves it alone, and push
-3. The workflow builds the image with the new version once the skipped version bump run completes
-
-## Build Artifacts
-
-The workflow produces Docker images for the `linux/amd64` and `linux/arm64` platforms (`linux/arm64`
-since 2.0.288). The images are:
-
-- Built from `Dockerfile.dotnet`
-- Include all dependencies and the compiled .NET application
-- Support dynamic PUID/PGID configuration
-- Include security hardening (non-root user, path validation, etc.)
-
-## Pull Request Behavior
-
-When a pull request is created:
-- The Docker image is **built** but **not pushed** to Docker Hub
-- This allows validation of the Docker build process without publishing
-- Once the PR is merged and the version bump has finished, the image will be built and pushed
-
-## Monitoring Builds
-
-To monitor build status:
-1. Go to your GitHub repository
-2. Click on the "Actions" tab
-3. Select "Build and Push .NET Docker Image" workflow
-4. View individual workflow runs and their logs
+Medium and higher findings from Trivy are uploaded to the repository's code scanning alerts.
 
 ## Troubleshooting
 
-### Build Fails
-- Check the workflow logs in the Actions tab
-- Verify .NET 10.0 SDK is available
-- Ensure `Dockerfile.dotnet` is present and valid
+**A push to `dotnet` released nothing.** Check the Release run. If `dotnet` moved past the tested commit, the run for the
+newer push releases it. If the tests failed, no version is made and no image is published.
 
-### Push Fails
-- Verify Docker Hub credentials are correct in repository secrets
-- Check Docker Hub rate limits
-- Ensure you have permission to push to the repository
+**A version tag is missing.** Check the notices on the publish job, then [backfill](#backfilling-a-version-tag) it.
 
-### Version Not Updated
-- The image is published a few minutes after the merge, once the "Automatic Version Bump" run
-  has finished. Check that a "Build and Push .NET Docker Image" run started after it and
-  succeeded, then pull the image again
-- If no run started, run the workflow manually on `dotnet` (Actions → "Build and Push .NET
-  Docker Image" → Run workflow)
-- A run that shows "dotnet has moved on since vX.Y.Z" published only that release's version tag,
-  and one that shows "Nothing is published" published nothing, because `dotnet` had moved on.
-  The run for the newer commit moves `dotnet`. Re-running the old run does not help, because it
-  builds the same commit again
-- Verify the version in `ComicMaintainer.WebApi.csproj` is correct
-- Check that the grep command in the workflow successfully extracts the version
+**The push to Docker Hub failed.** Check the secrets and Docker Hub's rate limits, then run the workflow by hand with
+**version** empty.
 
-### Version Tag Missing
-- The run shows "This commit is not the vX.Y.Z release, so only :dotnet is published" when it
-  built a commit after the release, for example because the bump was skipped. That is expected
-- Check that the "Automatic Version Bump" run succeeded and pushed the `vX.Y.Z` git tag
-- When several releases are merged within a few minutes, a publish that is still waiting to
-  start is replaced by the next one, so that release gets no tag. Either way,
-  [backfill](#backfilling-a-version-tag) the tag
+**A new base-image vulnerability blocks every pull request.** The Trivy gate fails on fixable critical and high
+vulnerabilities, so the fix is usually to pick up the updated base image or package.
 
-## Usage
-
-Once secrets are configured and PRs are merged to the `dotnet` branch, the workflow runs automatically after each version bump. To use the published image:
+## Local testing
 
 ```bash
-# Pull the newest release
-docker pull iceburn1/comicmaintainer:dotnet
-
-# Or pin a specific release, e.g. to roll back
-docker pull iceburn1/comicmaintainer:2.0.404
-
-# Run the container
-docker run -e PUID=$(id -u) -e PGID=$(id -g) \
-  -v /path/to/comics:/watched_dir \
-  -v /path/to/config:/Config \
-  iceburn1/comicmaintainer:dotnet
+docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
+./scripts/container-smoke-test.sh
 ```
 
-See [Pin or Roll Back to a Version](DOCKER_DEPLOYMENT_DOTNET.md#pin-or-roll-back-to-a-version)
-before running an older release against an existing `/Config`.
-
-## Local Testing
-
-To test the Docker build locally before pushing:
-
-```bash
-# Build the image
-docker build -f Dockerfile.dotnet -t comicmaintainer:dotnet-test .
-
-# Run the image
-docker run -e PUID=$(id -u) -e PGID=$(id -g) \
-  -v $(pwd)/test_comics:/watched_dir \
-  -v $(pwd)/config:/Config \
-  comicmaintainer:dotnet-test
-```
-
-## Related Documentation
-
-- [Docker Deployment Guide](DOCKER_DEPLOYMENT_DOTNET.md)
-- [Security Fixes](archive/SECURITY_FIXES_DOTNET.md)
-- [.NET Implementation Summary](archive/DOTNET_IMPLEMENTATION_SUMMARY.md)
+See also [Pin or Roll Back to a Version](DOCKER_DEPLOYMENT_DOTNET.md#pin-or-roll-back-to-a-version) before running an
+older release against an existing `/Config`.

@@ -280,6 +280,18 @@ public static class ArchiveEntryReader
     }
 
     /// <summary>
+    /// The CRC32 a RAR entry's header carries, or null when there is none to check the data
+    /// against: no checksum at all, a BLAKE2 hash instead, or an entry split over volumes.
+    /// </summary>
+    internal static uint? RarEntryCrc32(IArchiveEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        return !entry.IsSplitAfter && RarFileHeader.FileCrc(RarFileHeader.Of(entry)) is { Length: sizeof(uint) } crc
+            ? BitConverter.ToUInt32(crc)
+            : null;
+    }
+
+    /// <summary>
     /// The fields of a parsed RAR header that SharpCompress keeps internal. The names are those
     /// of its <c>FileHeader</c>; should an upgrade rename one, opening a RAR 5 fails with a
     /// <see cref="MissingMethodException"/> instead of passing unchecked, and the tests say so.
@@ -302,6 +314,13 @@ public static class ArchiveEntryReader
 
         [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_FileName")]
         public static extern string? FileName([UnsafeAccessorType(TypeName)] object header);
+
+        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_FileCrc")]
+        public static extern byte[]? FileCrc([UnsafeAccessorType(TypeName)] object header);
+
+        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_FileHeader")]
+        [return: UnsafeAccessorType(TypeName)]
+        public static extern object Of([UnsafeAccessorType("SharpCompress.Common.Rar.RarEntry, SharpCompress")] object entry);
     }
 
     /// <summary>

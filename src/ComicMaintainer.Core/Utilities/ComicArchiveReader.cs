@@ -1,6 +1,7 @@
 using System.Globalization;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
+using SharpCompress.Crypto;
 using SharpCompress.Readers;
 using SharpCompress.Writers.Zip;
 using SystemZipArchive = System.IO.Compression.ZipArchive;
@@ -75,8 +76,10 @@ public abstract class ComicArchiveEntry
 /// </para>
 /// <para>
 /// The entries of a solid RAR can only be decompressed in archive order: opened on its own,
-/// such an entry comes back wrong (RAR 5) or fails (RAR 4). They are read through the
-/// archive from the start instead, under the rewrite limits; see <see cref="ComicArchiveEntry.ReadAllBytes"/>.
+/// such an entry comes back wrong (RAR 5) or fails (RAR 4). They are read in order instead,
+/// from the entry listing the header check covered, under the rewrite limits; see
+/// <see cref="ComicArchiveEntry.ReadAllBytes"/>. They are also checked against the CRC32 in
+/// their headers, because one damaged entry garbles every entry decompressed after it.
 /// </para>
 /// </remarks>
 public sealed class ComicArchiveReader : IDisposable
@@ -337,7 +340,8 @@ public sealed class ComicArchiveReader : IDisposable
     /// while it is copied, and a budget for the whole archive.
     /// </summary>
     /// <remarks>
-    /// A solid RAR is read from the start, in order. Names get ZIP's '/' separators.
+    /// A solid RAR is decompressed from the start, in order, the entries left out included.
+    /// Names get ZIP's '/' separators.
     /// </remarks>
     /// <exception cref="ArchiveLimitExceededException">The archive is over a rewrite limit.</exception>
     public void CopyFileEntriesTo(ZipWriter writer, Func<string, bool> include) =>
@@ -356,10 +360,12 @@ public sealed class ComicArchiveReader : IDisposable
         // A solid archive is decompressed from the start, the entries left out included.
         var solid = _rar is { IsSolid: true };
 
-        // Refused from the headers alone when they already give the archive away, before a
-        // byte is written. The streams below catch headers that understate their sizes.
+        // Listed in full before anything is read: reading an entry moves the position headers
+        // are parsed from. Refused from the headers alone when they already give the archive
+        // away, before a byte is written; the streams below catch headers that understate.
+        var entries = EnumerateEntries().ToList();
         var declaredTotal = 0L;
-        foreach (var entry in EnumerateEntries())
+        foreach (var entry in entries)
         {
             if (entry.IsDirectory || (!solid && !include(entry.Name)))
             {
@@ -377,37 +383,22 @@ public sealed class ComicArchiveReader : IDisposable
         EnsureWithinTotalBudget(declaredTotal, totalBudgetBytes);
 
         var budget = new DecompressionBudget(_archiveName, totalBudgetBytes);
-        if (solid)
+        foreach (var entry in entries)
         {
-            using var reader = _rar!.ExtractAllEntries();
-            while (reader.MoveToNextEntry())
+            if (entry.IsDirectory)
             {
-                var entry = reader.Entry;
-                var name = entry.Key ?? string.Empty;
-                if (entry.IsDirectory)
-                {
-                    continue;
-                }
-
-                if (include(name))
-                {
-                    CopyEntry(writer, name, entry.Size, entry.LastModifiedTime, reader.OpenEntryStream, budget, maxEntryBytes);
-                }
-                else
-                {
-                    DiscardEntry(name, entry.Size, reader.OpenEntryStream, budget, maxEntryBytes);
-                }
+                continue;
             }
 
-            return;
-        }
-
-        foreach (var entry in EnumerateEntries())
-        {
-            if (!entry.IsDirectory && include(entry.Name))
+            var copyable = (ICopyableEntry)entry;
+            var declaredSize = copyable.DeclaredSizes.Uncompressed;
+            if (include(entry.Name))
             {
-                var copyable = (ICopyableEntry)entry;
-                CopyEntry(writer, entry.Name, copyable.DeclaredSizes.Uncompressed, copyable.LastModified, copyable.OpenStream, budget, maxEntryBytes);
+                CopyEntry(writer, entry.Name, declaredSize, copyable, budget, maxEntryBytes);
+            }
+            else if (solid)
+            {
+                DiscardEntry(entry.Name, declaredSize, copyable, budget, maxEntryBytes);
             }
         }
     }
@@ -426,25 +417,24 @@ public sealed class ComicArchiveReader : IDisposable
         ZipWriter writer,
         string name,
         long declaredSize,
-        DateTime? lastModified,
-        Func<Stream> open,
+        ICopyableEntry entry,
         DecompressionBudget budget,
         long maxEntryBytes)
     {
         var targetName = Format == ComicArchiveFormat.Zip ? name : name.Replace('\\', '/');
-        using var source = open();
-        using var bounded = new LimitedRewriteStream(source, name, declaredSize, maxEntryBytes, budget);
-        writer.Write(targetName, bounded, lastModified);
+        using var source = entry.OpenStream();
+        using var bounded = new LimitedRewriteStream(source, name, declaredSize, maxEntryBytes, budget, entry.ExpectedCrc);
+        writer.Write(targetName, bounded, entry.LastModified);
     }
 
     /// <summary>
     /// Decompresses a solid archive's entry that is left out of the copy, which the entries after
     /// it depend on, under the same limits as one that is copied.
     /// </summary>
-    private static void DiscardEntry(string name, long declaredSize, Func<Stream> open, DecompressionBudget budget, long maxEntryBytes)
+    private static void DiscardEntry(string name, long declaredSize, ICopyableEntry entry, DecompressionBudget budget, long maxEntryBytes)
     {
-        using var source = open();
-        using var bounded = new LimitedRewriteStream(source, name, declaredSize, maxEntryBytes, budget);
+        using var source = entry.OpenStream();
+        using var bounded = new LimitedRewriteStream(source, name, declaredSize, maxEntryBytes, budget, entry.ExpectedCrc);
         bounded.CopyTo(Stream.Null);
     }
 
@@ -526,6 +516,9 @@ public sealed class ComicArchiveReader : IDisposable
 
         DateTime? LastModified { get; }
 
+        /// <summary>The CRC32 to check the entry's data against, or null to take it as it comes.</summary>
+        uint? ExpectedCrc { get; }
+
         Stream OpenStream();
     }
 
@@ -549,6 +542,8 @@ public sealed class ComicArchiveReader : IDisposable
         // Local, as the DOS time in the entry is; the ZIP writer treats any other kind as UTC
         // and would shift the timestamp.
         public DateTime? LastModified => _entry.LastWriteTime.LocalDateTime;
+
+        public uint? ExpectedCrc => null;
 
         public override byte[] ReadAllBytes(long maxBytes)
         {
@@ -604,6 +599,8 @@ public sealed class ComicArchiveReader : IDisposable
 
         public DateTime? LastModified => _entry.LastModifiedTime;
 
+        public uint? ExpectedCrc => _owner.IsSolidlyCompressed(_entry) ? ArchiveEntryReader.RarEntryCrc32(_entry) : null;
+
         public override byte[] ReadAllBytes(long maxBytes) =>
             _owner.IsSolidlyCompressed(_entry)
                 ? _owner.ReadSolidEntry(Position, Name, _entry.Size, maxBytes)
@@ -615,19 +612,26 @@ public sealed class ComicArchiveReader : IDisposable
     }
 
     /// <summary>
-    /// A forward pass over a solid RAR, in its own archive instance because the pass moves the
-    /// file position that an archive reads its headers from.
+    /// A forward pass over a solid RAR, on its own archive instance: its decoder carries over
+    /// from entry to entry, and reading moves the file position that the instance's headers are
+    /// parsed from, so they are all listed before the first read.
     /// </summary>
+    /// <remarks>
+    /// This does not go through SharpCompress's streaming reader. That one parses the next
+    /// header wherever the decoder happened to stop, so an entry packing more than it unpacks
+    /// could smuggle headers that the check in <see cref="ArchiveEntryReader.EnsureRarHeadersWithinLimits"/>
+    /// never saw; every header read here comes from the archive listing that check covers.
+    /// </remarks>
     private sealed class SolidRarCursor : IDisposable
     {
         private readonly ComicArchiveReader _source;
-        private readonly IReader _reader;
+        private readonly List<ComicArchiveEntry> _entries;
         private readonly DecompressionBudget _budget;
 
         public SolidRarCursor(ComicArchiveReader source, DecompressionBudget budget)
         {
             _source = source;
-            _reader = source._rar!.ExtractAllEntries();
+            _entries = source.EnumerateRarEntries().Take(source._rarFileHeadersToCheck).ToList();
             _budget = budget;
         }
 
@@ -636,20 +640,20 @@ public sealed class ComicArchiveReader : IDisposable
 
         public byte[] Read(int position, string name, long declaredSize, long maxBytes)
         {
-            while (_reader.MoveToNextEntry())
+            while (Position + 1 < _entries.Count)
             {
-                Position++;
-                var entry = _reader.Entry;
-                var key = entry.Key ?? string.Empty;
-                if (Position == position && string.Equals(key, name, StringComparison.Ordinal))
+                var entry = _entries[++Position];
+                var copyable = (ICopyableEntry)entry;
+                if (Position == position && string.Equals(entry.Name, name, StringComparison.Ordinal))
                 {
-                    using var stream = _reader.OpenEntryStream();
-                    return ArchiveEntryReader.ReadBounded(stream, name, declaredSize, maxBytes);
+                    using var stream = copyable.OpenStream();
+                    using var bounded = new LimitedRewriteStream(stream, name, declaredSize, maxBytes, _budget, copyable.ExpectedCrc);
+                    return ArchiveEntryReader.ReadBounded(bounded, name, declaredSize, maxBytes);
                 }
 
                 if (!entry.IsDirectory)
                 {
-                    DiscardEntry(key, entry.Size, _reader.OpenEntryStream, _budget, ArchiveEntryReader.MaxRewriteEntryBytes);
+                    DiscardEntry(entry.Name, copyable.DeclaredSizes.Uncompressed, copyable, _budget, ArchiveEntryReader.MaxRewriteEntryBytes);
                 }
             }
 
@@ -657,11 +661,7 @@ public sealed class ComicArchiveReader : IDisposable
                 $"'{_source._archiveName}' does not list '{name}' where its headers put it.", innerException: null);
         }
 
-        public void Dispose()
-        {
-            _reader.Dispose();
-            _source.Dispose();
-        }
+        public void Dispose() => _source.Dispose();
     }
 
     /// <summary>What one pass over an archive may still decompress, across all of its entries.</summary>
@@ -701,15 +701,18 @@ public sealed class ComicArchiveReader : IDisposable
         private readonly long _declaredSize;
         private readonly long _maxEntryBytes;
         private readonly DecompressionBudget _budget;
+        private readonly uint? _expectedCrc;
         private long _read;
+        private uint _crc = Crc32Stream.DEFAULT_SEED;
 
-        public LimitedRewriteStream(Stream inner, string entryName, long declaredSize, long maxEntryBytes, DecompressionBudget budget)
+        public LimitedRewriteStream(Stream inner, string entryName, long declaredSize, long maxEntryBytes, DecompressionBudget budget, uint? expectedCrc = null)
         {
             _inner = inner;
             _entryName = entryName;
             _declaredSize = declaredSize;
             _maxEntryBytes = maxEntryBytes;
             _budget = budget;
+            _expectedCrc = expectedCrc;
         }
 
         public override bool CanRead => true;
@@ -749,6 +752,16 @@ public sealed class ComicArchiveReader : IDisposable
                 }
 
                 _budget.Consume(count);
+                if (_expectedCrc is not null)
+                {
+                    // Compute hands back the finished checksum; the running value is its inverse.
+                    _crc = ~Crc32Stream.Compute(Crc32Stream.DEFAULT_POLYNOMIAL, _crc, buffer[..count]);
+                }
+            }
+            else if (!buffer.IsEmpty && _expectedCrc is { } expected && ~_crc != expected)
+            {
+                throw new ComicArchiveFormatException(
+                    $"Archive entry '{_entryName}' fails its CRC check; the archive is damaged.", innerException: null);
             }
 
             return count;

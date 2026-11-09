@@ -985,11 +985,85 @@ public sealed class ComicArchiveReaderTests : IDisposable
     // ---- Solid RAR ------------------------------------------------------------------------
 
     /// <summary>
+    /// A solid RAR 5 whose only entry packs more bytes than it says it unpacks to, with a block
+    /// asking for a 1 GiB dictionary in the part of its data that is never unpacked.
+    /// </summary>
+    private string SolidRar5WithAHeaderHiddenInItsData(string fileName)
+    {
+        var data = new byte[] { 1, 2, 3 }.Concat(FileBlock("hidden.jpg", dictionaryPower: 13)).ToArray();
+        using var main = new MemoryStream();
+        WriteVInt(main, 1);
+        WriteVInt(main, 0);
+        WriteVInt(main, 0x04); // archive flags: solid
+
+        using var file = new MemoryStream();
+        WriteVInt(file, 2);
+        WriteVInt(file, 0x02); // a data area follows
+        WriteVInt(file, (ulong)data.Length);
+        WriteVInt(file, 0x04); // file flags: CRC present
+        WriteVInt(file, 3); // unpacked size: fewer bytes than are packed
+        WriteVInt(file, 0x20);
+        var crc = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(crc, ComicReaderServiceCoverageTests.StoredRar4.Crc32(data.AsSpan(0, 3)));
+        file.Write(crc);
+        WriteVInt(file, 0x40); // stored, solid
+        WriteVInt(file, 1);
+        var name = Encoding.UTF8.GetBytes("a.jpg");
+        WriteVInt(file, (ulong)name.Length);
+        file.Write(name);
+
+        var path = Path.Join(_dir, fileName);
+        File.WriteAllBytes(path, Rar5Of(Block(main.ToArray()), Block(file.ToArray()), data, EndBlock()));
+        return path;
+    }
+
+    [Fact]
+    public void CopyFileEntriesTo_SolidEntryPackingMoreThanItUnpacks_NeverParsesItsDataAsHeaders()
+    {
+        // Pre-checked from the headers alone, this archive only has a.jpg. Read through a
+        // streaming reader, the next header would start where the three unpacked bytes end.
+        var path = SolidRar5WithAHeaderHiddenInItsData("hidden.cbr");
+        using var output = new MemoryStream();
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        using (var archive = ComicArchiveReader.Open(path))
+        using (var writer = Writer(output))
+        {
+            archive.CopyFileEntriesTo(writer, _ => true);
+        }
+
+        Assert.True(GC.GetAllocatedBytesForCurrentThread() - allocated < 64L * 1024 * 1024, "Allocated a window from a hidden header.");
+        using var result = new ZipArchive(new MemoryStream(output.ToArray()), ZipArchiveMode.Read);
+        Assert.Equal(new[] { "a.jpg" }, result.Entries.Select(e => e.FullName));
+    }
+
+    [Fact]
+    public void ReadSolidEntry_EntryPackingMoreThanItUnpacks_NeverParsesItsDataAsHeaders()
+    {
+        var path = SolidRar5WithAHeaderHiddenInItsData("hidden-read.cbr");
+
+        using var archive = ComicArchiveReader.Open(path);
+
+        Assert.Equal(new byte[] { 1, 2, 3 }, archive.GetEntryAt(0)!.ReadAllBytes(1024));
+        Assert.Equal("a.jpg", Assert.Single(archive.EnumerateEntries()).Name);
+    }
+
+    /// <summary>
     /// A solid RAR 5 of stored entries. Stored data does not need the entries before it, but
     /// entries flagged solid can only be read through the archive in order, which, unlike
     /// opening one by itself, also checks its CRC: <paramref name="badCrc"/> tells them apart.
     /// </summary>
-    private string StoredSolidRar5(string fileName, string? badCrc, params (string Name, byte[] Data)[] entries)
+    private string StoredSolidRar5(string fileName, string? badCrc, params (string Name, byte[] Data)[] entries) =>
+        StoredSolidRar5(fileName, badCrc, Rar5Checksum.Crc32, entries);
+
+    private enum Rar5Checksum
+    {
+        Crc32,
+        None,
+        Blake2,
+    }
+
+    private string StoredSolidRar5(string fileName, string? badCrc, Rar5Checksum checksum, (string Name, byte[] Data)[] entries)
     {
         using var output = new MemoryStream();
         output.Write(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 });
@@ -1006,19 +1080,37 @@ public sealed class ComicArchiveReaderTests : IDisposable
             var (entryName, data) = entries[i];
             var nameBytes = Encoding.UTF8.GetBytes(entryName);
             using var file = new MemoryStream();
+            var blake2 = checksum == Rar5Checksum.Blake2;
             WriteVInt(file, 2); // file header
-            WriteVInt(file, 2); // flags: a data area follows
+            WriteVInt(file, blake2 ? 3UL : 2UL); // flags: a data area follows, and an extra area
+            if (blake2)
+            {
+                WriteVInt(file, 35); // extra area size
+            }
+
             WriteVInt(file, (ulong)data.Length);
-            WriteVInt(file, 0x04); // file flags: CRC present
+            WriteVInt(file, checksum == Rar5Checksum.Crc32 ? 0x04UL : 0UL); // file flags: CRC present
             WriteVInt(file, (ulong)data.Length); // unpacked size
             WriteVInt(file, 0x20);
-            var crc = new byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(crc, ComicReaderServiceCoverageTests.StoredRar4.Crc32(data) + (entryName == badCrc ? 1u : 0u));
-            file.Write(crc);
+            if (checksum == Rar5Checksum.Crc32)
+            {
+                var crc = new byte[4];
+                BinaryPrimitives.WriteUInt32LittleEndian(crc, ComicReaderServiceCoverageTests.StoredRar4.Crc32(data) + (entryName == badCrc ? 1u : 0u));
+                file.Write(crc);
+            }
+
             WriteVInt(file, i == 0 ? 0UL : 0x40UL); // compression: stored; solid after the first
             WriteVInt(file, 1); // host OS
             WriteVInt(file, (ulong)nameBytes.Length);
             file.Write(nameBytes);
+            if (blake2)
+            {
+                WriteVInt(file, 34); // record size
+                WriteVInt(file, 2); // record type: a hash
+                WriteVInt(file, 0); // hash type: BLAKE2
+                file.Write(new byte[32]);
+            }
+
             WriteBlock(output, file.ToArray());
             output.Write(data);
         }
@@ -1049,7 +1141,23 @@ public sealed class ComicArchiveReaderTests : IDisposable
         // Opened by itself this entry would come back with its CRC never checked.
         using var archive = ComicArchiveReader.Open(SolidBook(badCrc: "p2.jpg"));
 
-        Assert.Throws<SharpCompress.Common.InvalidFormatException>(() => archive.GetEntryAt(1)!.ReadAllBytes(1024));
+        var ex = Assert.Throws<ComicArchiveFormatException>(() => archive.GetEntryAt(1)!.ReadAllBytes(1024));
+
+        Assert.Contains("p2.jpg", ex.Message);
+        Assert.Contains("CRC", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void ReadAllBytes_SolidEntryWithNothingToCheckItsDataAgainst_IsReadAsIs(int checksum)
+    {
+        // Some archives carry a BLAKE2 hash instead of a CRC32, or nothing at all.
+        var kind = checksum == 0 ? Rar5Checksum.None : Rar5Checksum.Blake2;
+        var entries = new[] { ("p1.jpg", Bytes("one")), ("p2.jpg", Bytes("two")) };
+        using var archive = ComicArchiveReader.Open(StoredSolidRar5($"unchecked{checksum}.cbr", null, kind, entries));
+
+        Assert.Equal(Bytes("two"), archive.GetEntryAt(1)!.ReadAllBytes(1024));
     }
 
     [Fact]
@@ -1091,7 +1199,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
         var damaged = StoredSolidRar5("damaged.cbr", badCrc: "ComicInfo.xml", ("p1.jpg", Bytes("one")), ("ComicInfo.xml", Bytes("<ComicInfo/>")));
         using var damagedArchive = ComicArchiveReader.Open(damaged);
 
-        Assert.Throws<SharpCompress.Common.InvalidFormatException>(() => damagedArchive.FindComicInfoEntry()!.ReadText());
+        Assert.Throws<ComicArchiveFormatException>(() => damagedArchive.FindComicInfoEntry()!.ReadText());
     }
 
     [Fact]

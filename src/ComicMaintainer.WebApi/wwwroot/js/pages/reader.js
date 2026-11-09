@@ -21,6 +21,14 @@
         // to (filePath -> { totalPages, name }).
         let comicMeta = new Map();
 
+        // The reader opens saved comics with no connection, where the service
+        // worker answers and the age of the stored token does not matter. So
+        // the server judges the session: when it can be reached, it answers an
+        // expired token with a 401, which ends the session as usual.
+        function readerApiFetch(path, options = {}) {
+            return apiFetch(path, { ...options, allowExpiredToken: true });
+        }
+
         // Build the key used to track loaded pages for a specific comic.
         function pageLoadedKey(filePath, pageNum) {
             return `${filePath}#${pageNum}`;
@@ -180,7 +188,7 @@
 
             try {
                 // Get comic info
-                const response = await apiFetch(`/api/ComicReader/info?filePath=${encodeURIComponent(comicFilePath)}`, { json: false });
+                const response = await readerApiFetch(`/api/ComicReader/info?filePath=${encodeURIComponent(comicFilePath)}`, { json: false });
 
                 if (!response.ok) {
                     throw new Error(await refusalMessage(response, 'Failed to load comic info'));
@@ -444,7 +452,7 @@
 
         // Fetch page `pageNum` of `filePath` as a blob.
         async function fetchWebcomicPageBlob(filePath, pageNum) {
-            const response = await apiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`, { json: false });
+            const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`, { json: false });
             if (!response.ok) {
                 throw new Error(await refusalMessage(response, 'Failed to load page'));
             }
@@ -1025,7 +1033,7 @@
             const container = document.getElementById('webcomicContainer');
             if (!container || !nextPath || nextPath === tailPath) return false;
 
-            const response = await apiFetch(`/api/ComicReader/info?filePath=${encodeURIComponent(nextPath)}`, { json: false });
+            const response = await readerApiFetch(`/api/ComicReader/info?filePath=${encodeURIComponent(nextPath)}`, { json: false });
             if (!container.isConnected) return false;
 
             if (!response.ok) {
@@ -1160,7 +1168,7 @@
             let info = null;
             let failed = true;
             try {
-                const response = await apiFetch(
+                const response = await readerApiFetch(
                     `/api/ComicReader/adjacent?filePath=${encodeURIComponent(filePath)}&direction=next`,
                     { json: false }
                 );
@@ -1265,7 +1273,7 @@
             if (pageNum < 1 || pageNum > totalPages) return null;
             if (mangaPageCache.has(pageNum)) return mangaPageCache.get(pageNum);
             try {
-                const response = await apiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`, { json: false });
+                const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`, { json: false });
                 if (!response.ok) {
                     if (response.status === 422) {
                         mangaPageRefusals.set(pageNum, await refusalMessage(response, 'Failed to load page'));
@@ -1330,7 +1338,7 @@
             preloadedNextComicPath = nextPath;
             for (let p = 1; p <= NEXT_COMIC_PRELOAD_PAGES; p++) {
                 try {
-                    const response = await apiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(nextPath)}&page=${p}`, { json: false });
+                    const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(nextPath)}&page=${p}`, { json: false });
                     if (!response.ok) break; // out of pages or an error; stop early
                     // Drain the body so the response is fully received and stored.
                     await response.blob();
@@ -1471,7 +1479,7 @@
                 let nextInfo = nextComicInfo;
                 if (!nextInfo || !nextInfo.hasAdjacent || !nextInfo.filePath
                     || nextInfo.filePath === comicFilePath) {
-                    const response = await apiFetch(`/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`, { json: false });
+                    const response = await readerApiFetch(`/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`, { json: false });
                     if (!response.ok) throw new Error('Failed to fetch next comic info');
                     nextInfo = await response.json();
                 }
@@ -1490,7 +1498,7 @@
         // so a single Back press still leaves the reader.
         async function navigateToPreviousComic() {
             try {
-                const response = await apiFetch(`/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=prev`, { json: false });
+                const response = await readerApiFetch(`/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=prev`, { json: false });
                 if (!response.ok) throw new Error('Failed to fetch previous comic info');
                 const prevInfo = await response.json();
                 if (prevInfo.hasAdjacent && prevInfo.filePath) {
@@ -1638,7 +1646,7 @@
             // Sending is a write operation; hide the button for read-only users
             // rather than letting them hit a 403.
             try {
-                const response = await apiFetch('/api/auth/user', { json: false });
+                const response = await readerApiFetch('/api/auth/user', { json: false });
                 if (!response.ok) return;
                 const user = await response.json();
                 button.hidden = user.canModifyLibrary === false;
@@ -1661,8 +1669,8 @@
 
             try {
                 const [status, devices] = await Promise.all([
-                    apiFetch('/api/email/status').catch(() => null),
-                    apiFetch('/api/email/devices')
+                    readerApiFetch('/api/email/status').catch(() => null),
+                    readerApiFetch('/api/email/devices')
                 ]);
 
                 const list = Array.isArray(devices.devices) ? devices.devices : [];
@@ -1700,7 +1708,7 @@
             }
             if (sendBtn) sendBtn.disabled = true;
             try {
-                const result = await apiFetch('/api/email/send', {
+                const result = await readerApiFetch('/api/email/send', {
                     method: 'POST',
                     body: JSON.stringify({
                         files: [comicFilePath],
@@ -1996,7 +2004,7 @@
 
             markReadInFlight.add(filePath);
             try {
-                const response = await apiFetch(
+                const response = await readerApiFetch(
                     `/api/ComicReader/mark-read?filePath=${encodeURIComponent(filePath)}`,
                     { method: 'POST', json: false }
                 );
@@ -2080,7 +2088,7 @@
         // Returns true when the request reached the server (so the queued entry
         // can be dropped), false when it should be retried later.
         async function postReadingProgress(filePath, pageNum) {
-            const response = await apiFetch(`/api/ComicReader/progress?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`, { method: 'POST', json: false });
+            const response = await readerApiFetch(`/api/ComicReader/progress?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`, { method: 'POST', json: false });
 
             if (response.ok) {
                 return true;
@@ -2153,7 +2161,7 @@
             const pendingPage = getPendingProgress(comicFilePath);
 
             try {
-                const response = await apiFetch(`/api/ComicReader/progress?filePath=${encodeURIComponent(comicFilePath)}`, { json: false });
+                const response = await readerApiFetch(`/api/ComicReader/progress?filePath=${encodeURIComponent(comicFilePath)}`, { json: false });
 
                 if (response.ok) {
                     const data = await response.json();

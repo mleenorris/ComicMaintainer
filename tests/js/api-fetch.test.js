@@ -287,6 +287,23 @@ test('an expired token goes to the login page without sending the request', asyn
     assert.ok(wentToLogin(page));
 });
 
+test('allowExpiredToken sends the request and lets the answer decide', async () => {
+    const token = expiredToken();
+    const page = apiPage({ localStorage: { jwt_token: token }, routes: { 'GET /api/thing': { ok: true } } });
+
+    assert.deepEqual(plain(await page.run("apiFetch('/api/thing', { allowExpiredToken: true })")), { ok: true });
+
+    assert.equal(page.fetchCalls[0].headers.authorization, `Bearer ${token}`);
+    assert.equal(wentToLogin(page), false);
+    assert.equal(page.window.localStorage.getItem('jwt_token'), token);
+
+    page.route('GET /api/thing', 401);
+    const error = await failure(page, "apiFetch('/api/thing', { allowExpiredToken: true })");
+
+    assert.equal(error.authHandled, true);
+    assert.ok(wentToLogin(page));
+});
+
 test('failures on the way to the login page are not shown', async () => {
     const page = apiPage({ routes: { 'GET /api/thing': 401 } });
     await failure(page);

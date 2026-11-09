@@ -233,7 +233,7 @@
         }
         
         // Helper function to get auth headers
-        function getAuthHeaders() {
+        function getAuthHeaders({ allowExpiredToken = false } = {}) {
             const isAutheliaAuth = isAutheliaAuthenticated();
             
             // If authenticated via Authelia, don't need Authorization header
@@ -249,7 +249,7 @@
             const token = localStorage.getItem('jwt_token');
             
             // Proactively check token expiry before making API calls
-            if (token && isTokenExpired(token)) {
+            if (token && !allowExpiredToken && isTokenExpired(token)) {
                 console.log('[AUTH] JWT token expired, redirecting to login');
                 redirectToLogin();
                 return {};
@@ -358,6 +358,10 @@
          *    caller, for the requests that are made without a session.
          *  - redirectOn401: false leaves a 401 to the caller but still sends
          *    the session headers.
+         *  - allowExpiredToken: true sends the request even when the stored
+         *    token has expired, for a page that also works offline: the
+         *    service worker can still answer it, and a server that is reachable
+         *    answers with a 401.
          *
          * A 401 means the session has ended: the user is sent to the login
          * page and this throws an error flagged `authHandled`.
@@ -369,13 +373,14 @@
                 json = true,
                 auth = true,
                 redirectOn401 = true,
+                allowExpiredToken = false,
                 errorMessage,
                 forbiddenMessage = 'You do not have permission to do that.',
                 headers,
                 ...fetchOptions
             } = options;
 
-            const sessionHeaders = auth ? getAuthHeaders() : {};
+            const sessionHeaders = auth ? getAuthHeaders({ allowExpiredToken }) : {};
             // getAuthHeaders() answers with nothing only when it found an
             // expired token and started the redirect: sending the request
             // would just earn a 401.

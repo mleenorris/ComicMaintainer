@@ -356,6 +356,37 @@ test('Authelia sessions fetch the stream token with their cookies', async () => 
     assert.ok(consoleLines(page, 'log').includes('SSE: Authentication mode - Authelia'));
 });
 
+for (const [description, body] of [['an empty object', {}], ['null', null]]) {
+    test(`a stream token answer of ${description} is retried with backoff instead of opening a stream without a token`, async t => {
+        useMockTimers(t);
+        const page = await boot({ routes: { [STREAM_TOKEN]: respond(200, JSON.stringify(body), { 'Content-Type': 'application/json' }) } });
+        assert.equal(page.eventSources.length, 0);
+        assert.ok(consoleLines(page, 'error').includes('SSE: Failed to initialize EventSource: No stream token in the response'));
+        assert.deepEqual(retryDelays(page), ['1@5s']);
+
+        page.route(STREAM_TOKEN, { token: 'second try', expiresIn: 60 });
+        t.mock.timers.tick(5000);
+        await page.settle(3);
+        assert.equal(page.eventSources.length, 1);
+        assert.equal(page.eventSources[0].url, '/api/events/stream?access_token=second%20try');
+    });
+}
+
+test('starting the stream again while it is being opened does not open a second one', async () => {
+    const gate = deferred();
+    const page = await boot({ routes: { [STREAM_TOKEN]: () => gate.promise } });
+    assert.equal(requests(page, 'POST', '/api/auth/stream-token').length, 1);
+
+    page.run('initEventSource()');
+    await page.settle(3);
+    assert.equal(requests(page, 'POST', '/api/auth/stream-token').length, 1);
+
+    gate.resolve({ token: 'only-one', expiresIn: 60 });
+    await page.settle(3);
+    assert.equal(page.eventSources.length, 1);
+    assert.equal(page.eventSources[0].url, '/api/events/stream?access_token=only-one');
+});
+
 test('a refused Authelia stream token is retried with backoff until the server issues one', async t => {
     useMockTimers(t);
     const page = await bootAuthelia({ [STREAM_TOKEN]: respond(401, { error: 'Unauthorized' }) });

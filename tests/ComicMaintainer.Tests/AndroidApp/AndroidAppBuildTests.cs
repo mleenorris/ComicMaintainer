@@ -37,6 +37,17 @@ public sealed class AndroidAppBuildTests
         Assert.DoesNotContain("MauiApp", solution, StringComparison.Ordinal);
     }
 
+    // The command line skips a line it does not expect, but other tools that read solution files are stricter.
+    [Theory]
+    [InlineData("ComicMaintainer.sln")]
+    [InlineData("ComicMaintainer.Android.sln")]
+    public void ASolution_ClosesEachProjectExactlyOnce(string solutionFile)
+    {
+        var lines = File.ReadAllLines(Path.Join(RepositoryRoot, solutionFile));
+
+        Assert.Equal(lines.Count(line => line.StartsWith("Project(", StringComparison.Ordinal)), lines.Count(line => line == "EndProject"));
+    }
+
     [Fact]
     public void TheAppHasASolutionOfItsOwn()
     {

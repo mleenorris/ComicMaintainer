@@ -363,7 +363,13 @@
             }
         }
 
+        // Guards against an older answer overwriting a newer one: a job can end
+        // while the reload that followed its start is still on its way, and
+        // that reload's list would bring back the folders the job combined.
+        let combineFoldersLoadToken = 0;
+
         async function openCombineFoldersModal() {
+            const loadToken = ++combineFoldersLoadToken;
             const modal = document.getElementById('combineFoldersModal');
             const emptyState = document.getElementById('combineFoldersEmptyState');
             const content = document.getElementById('combineFoldersContent');
@@ -383,6 +389,7 @@
 
             try {
                 const data = await apiFetch('/api/files/combinable-folders');
+                if (loadToken !== combineFoldersLoadToken) return;
                 combineFolderGroups = Array.isArray(data.groups) ? data.groups : [];
                 combineFolderIndex = 0;
                 combineFolderSelectedDestination = null;
@@ -396,7 +403,7 @@
 
                 renderCombineFolderGroup();
             } catch (error) {
-                if (error.authHandled) return;
+                if (error.authHandled || loadToken !== combineFoldersLoadToken) return;
                 console.error('Failed to load combinable folders:', error);
                 emptyState.style.display = 'block';
                 emptyState.textContent = `Failed to load combinable folders: ${error.message}`;

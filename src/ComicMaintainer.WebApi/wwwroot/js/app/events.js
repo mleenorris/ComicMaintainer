@@ -447,7 +447,13 @@
             const progress = data.progress || {};
             
             console.log(`SSE: Job ${jobId} updated - status: ${status}, progress: ${progress.processed}/${progress.total}`);
-            
+
+            // Whoever asked to hear about this job's end is told even when
+            // another job has taken the progress modal over since it started.
+            if (isTerminalJobStatus(status)) {
+                jobProgress.notifyJobFinished(jobId);
+            }
+
             // Only handle updates for the current active job
             if (!hasActiveJob || currentJobId !== jobId) {
                 console.log(`SSE: Ignoring job update for ${jobId} (not current job)`);
@@ -466,8 +472,7 @@
             if (isTerminalJobStatus(status)) {
                 console.log(`SSE: Job ${jobId} finished with status: ${status}`);
                 scheduleLibraryHealthRefresh(250);
-                jobProgress.notifyJobFinished(jobId);
-                
+
                 // Allow a brief moment for final updates, then finalize. The
                 // finalize (and the close it schedules) is dropped when another
                 // job takes the progress modal over and does nothing once this

@@ -92,6 +92,34 @@ public sealed class FileStoreServicePendingProcessingTests : IAsyncLifetime
         Assert.True(await PendingInDatabaseAsync(comic));
     }
 
+    // The flag only remembers work for a restart: a database problem must not fail what the file watcher is doing.
+    [Fact]
+    public async Task SetProcessingPendingAsync_WhenTheDatabaseFails_DoesNotThrow()
+    {
+        var comic = CreateComic("Saga", "Saga 001.cbz");
+        var store = CreateService();
+        await store.AddFileAsync(comic);
+        await DropFilesTableAsync();
+
+        await store.SetProcessingPendingAsync(comic, true);
+    }
+
+    [Fact]
+    public async Task GetProcessingPendingFilesAsync_WhenTheDatabaseFails_ReturnsNothing()
+    {
+        var store = CreateService();
+        await DropFilesTableAsync();
+
+        Assert.Empty(await store.GetProcessingPendingFilesAsync());
+    }
+
+    private async Task DropFilesTableAsync()
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys=OFF");
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE ComicFiles");
+    }
+
     [Fact]
     public async Task PendingFlag_MovesWithTheFileWhenItOrItsDirectoryIsRenamed()
     {

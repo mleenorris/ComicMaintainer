@@ -176,6 +176,68 @@ public sealed class FileStoreServiceStaleCleanupTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NothingTracked_CompletesWithoutTouchingTheLibrary()
+    {
+        var service = await CreateServiceAsync();
+
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled);
+
+        Assert.Equal(StaleCleanupStatus.Completed, result.Status);
+        Assert.Equal(0, result.RemovedCount);
+        Assert.Equal("No tracked files.", result.Message);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task BlankWatchedDirectory_IsTreatedAsUnavailable(string watched)
+    {
+        var paths = await TrackAsync(present: 1, missing: 1);
+        var service = await CreateServiceAsync();
+        _settings.WatchedDirectory = watched;
+
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled);
+
+        Assert.Equal(StaleCleanupStatus.WatchedDirectoryUnavailable, result.Status);
+        Assert.Equal(paths.Present.Count + paths.Missing.Count, (await RowsAsync()).Count);
+    }
+
+    // A dropped event stream must not turn a finished cleanup into a failed one.
+    [Fact]
+    public async Task BroadcastFailure_DoesNotFailTheCleanup()
+    {
+        _settings.StaleCleanupMissingGraceHours = 1;
+        var paths = await TrackAsync(present: 5, missing: 1);
+        var service = await CreateServiceAsync();
+        await SetMissingSinceAsync(paths.Missing[0], DateTime.UtcNow.AddHours(-2));
+        _broadcaster.Setup(b => b.BroadcastFileListUpdateAsync()).ThrowsAsync(new InvalidOperationException("hub unavailable"));
+
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled);
+
+        Assert.Equal(StaleCleanupStatus.Completed, result.Status);
+        Assert.Equal(1, result.RemovedCount);
+        Assert.DoesNotContain(paths.Missing[0], (await RowsAsync()).Keys);
+    }
+
+    // A path the operating system cannot even look up says nothing about whether the file exists.
+    [Fact]
+    public async Task ARowWhosePathCannotBeCheckedIsLeftAloneAndNotCountedAsMissing()
+    {
+        var paths = await TrackAsync(present: 3, missing: 0);
+        var unusable = Path.Join(_library, "Saga", "bad\0name.cbz");
+        await InsertRowsAsync(unusable);
+        var service = await CreateServiceAsync();
+
+        var result = await service.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled);
+
+        Assert.Equal(StaleCleanupStatus.Completed, result.Status);
+        Assert.Equal(0, result.RemovedCount);
+        var rows = await RowsAsync();
+        Assert.Equal(paths.Present.Count + 1, rows.Count);
+        Assert.Null(rows[unusable].MissingSince);
+    }
+
+    [Fact]
     public async Task FileThatComesBack_KeepsItsRowAndStoredStateAndLosesTheStamp()
     {
         var paths = await TrackAsync(present: 10, missing: 1);

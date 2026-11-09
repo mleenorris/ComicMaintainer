@@ -70,8 +70,8 @@ public abstract class ComicArchiveEntry
 /// and Deflate64: none of them can be made to allocate much by a crafted header. An entry using
 /// another method (LZMA, BZip2, PPMd, ...) is refused when it is read. RAR goes through
 /// SharpCompress. Every read is bounded by <see cref="ArchiveEntryReader"/> (entry count,
-/// declared size, ratio, RAR5 dictionary size), and a rewrite by
-/// <see cref="CopyFileEntriesTo"/>.
+/// declared size, ratio, and for RAR 5 the dictionary and comment its headers ask for), and a
+/// rewrite by <see cref="CopyFileEntriesTo"/>.
 /// </para>
 /// <para>
 /// The entries of a solid RAR can only be decompressed in archive order: opened on its own,
@@ -115,6 +115,9 @@ public sealed class ComicArchiveReader : IDisposable
     /// <summary>What the file actually is, as told by its content.</summary>
     public ComicArchiveFormat Format => _rar is null ? ComicArchiveFormat.Zip : ComicArchiveFormat.Rar;
 
+    /// <summary>How big the archive is on disk, every volume of a set included.</summary>
+    internal long ArchiveBytes => _archiveBytes;
+
     /// <summary>Opens an archive, sniffing its format, and checks its read limits.</summary>
     /// <exception cref="ArchiveLimitExceededException">The archive is over a read limit.</exception>
     /// <exception cref="ComicArchiveFormatException">The file is not a readable ZIP or RAR archive.</exception>
@@ -140,7 +143,6 @@ public sealed class ComicArchiveReader : IDisposable
         var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096);
         try
         {
-            var archiveBytes = stream.Length;
             Span<byte> signature = stackalloc byte[SignatureLength];
             var read = stream.ReadAtLeast(signature, SignatureLength, throwOnEndOfStream: false);
             signature = signature[..read];
@@ -149,14 +151,15 @@ public sealed class ComicArchiveReader : IDisposable
             {
                 if (signature.StartsWith(Rar5Signature))
                 {
-                    ArchiveEntryReader.EnsureRarDictionariesWithinLimit(stream, archiveName, rarFileHeadersToCheck);
+                    ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, archiveName, rarFileHeadersToCheck);
                 }
 
-                return new ComicArchiveReader(filePath, archiveBytes, rarFileHeadersToCheck, zip: null, OpenRarArchive(filePath, stream));
+                var (rar, totalBytes) = OpenRarArchive(filePath, stream);
+                return new ComicArchiveReader(filePath, totalBytes, rarFileHeadersToCheck, zip: null, rar);
             }
 
             stream.Position = 0;
-            return new ComicArchiveReader(filePath, archiveBytes, rarFileHeadersToCheck, ArchiveEntryReader.OpenZip(stream, archiveName), rar: null);
+            return new ComicArchiveReader(filePath, stream.Length, rarFileHeadersToCheck, ArchiveEntryReader.OpenZip(stream, archiveName), rar: null);
         }
         catch (InvalidDataException ex)
         {
@@ -171,8 +174,9 @@ public sealed class ComicArchiveReader : IDisposable
     }
 
     /// <summary>
-    /// Opens the RAR archive in <paramref name="firstFile"/>, whose dictionaries the caller has
+    /// Opens the RAR archive in <paramref name="firstFile"/>, whose headers the caller has
     /// checked, so that SharpCompress only ever parses headers that have been checked too.
+    /// Also returns the size of everything opened, every volume of a set included.
     /// </summary>
     /// <remarks>
     /// Opened by path, SharpCompress looks for the parts that follow by name. When the next part
@@ -182,8 +186,9 @@ public sealed class ComicArchiveReader : IDisposable
     /// signature, so that case gets only the file that was asked for: it is opened from its
     /// already checked stream, which SharpCompress cannot follow to another file.
     /// </remarks>
-    private static IArchive OpenRarArchive(string filePath, FileStream firstFile)
+    private static (IArchive Archive, long TotalBytes) OpenRarArchive(string filePath, FileStream firstFile)
     {
+        var totalBytes = firstFile.Length;
         var set = RarArchive.OpenArchive(filePath, RarReaderOptions);
         try
         {
@@ -192,11 +197,11 @@ public sealed class ComicArchiveReader : IDisposable
             {
                 foreach (var volume in volumes.Skip(1))
                 {
-                    EnsureRar5VolumeWithinLimits(volume.FileName!);
+                    totalBytes += EnsureRarVolumeWithinLimits(volume.FileName!);
                 }
 
                 firstFile.Dispose();
-                return set;
+                return (set, totalBytes);
             }
         }
         catch
@@ -207,18 +212,21 @@ public sealed class ComicArchiveReader : IDisposable
 
         set.Dispose();
         firstFile.Position = 0;
-        return RarArchive.OpenArchive(firstFile, RarReaderOptions);
+        return (RarArchive.OpenArchive(firstFile, RarReaderOptions), totalBytes);
     }
 
-    private static void EnsureRar5VolumeWithinLimits(string volumePath)
+    /// <summary>Checks a following volume the way the first was checked, and returns its size.</summary>
+    private static long EnsureRarVolumeWithinLimits(string volumePath)
     {
         using var volume = new FileStream(volumePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096);
         Span<byte> signature = stackalloc byte[SignatureLength];
         if (volume.ReadAtLeast(signature, SignatureLength, throwOnEndOfStream: false) == SignatureLength
             && signature.StartsWith(Rar5Signature))
         {
-            ArchiveEntryReader.EnsureRarDictionariesWithinLimit(volume, Path.GetFileName(volumePath));
+            ArchiveEntryReader.EnsureRarHeadersWithinLimits(volume, Path.GetFileName(volumePath));
         }
+
+        return volume.Length;
     }
 
     /// <summary>

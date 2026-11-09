@@ -2,8 +2,13 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Compression;
+using System.Runtime.CompilerServices;
 using System.Text;
 using SharpCompress.Archives;
+using SharpCompress.Common;
+using SharpCompress.Common.Rar.Headers;
+using SharpCompress.IO;
+using SharpCompress.Readers;
 
 namespace ComicMaintainer.Core.Utilities;
 
@@ -65,9 +70,16 @@ public static class ArchiveEntryReader
     /// <remarks>
     /// SharpCompress allocates the unpack window straight from the header's dictionary
     /// size, before it looks at the data: a file of a few hundred bytes can ask for 1 GiB.
-    /// See <see cref="EnsureRarDictionariesWithinLimit"/>.
+    /// See <see cref="EnsureRarHeadersWithinLimits"/>.
     /// </remarks>
     public const long MaxRarDictionaryBytes = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// Largest archive comment a RAR 5 header may declare: 1 MiB. RAR itself writes at most
+    /// 256 KiB of comment; SharpCompress allocates whatever the header says as soon as it gets
+    /// there. See <see cref="EnsureRarHeadersWithinLimits"/>.
+    /// </summary>
+    public const long MaxRarCommentBytes = 1024L * 1024;
 
     /// <summary>
     /// Largest single entry, uncompressed, that a rewrite (tagging, converting to CBZ,
@@ -91,23 +103,19 @@ public static class ArchiveEntryReader
 
     private const int CopyBufferBytes = 81920;
 
-    // RAR 5 block types and flags (https://www.rarlab.com/technote.htm).
-    private const int Rar5SignatureLength = 8;
-    private const ulong Rar5BlockMain = 1;
-    private const ulong Rar5BlockFile = 2;
-    private const ulong Rar5BlockService = 3;
-    private const ulong Rar5HasExtraArea = 0x01;
-    private const ulong Rar5HasDataArea = 0x02;
-    private const ulong Rar5FileIsDirectory = 0x01;
-    private const ulong Rar5FileHasTime = 0x02;
-    private const ulong Rar5FileHasCrc = 0x04;
-    private const long Rar5MinDictionaryBytes = 128 * 1024;
+    // What SharpCompress's "128 KiB << n" comes to for the largest n: it works it out in 32 bits,
+    // where 4 GiB wraps round to 0.
+    private const long RarLargestDictionaryBytes = 4L * 1024 * 1024 * 1024;
 
-    // Enough for the fixed fields ahead of the file name in any RAR 5 header.
-    private const int Rar5HeaderPrefixLength = 96;
+    // The name of an archive comment's service header.
+    private const string RarCommentHeaderName = "CMT";
 
-    // A real archive has one header per entry and a few more; this also bounds the walk.
-    private const int MaxRar5Blocks = (2 * MaxEntries) + 16;
+    // A real archive has one header per entry and a few more; this also bounds the walk,
+    // which a negative data size can send back over the same headers for ever.
+    private const int MaxRarHeaders = (2 * MaxEntries) + 16;
+
+    // The options of the archive itself, except that the check must not close the file.
+    private static readonly ReaderOptions RarHeaderCheckOptions = new() { LeaveStreamOpen = true };
 
     // ZIP record signatures and sizes (APPNOTE.TXT 4.3.12-4.3.16).
     private const uint ZipCentralHeaderSignature = 0x02014b50;
@@ -162,170 +170,138 @@ public static class ArchiveEntryReader
     }
 
     /// <summary>
-    /// Refuses a RAR 5 archive any of whose compressed entries asks for a decompression
-    /// dictionary above <see cref="MaxRarDictionaryBytes"/>, before anything is decompressed.
+    /// Refuses a RAR 5 archive whose headers would make SharpCompress allocate more than a comic
+    /// can need: a decompression dictionary above <see cref="MaxRarDictionaryBytes"/> for a
+    /// compressed entry, or an archive comment above <see cref="MaxRarCommentBytes"/>.
     /// </summary>
     /// <remarks>
-    /// SharpCompress sizes its unpack window from each entry's header and allocates it when the
-    /// entry is first opened (<c>Unpack.Init</c>); the entry limits cannot see that allocation,
-    /// because the header has no relation to the data that follows, and SharpCompress keeps the
-    /// value to itself. So the block headers are walked here the way it walks them. Stored
-    /// entries and folders never allocate a window, so they are not checked. Walks at most
-    /// <paramref name="maxFileHeaders"/> file headers, and the stream is left positioned
-    /// wherever the walk stopped.
+    /// <para>
+    /// SharpCompress allocates on the word of a header, whatever data follows: the unpack window
+    /// when an entry is first opened (<c>Unpack.Init</c>), and a byte array for a comment as soon
+    /// as listing the entries reaches its header (<c>RarVolume.GetVolumeFileParts</c>). A file of
+    /// a hundred bytes can ask for gigabytes either way, and the entry limits never see it.
+    /// </para>
+    /// <para>
+    /// The headers are read here by SharpCompress's own parser, over the same bytes, so what is
+    /// checked is exactly what it is going to act on. A parser of our own could not stay in step
+    /// with its quirks (block codes it accepts from RAR 4, headers it reads past their declared
+    /// end, data areas it ignores), and whatever it read differently would escape the check.
+    /// Stored entries and folders never allocate a window, and service headers are never
+    /// unpacked, so those are not held to the dictionary limit.
+    /// </para>
+    /// <para>
+    /// A header the parser rejects ends the check without complaint: SharpCompress cannot get
+    /// past it either, so nothing after it is ever acted on, and the entries before it stay
+    /// readable. Walks at most <paramref name="maxFileHeaders"/> file headers, and leaves the
+    /// stream positioned wherever the walk stopped.
+    /// </para>
     /// </remarks>
     /// <param name="stream">A seekable stream over the archive.</param>
     /// <param name="archiveName">File name used in the error message.</param>
     /// <param name="maxFileHeaders">How many file headers to check, for a caller reading one entry.</param>
-    /// <exception cref="ArchiveLimitExceededException">The archive asks for too large a dictionary, or has too many headers.</exception>
-    internal static void EnsureRarDictionariesWithinLimit(Stream stream, string archiveName, int maxFileHeaders = int.MaxValue)
+    /// <returns>How many file headers were checked.</returns>
+    /// <exception cref="ArchiveLimitExceededException">A header is over a limit, or there are too many headers.</exception>
+    internal static int EnsureRarHeadersWithinLimits(Stream stream, string archiveName, int maxFileHeaders = int.MaxValue)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
-        Span<byte> buffer = stackalloc byte[Rar5HeaderPrefixLength];
-        var position = (long)Rar5SignatureLength;
+        stream.Position = 0;
         var fileHeaders = 0;
-        for (var blocks = 0; ; blocks++)
+        try
         {
-            if (blocks >= MaxRar5Blocks)
+            var headers = 0;
+            foreach (var header in new RarHeaderFactory(StreamingMode.Seekable, RarHeaderCheckOptions).ReadHeaders(stream))
             {
-                throw TooManyEntries(archiveName, MaxEntries);
-            }
+                if (++headers > MaxRarHeaders)
+                {
+                    throw TooManyEntries(archiveName, MaxEntries);
+                }
 
-            // CRC32 (4 bytes), then the header size as a variable-length integer of 3 bytes at most.
-            stream.Position = position;
-            var read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
-            var header = (ReadOnlySpan<byte>)buffer[..read];
-            if (read < 5 || !TryReadVInt(header, 4, 3, out var headerSize, out var bodyStart))
-            {
-                return;
+                if (header.HeaderType == HeaderType.File)
+                {
+                    EnsureRarDictionaryWithinLimit(header, archiveName);
+                    if (++fileHeaders >= maxFileHeaders)
+                    {
+                        return fileHeaders;
+                    }
+                }
+                else if (header.HeaderType == HeaderType.Service
+                    && string.Equals(RarFileHeader.FileName(header), RarCommentHeaderName, StringComparison.Ordinal))
+                {
+                    StepOverRarComment(header, stream, archiveName);
+                }
             }
+        }
+        catch (Exception ex) when (ex is SharpCompressException or EndOfStreamException or OverflowException or ArgumentException)
+        {
+            // See the remarks: this is where SharpCompress stops as well.
+        }
 
-            if (!TryParseRar5Block(header[bodyStart..], out var block))
-            {
-                return;
-            }
+        return fileHeaders;
+    }
 
-            if (block.Type != Rar5BlockMain && block.Type != Rar5BlockFile && block.Type != Rar5BlockService)
-            {
-                // The end of the archive, an encryption header (everything after it needs a
-                // password this application does not have) or a block type SharpCompress
-                // refuses: either way it lists no further entries.
-                return;
-            }
+    private static void EnsureRarDictionaryWithinLimit(IRarHeader header, string archiveName)
+    {
+        if (RarFileHeader.IsDirectory(header) || RarFileHeader.IsStored(header))
+        {
+            return;
+        }
 
-            if (block.HasCompressedWindow && block.DictionaryBytes > MaxRarDictionaryBytes)
-            {
-                throw new ArchiveLimitExceededException(string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"'{archiveName}' needs a {FormatBytes(block.DictionaryBytes)} decompression dictionary, over the {FormatBytes(MaxRarDictionaryBytes)} limit. Repack it as CBZ or with a smaller dictionary."));
-            }
-
-            if (block.Type == Rar5BlockFile && ++fileHeaders >= maxFileHeaders)
-            {
-                return;
-            }
-
-            var headerEnd = position + bodyStart + (long)headerSize;
-            if (block.DataSize > (ulong)(long.MaxValue - headerEnd))
-            {
-                return;
-            }
-
-            // The header size counts from the end of its own field; the data area follows it.
-            position = headerEnd + (long)block.DataSize;
+        var windowBytes = RarFileHeader.WindowSize(header);
+        var dictionaryBytes = windowBytes == 0 ? RarLargestDictionaryBytes : windowBytes;
+        if (dictionaryBytes > MaxRarDictionaryBytes)
+        {
+            throw new ArchiveLimitExceededException(string.Create(
+                CultureInfo.InvariantCulture,
+                $"'{archiveName}' needs a {FormatBytes(dictionaryBytes)} decompression dictionary, over the {FormatBytes(MaxRarDictionaryBytes)} limit. Repack it as CBZ or with a smaller dictionary."));
         }
     }
 
-    /// <summary>The fields of a RAR 5 block header this application acts on.</summary>
-    private readonly record struct Rar5Block(ulong Type, ulong DataSize, bool HasCompressedWindow, long DictionaryBytes);
-
     /// <summary>
-    /// Parses the start of a block header (from its type field) as SharpCompress does, returning
-    /// false when it is malformed, at which point SharpCompress stops listing entries too.
+    /// Refuses a comment header that declares too much, and moves past its data: the parser
+    /// leaves that to the code listing the entries, which reads the whole comment into memory.
     /// </summary>
-    private static bool TryParseRar5Block(ReadOnlySpan<byte> header, out Rar5Block block)
+    private static void StepOverRarComment(IRarHeader header, Stream stream, string archiveName)
     {
-        block = default;
-        var offset = 0;
-        if (!TryReadVInt(header, offset, 2, out var type, out offset)
-            || !TryReadVInt(header, offset, 2, out var flags, out offset))
+        var commentBytes = RarFileHeader.CompressedSize(header);
+        if (commentBytes <= 0)
         {
-            return false;
+            throw new ArchiveLimitExceededException($"'{archiveName}' has a malformed archive comment; the archive is corrupt or crafted.");
         }
 
-        if ((flags & Rar5HasExtraArea) != 0 && !TryReadVInt(header, offset, 5, out _, out offset))
+        if (commentBytes > MaxRarCommentBytes)
         {
-            return false;
+            throw new ArchiveLimitExceededException(string.Create(
+                CultureInfo.InvariantCulture,
+                $"'{archiveName}' declares a {FormatBytes(commentBytes)} archive comment, over the {FormatBytes(MaxRarCommentBytes)} limit; the archive is corrupt or crafted."));
         }
 
-        var dataSize = 0UL;
-        if ((flags & Rar5HasDataArea) != 0 && !TryReadVInt(header, offset, 10, out dataSize, out offset))
-        {
-            return false;
-        }
-
-        if (type != Rar5BlockFile && type != Rar5BlockService)
-        {
-            block = new Rar5Block(type, dataSize, false, 0);
-            return true;
-        }
-
-        // File flags, unpacked size, attributes, optional time and CRC, compression information.
-        if (!TryReadVInt(header, offset, 3, out var fileFlags, out offset)
-            || !TryReadVInt(header, offset, 10, out _, out offset)
-            || !TryReadVInt(header, offset, 5, out _, out offset))
-        {
-            return false;
-        }
-
-        if ((fileFlags & Rar5FileHasTime) != 0)
-        {
-            offset += sizeof(uint);
-        }
-
-        if ((fileFlags & Rar5FileHasCrc) != 0)
-        {
-            offset += sizeof(uint);
-        }
-
-        if (offset > header.Length || !TryReadVInt(header, offset, 3, out var compression, out _))
-        {
-            return false;
-        }
-
-        var method = (compression >> 7) & 0x7;
-        var dictionary = Rar5MinDictionaryBytes << (int)((compression >> 10) & 0xF);
-        var isDirectory = (fileFlags & Rar5FileIsDirectory) != 0;
-        block = new Rar5Block(type, dataSize, method != 0 && !isDirectory, dictionary);
-        return true;
+        stream.Seek(commentBytes, SeekOrigin.Current);
     }
 
     /// <summary>
-    /// Reads a RAR 5 variable-length integer (seven bits per byte, the high bit continues),
-    /// occupying at most <paramref name="maxBytes"/> bytes.
+    /// The fields of a parsed RAR header that SharpCompress keeps internal. The names are those
+    /// of its <c>FileHeader</c>; should an upgrade rename one, opening a RAR 5 fails with a
+    /// <see cref="MissingMethodException"/> instead of passing unchecked, and the tests say so.
     /// </summary>
-    private static bool TryReadVInt(ReadOnlySpan<byte> data, int start, int maxBytes, out ulong value, out int next)
+    private static class RarFileHeader
     {
-        value = 0;
-        next = start;
-        for (var i = 0; i < maxBytes; i++)
-        {
-            if (start + i >= data.Length)
-            {
-                return false;
-            }
+        private const string TypeName = "SharpCompress.Common.Rar.Headers.FileHeader, SharpCompress";
 
-            var b = data[start + i];
-            value |= (ulong)(b & 0x7F) << (7 * i);
-            if ((b & 0x80) == 0)
-            {
-                next = start + i + 1;
-                return true;
-            }
-        }
+        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_WindowSize")]
+        public static extern uint WindowSize([UnsafeAccessorType(TypeName)] object header);
 
-        return false;
+        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_IsStored")]
+        public static extern bool IsStored([UnsafeAccessorType(TypeName)] object header);
+
+        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_IsDirectory")]
+        public static extern bool IsDirectory([UnsafeAccessorType(TypeName)] object header);
+
+        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_CompressedSize")]
+        public static extern long CompressedSize([UnsafeAccessorType(TypeName)] object header);
+
+        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_FileName")]
+        public static extern string? FileName([UnsafeAccessorType(TypeName)] object header);
     }
 
     /// <summary>

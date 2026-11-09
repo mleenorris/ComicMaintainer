@@ -3,6 +3,8 @@ using System.IO.Compression;
 using System.Text;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Tests.Services;
+using SharpCompress.Archives;
+using SharpCompress.Archives.Rar;
 using SharpCompress.Common;
 using SharpCompress.Writers.Zip;
 using Xunit;
@@ -314,10 +316,14 @@ public sealed class ComicArchiveReaderTests : IDisposable
         return output.ToArray();
     }
 
-    private static void WriteBlock(Stream output, byte[] body)
+    /// <summary>
+    /// Writes a RAR 5 block: its CRC, the size of its header and the header itself.
+    /// <paramref name="declaredSize"/> is a size to claim instead of the real one.
+    /// </summary>
+    private static void WriteBlock(Stream output, byte[] body, int? declaredSize = null)
     {
         using var header = new MemoryStream();
-        WriteVInt(header, (ulong)body.Length);
+        WriteVInt(header, (ulong)(declaredSize ?? body.Length));
         header.Write(body);
         var crc = new byte[4];
         BinaryPrimitives.WriteUInt32LittleEndian(crc, ComicReaderServiceCoverageTests.StoredRar4.Crc32(header.ToArray()));
@@ -420,7 +426,16 @@ public sealed class ComicArchiveReaderTests : IDisposable
         return output.ToArray();
     }
 
-    private static byte[] FileHeaderBody(ulong type, ulong headerFlags, ulong fileFlags, int dictionaryPower, int method = 3, bool extraArea = false)
+    /// <summary>The body of a RAR 5 file or service header, complete, as SharpCompress parses it.</summary>
+    private static byte[] FileHeaderBody(
+        ulong type,
+        ulong headerFlags,
+        ulong fileFlags,
+        int dictionaryPower,
+        int method = 3,
+        bool extraArea = false,
+        string name = "p0.jpg",
+        ulong dataSize = 16)
     {
         using var body = new MemoryStream();
         WriteVInt(body, type);
@@ -432,7 +447,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
 
         if ((headerFlags & 0x02) != 0)
         {
-            WriteVInt(body, 16); // data area size
+            WriteVInt(body, dataSize);
         }
 
         WriteVInt(body, fileFlags);
@@ -449,56 +464,288 @@ public sealed class ComicArchiveReaderTests : IDisposable
         }
 
         WriteVInt(body, ((ulong)(uint)method << 7) | ((ulong)(uint)dictionaryPower << 10));
+        WriteVInt(body, 1); // host OS
+        var nameBytes = Encoding.UTF8.GetBytes(name);
+        WriteVInt(body, (ulong)nameBytes.Length);
+        body.Write(nameBytes);
         return body.ToArray();
     }
 
-    [Fact]
-    public void EnsureRarDictionaries_NothingAfterTheSignature_IsFine() =>
-        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes()), "x.cbr");
+    private static byte[] Block(byte[] body, int? declaredSize = null)
+    {
+        using var output = new MemoryStream();
+        WriteBlock(output, body, declaredSize);
+        return output.ToArray();
+    }
+
+    /// <summary>A RAR 5 archive made of ready-made blocks and data areas, in order.</summary>
+    private static byte[] Rar5Of(params byte[][] parts) =>
+        new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 }.Concat(parts.SelectMany(p => p)).ToArray();
+
+    private static byte[] MainBlock(ulong code = 1, ulong? dataAreaSize = null)
+    {
+        using var body = new MemoryStream();
+        WriteVInt(body, code);
+        WriteVInt(body, dataAreaSize is null ? 0UL : 0x02UL);
+        if (dataAreaSize is { } size)
+        {
+            WriteVInt(body, size);
+        }
+
+        WriteVInt(body, 0); // archive flags
+        return Block(body.ToArray());
+    }
+
+    private static byte[] EndBlock(ulong code = 5) => Block(new byte[] { (byte)code, 0, 0 });
+
+    /// <summary>A RAR 5 archive whose comment header declares <paramref name="declaredSize"/> bytes, with none there.</summary>
+    internal static byte[] Rar5WithComment(ulong declaredSize) =>
+        Rar5Of(MainBlock(), ServiceBlock("CMT", declaredSize), EndBlock());
+
+    /// <summary>A file block and its data area.</summary>
+    private static byte[] FileBlock(string name = "p0.jpg", ulong code = 2, int dictionaryPower = 0, int method = 3, ulong fileFlags = 0) =>
+        Block(FileHeaderBody(code, headerFlags: 0x02, fileFlags, dictionaryPower, method, name: name)).Concat(new byte[16]).ToArray();
+
+    /// <summary>A service block called <paramref name="name"/>, with <paramref name="data"/> after it.</summary>
+    private static byte[] ServiceBlock(string name, ulong declaredSize, byte[]? data = null, ulong code = 3) =>
+        Block(FileHeaderBody(code, headerFlags: 0x02, fileFlags: 0, dictionaryPower: 0, method: 0, name: name, dataSize: declaredSize))
+            .Concat(data ?? Array.Empty<byte>())
+            .ToArray();
+
+    /// <summary>
+    /// A file block with an extra record that makes SharpCompress read 32 bytes past the header
+    /// size it declares, the CRC taking them in, which a header parsed by its size would miss.
+    /// </summary>
+    private static byte[] FileBlockReadingPastItsHeader()
+    {
+        using var body = new MemoryStream();
+        WriteVInt(body, 2);
+        WriteVInt(body, 0x03); // an extra area and a data area
+        WriteVInt(body, 3); // the extra area's size
+        WriteVInt(body, 16); // the data area's size
+        WriteVInt(body, 0);
+        WriteVInt(body, 1000);
+        WriteVInt(body, 0x20);
+        WriteVInt(body, 3UL << 7);
+        WriteVInt(body, 1);
+        WriteVInt(body, 6);
+        body.Write(Encoding.UTF8.GetBytes("p1.jpg"));
+        var declared = (int)body.Length + 3;
+        WriteVInt(body, 1); // record size
+        WriteVInt(body, 2); // record type: a hash
+        WriteVInt(body, 0); // hash type: BLAKE2, 32 bytes read whatever the record size says
+        body.Write(new byte[32]);
+        return Block(body.ToArray(), declared).Concat(new byte[16]).ToArray();
+    }
+
+    /// <summary>How many entries SharpCompress itself lists before it stops, however it stops.</summary>
+    private static int EntriesSharpCompressLists(byte[] archive)
+    {
+        using var rar = RarArchive.OpenArchive(new MemoryStream(archive));
+        var count = 0;
+        try
+        {
+            foreach (var _ in ((IArchive)rar).Entries)
+            {
+                count++;
+            }
+        }
+        catch (Exception ex) when (ex is SharpCompressException or EndOfStreamException or OverflowException or ArgumentException)
+        {
+            // Listing stopped at a header it cannot read.
+        }
+
+        return count;
+    }
+
+    public static TheoryData<string, byte[]> Rar5HeaderLayouts => new()
+    {
+        { "plain", Rar5Of(MainBlock(), FileBlock("p0.jpg"), FileBlock("p1.jpg"), EndBlock()) },
+        { "comment first", Rar5Of(MainBlock(), ServiceBlock("CMT", 5, new byte[5]), FileBlock("p0.jpg"), FileBlock("p1.jpg"), EndBlock()) },
+        { "comment between", Rar5Of(MainBlock(), FileBlock("p0.jpg"), ServiceBlock("CMT", 5, new byte[5]), FileBlock("p1.jpg"), EndBlock()) },
+        { "other service block", Rar5Of(MainBlock(), ServiceBlock("QO", 3, new byte[3]), FileBlock("p0.jpg"), EndBlock()) },
+        { "RAR 4 service code", Rar5Of(MainBlock(), ServiceBlock("RR", 3, new byte[3], code: 122), FileBlock("p0.jpg"), EndBlock()) },
+        { "RAR 4 main code", Rar5Of(MainBlock(code: 115), FileBlock("p0.jpg"), EndBlock()) },
+        { "RAR 4 file code", Rar5Of(MainBlock(), FileBlock("p0.jpg", code: 116), FileBlock("p1.jpg"), EndBlock()) },
+        { "RAR 4 end code", Rar5Of(MainBlock(), FileBlock("p0.jpg"), EndBlock(code: 123), FileBlock("p1.jpg")) },
+        { "main claiming a data area", Rar5Of(MainBlock(dataAreaSize: 1UL << 40), FileBlock("p0.jpg"), EndBlock()) },
+        { "main shorter than it says", Rar5Of(Block(new byte[] { 1, 0, 0 }, declaredSize: 2), FileBlock("p0.jpg"), EndBlock()) },
+        { "header read past its end", Rar5Of(MainBlock(), FileBlockReadingPastItsHeader(), FileBlock("p0.jpg"), EndBlock()) },
+        { "folder and stored", Rar5Of(MainBlock(), FileBlock("dir", fileFlags: 1), FileBlock("p0.jpg", method: 0), EndBlock()) },
+        { "unknown block", Rar5Of(MainBlock(), FileBlock("p0.jpg"), Block(new byte[] { 9, 0, 0 }), FileBlock("p1.jpg")) },
+        { "recovery block", Rar5Of(MainBlock(), FileBlock("p0.jpg"), Block(new byte[] { 120, 0, 0 }), FileBlock("p1.jpg")) },
+        { "encrypted headers", Rar5Of(MainBlock(), FileBlock("p0.jpg"), Block(new byte[] { 4, 0, 0 }), FileBlock("p1.jpg")) },
+        { "no end", Rar5Of(MainBlock(), FileBlock("p0.jpg")) },
+    };
+
+    [Theory]
+    [MemberData(nameof(Rar5HeaderLayouts))]
+    public void EnsureRarHeaders_ChecksEveryEntrySharpCompressLists(string layout, byte[] archive)
+    {
+        var listed = EntriesSharpCompressLists(archive);
+
+        var checkedHeaders = ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(archive), "x.cbr");
+
+        Assert.True(listed == checkedHeaders, $"{layout}: SharpCompress lists {listed}, the check saw {checkedHeaders}");
+    }
 
     [Fact]
-    public void EnsureRarDictionaries_AHeaderSizeThatIsNotAValidNumber_StopsTheWalk()
+    public void Open_Rar5MainHeaderClaimingADataArea_StillSeesTheHeaderAfterIt()
+    {
+        // SharpCompress does not skip the area a main header claims, so what follows is parsed.
+        var path = Path.Join(_dir, "main-data.cbr");
+        File.WriteAllBytes(path, Rar5Of(MainBlock(dataAreaSize: 1UL << 40), FileBlock(dictionaryPower: 13), EndBlock()));
+
+        Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
+    }
+
+    [Fact]
+    public void Open_Rar5FileUnderARar4HeaderCode_IsCheckedLikeAnyOther()
+    {
+        // SharpCompress goes by the code alone, and parses this one with the RAR 5 reader.
+        var path = Path.Join(_dir, "code-116.cbr");
+        File.WriteAllBytes(path, Rar5Of(MainBlock(), FileBlock(code: 116, dictionaryPower: 13), EndBlock()));
+
+        Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
+    }
+
+    [Theory]
+    [InlineData("a0.jpg")]
+    [InlineData("a1.jpg")]
+    [InlineData("a2.jpg")]
+    [InlineData("a3.jpg")]
+    public void Open_Rar5MainHeaderShorterThanItsFields_StillSeesTheHeaderAfterIt(string name)
+    {
+        // A size that is too small is not rewound to: the next header starts where the fields end.
+        // The names vary the byte a parse going by the declared size would land on.
+        var path = Path.Join(_dir, "main-short.cbr");
+        File.WriteAllBytes(path, Rar5Of(Block(new byte[] { 1, 0, 0 }, declaredSize: 2), FileBlock(name, dictionaryPower: 13), EndBlock()));
+
+        Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
+    }
+
+    [Fact]
+    public void Open_Rar5HeaderReadPastItsDeclaredEnd_StillSeesTheHeaderAfterIt()
+    {
+        var path = Path.Join(_dir, "overrun.cbr");
+        File.WriteAllBytes(path, Rar5Of(MainBlock(), FileBlockReadingPastItsHeader(), FileBlock(dictionaryPower: 13), EndBlock()));
+
+        Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
+    }
+
+    [Fact]
+    public void Open_Rar5HeaderSeekingBackToItself_IsRefusedInsteadOfBeingParsedForEver()
+    {
+        // A data size of minus the block's own length: left alone, listing never ends.
+        var length = Block(FileHeaderBody(3, 0x02, 0, 0, 0, name: "QO", dataSize: ulong.MaxValue)).Length;
+        var loop = Block(FileHeaderBody(3, 0x02, 0, 0, 0, name: "QO", dataSize: unchecked((ulong)-(long)length)));
+        var path = Path.Join(_dir, "loop.cbr");
+        File.WriteAllBytes(path, Rar5Of(MainBlock(), loop, EndBlock()));
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
+
+        Assert.Contains("loop.cbr", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(300L * 1024 * 1024)]
+    [InlineData(1024L * 1024 * 1024)]
+    [InlineData(ArchiveEntryReader.MaxRarCommentBytes + 1)]
+    public void Open_Rar5DeclaringAHugeComment_IsRefusedBeforeAnythingIsAllocated(long declared)
+    {
+        // A 46-byte file: SharpCompress allocates what the header says the moment it lists it.
+        var path = Path.Join(_dir, "comment.cbr");
+        File.WriteAllBytes(path, Rar5Of(MainBlock(), ServiceBlock("CMT", (ulong)declared), EndBlock()));
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Contains("comment.cbr", ex.Message);
+        Assert.Contains("archive comment", ex.Message);
+        Assert.True(allocated < 512 * 1024, $"Allocated {allocated} bytes refusing the archive.");
+    }
+
+    [Theory]
+    [InlineData(0UL)]
+    [InlineData(ulong.MaxValue)] // -1 once SharpCompress has it in a long
+    public void Open_Rar5CommentWithANonsenseSize_IsRefused(ulong declared)
+    {
+        var path = Path.Join(_dir, "comment.cbr");
+        File.WriteAllBytes(path, Rar5Of(MainBlock(), ServiceBlock("CMT", declared), EndBlock()));
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
+
+        Assert.Contains("malformed archive comment", ex.Message);
+    }
+
+    [Fact]
+    public void Open_Rar5WithARealComment_Opens()
+    {
+        var path = Path.Join(_dir, "commented.cbr");
+        var comment = new byte[ArchiveEntryReader.MaxRarCommentBytes];
+        File.WriteAllBytes(path, Rar5Of(MainBlock(), ServiceBlock("CMT", (ulong)comment.Length, comment), FileBlock("p0.jpg"), EndBlock()));
+
+        using var archive = ComicArchiveReader.Open(path);
+
+        Assert.Equal("p0.jpg", archive.GetEntryAt(0)!.Name);
+    }
+
+    [Fact]
+    public void Open_Rar5EntryAfterAComment_IsCheckedToo()
+    {
+        var path = Path.Join(_dir, "comment-bomb.cbr");
+        File.WriteAllBytes(path, Rar5Of(MainBlock(), ServiceBlock("CMT", 5, new byte[5]), FileBlock(dictionaryPower: 13), EndBlock()));
+
+        Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
+    }
+
+    [Fact]
+    public void EnsureRarHeaders_NothingAfterTheSignature_IsFine() =>
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes()), "x.cbr"));
+
+    [Fact]
+    public void EnsureRarHeaders_AHeaderSizeThatIsNotAValidNumber_EndsTheCheck()
     {
         // SharpCompress stops listing entries at a header like this one.
         using var output = new MemoryStream();
         output.Write(Rar5Bytes());
         output.Write(new byte[] { 1, 2, 3, 4, 0xFF, 0xFF, 0xFF, 0xFF });
 
-        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(output.ToArray()), "x.cbr");
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(output.ToArray()), "x.cbr"));
     }
 
     [Fact]
-    public void EnsureRarDictionaries_HeaderWithExtraAreaTimeAndCrc_IsStillParsed()
+    public void EnsureRarHeaders_HeaderWithExtraAreaTimeAndCrc_IsStillParsed()
     {
         var body = FileHeaderBody(type: 2, headerFlags: 0x03, fileFlags: 0x06, dictionaryPower: 13, extraArea: true);
 
         Assert.Throws<ArchiveLimitExceededException>(() =>
-            ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
+            ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
     }
 
     [Fact]
-    public void EnsureRarDictionaries_ServiceHeaderAskingForTooMuch_IsRefused()
+    public void EnsureRarHeaders_ServiceHeaderAskingForAHugeDictionary_IsNotRefused()
     {
-        var body = FileHeaderBody(type: 3, headerFlags: 0, fileFlags: 0, dictionaryPower: 13);
+        // SharpCompress never unpacks a service block, so no window is ever allocated for one.
+        var body = FileHeaderBody(type: 3, headerFlags: 0, fileFlags: 0, dictionaryPower: 13, name: "QO");
 
-        Assert.Throws<ArchiveLimitExceededException>(() =>
-            ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
     }
 
     [Theory]
-    [InlineData(4UL)] // Encrypted headers follow: the walk has to stop.
+    [InlineData(4UL)] // Encrypted headers follow: SharpCompress wants a password to go on.
     [InlineData(9UL)] // SharpCompress refuses a block type it does not know.
-    public void EnsureRarDictionaries_BlocksTheWalkCannotPass_StopIt(ulong type)
+    public void EnsureRarHeaders_BlocksSharpCompressCannotPass_EndTheCheck(ulong type)
     {
-        var after = FileHeaderBody(type: 2, headerFlags: 0, fileFlags: 0, dictionaryPower: 13);
+        var archive = Rar5Of(Block(new byte[] { (byte)type, 0, 0 }), FileBlock(dictionaryPower: 13));
 
-        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(
-            new MemoryStream(Rar5Bytes(new byte[] { (byte)type, 0, 0 }, after)),
-            "x.cbr");
+        Assert.Equal(0, EntriesSharpCompressLists(archive));
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(archive), "x.cbr"));
     }
 
     [Fact]
-    public void EnsureRarDictionaries_TruncatedFileHeader_StopsTheWalk()
+    public void EnsureRarHeaders_TruncatedFileHeader_EndsTheCheck()
     {
         // Declares a time and a CRC that are not there.
         using var body = new MemoryStream();
@@ -508,32 +755,25 @@ public sealed class ComicArchiveReaderTests : IDisposable
         WriteVInt(body, 1000);
         WriteVInt(body, 0x20);
 
-        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body.ToArray())), "x.cbr");
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body.ToArray())), "x.cbr"));
     }
 
     [Fact]
-    public void EnsureRarDictionaries_ADataAreaPastAnyFile_StopsTheWalk()
+    public void EnsureRarHeaders_ADataAreaPastAnyFile_EndsTheCheck()
     {
-        using var body = new MemoryStream();
-        WriteVInt(body, 2);
-        WriteVInt(body, 0x02);
-        WriteVInt(body, ulong.MaxValue >> 1); // data area size
-        WriteVInt(body, 0);
-        WriteVInt(body, 1000);
-        WriteVInt(body, 0x20);
-        WriteVInt(body, 3UL << 7);
+        var body = FileHeaderBody(2, headerFlags: 0x02, fileFlags: 0, dictionaryPower: 0, dataSize: ulong.MaxValue >> 1);
 
-        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body.ToArray())), "x.cbr");
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
     }
 
     [Fact]
-    public void EnsureRarDictionaries_MoreHeadersThanAnArchiveCouldHold_IsRefused()
+    public void EnsureRarHeaders_MoreHeadersThanAnArchiveCouldHold_IsRefused()
     {
         var mainHeader = new byte[] { 1, 0, 0 };
         var blocks = Enumerable.Repeat(mainHeader, (2 * ArchiveEntryReader.MaxEntries) + 17).ToArray();
 
         var ex = Assert.Throws<ArchiveLimitExceededException>(() =>
-            ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(blocks)), "many.cbr"));
+            ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(blocks)), "many.cbr"));
 
         Assert.Contains("many.cbr", ex.Message);
     }
@@ -544,8 +784,8 @@ public sealed class ComicArchiveReaderTests : IDisposable
     [InlineData(new byte[] { 2, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01 })] // extra area size does not fit
     [InlineData(new byte[] { 2, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01 })] // data size does not fit
     [InlineData(new byte[] { 2, 0, 0xFF, 0xFF, 0xFF, 0x01 })] // file flags do not fit
-    public void EnsureRarDictionaries_MalformedFields_StopTheWalk(byte[] body) =>
-        ArchiveEntryReader.EnsureRarDictionariesWithinLimit(new MemoryStream(Rar5Bytes(body)), "x.cbr");
+    public void EnsureRarHeaders_MalformedFields_EndTheCheck(byte[] body) =>
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
 
     [Fact]
     public void Open_Rar5VolumeSet_WithinTheLimits_Opens()
@@ -557,6 +797,35 @@ public sealed class ComicArchiveReaderTests : IDisposable
         using var archive = ComicArchiveReader.Open(first);
 
         Assert.Equal(ComicArchiveFormat.Rar, archive.Format);
+    }
+
+    [Fact]
+    public void ArchiveBytes_OfAVolumeSet_CountsEveryVolume()
+    {
+        // The rewrite budget comes from this: a set of 50 volumes is not as small as its first.
+        var second = Rar5(8);
+        var first = Rar5(8, fileHeaders: 3);
+        File.WriteAllBytes(Path.Join(_dir, "sum.part2.rar"), second);
+        var path = Path.Join(_dir, "sum.part1.rar");
+        File.WriteAllBytes(path, first);
+
+        using var archive = ComicArchiveReader.Open(path);
+
+        Assert.Equal(first.Length + second.Length, archive.ArchiveBytes);
+    }
+
+    [Fact]
+    public void ArchiveBytes_OfASingleFile_IsItsLength()
+    {
+        var rar = Path.Join(_dir, "single.cbr");
+        File.WriteAllBytes(rar, Rar5(8));
+        var zip = Zip("single.cbz", ("p1.jpg", new byte[32]));
+
+        using var rarArchive = ComicArchiveReader.Open(rar);
+        using var zipArchive = ComicArchiveReader.Open(zip);
+
+        Assert.Equal(new FileInfo(rar).Length, rarArchive.ArchiveBytes);
+        Assert.Equal(new FileInfo(zip).Length, zipArchive.ArchiveBytes);
     }
 
     [Fact]

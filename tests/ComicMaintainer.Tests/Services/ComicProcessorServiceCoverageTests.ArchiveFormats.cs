@@ -270,6 +270,23 @@ public partial class ComicProcessorServiceCoverageTests
     }
 
     [Fact]
+    public async Task NormalizeFilesAsync_ArchiveDeclaringAHugeComment_FailsOnlyThatFile()
+    {
+        // Used to throw an OutOfMemoryException that no per-file catch stops, ending the batch.
+        var service = CreateService();
+        var bomb = Path.GetFullPath(Path.Join(_library, "Series/comment.cbr"));
+        Directory.CreateDirectory(Path.GetDirectoryName(bomb)!);
+        File.WriteAllBytes(bomb, ComicMaintainer.Tests.Utilities.ComicArchiveReaderTests.Rar5WithComment(1UL << 30));
+        var good = WriteZipNamed("Series/good.cbz", ("ComicInfo.xml", Utf8(Xml("Old", "1", null))));
+
+        var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { bomb, good }));
+
+        Assert.Equal(1, job.FailedFiles);
+        Assert.Contains("archive comment", job.Errors[bomb]);
+        Assert.False(job.Errors.ContainsKey(good));
+    }
+
+    [Fact]
     public async Task NormalizeFilesAsync_RarMissingAVolume_ReportsThat()
     {
         // ComicInfo.xml goes on in a next volume that is not there, which SharpCompress reports.

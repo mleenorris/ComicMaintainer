@@ -79,14 +79,11 @@ Add the following environment variables to your ComicMaintainer container. `AUTH
 container refuses to start without it (see [Choosing `AUTHELIA_TRUSTED_PROXIES`](#choosing-authelia_trusted_proxies)).
 
 ```yaml
-version: '3.8'
-
 services:
   comicmaintainer:
-    image: iceburn1/comictagger-watcher:latest
+    image: iceburn1/comicmaintainer:dotnet
     container_name: comicmaintainer
     environment:
-      - WATCHED_DIR=/watched_dir
       - AUTHELIA_ENABLED=true  # Enable Authelia authentication
       - AUTHELIA_TRUSTED_PROXIES=172.18.0.0/16  # Required: subnet of swag-network (docker network inspect swag-network)
       - AUTHELIA_URL=http://authelia:9091  # Optional: log Authelia outages
@@ -94,6 +91,7 @@ services:
       - PGID=1000
     volumes:
       - /path/to/comics:/watched_dir
+      - /path/to/duplicates:/duplicates
       - /path/to/config:/Config
     networks:
       - swag-network
@@ -163,8 +161,7 @@ ComicMaintainer supports the following Authelia-related environment variables:
      is used for that only, never for the check above.
    - The setting is required: with `AUTHELIA_ENABLED=true`, the app refuses to start when `AUTHELIA_TRUSTED_PROXIES`
      is missing, empty or contains an entry that is not an IP address or CIDR range (see
-     [Troubleshooting](#troubleshooting)). This is a breaking change for existing Authelia deployments; see the
-     [upgrade note](../CHANGELOG.md#breaking-changes).
+     [Troubleshooting](#troubleshooting)).
    - Every address in the list can sign in as any user, so keep the list as narrow as possible, and make sure your
      reverse proxy removes or overwrites `Remote-*` headers sent by clients (SWAG's `authelia-location.conf` does)
      and only forwards requests that Authelia has authenticated.
@@ -243,7 +240,7 @@ really is your proxy, add it (or its subnet).
 ```yaml
 services:
   comicmaintainer:
-    image: iceburn1/comictagger-watcher:latest
+    image: iceburn1/comicmaintainer:dotnet
     environment:
       - AUTHELIA_ENABLED=true
       - AUTHELIA_TRUSTED_PROXIES=172.18.0.0/16  # Subnet of swag-network (or the proxy's fixed IP)
@@ -254,6 +251,29 @@ services:
       - 5000  # Don't use 'ports' - only expose to internal network
     restart: unless-stopped
 ```
+
+## OPDS Catalog and Comic Apps
+
+Comic apps that read the [OPDS catalog](OPDS.md) cannot follow Authelia's login page, so the catalog has to bypass Authelia, and ComicMaintainer signs those requests in itself. Add a rule to your Authelia `access_control` configuration. Rules are checked in order and the first match decides, so it must come before any other rule for the same domain:
+
+```yaml
+access_control:
+  rules:
+    - domain: comics.yourdomain.com
+      resources:
+        - '^/opds/.*$'
+      policy: bypass
+```
+
+For a subfolder install, include the folder: `'^/comics/opds/.*$'`.
+
+With Authelia enabled, the catalog accepts **only** a username with an API key as the password. Local passwords are refused there, and accounts Authelia created have no usable local password. To create a key:
+
+1. Sign in through Authelia and open **Settings > OPDS Catalog**.
+2. Select **Create API key**. No password is asked for in an Authelia session.
+3. Copy the key, which is shown only once, and enter it in your comic app as the password, with your Authelia username.
+
+The catalog answers 404 until an administrator enables it under **Settings > OPDS Catalog**, or with `OPDS_ENABLED=true`. See the [OPDS guide](OPDS.md).
 
 ## User Management
 
@@ -273,8 +293,14 @@ When a user successfully authenticates via Authelia:
    normally require the Admin role. If no admin groups are configured at all (neither `AUTHELIA_ADMIN_GROUPS` nor
    `AutheliaSettings:AdminGroups` in `appsettings.json`), ComicMaintainer cannot tell which Authelia users are
    administrators, so it lets **every signed-in user who is not ReadOnly administer it**, including users of local
-   accounts, rather than locking everyone out. Once admin groups are configured, only users with the Admin role can
-   administer.
+   accounts, rather than locking everyone out. That also lets them read and change everyone's e-reader devices and
+   email deliveries. Once admin groups are configured, only users with the Admin role can administer.
+
+### First-Run Setup
+
+The web interface's first-run setup is never offered while Authelia is enabled. To have a local administrator as
+well, set `ADMIN_USERNAME` and `ADMIN_PASSWORD` (see the
+[Docker Deployment Guide](DOCKER_DEPLOYMENT_DOTNET.md#first-administrator)).
 
 ### Available Roles
 
@@ -314,8 +340,7 @@ and logs each change, in the container log and in `app.log` in the config direct
   than the outage was.
 - The checks are left out of the OpenTelemetry HTTP client traces and metrics, which would otherwise get a request
   every 30 seconds.
-- Outages are warnings, not errors, so they are not sent as
-  [automated error reports](DEBUG_LOGGING_GUIDE.md#automated-error-report).
+- Outages are warnings, not errors, so they are not sent as automated error reports.
 - The check works whether or not `AUTHELIA_ENABLED` is set, for example when Authelia guards ComicMaintainer at the
   proxy while users sign in with ComicMaintainer accounts. Without `AUTHELIA_URL`, nothing is checked.
 
@@ -367,8 +392,7 @@ The log shows `AUTHELIA_TRUSTED_PROXIES is required when Authelia is enabled ...
 `Invalid AUTHELIA_TRUSTED_PROXIES entry '<entry>' ...`.
 
 **Solution:**
-1. Authelia mode requires the list of trusted reverse proxies (see the [upgrade note](../CHANGELOG.md#breaking-changes)).
-   Set `AUTHELIA_TRUSTED_PROXIES` as described in [Choosing `AUTHELIA_TRUSTED_PROXIES`](#choosing-authelia_trusted_proxies)
+1. Set `AUTHELIA_TRUSTED_PROXIES` as described in [Choosing `AUTHELIA_TRUSTED_PROXIES`](#choosing-authelia_trusted_proxies)
 2. For an invalid entry, fix the entry named in the message: it must be an IP address or a CIDR range written with
    its network address (`172.18.0.0/16`, not `172.18.0.5/16`); hostnames and ports are not accepted, and entries
    are separated by commas
@@ -413,6 +437,23 @@ The log shows `AUTHELIA_TRUSTED_PROXIES is required when Authelia is enabled ...
 2. Verify the ComicMaintainer database is healthy
 3. Check container logs for detailed error messages
 4. Ensure `Remote-User` header contains a valid username
+
+### Issue: A Comic App Cannot Sign In to the OPDS Catalog
+
+**Solution:**
+1. Use your username with an API key as the password. Local passwords are refused while Authelia is enabled
+2. Check that the [bypass rule](#opds-catalog-and-comic-apps) comes before other rules for the domain
+3. If the app gets Authelia's login page, the bypass rule is not matching: check the domain and the path, including
+   the folder of a subfolder install
+4. If the key was replaced, or a password changed, create a new key. `Refused an API key` in the log means an old key
+   is still in use
+
+### Issue: Installing the Web App Fails, or an Update Never Arrives
+
+**Solution:**
+1. `/manifest.json`, `/sw.js` and `/api/version` must be reachable through the proxy. The browser sends a cookie with
+   the `/manifest.json` request, so an authenticated session lets it through
+2. If you bypass or restrict paths in your Authelia rules, check that these three are not refused
 
 ## Testing Your Setup
 
@@ -459,8 +500,6 @@ curl -I https://comics.yourdomain.com/api/version
 Here's a complete docker-compose.yml showing SWAG, Authelia, and ComicMaintainer:
 
 ```yaml
-version: '3.8'
-
 services:
   swag:
     image: lscr.io/linuxserver/swag:latest
@@ -497,10 +536,9 @@ services:
     restart: unless-stopped
 
   comicmaintainer:
-    image: iceburn1/comictagger-watcher:latest
+    image: iceburn1/comicmaintainer:dotnet
     container_name: comicmaintainer
     environment:
-      - WATCHED_DIR=/watched_dir
       - AUTHELIA_ENABLED=true
       - AUTHELIA_TRUSTED_PROXIES=172.30.0.10  # Only SWAG may send the Authelia headers
       - AUTHELIA_ADMIN_GROUPS=admins
@@ -509,6 +547,7 @@ services:
       - PGID=1000
     volumes:
       - /path/to/comics:/watched_dir
+      - /path/to/duplicates:/duplicates
       - /path/to/config:/Config
     networks:
       - swag-network
@@ -539,7 +578,9 @@ docker restart comicmaintainer
 docker restart swag
 ```
 
-Users will need to log in using the ComicMaintainer login page with their username/password.
+Users then sign in on the ComicMaintainer login page with their username and password. Accounts that Authelia created
+have only a random local password, so they cannot sign in. If you have no local administrator, set `ADMIN_USERNAME` to
+a name not in use and `ADMIN_PASSWORD` to a password of your own, and restart to create one.
 
 ## Additional Resources
 
@@ -547,6 +588,7 @@ Users will need to log in using the ComicMaintainer login page with their userna
 - [SWAG Documentation](https://docs.linuxserver.io/general/swag)
 - [ComicMaintainer Reverse Proxy Guide](REVERSE_PROXY.md)
 - [SWAG Configuration Examples](swag-configs/README.md)
+- [OPDS Catalog Guide](OPDS.md)
 
 ## Support
 

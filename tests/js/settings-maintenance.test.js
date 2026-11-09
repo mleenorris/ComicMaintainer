@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
-const { bootSettings, messages, lastMessage, clearMessages, callsTo, requestLog } = require('./support/settings-helpers');
+const { bootSettings, messages, lastMessage, clearMessages, callsTo, requestLog, SERVER_FAILURE, serverFailure } = require('./support/settings-helpers');
 
 const networkError = () => {
     throw new TypeError('Failed to fetch');
@@ -94,6 +94,7 @@ test('a failed reset is reported', async () => {
         [respond(500, { success: false, error: 'Error resetting database: disk I/O error' }),
             'Failed to reset database: Error resetting database: disk I/O error'],
         [respond(500, {}), 'Failed to reset database: HTTP error! status: 500'],
+        [serverFailure('corr-reset'), `Failed to reset database: ${SERVER_FAILURE} (ref: corr-reset)`],
         // A reverse proxy's error page, an empty body, or JSON that is not an object.
         [respond(502, '<html><head><title>502 Bad Gateway</title></head><body><h1>502 Bad Gateway</h1></body></html>',
             { 'Content-Type': 'text/html' }), 'Failed to reset database: HTTP error! status: 502'],
@@ -147,6 +148,7 @@ test('Clean up database now reports how many stale entries were removed', async 
         [respond(500, { success: false, error: 'The cleanup failed. No rows were removed.' }),
             'Failed to cleanup database: The cleanup failed. No rows were removed.'],
         [respond(502, 'Bad gateway'), 'Failed to cleanup database: HTTP error! status: 502'],
+        [serverFailure('corr-cleanup'), `Failed to cleanup database: ${SERVER_FAILURE} (ref: corr-cleanup)`],
         [networkError, 'Failed to cleanup database: Failed to fetch']
     ];
     for (const [response, expected] of failures) {

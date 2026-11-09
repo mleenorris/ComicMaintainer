@@ -32,12 +32,12 @@
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 showMessage(`Default library view set to ${selectedView === 'series' ? 'Series' : 'Files (folder view)'}`, 'success');
             } catch (error) {
                 console.error('Failed to update default library view:', error);
-                showMessage('Failed to update default library view: ' + error.message, 'error');
+                showMessage('Failed to update default library view: ' + error.message, 'error', { reference: error });
             }
         }
 
@@ -59,9 +59,7 @@
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
-                    let msg = `HTTP error! status: ${response.status}`;
-                    try { const j = await response.json(); if (j && j.error) msg = j.error; } catch {}
-                    throw new Error(msg);
+                    throw apiResponseError(response, await settingsErrorMessage(response));
                 }
                 showMessage('Default preferred language updated', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
@@ -69,7 +67,7 @@
                 }
             } catch (error) {
                 console.error('Failed to update default preferred language:', error);
-                showMessage('Failed to update default preferred language: ' + error.message, 'error');
+                showMessage('Failed to update default preferred language: ' + error.message, 'error', { reference: error });
             }
         }
         
@@ -95,13 +93,13 @@
                 }
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`File rename ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update rename setting: ' + error.message, 'error');
+                showMessage('Failed to update rename setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('watcherEnableRenameCheckbox').checked = !enabled;
             }
         }
@@ -125,13 +123,13 @@
                 }
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Metadata normalize ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update normalize setting: ' + error.message, 'error');
+                showMessage('Failed to update normalize setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('watcherEnableNormalizeCheckbox').checked = !enabled;
             }
         }
@@ -155,13 +153,13 @@
                 }
 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Convert CBR/RAR to CBZ when writing tags ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update CBR/RAR conversion setting: ' + error.message, 'error');
+                showMessage('Failed to update CBR/RAR conversion setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('convertRarToCbzOnWriteCheckbox').checked = !enabled;
             }
         }
@@ -185,13 +183,13 @@
                 }
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Embed cover into first issue archive ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update cover embed setting: ' + error.message, 'error');
+                showMessage('Failed to update cover embed setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('writeCoverToFirstArchiveCheckbox').checked = !enabled;
             }
         }
@@ -215,13 +213,13 @@
                 }
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Write cover into series folder ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update cover folder setting: ' + error.message, 'error');
+                showMessage('Failed to update cover folder setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('writeCoverToSeriesFolderCheckbox').checked = !enabled;
             }
         }
@@ -246,13 +244,13 @@
                 }
 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
 
                 showMessage(`Self-service registration ${enabled ? 'enabled' : 'disabled'} successfully!`, 'success');
             } catch (error) {
                 checkbox.checked = !enabled;
-                showMessage('Failed to update registration setting: ' + error.message, 'error');
+                showMessage('Failed to update registration setting: ' + error.message, 'error', { reference: error });
             }
         }
 
@@ -275,13 +273,13 @@
                 }
                 
                 if (!response.ok) {
-                    throw new Error(await settingsErrorMessage(response));
+                    throw apiResponseError(response, await settingsErrorMessage(response));
                 }
 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Download external series images ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update series image download setting: ' + error.message, 'error');
+                showMessage('Failed to update series image download setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('downloadExternalSeriesImagesCheckbox').checked = !enabled;
             }
         }
@@ -723,9 +721,7 @@
                 if (handleAuthError(response)) return;
                 
                 if (!response.ok) {
-                    // A proxy's error page (e.g. a 502/504) or an empty body is not JSON.
-                    const errorData = await response.json().catch(() => null);
-                    throw new Error((errorData && errorData.error) || `HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response, await settingsErrorMessage(response));
                 }
                 
                 const result = await response.json();
@@ -751,7 +747,7 @@
                     showMessage(result.error || 'Failed to reset database', 'error');
                 }
             } catch (error) {
-                showMessage('Failed to reset database: ' + error.message, 'error');
+                showMessage('Failed to reset database: ' + error.message, 'error', { reference: error });
             }
         }
         
@@ -1394,9 +1390,11 @@
 
         /**
          * Sends one Save Settings request. Throws an Error carrying the server's
-         * reason on failure, flagged `authHandled` after a 401 (already redirecting
-         * to login) and `nothingSaved` when the server answered that it did not
-         * apply the save (a proxy's 502/504 says nothing about that).
+         * reason and the request's reference on failure, flagged `authHandled` after
+         * a 401 (already redirecting to login) and `nothingSaved` when the server
+         * refused the save (a 4xx). A 5xx says nothing about that: the file may
+         * already be replaced when a later step fails, and a proxy's 502/504 never
+         * saw the outcome.
          */
         async function saveAllSettings(body) {
             const response = await fetch(apiUrl('/api/settings'), {
@@ -1413,8 +1411,8 @@
                 throw error;
             }
             if (!response.ok) {
-                const error = new Error(await settingsErrorMessage(response));
-                error.nothingSaved = response.status <= 500;
+                const error = apiResponseError(response, await settingsErrorMessage(response));
+                error.nothingSaved = response.status < 500;
                 throw error;
             }
         }
@@ -1648,9 +1646,9 @@
                 if (error.authHandled) return;
                 let message = `Failed to save settings: ${error.message}`;
                 if (!/[.!?]$/.test(message)) message += '.';
-                // The save is all or nothing, and the form keeps the edits for a retry.
+                // A refused save is all or nothing, and the form keeps the edits for a retry.
                 if (error.nothingSaved) message += ' No settings were saved.';
-                showMessage(message, 'error');
+                showMessage(message, 'error', { reference: error });
                 return;
             }
 
@@ -1693,7 +1691,7 @@
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response);
                 }
                 const data = await response.json();
                 if (!data.default) {
@@ -1703,7 +1701,7 @@
                 document.getElementById('filenameFormat').value = data.default;
                 showMessage('Reset to default format', 'info');
             } catch (error) {
-                showMessage('Failed to reset format: ' + error.message, 'error');
+                showMessage('Failed to reset format: ' + error.message, 'error', { reference: error });
             }
         }
         
@@ -1747,10 +1745,10 @@
                     // Refused (the library looks unmounted); nothing was removed.
                     showMessage(result.message || 'Database cleanup was skipped. No entries were removed.', 'warning');
                 } else {
-                    throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                    throw apiResponseError(response, result.error || undefined);
                 }
             } catch (error) {
-                showMessage('Failed to cleanup database: ' + error.message, 'error');
+                showMessage('Failed to cleanup database: ' + error.message, 'error', { reference: error });
             }
         }
 

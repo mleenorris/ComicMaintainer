@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const { respond, plain } = require('./support/dom');
 const { bootApp, deferred } = require('./support/app');
 const {
-    settingsResponse, settingsRoutes, bootSettings, messages, lastMessage, clearMessages, callsTo
+    settingsResponse, settingsRoutes, bootSettings, messages, lastMessage, clearMessages, callsTo, SERVER_FAILURE, serverFailure
 } = require('./support/settings-helpers');
 
 const networkError = () => {
@@ -520,6 +520,24 @@ test('settings checkboxes save as soon as they change', async t => {
     }
 });
 
+test('an unexpected failure of a checkbox quotes the reference of its request', async t => {
+    const page = await bootSettings();
+
+    for (const [id, method, path, label, errorPrefix] of TOGGLES) {
+        await t.test(label, async () => {
+            const checkbox = page.$(`#${id}`);
+            page.route(`${method} ${path}`, serverFailure(`corr-${id}`));
+
+            page.input(checkbox, !checkbox.checked);
+            await page.settle();
+
+            // The one toggle the environment can pin passes the server's reason on.
+            const reason = id === 'downloadExternalSeriesImagesCheckbox' ? SERVER_FAILURE : 'HTTP error! status: 500';
+            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}${reason} (ref: corr-${id})` });
+        });
+    }
+});
+
 test('changing the theme applies it and saves the preference', async () => {
     const page = await bootSettings({ routes: { 'PUT /api/preferences': {} } });
 
@@ -620,6 +638,20 @@ test('the default preferred language saves on change and refreshes the series li
     page.$('#defaultPreferredLanguageSelect').remove();
     await page.run('updateDefaultPreferredLanguageFromSettings()');
     assert.equal(page.fetchCalls.length, before);
+});
+
+test('the default view and language selects quote the reference of an unexpected failure', async () => {
+    const viewRoute = 'PUT /api/settings/default-library-view';
+    const languageRoute = 'PUT /api/settings/default-preferred-language';
+    const page = await bootSettings({ routes: { [viewRoute]: serverFailure('corr-view'), [languageRoute]: serverFailure('corr-language') } });
+
+    page.input('#defaultLibraryViewSelect', 'files');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to update default library view: HTTP error! status: 500 (ref: corr-view)' });
+
+    page.input('#defaultPreferredLanguageSelect', 'ko');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { type: 'error', text: `Failed to update default preferred language: ${SERVER_FAILURE} (ref: corr-language)` });
 });
 
 test('settings opens from the sidebar and Cancel returns to the previous page', async () => {

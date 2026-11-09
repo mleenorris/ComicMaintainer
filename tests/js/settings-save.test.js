@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
 const { deferred } = require('./support/app');
 const {
-    bootSettings, messages, lastMessage, clearMessages, callsTo, requestLog, settingsResponse
+    bootSettings, messages, lastMessage, clearMessages, callsTo, requestLog, settingsResponse, SERVER_FAILURE, serverFailure
 } = require('./support/settings-helpers');
 
 const networkError = () => {
@@ -401,11 +401,14 @@ const FAILED_SAVES = [
         'Failed to save settings: One or more validation errors occurred. No settings were saved.'],
     ['a setting pinned by the environment', respond(409, { error: 'Set by the environment and cannot be changed here: SMTP_HOST.' }),
         'Failed to save settings: Set by the environment and cannot be changed here: SMTP_HOST. No settings were saved.'],
-    ['a server error with an error field', respond(500, { error: 'The request could not be completed.' }),
-        'Failed to save settings: The request could not be completed. No settings were saved.'],
-    ['a server error with only a message', respond(500, { message: 'Storage failure' }),
-        'Failed to save settings: Storage failure. No settings were saved.'],
-    ['a server error without a reason', respond(500, {}), 'Failed to save settings: HTTP error! status: 500. No settings were saved.'],
+    // Sent back with the request's reference, the only way to find the log line. A 5xx does
+    // not claim that nothing was saved: the file can be replaced before a later step fails.
+    ["the global handler's answer", serverFailure('corr-500'),
+        `Failed to save settings: ${SERVER_FAILURE} (ref: corr-500)`],
+    ['a refusal with a reference', respond(409, { error: 'Set by the environment and cannot be changed here: SMTP_HOST.' }, { 'X-Correlation-Id': 'corr-409' }),
+        'Failed to save settings: Set by the environment and cannot be changed here: SMTP_HOST. No settings were saved. (ref: corr-409)'],
+    ['a server error with only a message', respond(500, { message: 'Storage failure' }), 'Failed to save settings: Storage failure.'],
+    ['a server error without a reason', respond(500, {}), 'Failed to save settings: HTTP error! status: 500.'],
     ['a bare status', 503, 'Failed to save settings: HTTP error! status: 503.'],
     ['a proxy error page', respond(502, '<html><body><h1>502 Bad Gateway</h1></body></html>', { 'Content-Type': 'text/html' }),
         'Failed to save settings: HTTP error! status: 502.'],
@@ -620,6 +623,20 @@ test('the pinned download-images toggle reports the server\'s refusal if the pag
     assert.equal(page.$('#downloadExternalSeriesImagesCheckbox').checked, before);
 });
 
+test('the download-images toggle quotes the reference of an unexpected failure', async () => {
+    const page = await bootSettings();
+    page.route('PUT /api/settings/download-external-series-images', serverFailure('corr-images'));
+    clearMessages(page);
+
+    page.$('#downloadExternalSeriesImagesCheckbox').checked = !page.$('#downloadExternalSeriesImagesCheckbox').checked;
+    await page.run('updateDownloadExternalSeriesImages()');
+
+    assert.deepEqual(lastMessage(page), {
+        type: 'error',
+        text: `Failed to update series image download setting: ${SERVER_FAILURE} (ref: corr-images)`
+    });
+});
+
 test('values at the server limits are saved', async () => {
     const page = await bootSettings();
     routeSave(page);
@@ -710,6 +727,11 @@ test('Reset Filename Format puts the default format the server reports into the 
     await page.settle();
     assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to reset format: HTTP error! status: 500' });
 
+    page.route(route, serverFailure('corr-format'));
+    page.click('#resetFilenameFormatBtn');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to reset format: HTTP error! status: 500 (ref: corr-format)' });
+
     page.route(route, networkError);
     page.click('#resetFilenameFormatBtn');
     await page.settle();
@@ -721,7 +743,7 @@ test('Reset Filename Format puts the default format the server reports into the 
     await page.settle();
     assert.equal(messages(page).length, shown);
     assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
-    assert.equal(callsTo(page, route).length, 5);
+    assert.equal(callsTo(page, route).length, 6);
 });
 
 test('Send Test Report reports what the server said', async () => {

@@ -264,7 +264,7 @@ public class EmailDeliveryUiTests
 
         Assert.Contains("/api/email/deliveries?limit=${EMAIL_DELIVERY_HISTORY_PAGE_SIZE}&offset=${offset}", js);
         Assert.Contains("/api/email/deliveries/${encodeURIComponent(id)}/cancel", js);
-        Assert.Contains("'/api/email/deliveries/cancel-pending'", js);
+        Assert.Contains("`/api/email/deliveries/cancel-pending$", js);
         Assert.Matches(
             new Regex(@"<button[^>]*data-requires-write[^>]*onclick=""cancelEmailDelivery\('\$\{jsArg\(delivery\.id\)\}', this\)"""),
             js);

@@ -18,9 +18,9 @@ public class MetadataController : ControllerBase
     private readonly ISeriesMetadataCacheService _cache;
     private readonly ISeriesMetadataRefreshJobService _refreshJobs;
     private readonly IExternalSeriesMetadataService _externalMetadata;
-    private readonly IComicProcessorService? _processor;
-    private readonly IFileStoreService? _fileStore;
-    private readonly ISeriesLanguagePreferenceRetagService? _languageRetag;
+    private readonly IComicProcessorService _processor;
+    private readonly IFileStoreService _fileStore;
+    private readonly ISeriesLanguagePreferenceRetagService _languageRetag;
     private readonly IHostApplicationLifetime? _applicationLifetime;
     private readonly ILogger<MetadataController> _logger;
 
@@ -30,9 +30,9 @@ public class MetadataController : ControllerBase
         ISeriesMetadataRefreshJobService refreshJobs,
         IExternalSeriesMetadataService externalMetadata,
         ILogger<MetadataController> logger,
-        IComicProcessorService? processor = null,
-        IFileStoreService? fileStore = null,
-        ISeriesLanguagePreferenceRetagService? languageRetag = null,
+        IComicProcessorService processor,
+        IFileStoreService fileStore,
+        ISeriesLanguagePreferenceRetagService languageRetag,
         IHostApplicationLifetime? applicationLifetime = null)
     {
         _library = library;
@@ -649,24 +649,21 @@ public class MetadataController : ControllerBase
             // the new language preference when the scheduled backfill job runs.
             // We do not block the API response, and we deliberately avoid an
             // eager forced normalize so the library view doesn't churn.
-            if (_languageRetag is not null)
+            try
             {
-                try
+                var flaggedCount = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
+                if (flaggedCount > 0)
                 {
-                    var flaggedCount = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
-                    if (flaggedCount > 0)
-                    {
-                        _logger.LogInformation(
-                            LoggingHelper.WithWebsitePrefix("Flagged {FileCount} file(s) for metadata backfill after preferred-language change for {SeriesTitle}"),
-                            flaggedCount, LoggingHelper.SanitizeForLog(seriesTitle));
-                    }
+                    _logger.LogInformation(
+                        LoggingHelper.WithWebsitePrefix("Flagged {FileCount} file(s) for metadata backfill after preferred-language change for {SeriesTitle}"),
+                        flaggedCount, LoggingHelper.SanitizeForLog(seriesTitle));
                 }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogWarning(ex,
-                        LoggingHelper.WithWebsitePrefix("Failed to flag files for metadata backfill after preferred-language change for {SeriesTitle}"),
-                        LoggingHelper.SanitizeForLog(seriesTitle));
-                }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _logger.LogWarning(ex,
+                    LoggingHelper.WithWebsitePrefix("Failed to flag files for metadata backfill after preferred-language change for {SeriesTitle}"),
+                    LoggingHelper.SanitizeForLog(seriesTitle));
             }
 
             return Ok(record);
@@ -741,24 +738,21 @@ public class MetadataController : ControllerBase
             // their on-disk <Series> tags catch up with the new name when the
             // scheduled backfill job runs (same DB-first flow as
             // preferred-language changes; no eager forced normalize).
-            if (_languageRetag is not null)
+            try
             {
-                try
+                var flaggedCount = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
+                if (flaggedCount > 0)
                 {
-                    var flaggedCount = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
-                    if (flaggedCount > 0)
-                    {
-                        _logger.LogInformation(
-                            LoggingHelper.WithWebsitePrefix("Flagged {FileCount} file(s) for metadata backfill after series-name change for {SeriesTitle}"),
-                            flaggedCount, LoggingHelper.SanitizeForLog(seriesTitle));
-                    }
+                    _logger.LogInformation(
+                        LoggingHelper.WithWebsitePrefix("Flagged {FileCount} file(s) for metadata backfill after series-name change for {SeriesTitle}"),
+                        flaggedCount, LoggingHelper.SanitizeForLog(seriesTitle));
                 }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogWarning(ex,
-                        LoggingHelper.WithWebsitePrefix("Failed to flag files for metadata backfill after series-name change for {SeriesTitle}"),
-                        LoggingHelper.SanitizeForLog(seriesTitle));
-                }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _logger.LogWarning(ex,
+                    LoggingHelper.WithWebsitePrefix("Failed to flag files for metadata backfill after series-name change for {SeriesTitle}"),
+                    LoggingHelper.SanitizeForLog(seriesTitle));
             }
 
             return Ok(record);
@@ -857,11 +851,6 @@ public class MetadataController : ControllerBase
         SeriesMetadataCacheRecord record,
         CancellationToken cancellationToken)
     {
-        if (_processor is null || _fileStore is null)
-        {
-            return null;
-        }
-
         // The series is known by the requested title (typically the current
         // folder name) and every title of the matched record, so files whose
         // metadata or folder still references an older name are picked up.

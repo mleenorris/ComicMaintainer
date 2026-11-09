@@ -11,6 +11,7 @@ using ComicMaintainer.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 
@@ -492,7 +493,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         var databaseName = Guid.NewGuid().ToString("N");
         services.AddDbContextFactory<ComicMaintainerDbContext>(options => options.UseInMemoryDatabase(databaseName));
         await using var provider = services.BuildServiceProvider();
-        var store = new FileStoreService(
+        var store = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(_settings),
             Mock.Of<ILogger<FileStoreService>>(),
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
@@ -598,7 +599,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
         var databaseName = Guid.NewGuid().ToString("N");
         services.AddDbContextFactory<ComicMaintainerDbContext>(options => options.UseInMemoryDatabase(databaseName));
         await using var provider = services.BuildServiceProvider();
-        var store = new FileStoreService(
+        var store = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(_settings),
             Mock.Of<ILogger<FileStoreService>>(),
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
@@ -1000,7 +1001,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
 
     private ComicProcessorService CreateService(IJobStateStore? jobStateStore = null, IFileStoreService? fileStore = null)
     {
-        var service = new ComicProcessorService(
+        var service = TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             _logger,
             fileStore ?? _fileStore.Object,
@@ -1143,7 +1144,17 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
             IFileStoreService fileStore,
             IProcessingHistoryService historyService,
             IEventBroadcaster eventBroadcaster)
-            : base(settings, logger, fileStore, historyService, eventBroadcaster)
+            : base(
+                  settings,
+                  logger,
+                  fileStore,
+                  historyService,
+                  eventBroadcaster,
+                  Mock.Of<ISeriesMetadataCacheService>(),
+                  TestServices.CreateSeriesNameResolver(settings, NullLogger<SeriesNameResolver>.Instance),
+                  Mock.Of<IJobStateStore>(),
+                  Mock.Of<IComicEmailService>(),
+                  new FileOperationLock())
         {
         }
 

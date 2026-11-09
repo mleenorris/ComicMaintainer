@@ -1,7 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SharpCompress.Archives;
@@ -18,11 +17,6 @@ namespace ComicMaintainer.Core.Services;
 ///
 /// <para>Design notes:</para>
 /// <list type="bullet">
-///   <item><see cref="ISeriesLibraryService"/> is resolved lazily through
-///   <see cref="IServiceScopeFactory"/> because the metadata cache service
-///   (which calls this writer) is itself a dependency of the library
-///   service. Resolving at call-time avoids a construction-time cycle. This
-///   mirrors <see cref="SeriesFolderCoverWriter"/>.</item>
 ///   <item>Only writable CBZ archives are modified. The on-disk entry name is
 ///   pinned to <c>cover.&lt;ext&gt;</c> at the archive root and never derives
 ///   from the provider URL or normalized key.</item>
@@ -51,23 +45,26 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
             ["image/webp"] = ".webp"
         };
 
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ISeriesLibraryService _library;
+    private readonly IFileWatcherService _watcher;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesArchiveCoverWriter> _logger;
     private readonly IFileOperationLock _fileLock;
 
     public SeriesArchiveCoverWriter(
-        IServiceScopeFactory scopeFactory,
+        ISeriesLibraryService library,
+        IFileWatcherService watcher,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesArchiveCoverWriter> logger,
-        IFileOperationLock? fileLock = null)
+        IFileOperationLock fileLock)
     {
-        _scopeFactory = scopeFactory;
+        _library = library;
+        _watcher = watcher;
         _settings = settings;
         _logger = logger;
         // Shared with the file processor through DI, so embedding a cover never rewrites an
         // archive that is being normalized, renamed or edited at the same time.
-        _fileLock = fileLock ?? new FileOperationLock();
+        _fileLock = fileLock;
     }
 
     public async Task WriteAsync(
@@ -214,15 +211,15 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
     {
         try
         {
-            // Resolve the library service lazily through a fresh scope so
-            // singleton-vs-singleton construction order remains acyclic.
-            using var scope = _scopeFactory.CreateScope();
-            var library = scope.ServiceProvider.GetRequiredService<ISeriesLibraryService>();
-            return await library.GetFirstIssueFilePathForNormalizedKeyAsync(normalizedKey, cancellationToken);
+            return await _library.GetFirstIssueFilePathForNormalizedKeyAsync(normalizedKey, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogDebug(ex,
+            _logger.LogWarning(ex,
                 "Failed to resolve first archive for series cover embed/remove for {Key}",
                 LoggingHelper.SanitizeForLog(normalizedKey));
             return null;
@@ -231,8 +228,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
 
     /// <summary>
     /// Marks the archive path as a self-induced change on the file watcher so
-    /// the cover rewrite does not get picked up and reprocessed. Resolved
-    /// lazily through a fresh scope to keep singleton construction acyclic.
+    /// the cover rewrite does not get picked up and reprocessed.
     /// </summary>
     private void SuppressWatcherProcessing(string archivePath)
     {
@@ -243,13 +239,11 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
 
         try
         {
-            using var scope = _scopeFactory.CreateScope();
-            var watcher = scope.ServiceProvider.GetService<IFileWatcherService>();
-            watcher?.SuppressProcessing(archivePath);
+            _watcher.SuppressProcessing(archivePath);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogDebug(ex,
+            _logger.LogWarning(ex,
                 "Failed to suppress watcher processing for first-archive cover write {Path}",
                 LoggingHelper.SanitizePathForLog(archivePath));
         }

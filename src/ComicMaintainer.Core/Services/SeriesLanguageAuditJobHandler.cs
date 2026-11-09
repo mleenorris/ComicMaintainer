@@ -27,7 +27,7 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
     private readonly ISeriesLanguagePreferenceRetagService _retag;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<SeriesLanguageAuditJobHandler> _logger;
-    private readonly ISeriesNameResolver? _seriesNameResolver;
+    private readonly ISeriesNameResolver _seriesNameResolver;
 
     public SeriesLanguageAuditJobHandler(
         ISeriesMetadataCacheService cache,
@@ -35,7 +35,7 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
         ISeriesLanguagePreferenceRetagService retag,
         IOptionsMonitor<AppSettings> appSettings,
         ILogger<SeriesLanguageAuditJobHandler> logger,
-        ISeriesNameResolver? seriesNameResolver = null)
+        ISeriesNameResolver seriesNameResolver)
     {
         _cache = cache;
         _fileStore = fileStore;
@@ -95,9 +95,7 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
             // normalize pipeline writes into ComicInfo.xml — the audit
             // exists to catch drift between cache state and on-disk
             // metadata, so it must use the same resolver as the writer.
-            var expected = _seriesNameResolver is not null
-                ? _seriesNameResolver.ResolveForRecord(record)
-                : SeriesDisplayTitleResolver.Resolve(record, globalDefault);
+            var expected = _seriesNameResolver.ResolveForRecord(record);
             if (string.IsNullOrWhiteSpace(expected))
             {
                 continue;

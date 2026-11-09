@@ -34,9 +34,10 @@ public interface IComicEmailQueue
     /// deliveries the queue does not hold (see
     /// <see cref="IComicEmailService.ResumePendingDeliveriesAsync"/>): once right
     /// away, so deliveries an earlier run left pending are resumed, and then
-    /// periodically.
+    /// periodically. <paramref name="deliveryService"/> is passed here rather
+    /// than to the constructor because it enqueues work on this queue.
     /// </summary>
-    Task StartAsync(CancellationToken cancellationToken = default);
+    Task StartAsync(IComicEmailService deliveryService, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Stops the background consumer and waits for the in-flight send. Deliveries

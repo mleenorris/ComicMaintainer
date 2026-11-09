@@ -2,7 +2,6 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Core.Configuration;
-using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -21,9 +20,9 @@ public partial class FilesController : ControllerBase
     private readonly ILogger<FilesController> _logger;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IFolderCombineService _folderCombine;
-    private readonly IEventBroadcaster? _eventBroadcaster;
-    private readonly ISeriesNameResolver? _seriesNameResolver;
-    private readonly ScheduledJobsHostedService? _scheduledJobsHostedService;
+    private readonly IEventBroadcaster _eventBroadcaster;
+    private readonly ISeriesNameResolver _seriesNameResolver;
+    private readonly IScheduledJobRunner _scheduledJobs;
 
     /// <summary>
     /// The per-file lock shared with the processor, the watcher and every job. Moves and deletes
@@ -40,10 +39,10 @@ public partial class FilesController : ControllerBase
         ILogger<FilesController> logger,
         IOptionsMonitor<AppSettings> settings,
         IFolderCombineService folderCombine,
-        IEventBroadcaster? eventBroadcaster = null,
-        ISeriesNameResolver? seriesNameResolver = null,
-        ScheduledJobsHostedService? scheduledJobsHostedService = null,
-        IFileOperationLock? fileOperationLock = null)
+        IEventBroadcaster eventBroadcaster,
+        ISeriesNameResolver seriesNameResolver,
+        IScheduledJobRunner scheduledJobs,
+        IFileOperationLock fileOperationLock)
     {
         _fileStore = fileStore;
         _processor = processor;
@@ -54,8 +53,8 @@ public partial class FilesController : ControllerBase
         _folderCombine = folderCombine;
         _eventBroadcaster = eventBroadcaster;
         _seriesNameResolver = seriesNameResolver;
-        _scheduledJobsHostedService = scheduledJobsHostedService;
-        _fileOperationLock = fileOperationLock ?? new ComicMaintainer.Core.Services.FileOperationLock();
+        _scheduledJobs = scheduledJobs;
+        _fileOperationLock = fileOperationLock;
     }
 
     /// <summary>

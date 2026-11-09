@@ -26,7 +26,6 @@ public class ComicEmailQueue : IComicEmailQueue
     /// </summary>
     public static readonly TimeSpan PendingSweepInterval = TimeSpan.FromMinutes(15);
 
-    private readonly Func<IComicEmailService> _serviceFactory;
     private readonly ILogger<ComicEmailQueue> _logger;
     private readonly TimeProvider _timeProvider;
 
@@ -62,10 +61,6 @@ public class ComicEmailQueue : IComicEmailQueue
     private Task _allConsumersDone = Task.CompletedTask;
 
     /// <summary>Initializes a new instance of the <see cref="ComicEmailQueue"/> class.</summary>
-    /// <param name="serviceFactory">
-    /// Resolves the delivery service lazily; the service itself enqueues work,
-    /// so constructor injection would form a dependency cycle.
-    /// </param>
     /// <param name="logger">Logger.</param>
     /// <param name="metrics">Publishes the queue depth when set.</param>
     /// <param name="timeProvider">
@@ -73,12 +68,10 @@ public class ComicEmailQueue : IComicEmailQueue
     /// clock when null.
     /// </param>
     public ComicEmailQueue(
-        Func<IComicEmailService> serviceFactory,
         ILogger<ComicEmailQueue> logger,
         ComicMaintainerMetrics? metrics = null,
         TimeProvider? timeProvider = null)
     {
-        _serviceFactory = serviceFactory;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
         metrics?.SetEmailQueueDepthProvider(() => _channel.Reader.Count);
@@ -229,7 +222,7 @@ public class ComicEmailQueue : IComicEmailQueue
         }
     }
 
-    public Task StartAsync(CancellationToken cancellationToken = default)
+    public Task StartAsync(IComicEmailService deliveryService, CancellationToken cancellationToken = default)
     {
         lock (_lifecycleLock)
         {
@@ -246,8 +239,8 @@ public class ComicEmailQueue : IComicEmailQueue
             var previous = _allConsumersDone;
             _stoppingCts = stoppingCts;
             _sweepCts = sweepCts;
-            _consumer = Task.Run(() => ConsumeAsync(previous, reader, stoppingCts.Token), CancellationToken.None);
-            _sweep = Task.Run(() => SweepPendingAsync(sweepCts.Token), CancellationToken.None);
+            _consumer = Task.Run(() => ConsumeAsync(deliveryService, previous, reader, stoppingCts.Token), CancellationToken.None);
+            _sweep = Task.Run(() => SweepPendingAsync(deliveryService, sweepCts.Token), CancellationToken.None);
             _allConsumersDone = Task.WhenAll(previous, _consumer);
         }
 
@@ -321,7 +314,7 @@ public class ComicEmailQueue : IComicEmailQueue
         SingleWriter = false
     });
 
-    private async Task ConsumeAsync(Task previous, ChannelReader<int> reader, CancellationToken cancellationToken)
+    private async Task ConsumeAsync(IComicEmailService deliveryService, Task previous, ChannelReader<int> reader, CancellationToken cancellationToken)
     {
         // A restart can overlap the previous run still draining; wait for it so the
         // mail server is never hit concurrently. If this run is stopped meanwhile,
@@ -346,7 +339,7 @@ public class ComicEmailQueue : IComicEmailQueue
 
                 try
                 {
-                    await _serviceFactory().ProcessDeliveryAsync(deliveryId, cancellationToken);
+                    await deliveryService.ProcessDeliveryAsync(deliveryId, cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -390,13 +383,13 @@ public class ComicEmailQueue : IComicEmailQueue
     /// <see cref="PendingSweepInterval"/> so a delivery that failed before it
     /// was claimed is retried rather than left pending.
     /// </summary>
-    private async Task SweepPendingAsync(CancellationToken cancellationToken)
+    private async Task SweepPendingAsync(IComicEmailService deliveryService, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await _serviceFactory().ResumePendingDeliveriesAsync(cancellationToken);
+                await deliveryService.ResumePendingDeliveriesAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

@@ -61,7 +61,7 @@ public sealed class ArchiveWriteRecoveryHostedServiceTests : IDisposable
             l => l.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((state, _) => state.ToString() == "Failed to recover interrupted archive writes at startup"),
+                It.Is<It.IsAnyType>((state, _) => state!.ToString() == "Failed to recover interrupted archive writes at startup"),
                 It.Is<InvalidOperationException>(ex => ex.Message == "settings unavailable"),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

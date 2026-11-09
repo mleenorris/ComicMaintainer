@@ -27,9 +27,7 @@ public partial class FileStoreService
         // Captured before reading: a change committed while we read bumps the version, so
         // whatever we cache here is never served for the newer version.
         var cacheKey = ReadPathsCacheKey(userId, GetReadStateVersion(userId));
-        if (_memoryCache != null &&
-            _memoryCache.TryGetValue(cacheKey, out HashSet<string>? cached) &&
-            cached != null)
+        if (_memoryCache.TryGetValue(cacheKey, out HashSet<string>? cached) && cached != null)
         {
             return cached;
         }
@@ -42,7 +40,7 @@ public partial class FileStoreService
             .ToListAsync(cancellationToken);
 
         var set = new HashSet<string>(paths, StringComparer.Ordinal);
-        _memoryCache?.Set(cacheKey, set, ReadPathsCacheTtl);
+        _memoryCache.Set(cacheKey, set, ReadPathsCacheTtl);
         return set;
     }
 
@@ -55,7 +53,7 @@ public partial class FileStoreService
     {
         var stale = ReadPathsCacheKey(userId, GetReadStateVersion(userId));
         MarkReadStateChanged(userId);
-        _memoryCache?.Remove(stale);
+        _memoryCache.Remove(stale);
     }
 
     /// <summary>
@@ -435,41 +433,6 @@ public partial class FileStoreService
             default:
                 var paths = scope.FilePaths ?? Array.Empty<string>();
                 return files.Where(f => paths.Contains(f.FilePath));
-        }
-    }
-
-    public async Task SaveReadingProgressAsync(string filePath, int currentPage, CancellationToken cancellationToken = default)
-    {
-        if (currentPage < 1)
-        {
-            _logger.LogWarning("Invalid page number {Page} for {FilePath}, must be >= 1", currentPage, SanitizeForLogging(filePath));
-            return;
-        }
-
-        var userId = CurrentUserId;
-        if (userId == null)
-        {
-            _logger.LogDebug(
-                "Ignoring reading-progress update for {FilePath}: no user in scope",
-                SanitizeForLogging(filePath));
-            return;
-        }
-
-        try
-        {
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-
-            await UpsertUserReadStatusAsync(dbContext, userId, filePath, status =>
-            {
-                status.CurrentPage = currentPage;
-                status.LastReadDate = DateTime.UtcNow;
-                status.UpdatedAt = DateTime.UtcNow;
-            }, cancellationToken);
-            _logger.LogDebug("Updated reading progress for {FilePath} to page {Page}", SanitizeForLogging(filePath), currentPage);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error saving reading progress for {FilePath}", SanitizeForLogging(filePath));
         }
     }
 

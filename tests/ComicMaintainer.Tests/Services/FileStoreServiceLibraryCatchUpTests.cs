@@ -134,7 +134,6 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
         var gone = await SeedGoneFileAsync(store);
 
         var lease = store.SuspendStaleCleanup();
-        Assert.True(store.IsStaleCleanupSuspended);
 
         var cleanup = store.CleanupStaleEntriesAsync(ConfirmedCleanup);
 
@@ -145,7 +144,6 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
         lease.Dispose();
 
         Assert.Equal(1, (await cleanup.WaitAsync(WaitTimeout)).RemovedCount);
-        Assert.False(store.IsStaleCleanupSuspended);
         Assert.False(await store.FileExistsAsync(gone));
     }
 
@@ -163,7 +161,6 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
 
         await Task.Delay(100);
         Assert.False(cleanup.IsCompleted);
-        Assert.True(store.IsStaleCleanupSuspended);
 
         second.Dispose();
 
@@ -193,7 +190,6 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
         var store = CreateService();
         var gone = await SeedGoneFileAsync(store);
 
-        Assert.False(store.IsStaleCleanupSuspended);
         Assert.Equal(1, (await store.CleanupStaleEntriesAsync(ConfirmedCleanup).WaitAsync(WaitTimeout)).RemovedCount);
         Assert.False(await store.FileExistsAsync(gone));
     }
@@ -202,7 +198,7 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
     private static readonly StaleCleanupOptions ConfirmedCleanup = new(IsManual: true, Confirmed: true);
 
     private FileStoreService CreateService() =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _library, DuplicateDirectory = string.Empty }),
             NullLogger<FileStoreService>.Instance,
             _factory);

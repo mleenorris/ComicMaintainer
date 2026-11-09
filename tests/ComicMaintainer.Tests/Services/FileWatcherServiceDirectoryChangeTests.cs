@@ -240,7 +240,7 @@ public sealed class FileWatcherServiceDirectoryChangeTests : IDisposable
             WatcherFileStabilityDelaySeconds = stabilitySeconds,
             WatcherDirectoryScanDelaySeconds = 0,
         };
-        var service = new FileWatcherService(
+        var service = TestServices.CreateFileWatcher(
             new TestOptionsMonitor<AppSettings>(settings),
             new QueueLogger(_logs),
             _store.Object,

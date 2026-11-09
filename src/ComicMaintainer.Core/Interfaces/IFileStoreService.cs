@@ -121,11 +121,6 @@ public interface IFileStoreService
     Task<int> MarkScopeReadAsync(FileReadScope scope, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Save reading progress (current page) for a comic file
-    /// </summary>
-    Task SaveReadingProgressAsync(string filePath, int currentPage, CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Get reading progress (current page) for a comic file
     /// </summary>
     Task<int> GetReadingProgressAsync(string filePath, CancellationToken cancellationToken = default);
@@ -163,9 +158,16 @@ public interface IFileStoreService
     /// <summary>
     /// Update the tracked file path from oldPath to newPath, preserving all processing state
     /// (IsRenamed, IsNormalized, IsDuplicate, IsRead, Metadata).  Used when a file is renamed
-    /// so the database record follows the file without resetting its status. Identical paths
-    /// are a no-op.
+    /// so the database record follows the file without resetting its status, along with every
+    /// user's read state and the email delivery history. Identical paths are a no-op.
     /// </summary>
+    /// <remarks>
+    /// Throws when the record could not be moved. Nothing has changed then and both stores still
+    /// have the file at <paramref name="oldPath"/>, so a caller that has already moved the file
+    /// on disk can undo that (or leave the record to the file watcher and the next scan). Once
+    /// the record has moved, a later failure (repointing read state or deliveries) is logged and
+    /// not thrown: the file really is at <paramref name="newPath"/> now.
+    /// </remarks>
     /// <param name="broadcastUpdate">
     /// When true (default) a file list update event is broadcast after a successful update.
     /// Callers performing bulk updates (e.g. combining folders containing many files) should
@@ -179,7 +181,7 @@ public interface IFileStoreService
     /// <paramref name="oldDirectory"/> to the same relative path under
     /// <paramref name="newDirectory"/>, in one transaction: the file rows with all their state
     /// (processing flags, user metadata edits and field locks), every user's read status and
-    /// reader progress. Where a row already exists at a destination path, the moved row wins
+    /// reader progress, and the email delivery history. Where a row already exists at a destination path, the moved row wins
     /// and absorbs its state. Returns the number of files moved; 0 when nothing is tracked
     /// under <paramref name="oldDirectory"/> or <paramref name="newDirectory"/> is outside the
     /// allowed directories.
@@ -238,12 +240,6 @@ public interface IFileStoreService
     /// read state.
     /// </summary>
     IDisposable SuspendStaleCleanup();
-
-    /// <summary>
-    /// Whether a <see cref="SuspendStaleCleanup"/> lease is active, in which case
-    /// <see cref="CleanupStaleEntriesAsync"/> does not complete before the lease ends.
-    /// </summary>
-    bool IsStaleCleanupSuspended { get; }
 
     /// <summary>
     /// Re-reads the on-disk size and last-write time of each tracked file in

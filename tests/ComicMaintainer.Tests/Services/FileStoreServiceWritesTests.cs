@@ -709,7 +709,8 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         var newPath = WriteComic(_library, "New.cbz");
         _factory.FailAll();
 
-        await service.UpdateFilePathAsync(oldPath, newPath);
+        // The caller has to know the row did not move: a conversion undoes itself on this.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateFilePathAsync(oldPath, newPath));
 
         Assert.True(_logger.Contains(LogLevel.Error, "Error updating file path in database"));
         // Regression: memory moved first, so every endpoint reading it showed a move the
@@ -719,6 +720,47 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Never);
         _factory.Heal();
         Assert.Equal(oldPath, Assert.Single(await AllRowsAsync()).FilePath);
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_Cancelled_ThrowsWithoutLoggingAnErrorAndLeavesBothStoresAtTheOldPath()
+    {
+        var oldPath = Path.Join(_library, "Old.cbz");
+        await SeedAsync(Row(oldPath, renamed: true));
+        var service = CreateService(broadcaster: _broadcaster.Object);
+        await service.InitializeFromDatabaseAsync();
+        var newPath = WriteComic(_library, "New.cbz");
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.UpdateFilePathAsync(oldPath, newPath, cts.Token));
+
+        Assert.False(_logger.Has(LogLevel.Error));
+        Assert.True(await service.IsFileRenamedAsync(oldPath));
+        Assert.False(await service.FileExistsAsync(newPath));
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_RepointingFailsAfterTheRowMoved_DoesNotThrowAndKeepsTheMovedRow()
+    {
+        var oldPath = Path.Join(_library, "Old.cbz");
+        await SeedAsync(Row(oldPath, renamed: true));
+        var service = CreateService(broadcaster: _broadcaster.Object);
+        await service.InitializeFromDatabaseAsync();
+        var newPath = WriteComic(_library, "New.cbz");
+        // The first save moves the row; the next one repoints the read state and fails.
+        _interceptor.BeforeNextSave = () =>
+        {
+            _interceptor.BeforeNextSave = () => throw new InvalidOperationException("database is locked");
+            return Task.CompletedTask;
+        };
+
+        await service.UpdateFilePathAsync(oldPath, newPath);
+
+        Assert.True(_logger.Contains(LogLevel.Error, "Error updating file path in database"));
+        Assert.Equal(newPath, Assert.Single(await AllRowsAsync()).FilePath);
+        Assert.True(await service.FileExistsAsync(newPath));
+        Assert.False(await service.FileExistsAsync(oldPath));
     }
 
     [Fact]
@@ -947,7 +989,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         string duplicateDirectory = "",
         IEventBroadcaster? broadcaster = null,
         string? watchedDirectory = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = watchedDirectory ?? _library,

@@ -6,6 +6,7 @@ using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -24,7 +25,7 @@ public class SeriesNameResolverCoverageTests
     }
 
     private SeriesNameResolver CreateResolver(bool withCache = true, bool withExternal = true) =>
-        new(
+        TestServices.CreateSeriesNameResolver(
             _options.Object,
             _logger,
             withCache ? _cache.Object : null,

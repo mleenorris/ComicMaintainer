@@ -6,15 +6,14 @@ using Microsoft.Extensions.Logging;
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Default <see cref="ISeriesArchiveCoverWriteQueue"/> implementation. Backs the
+/// Default <see cref="ISeriesCoverArtifactQueue"/> implementation. Backs the
 /// queue with an unbounded <see cref="Channel{T}"/> drained by a single
-/// long-running consumer task so archive rewrites happen off the caller's
+/// long-running consumer task so cover writes happen off the caller's
 /// thread and never overlap each other.
 /// </summary>
-public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
+public class SeriesCoverArtifactQueue : ISeriesCoverArtifactQueue
 {
-    private readonly ISeriesArchiveCoverWriter _writer;
-    private readonly ILogger<SeriesArchiveCoverWriteQueue> _logger;
+    private readonly ILogger<SeriesCoverArtifactQueue> _logger;
 
     private readonly object _lifecycleLock = new();
 
@@ -32,11 +31,8 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
     // on that run alone to know the earlier ones are done.
     private Task _allConsumersDone = Task.CompletedTask;
 
-    public SeriesArchiveCoverWriteQueue(
-        ISeriesArchiveCoverWriter writer,
-        ILogger<SeriesArchiveCoverWriteQueue> logger)
+    public SeriesCoverArtifactQueue(ILogger<SeriesCoverArtifactQueue> logger)
     {
-        _writer = writer;
         _logger = logger;
     }
 
@@ -65,7 +61,7 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
         _channel.Writer.TryWrite(CoverWriteRequest.ForRemove(normalizedKey));
     }
 
-    public Task StartAsync(CancellationToken cancellationToken = default)
+    public Task StartAsync(ISeriesCoverArtifactWriter writer, CancellationToken cancellationToken = default)
     {
         lock (_lifecycleLock)
         {
@@ -80,7 +76,7 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
             var reader = _channel.Reader;
             var previous = _allConsumersDone;
             _stoppingCts = stoppingCts;
-            _consumer = Task.Run(() => ConsumeAsync(previous, reader, stoppingCts.Token), CancellationToken.None);
+            _consumer = Task.Run(() => ConsumeAsync(writer, previous, reader, stoppingCts.Token), CancellationToken.None);
             _allConsumersDone = Task.WhenAll(previous, _consumer);
         }
 
@@ -129,10 +125,10 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
             SingleWriter = false
         });
 
-    private async Task ConsumeAsync(Task previous, ChannelReader<CoverWriteRequest> reader, CancellationToken cancellationToken)
+    private async Task ConsumeAsync(ISeriesCoverArtifactWriter writer, Task previous, ChannelReader<CoverWriteRequest> reader, CancellationToken cancellationToken)
     {
         // A restart can overlap the previous run still draining; wait for it so
-        // archive rewrites never overlap. If this run is stopped meanwhile, the
+        // cover writes never overlap. If this run is stopped meanwhile, the
         // read below ends it.
         await previous.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
@@ -140,7 +136,7 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
         {
             await foreach (var request in reader.ReadAllAsync(cancellationToken))
             {
-                await ProcessAsync(request, cancellationToken);
+                await ProcessAsync(writer, request, cancellationToken);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -149,21 +145,21 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogError(ex, "Series archive cover write queue consumer terminated unexpectedly");
+            _logger.LogError(ex, "Series cover artifact queue consumer terminated unexpectedly");
         }
     }
 
-    private async Task ProcessAsync(CoverWriteRequest request, CancellationToken cancellationToken)
+    private async Task ProcessAsync(ISeriesCoverArtifactWriter writer, CoverWriteRequest request, CancellationToken cancellationToken)
     {
         try
         {
             if (request.IsRemove)
             {
-                await _writer.RemoveAsync(request.NormalizedKey, cancellationToken);
+                await writer.RemoveAsync(request.NormalizedKey, cancellationToken);
             }
             else
             {
-                await _writer.WriteAsync(
+                await writer.WriteAsync(
                     request.NormalizedKey,
                     request.SourceFilePath!,
                     request.ContentType!,
@@ -179,8 +175,8 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogDebug(ex,
-                "Failed to {Operation} embedded first-archive series cover for {Key}",
+            _logger.LogWarning(ex,
+                "Failed to {Operation} series cover artifacts for {Key}",
                 request.IsRemove ? "remove" : "write",
                 LoggingHelper.SanitizeForLog(request.NormalizedKey));
         }

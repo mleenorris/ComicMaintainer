@@ -4,7 +4,6 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Telemetry;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.Concurrent;
 using System.Xml.Linq;
 using SharpCompress.Archives;
@@ -24,11 +23,11 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly IOptionsMonitor<AppSettings> _settingsMonitor;
     private readonly ILogger<ComicProcessorService> _logger;
     private readonly IFileStoreService _fileStore;
-    private readonly IEventBroadcaster? _eventBroadcaster;
-    private readonly ISeriesMetadataCacheService? _seriesMetadataCache;
+    private readonly IEventBroadcaster _eventBroadcaster;
+    private readonly ISeriesMetadataCacheService _seriesMetadataCache;
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesNameResolver _seriesNameResolver;
-    private readonly IJobStateStore? _jobStateStore;
+    private readonly IJobStateStore _jobStateStore;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
     private readonly ConcurrentDictionary<Guid, object> _jobSyncLocks = new();
@@ -42,7 +41,7 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
     /// Minimum spacing between durable progress writes for a job that has not changed status.
     /// </summary>
     private static readonly TimeSpan JobPersistenceInterval = TimeSpan.FromSeconds(5);
-    private readonly IComicEmailService? _comicEmail;
+    private readonly IComicEmailService _comicEmail;
     private readonly ComicMaintainerMetrics? _metrics;
     private readonly SemaphoreSlim _processingSemaphore;
     private readonly IFileOperationLock _fileLock;
@@ -63,15 +62,13 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         ILogger<ComicProcessorService> logger,
         IFileStoreService fileStore,
         IProcessingHistoryService historyService,
-        IEventBroadcaster? eventBroadcaster = null,
-        IExternalSeriesMetadataService? externalSeriesMetadata = null,
-        ISeriesMetadataCacheService? seriesMetadataCache = null,
-        ISeriesNameResolver? seriesNameResolver = null,
-        IJobStateStore? jobStateStore = null,
-        IComicEmailService? comicEmail = null,
-        ComicMaintainerMetrics? metrics = null,
-        ILoggerFactory? loggerFactory = null,
-        IFileOperationLock? fileLock = null)
+        IEventBroadcaster eventBroadcaster,
+        ISeriesMetadataCacheService seriesMetadataCache,
+        ISeriesNameResolver seriesNameResolver,
+        IJobStateStore jobStateStore,
+        IComicEmailService comicEmail,
+        IFileOperationLock fileLock,
+        ComicMaintainerMetrics? metrics = null)
     {
         _metrics = metrics;
         _settingsMonitor = settings;
@@ -80,21 +77,12 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         _historyService = historyService;
         _eventBroadcaster = eventBroadcaster;
         _seriesMetadataCache = seriesMetadataCache;
-        // DI always supplies the resolver. An instance built by hand (as tests do) gets the
-        // standard one over the same cache and provider, so there is a single implementation
-        // of the series-name priority. Pass a logger factory so its warnings stay visible.
-        _seriesNameResolver = seriesNameResolver ?? new SeriesNameResolver(
-            settings,
-            loggerFactory?.CreateLogger<SeriesNameResolver>() ?? NullLogger<SeriesNameResolver>.Instance,
-            seriesMetadataCache,
-            externalSeriesMetadata);
+        _seriesNameResolver = seriesNameResolver;
         _jobStateStore = jobStateStore;
         _comicEmail = comicEmail;
         _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
-        // DI shares one lock with every other component that rewrites archives; an instance
-        // built by hand (as tests do) still serializes its own operations on a file.
-        _fileLock = fileLock ?? new FileOperationLock();
+        _fileLock = fileLock;
     }
 
     protected virtual void Dispose(bool disposing)

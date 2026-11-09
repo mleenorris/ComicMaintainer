@@ -60,7 +60,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     private FilesController CreateController(
         IEventBroadcaster? broadcaster = null,
         ISeriesNameResolver? resolver = null,
-        ScheduledJobsHostedService? scheduledJobs = null) =>
+        IScheduledJobRunner? scheduledJobs = null) =>
         new(
             _fileStore.Object,
             _processor.Object,
@@ -69,9 +69,10 @@ public sealed class FilesControllerMetadataTests : IDisposable
             NullLogger<FilesController>.Instance,
             _settings.Object,
             TestFolderCombineService.Create(_fileStore.Object, _processor.Object, _history.Object, _seriesLibrary.Object, _settings.Object),
-            eventBroadcaster: broadcaster,
-            seriesNameResolver: resolver,
-            scheduledJobsHostedService: scheduledJobs);
+            broadcaster ?? Mock.Of<IEventBroadcaster>(),
+            resolver ?? Mock.Of<ISeriesNameResolver>(),
+            scheduledJobs ?? Mock.Of<IScheduledJobRunner>(),
+            new FileOperationLock());
 
     private string InRoot(params string[] parts) => Path.Join(new[] { _root }.Concat(parts).ToArray());
 
@@ -173,15 +174,6 @@ public sealed class FilesControllerMetadataTests : IDisposable
 
         AssertStatus(result.Result, 400, "File path is outside the allowed directory");
         _resolver.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task GetSeriesResolution_NoResolverRegistered_Returns503()
-    {
-        var result = await CreateController().GetSeriesResolution(InRoot("Saga 001.cbz"), CancellationToken.None);
-
-        AssertStatus(result.Result, 503, "Series name resolver not available");
-        _processor.Verify(p => p.GetMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

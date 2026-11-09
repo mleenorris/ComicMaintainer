@@ -291,11 +291,11 @@ public class ComicEmailDeliveryRetryTests : IDisposable
             });
 
         ComicEmailService? service = null;
-        var queue = new ComicEmailQueue(() => service!, new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: _time);
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object, timeProvider: _time);
         service = CreateService(queue);
         var id = await QueueAsync(service, "Series 001.cbz");
 
-        await queue.StartAsync();
+        await queue.StartAsync(service);
         try
         {
             // The sweep's delay is the first timer; the retry is the second.

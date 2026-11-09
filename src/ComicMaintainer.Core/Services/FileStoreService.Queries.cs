@@ -96,7 +96,7 @@ public partial class FileStoreService
     public async Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default)
     {
         var cacheKey = $"FileStore.FileCounts.{ChangeVersion}";
-        if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out (int, int, int, int) cached))
+        if (_memoryCache.TryGetValue(cacheKey, out (int, int, int, int) cached))
         {
             return cached;
         }
@@ -117,7 +117,7 @@ public partial class FileStoreService
         var result = counts is null
             ? (0, 0, 0, 0)
             : (counts.Total, counts.Processed, counts.Unprocessed, counts.Duplicates);
-        _memoryCache?.Set(cacheKey, result, UnmarkedCountCacheTtl);
+        _memoryCache.Set(cacheKey, result, UnmarkedCountCacheTtl);
         return result;
     }
 

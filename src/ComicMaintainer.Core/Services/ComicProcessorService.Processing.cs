@@ -404,11 +404,6 @@ public partial class ComicProcessorService
     /// </summary>
     private async Task TryQueueAutomaticEmailAsync(string filePath, string? seriesName, CancellationToken cancellationToken)
     {
-        if (_comicEmail is null)
-        {
-            return;
-        }
-
         try
         {
             var queued = await _comicEmail.QueueAutoSendAsync(filePath, seriesName, cancellationToken);
@@ -440,7 +435,7 @@ public partial class ComicProcessorService
     /// </summary>
     private async Task StampSeriesMetadataVersionAsync(string filePath, string? resolvedSeries, CancellationToken cancellationToken)
     {
-        if (_seriesMetadataCache is null || string.IsNullOrWhiteSpace(resolvedSeries)) return;
+        if (string.IsNullOrWhiteSpace(resolvedSeries)) return;
         try
         {
             var key = _seriesMetadataCache.NormalizeKey(resolvedSeries);

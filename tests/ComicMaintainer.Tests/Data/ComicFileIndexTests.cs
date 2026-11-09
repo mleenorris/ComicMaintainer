@@ -131,7 +131,7 @@ public sealed class ComicFileIndexTests : IAsyncLifetime
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>()));
     }
 
-    private FileStoreService CreateService() => new(
+    private FileStoreService CreateService() => TestServices.CreateFileStore(
         new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = "/library" }),
         NullLogger<FileStoreService>.Instance,
         _factory);

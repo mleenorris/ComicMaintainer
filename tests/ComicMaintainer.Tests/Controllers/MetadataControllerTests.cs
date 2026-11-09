@@ -23,7 +23,10 @@ public class MetadataControllerTests
             _cache.Object,
             _refreshJobs.Object,
             _external.Object,
-            new Mock<ILogger<MetadataController>>().Object);
+            new Mock<ILogger<MetadataController>>().Object,
+            Mock.Of<IComicProcessorService>(),
+            Mock.Of<IFileStoreService>(),
+            Mock.Of<ISeriesLanguagePreferenceRetagService>());
     }
 
     [Fact]
@@ -183,7 +186,9 @@ public class MetadataControllerTests
             _refreshJobs.Object,
             _external.Object,
             new Mock<ILogger<MetadataController>>().Object,
-            languageRetag: retag.Object);
+            Mock.Of<IComicProcessorService>(),
+            Mock.Of<IFileStoreService>(),
+            retag.Object);
 
         var result = await controller.SetPreferredLanguage(
             "Batman",
@@ -369,7 +374,8 @@ public class MetadataControllerTests
             _external.Object,
             new Mock<ILogger<MetadataController>>().Object,
             processor.Object,
-            fileStore.Object);
+            fileStore.Object,
+            Mock.Of<ISeriesLanguagePreferenceRetagService>());
 
         var result = await controller.ApplyMatch(
             "Batman",

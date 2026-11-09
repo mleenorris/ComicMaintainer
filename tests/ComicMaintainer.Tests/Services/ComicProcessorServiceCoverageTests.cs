@@ -1095,7 +1095,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
             options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
         using var provider = services.BuildServiceProvider();
-        var fileStore = new FileStoreService(
+        var fileStore = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<FileStoreService>.Instance,
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
@@ -2149,7 +2149,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Callback(() => cts.Cancel())
             .ThrowsAsync(new OperationCanceledException(cts.Token));
-        var resolver = new SeriesNameResolver(
+        var resolver = TestServices.CreateSeriesNameResolver(
             new TestOptionsMonitor<AppSettings>(_settings), NullLogger<SeriesNameResolver>.Instance, cache.Object, external.Object);
         var service = CreateService(cache: cache.Object, resolver: resolver, external: external.Object);
         var path = WriteCbz("Kaibutsu/source.cbz", Xml("Kaibutsu", "1", "Chapter 1"));
@@ -2194,7 +2194,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
 
         // Series resolution goes through the real SeriesNameResolver, logging to the same
         // logger, so its warnings can be asserted alongside the processor's.
-        var service = new ComicProcessorService(
+        var service = TestServices.CreateComicProcessor(
             settings,
             _logger,
             fileStore ?? _fileStore.Object,
@@ -2202,7 +2202,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
             eventBroadcaster: _broadcaster.Object,
             externalSeriesMetadata: external,
             seriesMetadataCache: cache,
-            seriesNameResolver: resolver ?? new SeriesNameResolver(settings, _logger, cache, external),
+            seriesNameResolver: resolver ?? TestServices.CreateSeriesNameResolver(settings, _logger, cache, external),
             comicEmail: email,
             metrics: metrics);
         _services.Add(service);
@@ -2532,7 +2532,17 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
             IFileStoreService fileStore,
             IProcessingHistoryService history,
             IEventBroadcaster eventBroadcaster)
-            : base(new TestOptionsMonitor<AppSettings>(settings), logger, fileStore, history, eventBroadcaster)
+            : base(
+                  new TestOptionsMonitor<AppSettings>(settings),
+                  logger,
+                  fileStore,
+                  history,
+                  eventBroadcaster,
+                  Mock.Of<ISeriesMetadataCacheService>(),
+                  TestServices.CreateSeriesNameResolver(new TestOptionsMonitor<AppSettings>(settings), NullLogger<SeriesNameResolver>.Instance),
+                  Mock.Of<IJobStateStore>(),
+                  Mock.Of<IComicEmailService>(),
+                  new FileOperationLock())
         {
         }
 

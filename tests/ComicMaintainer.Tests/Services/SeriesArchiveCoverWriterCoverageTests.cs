@@ -142,14 +142,52 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     // ---- watcher suppression -------------------------------------------------------
 
     [Fact]
-    public async Task WriteAsync_NoWatcherRegistered_StillEmbedsCover()
+    public async Task WriteAsync_FirstArchiveLookupFails_IsLoggedAtWarningAndSwallowed()
     {
-        var cbz = CreateCbz("issue1.cbz", ("01.jpg", PageBytes));
-        SetupFirstArchive(cbz);
+        _library
+            .Setup(l => l.GetFirstIssueFilePathForNormalizedKeyAsync(Key, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
+        var options = new Mock<IOptionsMonitor<AppSettings>>();
+        options.Setup(o => o.CurrentValue).Returns(_settings);
+        var writer = new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger.Object, new FileOperationLock());
 
-        await CreateWriter(registerWatcher: false).WriteAsync(Key, _source, "image/jpeg");
+        await writer.WriteAsync(Key, _source, "image/jpeg");
 
-        Assert.Equal(NewCover, ReadEntry(cbz, "cover.jpg"));
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state!.ToString()!.Contains("Failed to resolve first archive for series cover embed/remove")),
+                It.IsAny<InvalidOperationException>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task WriteAsync_CancelledDuringLookup_PropagatesWithoutAWarning()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        _library
+            .Setup(l => l.GetFirstIssueFilePathForNormalizedKeyAsync(Key, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
+        var options = new Mock<IOptionsMonitor<AppSettings>>();
+        options.Setup(o => o.CurrentValue).Returns(_settings);
+        var writer = new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger.Object, new FileOperationLock());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            writer.WriteAsync(Key, _source, "image/jpeg", cancellationToken: cts.Token));
+
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
     }
 
     [Fact]
@@ -456,18 +494,11 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
 
     // ---- helpers -----------------------------------------------------------------------
 
-    private SeriesArchiveCoverWriter CreateWriter(bool registerWatcher = true)
+    private SeriesArchiveCoverWriter CreateWriter()
     {
-        var services = new ServiceCollection();
-        services.AddScoped(_ => _library.Object);
-        if (registerWatcher)
-        {
-            services.AddScoped(_ => _watcher.Object);
-        }
-        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(_settings);
-        return new SeriesArchiveCoverWriter(scopeFactory, options.Object, Mock.Of<ILogger<SeriesArchiveCoverWriter>>());
+        return new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, Mock.Of<ILogger<SeriesArchiveCoverWriter>>(), new FileOperationLock());
     }
 
     private void SetupFirstArchive(string? path)

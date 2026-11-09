@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
@@ -45,7 +46,7 @@ public class JobStatePersistenceTests : IDisposable
 
     private ComicProcessorService CreateProcessor()
     {
-        return new ComicProcessorService(
+        return TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
             new Mock<ILogger<ComicProcessorService>>().Object,
             _fileStore.Object,
@@ -76,14 +77,23 @@ public class JobStatePersistenceTests : IDisposable
     public async Task BatchJob_PersistsCreationAndTerminalState()
     {
         var processor = CreateProcessor();
-        var saved = new List<ProcessingJob>();
+        var saved = new ConcurrentQueue<ProcessingJob>();
+        var terminalSaved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _jobStateStore
             .Setup(s => s.SaveAsync(It.IsAny<ProcessingJob>(), It.IsAny<CancellationToken>()))
-            .Callback<ProcessingJob, CancellationToken>((j, _) => saved.Add(j))
+            .Callback<ProcessingJob, CancellationToken>((j, _) =>
+            {
+                saved.Enqueue(j);
+                if (j.IsTerminal)
+                {
+                    terminalSaved.TrySetResult();
+                }
+            })
             .Returns(Task.CompletedTask);
 
         var jobId = await processor.ProcessFilesAsync(new List<string>());
         var job = await WaitForTerminalAsync(processor, jobId);
+        await terminalSaved.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.NotNull(job);
         Assert.Equal(JobStatus.Completed, job!.Status);
@@ -97,10 +107,10 @@ public class JobStatePersistenceTests : IDisposable
     public async Task BatchJob_RecordsOperationNameForPostRestartDisplay()
     {
         var processor = CreateProcessor();
-        var saved = new List<ProcessingJob>();
+        var saved = new ConcurrentQueue<ProcessingJob>();
         _jobStateStore
             .Setup(s => s.SaveAsync(It.IsAny<ProcessingJob>(), It.IsAny<CancellationToken>()))
-            .Callback<ProcessingJob, CancellationToken>((j, _) => saved.Add(j))
+            .Callback<ProcessingJob, CancellationToken>((j, _) => saved.Enqueue(j))
             .Returns(Task.CompletedTask);
 
         var jobId = await processor.ProcessFilesAsync(new List<string>());

@@ -124,7 +124,7 @@ public sealed class ComicProcessorServiceLibraryRootTests : IDisposable
     {
         var looked = _external.Invocations
             .Where(i => i.Method.Name == nameof(IExternalSeriesMetadataService.LookupSeriesAsync))
-            .Select(i => (string)i.Arguments[0])
+            .Select(i => (string)i.Arguments[0]!)
             .ToList();
         Assert.DoesNotContain(looked, name => name.Contains("watched", StringComparison.OrdinalIgnoreCase));
     }
@@ -141,7 +141,7 @@ public sealed class ComicProcessorServiceLibraryRootTests : IDisposable
                 }
             })
             .Returns(Task.CompletedTask);
-        return new ComicProcessorService(
+        return TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             Mock.Of<ILogger<ComicProcessorService>>(),
             _fileStore.Object,

@@ -93,6 +93,9 @@ public partial class FileStoreService
 
             await MoveUserStateUnderAsync(dbContext, oldPrefix, Rebase, cachedPaths, affectedUsers, cancellationToken);
 
+            await MoveEmailDeliveriesUnderAsync(dbContext, oldPrefix, Rebase, cachedPaths, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
             await transaction.CommitAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)

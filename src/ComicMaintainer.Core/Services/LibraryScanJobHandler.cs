@@ -56,7 +56,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
-    private readonly ISeriesMetadataCacheService? _seriesCache;
+    private readonly ISeriesMetadataCacheService _seriesCache;
     private readonly ILogger<LibraryScanJobHandler> _logger;
 
     public LibraryScanJobHandler(
@@ -64,7 +64,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         IFileStoreService fileStore,
         IComicProcessorService processor,
         ILogger<LibraryScanJobHandler> logger,
-        ISeriesMetadataCacheService? seriesCache = null)
+        ISeriesMetadataCacheService seriesCache)
     {
         _settings = settings;
         _fileStore = fileStore;
@@ -182,7 +182,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         // and ask the file store which files in that group have a stamp
         // older than the current version. Force-normalize the result.
         var staleToFix = new List<string>();
-        if (options.RetagStale && _seriesCache is not null)
+        if (options.RetagStale)
         {
             try
             {

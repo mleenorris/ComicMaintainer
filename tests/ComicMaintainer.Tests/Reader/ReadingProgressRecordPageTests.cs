@@ -138,7 +138,7 @@ public sealed class ReadingProgressRecordPageTests : IAsyncLifetime
     {
         await _service.RecordPageAsync("alice", FilePath, page: 7, totalPages: 10);
 
-        var fileStore = new FileStoreService(
+        var fileStore = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = "/comics", DuplicateDirectory = string.Empty }),
             NullLogger<FileStoreService>.Instance,
             _factory,

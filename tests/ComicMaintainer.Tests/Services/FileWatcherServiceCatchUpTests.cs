@@ -177,7 +177,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
     {
         CreateComic("Saga", "Saga 001.cbz");
         CreateComic("Saga", "Saga 002.cbz");
-        var service = new FileWatcherService(
+        var service = TestServices.CreateFileWatcher(
             new TestOptionsMonitor<AppSettings>(Settings()), new QueueLogger(_logs, () => null), _store.Object, _processor.Object);
         _services.Add(service);
         StopServiceOnFirstAdd(service, dispose);
@@ -222,7 +222,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
                 addEntered.TrySetResult();
                 await addRelease.Task;
             });
-        var service = new FileWatcherService(
+        var service = TestServices.CreateFileWatcher(
             new TestOptionsMonitor<AppSettings>(Settings()), new QueueLogger(_logs, () => null), _store.Object, _processor.Object);
         _services.Add(service);
 
@@ -475,7 +475,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
         // First run: the existing file is tracked and marked processed; a file then arrives and
         // is still settling when the application stops.
         var firstStore = CreateRealStore(factory);
-        using (var firstRun = new FileWatcherService(
+        using (var firstRun = TestServices.CreateFileWatcher(
                    new TestOptionsMonitor<AppSettings>(Settings(stabilitySeconds: 600)),
                    new QueueLogger(_logs, () => null), firstStore, processor.Object))
         {
@@ -495,7 +495,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
 
         // Second run, on the same database.
         var secondStore = CreateRealStore(factory);
-        using var secondRun = new FileWatcherService(
+        using var secondRun = TestServices.CreateFileWatcher(
             new TestOptionsMonitor<AppSettings>(Settings(stabilitySeconds: 0)),
             new QueueLogger(_logs, () => null), secondStore, processor.Object);
         await secondRun.StartAsync();
@@ -520,7 +520,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
         await CreateRealStore(factory).AddFileAsync(addedBeforeTheInterruption);
 
         var secondStore = CreateRealStore(factory);
-        using (var secondRun = new FileWatcherService(
+        using (var secondRun = TestServices.CreateFileWatcher(
                    new TestOptionsMonitor<AppSettings>(Settings()),
                    new QueueLogger(_logs, () => null), secondStore, processor.Object))
         {
@@ -536,7 +536,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
         // That scan has now run to the end, so what appears next did arrive.
         var arrived = CreateComic("Saga", "Saga 003.cbz");
         _logs.Clear();
-        using var thirdRun = new FileWatcherService(
+        using var thirdRun = TestServices.CreateFileWatcher(
             new TestOptionsMonitor<AppSettings>(Settings()),
             new QueueLogger(_logs, () => null), CreateRealStore(factory), processor.Object);
         await thirdRun.StartAsync();
@@ -576,7 +576,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
             }
         };
 
-        using var service = new FileWatcherService(
+        using var service = TestServices.CreateFileWatcher(
             new TestOptionsMonitor<AppSettings>(Settings()), new QueueLogger(_logs, () => _onLog), store, ProcessorRecording(processed).Object);
         await service.StartAsync();
 
@@ -644,7 +644,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
     }
 
     private FileStoreService CreateRealStore(IDbContextFactory<ComicMaintainerDbContext> factory) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(Settings()),
             NullLogger<FileStoreService>.Instance,
             factory);
@@ -702,7 +702,7 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
     /// </summary>
     private async Task<FileWatcherService> StartWatchingAsync(TestOptionsMonitor<AppSettings> monitor)
     {
-        var service = new FileWatcherService(monitor, new QueueLogger(_logs, () => _onLog), _store.Object, _processor.Object);
+        var service = TestServices.CreateFileWatcher(monitor, new QueueLogger(_logs, () => _onLog), _store.Object, _processor.Object);
         _services.Add(service);
 
         await service.StartAsync();

@@ -26,18 +26,18 @@ namespace ComicMaintainer.WebApi.Controllers;
 public class ScheduledJobsController : ControllerBase
 {
     private readonly IScheduledJobService _service;
-    private readonly ScheduledJobsHostedService _hostedService;
+    private readonly IScheduledJobRunner _runner;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly ILogger<ScheduledJobsController> _logger;
 
     public ScheduledJobsController(
         IScheduledJobService service,
-        ScheduledJobsHostedService hostedService,
+        IScheduledJobRunner runner,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         ILogger<ScheduledJobsController> logger)
     {
         _service = service;
-        _hostedService = hostedService;
+        _runner = runner;
         _dbContextFactory = dbContextFactory;
         _logger = logger;
     }
@@ -99,7 +99,7 @@ public class ScheduledJobsController : ControllerBase
         {
             return NotFound();
         }
-        var queued = await _hostedService.RunNowAsync(jobKey, ct);
+        var queued = await _runner.RunNowAsync(jobKey, ct);
         return Accepted(new { jobKey, queued });
     }
 

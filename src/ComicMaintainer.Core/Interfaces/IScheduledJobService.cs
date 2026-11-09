@@ -19,6 +19,12 @@ public interface IScheduledJobService
     /// <summary>List every job (combining persisted state with handler metadata).</summary>
     Task<IReadOnlyList<ScheduledJobView>> ListAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The handler registered for <paramref name="jobKey"/> (matched case-insensitively), or
+    /// null when none is. Used by the hosted runner to dispatch runs.
+    /// </summary>
+    IScheduledJobHandler? GetHandler(string jobKey);
+
     /// <summary>Fetch a single job, or null if no handler with that key is registered.</summary>
     Task<ScheduledJobView?> GetAsync(string jobKey, CancellationToken cancellationToken = default);
 

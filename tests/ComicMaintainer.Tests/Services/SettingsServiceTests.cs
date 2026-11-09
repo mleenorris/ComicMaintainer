@@ -433,7 +433,7 @@ public class SettingsServiceTests : IDisposable
             l => l.Log(
                 It.IsAny<LogLevel>(),
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("a-password-value")),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString()!.Contains("a-password-value")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);
@@ -578,7 +578,7 @@ public class SettingsServiceTests : IDisposable
             l => l.Log(
                 It.IsAny<LogLevel>(),
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("a-token-value")),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString()!.Contains("a-token-value")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);

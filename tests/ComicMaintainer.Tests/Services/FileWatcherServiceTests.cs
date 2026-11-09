@@ -99,7 +99,7 @@ public class FileWatcherServiceTests : IDisposable
 
         _mockOptions.Setup(o => o.CurrentValue).Returns(_settings);
 
-        _service = new FileWatcherService(
+        _service = TestServices.CreateFileWatcher(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -159,7 +159,7 @@ public class FileWatcherServiceTests : IDisposable
         var mockDisabledOptions = new Mock<IOptionsMonitor<AppSettings>>();
         mockDisabledOptions.Setup(o => o.CurrentValue).Returns(disabledSettings);
         
-        var disabledService = new FileWatcherService(
+        var disabledService = TestServices.CreateFileWatcher(
             mockDisabledOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -186,7 +186,7 @@ public class FileWatcherServiceTests : IDisposable
         var mockDisabledOptions = new Mock<IOptionsMonitor<AppSettings>>();
         mockDisabledOptions.Setup(o => o.CurrentValue).Returns(disabledSettings);
 
-        using var disabledService = new FileWatcherService(
+        using var disabledService = TestServices.CreateFileWatcher(
             mockDisabledOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -235,34 +235,6 @@ public class FileWatcherServiceTests : IDisposable
         // Act & Assert
         await _service.StopAsync();
         Assert.False(_service.IsRunning);
-    }
-
-    [Fact]
-    [Obsolete("Covers the deprecated SetEnabled no-op until it is removed.")]
-    public void SetEnabled_WithTrue_IsDeprecated()
-    {
-        // SetEnabled is now deprecated and does nothing
-        // Act
-        _service.SetEnabled(true);
-
-        // Assert - Should not start watcher (SetEnabled is now a no-op)
-        Assert.False(_service.IsRunning, "SetEnabled is deprecated and should not start watcher");
-    }
-
-    [Fact]
-    [Obsolete("Covers the deprecated SetEnabled no-op until it is removed.")]
-    public async Task SetEnabled_WithFalse_IsDeprecated()
-    {
-        // Arrange
-        await _service.StartAsync();
-        Assert.True(_service.IsRunning);
-
-        // SetEnabled is now deprecated and does nothing
-        // Act
-        _service.SetEnabled(false);
-
-        // Assert - Should not stop watcher (SetEnabled is now a no-op)
-        Assert.True(_service.IsRunning, "SetEnabled is deprecated and should not stop watcher");
     }
 
     [Fact]
@@ -674,7 +646,7 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        using var service = new FileWatcherService(
+        using var service = TestServices.CreateFileWatcher(
             monitor,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -712,7 +684,7 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        using var service = new FileWatcherService(
+        using var service = TestServices.CreateFileWatcher(
             monitor,
             _mockLogger.Object,
             _mockFileStore.Object,

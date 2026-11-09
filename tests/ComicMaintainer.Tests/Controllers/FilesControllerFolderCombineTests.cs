@@ -96,7 +96,11 @@ public sealed class FilesControllerFolderCombineTests : IDisposable
             _seriesLibrary.Object,
             NullLogger<FilesController>.Instance,
             _settings.Object,
-            folderCombine);
+            folderCombine,
+            Mock.Of<IEventBroadcaster>(),
+            Mock.Of<ISeriesNameResolver>(),
+            Mock.Of<IScheduledJobRunner>(),
+            new ComicMaintainer.Core.Services.FileOperationLock());
 
     private string Dir(string name) => Path.Join(_root, name);
 

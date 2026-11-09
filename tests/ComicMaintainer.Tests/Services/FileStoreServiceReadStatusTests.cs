@@ -257,39 +257,6 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveReadingProgressAsync_PageBelowOne_IsRejected()
-    {
-        var service = CreateService("alice");
-
-        await service.SaveReadingProgressAsync(Path.Join(_library, "Saga 001.cbz"), 0);
-
-        Assert.True(_logger.Contains(LogLevel.Warning, "Invalid page number 0"));
-        Assert.Equal(0, _factory.Created);
-    }
-
-    [Fact]
-    public async Task SaveReadingProgressAsync_NoUserInScope_WritesNothing()
-    {
-        var service = CreateService(userId: null);
-
-        await service.SaveReadingProgressAsync(Path.Join(_library, "Saga 001.cbz"), 4);
-
-        Assert.Equal(0, _factory.Created);
-        Assert.Empty(await AllStatusesAsync());
-    }
-
-    [Fact]
-    public async Task SaveReadingProgressAsync_DatabaseUnavailable_LogsError()
-    {
-        var service = CreateService("alice");
-        _factory.FailAll();
-
-        await service.SaveReadingProgressAsync(Path.Join(_library, "Saga 001.cbz"), 4);
-
-        Assert.True(_logger.Contains(LogLevel.Error, "Error saving reading progress"));
-    }
-
-    [Fact]
     public async Task GetReadingProgressAsync_NoUserInScope_ReturnsFirstPage()
     {
         var service = CreateService(userId: null);
@@ -311,7 +278,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     }
 
     private FileStoreService CreateService(string? userId, IMemoryCache? cache = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = _library,

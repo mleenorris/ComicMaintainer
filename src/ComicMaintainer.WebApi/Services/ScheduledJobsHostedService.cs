@@ -24,9 +24,9 @@ namespace ComicMaintainer.WebApi.Services;
 /// when a run is in progress it makes the job run once more after that run
 /// instead of dropping the request.
 /// </summary>
-public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
+public sealed class ScheduledJobsHostedService : IHostedService, IScheduledJobRunner, IDisposable
 {
-    private readonly ScheduledJobService _service;
+    private readonly IScheduledJobService _service;
     private readonly ILogger<ScheduledJobsHostedService> _logger;
     private readonly ComicMaintainerMetrics? _metrics;
     private readonly ConcurrentDictionary<string, JobSlot> _slots = new(StringComparer.OrdinalIgnoreCase);
@@ -39,12 +39,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         ComicMaintainerMetrics? metrics = null)
     {
         _metrics = metrics;
-        // The hosted service depends on the concrete ScheduledJobService for
-        // the Handlers enumeration, but interacts with state through the
-        // IScheduledJobService surface. The DI container resolves both to the
-        // same singleton instance, so the cast here is safe and avoids
-        // widening the public interface.
-        _service = (ScheduledJobService)service;
+        _service = service;
         _logger = logger;
     }
 
@@ -98,24 +93,12 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         _shutdownCts?.Dispose();
     }
 
-    /// <summary>
-    /// Trigger an immediate run of the named job in the background. The run
-    /// honors single-flight: returns false, without starting anything, when the
-    /// job is unknown or a run is already in progress for that key. Once
-    /// started, the run is not tied to <paramref name="cancellationToken"/>.
-    /// </summary>
+    /// <inheritdoc />
     public Task<bool> RunNowAsync(string jobKey, CancellationToken cancellationToken = default) =>
         RequestRunAsync(jobKey, runAgainIfInProgress: false, cancellationToken);
 
-    /// <summary>
-    /// Like <see cref="RunNowAsync"/>, but a request that finds a run already in
-    /// progress is not dropped: the job runs again as soon as that run finishes,
-    /// so work added after the current run read its input is still picked up.
-    /// All requests made during one run share a single follow-up run, and no
-    /// follow-up starts once the host is stopping. Returns true when this
-    /// request started a run, false when the job is unknown or the request was
-    /// left to the follow-up run.
-    /// </summary>
+    /// <inheritdoc />
+    /// <remarks>No follow-up run starts once the host is stopping.</remarks>
     public Task<bool> RunNowOrAfterCurrentRunAsync(string jobKey, CancellationToken cancellationToken = default) =>
         RequestRunAsync(jobKey, runAgainIfInProgress: true, cancellationToken);
 

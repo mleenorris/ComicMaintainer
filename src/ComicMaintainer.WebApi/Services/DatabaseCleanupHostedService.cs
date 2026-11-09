@@ -28,8 +28,8 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     private readonly IFileStoreService _fileStore;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<DatabaseCleanupHostedService> _logger;
-    private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
-    private readonly IProcessingHistoryService? _historyService;
+    private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
+    private readonly IProcessingHistoryService _historyService;
     private readonly TimeSpan _startupDelay;
     private Timer? _timer;
     private readonly SemaphoreSlim _cleanupLock = new(1, 1);
@@ -44,9 +44,9 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
         IFileStoreService fileStore,
         IOptionsMonitor<AppSettings> appSettings,
         ILogger<DatabaseCleanupHostedService> logger,
-        IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
-        TimeSpan? startupDelay = null,
-        IProcessingHistoryService? historyService = null)
+        IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
+        IProcessingHistoryService historyService,
+        TimeSpan? startupDelay = null)
     {
         _fileStore = fileStore;
         _appSettings = appSettings;
@@ -256,11 +256,6 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     /// </summary>
     private async Task PruneProcessingHistoryAsync(CancellationToken cancellationToken)
     {
-        if (_historyService is null)
-        {
-            return;
-        }
-
         var settings = _appSettings.CurrentValue;
         try
         {
@@ -291,11 +286,6 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     /// </summary>
     private async Task RefreshPlannerStatisticsAsync(CancellationToken cancellationToken)
     {
-        if (_dbContextFactory is null)
-        {
-            return;
-        }
-
         try
         {
             if (await SqliteStatisticsMaintenance.OptimizeAsync(_dbContextFactory, cancellationToken))

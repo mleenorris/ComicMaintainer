@@ -195,7 +195,7 @@ public sealed class FileStoreServiceDirectoryMoveTests : IAsyncLifetime
     }
 
     private FileStoreService CreateService(string? userId = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _library, DuplicateDirectory = string.Empty }),
             NullLogger<FileStoreService>.Instance,
             _factory,

@@ -326,14 +326,11 @@ public partial class ComicProcessorService
                 job.Errors[subject] = message;
             }
 
-            if (owner._eventBroadcaster != null)
-            {
-                var name = Path.GetFileName(subject.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                await owner._eventBroadcaster.BroadcastFileProcessedAsync(
-                    string.IsNullOrEmpty(name) ? subject : name,
-                    false,
-                    message);
-            }
+            var name = Path.GetFileName(subject.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            await owner._eventBroadcaster.BroadcastFileProcessedAsync(
+                string.IsNullOrEmpty(name) ? subject : name,
+                false,
+                message);
         }
     }
 
@@ -468,13 +465,10 @@ public partial class ComicProcessorService
                             await BroadcastJobStatusAsync(job);
 
                             // Broadcast individual file processed event
-                            if (_eventBroadcaster != null)
-                            {
-                                await _eventBroadcaster.BroadcastFileProcessedAsync(
-                                    Path.GetFileName(item.file),
-                                    success,
-                                    error);
-                            }
+                            await _eventBroadcaster.BroadcastFileProcessedAsync(
+                                Path.GetFileName(item.file),
+                                success,
+                                error);
                         });
 
                     if (postLoopAsync is not null)

@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Tests.Helpers;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -70,7 +71,8 @@ public class FilesControllerTests
                 _mockSeriesLibrary.Object,
                 _mockSettings.Object,
                 metadataCache,
-                memoryCache));
+                memoryCache),
+            Mock.Of<IEventBroadcaster>(), Mock.Of<ISeriesNameResolver>(), Mock.Of<IScheduledJobRunner>(), new FileOperationLock());
     }
 
     [Fact]

@@ -5,12 +5,12 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
-public class SeriesArchiveCoverWriteQueueTests
+public class SeriesCoverArtifactQueueTests
 {
-    private readonly Mock<ISeriesArchiveCoverWriter> _writer = new();
+    private readonly Mock<ISeriesCoverArtifactWriter> _writer = new();
 
-    private SeriesArchiveCoverWriteQueue CreateQueue() =>
-        new(_writer.Object, new Mock<ILogger<SeriesArchiveCoverWriteQueue>>().Object);
+    private SeriesCoverArtifactQueue CreateQueue() =>
+        new(new Mock<ILogger<SeriesCoverArtifactQueue>>().Object);
 
     [Fact]
     public async Task EnqueueWrite_InvokesWriterOnBackgroundConsumer()
@@ -25,7 +25,7 @@ public class SeriesArchiveCoverWriteQueueTests
             });
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
 
         queue.EnqueueWrite("batman", "/cache/batman.png", "image/png", force: true);
 
@@ -48,7 +48,7 @@ public class SeriesArchiveCoverWriteQueueTests
             });
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
 
         queue.EnqueueRemove("batman");
 
@@ -84,7 +84,7 @@ public class SeriesArchiveCoverWriteQueueTests
             });
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
 
         for (var i = 0; i < 10; i++)
         {

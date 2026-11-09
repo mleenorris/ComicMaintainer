@@ -251,7 +251,7 @@ public sealed class FileStoreServiceStatusFlagsTests : IDisposable
     }
 
     private FileStoreService CreateService(IEventBroadcaster? broadcaster = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = _library,

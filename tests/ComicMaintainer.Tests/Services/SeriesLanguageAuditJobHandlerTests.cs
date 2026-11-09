@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -24,7 +25,8 @@ public class SeriesLanguageAuditJobHandlerTests
             _fileStore.Object,
             _retag.Object,
             _options.Object,
-            new Mock<ILogger<SeriesLanguageAuditJobHandler>>().Object);
+            new Mock<ILogger<SeriesLanguageAuditJobHandler>>().Object,
+            TestServices.CreateSeriesNameResolver(_options.Object, Mock.Of<ILogger<SeriesNameResolver>>(), _cache.Object));
     }
 
     private static SeriesMetadataCacheRecord BuildRecord(

@@ -349,46 +349,6 @@ namespace ComicMaintainer.Core.Migrations
                     b.ToTable("ErrorReports");
                 });
 
-            modelBuilder.Entity("ComicMaintainer.Core.Data.FileReadStatusEntity", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("CurrentPage")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(1);
-
-                    b.Property<string>("FilePath")
-                        .IsRequired()
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsRead")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("LastReadDate")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FilePath")
-                        .IsUnique();
-
-                    b.HasIndex("IsRead");
-
-                    b.HasIndex("LastReadDate");
-
-                    b.ToTable("FileReadStatuses");
-                });
-
             modelBuilder.Entity("ComicMaintainer.Core.Data.LibraryScanEntity", b =>
                 {
                     b.Property<int>("Id")

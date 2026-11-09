@@ -112,7 +112,7 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
 
         // The restarted process starts its queue, which resumes the delivery.
         var (service, queue) = CreateServiceWithRealQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(service);
         try
         {
             await WaitUntilAsync(async () => (await GetDeliveriesAsync()).Single().Status == EmailDeliveryStatus.Sent);
@@ -145,7 +145,7 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
         Assert.True(queue.IsQueued(id));
         Assert.Equal(0, await service.ResumePendingDeliveriesAsync());
 
-        await queue.StartAsync();
+        await queue.StartAsync(service);
         try
         {
             await WaitUntilAsync(async () => (await GetDeliveriesAsync()).Single().Status == EmailDeliveryStatus.Sent);
@@ -167,8 +167,8 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
         await AddDeliveryAsync(device.Id, "Series 001.cbz", EmailDeliveryStatus.Pending);
         await _devices.DeleteDeviceAsync(TestEmailScopes.Everyone, device.Id);
 
-        var (_, queue) = CreateServiceWithRealQueue();
-        await queue.StartAsync();
+        var (service, queue) = CreateServiceWithRealQueue();
+        await queue.StartAsync(service);
         try
         {
             await WaitUntilAsync(async () => (await GetDeliveriesAsync()).Single().Status == EmailDeliveryStatus.Cancelled);
@@ -221,8 +221,8 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
 
         for (var start = 1; start <= ComicEmailService.MaxStartsWithoutOutcome; start++)
         {
-            var (_, killedRun) = CreateServiceWithRealQueue();
-            await killedRun.StartAsync();
+            var (killedService, killedRun) = CreateServiceWithRealQueue();
+            await killedRun.StartAsync(killedService);
             Assert.True(await reachedSend.WaitAsync(Patience));
 
             var row = (await GetDeliveriesAsync()).Single();
@@ -230,8 +230,8 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
             Assert.Equal(start, row.StartsWithoutOutcome);
         }
 
-        var (_, queue) = CreateServiceWithRealQueue();
-        await queue.StartAsync();
+        var (service, queue) = CreateServiceWithRealQueue();
+        await queue.StartAsync(service);
         try
         {
             await WaitUntilAsync(async () => (await GetDeliveriesAsync()).Single().Status == EmailDeliveryStatus.Failed);
@@ -294,8 +294,8 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
                 await Task.Delay(Timeout.Infinite, token);
             });
 
-        var (_, queue) = CreateServiceWithRealQueue();
-        await queue.StartAsync();
+        var (service, queue) = CreateServiceWithRealQueue();
+        await queue.StartAsync(service);
         await sending.Task.WaitAsync(Patience);
         Assert.Equal(2, (await GetDeliveriesAsync()).Single().StartsWithoutOutcome);
 
@@ -338,7 +338,7 @@ public class ComicEmailDeliveryRecoveryTests : IDisposable
     private (ComicEmailService Service, ComicEmailQueue Queue) CreateServiceWithRealQueue()
     {
         ComicEmailService? service = null;
-        var queue = new ComicEmailQueue(() => service!, new Mock<ILogger<ComicEmailQueue>>().Object);
+        var queue = new ComicEmailQueue(new Mock<ILogger<ComicEmailQueue>>().Object);
         service = CreateService(queue);
         return (service, queue);
     }

@@ -19,9 +19,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbFactory;
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
-    private readonly Mock<ISeriesFolderCoverWriter> _folderCoverWriter = new();
-    private readonly Mock<ISeriesArchiveCoverWriteQueue> _archiveCoverQueue = new();
-    private readonly Mock<ISeriesArchiveCoverWriter> _archiveCoverWriter = new();
+    private readonly Mock<ISeriesCoverArtifactQueue> _coverArtifacts = new();
     private readonly AppSettings _settings = new() { DownloadExternalSeriesImages = true };
     private readonly ListLogger _logger = new();
     private readonly SeriesMetadataCacheService _service;
@@ -42,9 +40,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
             _dbFactory,
             _external.Object,
             _imageStore.Object,
-            _folderCoverWriter.Object,
-            _archiveCoverQueue.Object,
-            _archiveCoverWriter.Object,
+            _coverArtifacts.Object,
             settingsMonitor.Object,
             _logger);
     }
@@ -723,9 +719,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
 
         Assert.Equal("user", record.ImageStatus);
         Assert.Equal("series-u.png", record.LocalImageFile);
-        _folderCoverWriter.Verify(w => w.WriteAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-        _archiveCoverQueue.Verify(q => q.EnqueueWrite(
+        _coverArtifacts.Verify(q => q.EnqueueWrite(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
 
@@ -742,33 +736,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
 
         Assert.Equal("user", record.ImageStatus);
         _imageStore.Verify(s => s.ResolveAbsolutePath(It.IsAny<string>()), Times.Never);
-        _folderCoverWriter.Verify(w => w.WriteAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task SetUserImageAsync_FolderCoverWriterThrows_IsLoggedAndImageStillSaved()
-    {
-        _imageStore.Setup(s => s.SaveUserImageAsync("series-u", It.IsAny<Stream>(), "image/png", null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesImageStoreResult("series-u.png", "image/png", 3));
-        _imageStore.Setup(s => s.ResolveAbsolutePath("series-u.png")).Returns("/cache/series-u.png");
-        _folderCoverWriter.Setup(w => w.WriteAsync(
-                "series-u", "/cache/series-u.png", "image/png", false, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("read-only folder"));
-        using var content = new MemoryStream(new byte[] { 1, 2, 3 });
-        var before = _service.ChangeVersion;
-
-        var record = await _service.SetUserImageAsync("Series U", content, "image/png");
-
-        Assert.Equal("user", record.ImageStatus);
-        Assert.Equal("user-upload", record.RemoteImageUrl);
-        Assert.Equal(before + 1, _service.ChangeVersion);
-        Assert.Equal("user", (await _service.GetAsync("series-u"))!.ImageStatus);
-        Assert.Contains(_logger.Entries, e =>
-            e.Level == LogLevel.Debug
-            && e.Exception is IOException
-            && e.Message.Contains("Failed to write on-disk series cover for series-u"));
-        _archiveCoverQueue.Verify(q => q.EnqueueWrite(
+        _coverArtifacts.Verify(q => q.EnqueueWrite(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
 
@@ -777,11 +745,44 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
     {
         Assert.Null(await _service.ClearImageAsync(" "));
         Assert.Null(await _service.ClearImageAsync("missing"));
-        _archiveCoverQueue.Verify(q => q.EnqueueRemove(It.IsAny<string>()), Times.Never);
+        _coverArtifacts.Verify(q => q.EnqueueRemove(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
-    public async Task ClearImageAsync_FolderCoverRemovalFails_StillClearsAndQueuesArchiveRemoval()
+    public async Task SetUserImageAsync_StoredImage_QueuesItForTheSeriesArtifacts()
+    {
+        _imageStore.Setup(s => s.SaveUserImageAsync("series-u", It.IsAny<Stream>(), "image/png", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("series-u.png", "image/png", 3));
+        _imageStore.Setup(s => s.ResolveAbsolutePath("series-u.png")).Returns("/cache/series-u.png");
+        using var content = new MemoryStream(new byte[] { 1, 2, 3 });
+
+        var record = await _service.SetUserImageAsync("Series U", content, "image/png");
+
+        Assert.Equal("user", record.ImageStatus);
+        _coverArtifacts.Verify(q => q.EnqueueWrite("series-u", "/cache/series-u.png", "image/png", false), Times.Once);
+    }
+
+    [Fact]
+    public async Task SetUserImageAsync_CoverCannotBeQueued_IsLoggedAndImageStillSaved()
+    {
+        _imageStore.Setup(s => s.SaveUserImageAsync("series-u", It.IsAny<Stream>(), "image/png", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("series-u.png", "image/png", 3));
+        _imageStore.Setup(s => s.ResolveAbsolutePath("series-u.png")).Throws(new IOException("read-only folder"));
+        using var content = new MemoryStream(new byte[] { 1, 2, 3 });
+        var before = _service.ChangeVersion;
+
+        var record = await _service.SetUserImageAsync("Series U", content, "image/png");
+
+        Assert.Equal("user", record.ImageStatus);
+        Assert.Equal(before + 1, _service.ChangeVersion);
+        Assert.Contains(_logger.Entries, e =>
+            e.Level == LogLevel.Warning
+            && e.Exception is IOException
+            && e.Message.Contains("Failed to queue on-disk series cover for series-u"));
+    }
+
+    [Fact]
+    public async Task ClearImageAsync_CachedImage_ClearsItAndQueuesRemovingTheArtifacts()
     {
         var entity = Entity("series-c", "Series C");
         entity.LocalImageFile = "series-c.jpg";
@@ -789,8 +790,6 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         entity.ImageStatus = "downloaded";
         entity.RemoteImageUrl = "https://img.example/c.jpg";
         await SeedAsync(entity);
-        _folderCoverWriter.Setup(w => w.RemoveAsync("series-c", It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new UnauthorizedAccessException("denied"));
 
         var record = await _service.ClearImageAsync("series-c");
 
@@ -800,21 +799,17 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         Assert.Null(record.RemoteImageUrl);
         Assert.Equal("none", (await _service.GetAsync("series-c"))!.ImageStatus);
         _imageStore.Verify(s => s.Delete("series-c.jpg"), Times.Once);
-        _archiveCoverQueue.Verify(q => q.EnqueueRemove("series-c"), Times.Once);
-        Assert.Contains(_logger.Entries, e =>
-            e.Level == LogLevel.Debug
-            && e.Exception is UnauthorizedAccessException
-            && e.Message.Contains("Failed to remove on-disk series cover for series-c"));
+        _coverArtifacts.Verify(q => q.EnqueueRemove("series-c"), Times.Once);
     }
 
     [Fact]
-    public async Task ReapplyImageArtifactsAsync_BlankTitle_Throws()
+    public async Task GetCoverSourceAsync_BlankTitle_Throws()
     {
-        await Assert.ThrowsAsync<ArgumentException>(() => _service.ReapplyImageArtifactsAsync(" ", embedArchiveInline: true));
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.GetCoverSourceAsync(" "));
     }
 
     [Fact]
-    public async Task ReapplyImageArtifactsAsync_UnresolvableImageFile_ReturnsFalse()
+    public async Task GetCoverSourceAsync_UnresolvableImageFile_ReturnsNull()
     {
         var entity = Entity("series-r", "Series R");
         entity.LocalImageFile = "series-r.jpg";
@@ -823,13 +818,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         await SeedAsync(entity);
         _imageStore.Setup(s => s.ResolveAbsolutePath("series-r.jpg")).Returns(default(string?));
 
-        var applied = await _service.ReapplyImageArtifactsAsync("Series R", embedArchiveInline: true);
-
-        Assert.False(applied);
-        _folderCoverWriter.Verify(w => w.WriteAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-        _archiveCoverWriter.Verify(w => w.WriteAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Null(await _service.GetCoverSourceAsync("Series R"));
     }
 
     [Fact]

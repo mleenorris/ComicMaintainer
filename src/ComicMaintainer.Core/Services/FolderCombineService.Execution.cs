@@ -410,7 +410,21 @@ public sealed partial class FolderCombineService
                     // otherwise emit one file_list_updated SSE event per move, flooding the
                     // browser and hanging the site. FinishAsync emits a single broadcast.
                     // Not cancellable once the file has moved: the row must follow it.
-                    await _owner._fileStore.UpdateFilePathAsync(move.SourcePath, move.DestinationPath, CancellationToken.None, broadcastUpdate: false);
+                    try
+                    {
+                        await _owner._fileStore.UpdateFilePathAsync(move.SourcePath, move.DestinationPath, CancellationToken.None, broadcastUpdate: false);
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
+                    {
+                        // The row could not follow the file, so the file goes back: the library
+                        // keeps showing it where the database says it is, and it is reported as
+                        // not moved. If that fails too, the catch below reports it.
+                        _owner._logger.LogWarning(ex, "Could not move the library record of {Source}; moving the file back",
+                            LoggingHelper.SanitizePathForLog(move.SourcePath));
+                        File.Move(move.DestinationPath, move.SourcePath);
+                        await _owner.LogHistoryAsync(move.SourcePath, HistoryAction, false, "The library database could not be updated, so the file was not moved");
+                        return false;
+                    }
                 }
                 await _owner.LogHistoryAsync(move.SourcePath, HistoryAction, true, $"Moved to {move.DestinationPath}");
                 _movedDestinationPaths.Add(move.DestinationPath);

@@ -36,7 +36,10 @@ public class SeriesLanguageAuditJobHandlerCoverageTests
         _retag.Object,
         new TestOptionsMonitor<AppSettings>(_settings),
         _logger,
-        resolver);
+        resolver ?? TestServices.CreateSeriesNameResolver(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            Mock.Of<ILogger<SeriesNameResolver>>(),
+            _cache.Object));
 
     private void AddFile(string path, string? series) =>
         _files.Add(new ComicFile { FilePath = path, Metadata = new ComicMetadata { Series = series } });

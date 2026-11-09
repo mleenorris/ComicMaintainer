@@ -5,14 +5,14 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
-public class SeriesArchiveCoverWriteQueueCoverageTests
+public class SeriesCoverArtifactQueueCoverageTests
 {
     private static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(5);
 
-    private readonly Mock<ISeriesArchiveCoverWriter> _writer = new();
-    private readonly Mock<ILogger<SeriesArchiveCoverWriteQueue>> _logger = new();
+    private readonly Mock<ISeriesCoverArtifactWriter> _writer = new();
+    private readonly Mock<ILogger<SeriesCoverArtifactQueue>> _logger = new();
 
-    private SeriesArchiveCoverWriteQueue CreateQueue() => new(_writer.Object, _logger.Object);
+    private SeriesCoverArtifactQueue CreateQueue() => new(_logger.Object);
 
     [Fact]
     public async Task StartAsync_CalledTwice_KeepsSingleSequentialConsumer()
@@ -39,8 +39,8 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             });
 
         var queue = CreateQueue();
-        await queue.StartAsync();
-        var secondStart = queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
+        var secondStart = queue.StartAsync(_writer.Object);
 
         Assert.True(secondStart.IsCompletedSuccessfully);
 
@@ -58,7 +58,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
     }
 
     [Fact]
-    public async Task WriterFailures_AreLoggedAtDebugWithSanitizedKey_AndLaterRequestsStillRun()
+    public async Task WriterFailures_AreLoggedAtWarningWithSanitizedKey_AndLaterRequestsStillRun()
     {
         var healthyProcessed = new TaskCompletionSource();
         var writeFailure = new InvalidOperationException("write failed");
@@ -78,7 +78,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             });
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
 
         queue.EnqueueWrite("broken", "/cache/broken.png", "image/png");
         queue.EnqueueRemove("broken\nseries");
@@ -87,8 +87,8 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
         await healthyProcessed.Task.WaitAsync(WaitLimit);
         await queue.StopAsync().WaitAsync(WaitLimit);
 
-        VerifyLog(LogLevel.Debug, "Failed to write embedded first-archive series cover for broken", writeFailure, Times.Once());
-        VerifyLog(LogLevel.Debug, "Failed to remove embedded first-archive series cover for broken\\nseries", removeFailure, Times.Once());
+        VerifyLog(LogLevel.Warning, "Failed to write series cover artifacts for broken", writeFailure, Times.Once());
+        VerifyLog(LogLevel.Warning, "Failed to remove series cover artifacts for broken\\nseries", removeFailure, Times.Once());
         VerifyLog(LogLevel.Error, "terminated unexpectedly", null, Times.Never());
     }
 
@@ -109,7 +109,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             });
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
 
         queue.EnqueueWrite("slow", "/cache/slow.png", "image/png");
         queue.EnqueueWrite("healthy", "/cache/healthy.png", "image/png");
@@ -118,7 +118,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
         await healthyProcessed.Task.WaitAsync(WaitLimit);
         await queue.StopAsync().WaitAsync(WaitLimit);
 
-        VerifyLog(LogLevel.Debug, "Failed to write embedded first-archive series cover for slow", writerTimeout, Times.Once());
+        VerifyLog(LogLevel.Warning, "Failed to write series cover artifacts for slow", writerTimeout, Times.Once());
         VerifyLog(LogLevel.Error, "terminated unexpectedly", null, Times.Never());
     }
 
@@ -144,7 +144,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             });
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueWrite("slow", "/cache/slow.png", "image/png");
         await started.Task.WaitAsync(WaitLimit);
         queue.EnqueueRemove("pending");
@@ -155,7 +155,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
 
         Assert.True(observedCancellation.Task.IsCompletedSuccessfully);
         _writer.Verify(w => w.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        VerifyLog(LogLevel.Debug, "Failed to", null, Times.Never());
+        VerifyLog(LogLevel.Warning, "Failed to", null, Times.Never());
         VerifyLog(LogLevel.Error, "terminated unexpectedly", null, Times.Never());
     }
 
@@ -166,7 +166,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
         var terminated = new TaskCompletionSource<(string Message, Exception? Error)>();
         _logger
             .Setup(l => l.Log(
-                LogLevel.Debug,
+                LogLevel.Warning,
                 It.IsAny<EventId>(),
                 It.IsAny<It.IsAnyType>(),
                 It.IsAny<Exception?>(),
@@ -186,7 +186,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             .ThrowsAsync(new IOException("remove failed"));
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueRemove("broken");
 
         var (message, error) = await terminated.Task.WaitAsync(WaitLimit);
@@ -208,12 +208,12 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             .Returns<string, CancellationToken>((key, _) => Record("remove:" + key));
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueWrite("first-run", "/cache/a.png", "image/png");
         await queue.StopAsync().WaitAsync(WaitLimit);
 
         queue.EnqueueWrite("while-stopped", "/cache/b.png", "image/png");
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueRemove("after-restart");
 
         // A graceful stop drains everything queued for the run.
@@ -257,7 +257,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             });
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueWrite("first", "/cache/first.png", "image/png");
         await firstStarted.Task.WaitAsync(WaitLimit);
 
@@ -265,7 +265,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
         // again meanwhile and the new run gets a write of its own.
         var firstStop = queue.StopAsync();
         Assert.False(firstStop.IsCompleted);
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueWrite("second", "/cache/second.png", "image/png");
 
         releaseFirst.SetResult();
@@ -286,7 +286,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
         _writer.Verify(
             w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2));
-        VerifyLog(LogLevel.Debug, "Failed to", null, Times.Never());
+        VerifyLog(LogLevel.Warning, "Failed to", null, Times.Never());
         VerifyLog(LogLevel.Error, "terminated unexpectedly", null, Times.Never());
     }
 
@@ -304,11 +304,11 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             });
 
         var queue = CreateQueue();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueWrite("first", "/cache/first.png", "image/png");
         await firstStarted.Task.WaitAsync(WaitLimit);
         var firstStop = queue.StopAsync();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueRemove("second");
 
         // The new run is still waiting for the previous one; a stop whose deadline
@@ -353,11 +353,11 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
 
         // Run A is writing; run B starts behind it and is stopped with an expired
         // deadline while still waiting, then run C starts.
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueWrite("first", "/cache/first.png", "image/png");
         await firstStarted.Task.WaitAsync(WaitLimit);
         var firstStop = queue.StopAsync();
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueRemove("second");
         using (var expired = new CancellationTokenSource())
         {
@@ -365,7 +365,7 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
             await queue.StopAsync(expired.Token).WaitAsync(WaitLimit);
         }
 
-        await queue.StartAsync();
+        await queue.StartAsync(_writer.Object);
         queue.EnqueueRemove("first");
 
         // C must not rewrite the archive alongside A even though B has already finished.

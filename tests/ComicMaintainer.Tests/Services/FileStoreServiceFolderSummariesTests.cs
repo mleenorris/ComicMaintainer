@@ -31,7 +31,7 @@ public class FileStoreServiceFolderSummariesTests : IDisposable
 
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var factory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        _service = new FileStoreService(options, logger, factory);
+        _service = TestServices.CreateFileStore(options, logger, factory);
     }
 
     public void Dispose()

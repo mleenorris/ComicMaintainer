@@ -54,7 +54,10 @@ public class SettingsControllerTests
             _processorServiceMock.Object,
             _fileStoreMock.Object,
             _settingsServiceMock.Object,
-            _applicationLifetimeMock.Object);
+            _applicationLifetimeMock.Object,
+            Mock.Of<ISeriesLanguagePreferenceRetagService>(),
+            Mock.Of<IEventBroadcaster>(),
+            Mock.Of<IProcessingHistoryService>());
     }
 
     [Fact]

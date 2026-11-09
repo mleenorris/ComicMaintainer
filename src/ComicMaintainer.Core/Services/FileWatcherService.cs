@@ -24,7 +24,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     private readonly ILogger<FileWatcherService> _logger;
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
-    private readonly IEventBroadcaster? _eventBroadcaster;
+    private readonly IEventBroadcaster _eventBroadcaster;
     private readonly TimeProvider _timeProvider;
     private FileSystemWatcher? _watcher;
     private bool _enabled;
@@ -125,7 +125,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         ILogger<FileWatcherService> logger,
         IFileStoreService fileStore,
         IComicProcessorService processor,
-        IEventBroadcaster? eventBroadcaster = null,
+        IEventBroadcaster eventBroadcaster,
         TimeProvider? timeProvider = null)
     {
         _settingsMonitor = settings;
@@ -856,11 +856,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// </summary>
     private void QueueStatusBroadcast(bool running)
     {
-        if (_eventBroadcaster == null)
-        {
-            return;
-        }
-
         lock (_statusLock)
         {
             _statusDelivery = _statusDelivery
@@ -872,11 +867,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
     private async Task BroadcastStatusAsync(bool running)
     {
-        if (_eventBroadcaster == null)
-        {
-            return;
-        }
-
         // The next status is only sent once this one has finished, so a client can never receive
         // them out of order; the broadcaster bounds how long a stalled client can hold it up.
         try
@@ -887,18 +877,6 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         {
             _logger.LogWarning(ex, "Failed to broadcast watcher status change");
         }
-    }
-
-    /// <summary>
-    /// DEPRECATED: Direct watcher enable/disable is no longer supported.
-    /// Watcher is now controlled by WatcherEnableRename and WatcherEnableNormalize settings.
-    /// This method is kept for backward compatibility but does nothing.
-    /// </summary>
-    [Obsolete("Direct watcher enable/disable is deprecated. Use WatcherEnableRename and WatcherEnableNormalize settings instead.")]
-    public void SetEnabled(bool enabled)
-    {
-        _logger.LogWarning("SetEnabled is deprecated. Watcher is now controlled by WatcherEnableRename and WatcherEnableNormalize settings.");
-        // No-op: watcher is now controlled by rename/normalize settings
     }
 
     /// <summary>

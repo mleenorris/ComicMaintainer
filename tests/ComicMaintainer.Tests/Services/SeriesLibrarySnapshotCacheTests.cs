@@ -58,7 +58,7 @@ public class SeriesLibrarySnapshotCacheTests
         Metadata = new ComicMetadata { Series = series }
     };
 
-    private SeriesLibraryService CreateService(IUserContextAccessor? user) => new(
+    private SeriesLibraryService CreateService(IUserContextAccessor? user) => TestServices.CreateSeriesLibrary(
         _fileStore.Object,
         _metadataCache.Object,
         _settings.Object,
@@ -187,22 +187,12 @@ public class SeriesLibrarySnapshotCacheTests
     }
 
     [Fact]
-    public async Task WithoutUserContext_NeverCaches()
-    {
-        var service = CreateService(user: null);
-        await service.GetSeriesSummariesAsync();
-        await service.GetSeriesSummariesAsync();
-
-        VerifyBuilds(2);
-    }
-
-    [Fact]
     public async Task SourcesWithoutChangeVersions_NeverCache()
     {
         var fileStore = new Mock<IFileStoreService>();
         fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => _files.ToList());
-        var service = new SeriesLibraryService(
+        var service = TestServices.CreateSeriesLibrary(
             fileStore.Object, _metadataCache.Object, _settings.Object,
             new Mock<ILogger<SeriesLibraryService>>().Object, userContext: _user);
 

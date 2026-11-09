@@ -89,18 +89,6 @@ public partial class FileStoreService
     }
 
     /// <inheritdoc />
-    public bool IsStaleCleanupSuspended
-    {
-        get
-        {
-            lock (_staleCleanupLock)
-            {
-                return _staleCleanupSuspensions > 0;
-            }
-        }
-    }
-
-    /// <inheritdoc />
     public IDisposable SuspendStaleCleanup()
     {
         lock (_staleCleanupLock)

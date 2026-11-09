@@ -124,7 +124,7 @@ public sealed class FileStoreServiceMirrorTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        var service = new FileStoreService(
+        var service = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = Library, DuplicateDirectory = string.Empty }),
             NullLogger<FileStoreService>.Instance,
             _failing);

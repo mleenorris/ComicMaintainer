@@ -47,8 +47,6 @@ public class SettingsControllerCoverageTests
     private readonly Mock<IProcessingHistoryService> _history = new();
 
     private SettingsController CreateController(
-        bool withRetag = false,
-        bool withBroadcaster = false,
         IDbContextFactory<ComicMaintainerDbContext>? dbFactory = null) =>
         new(
             new TestOptionsMonitor<AppSettings>(_settings),
@@ -58,8 +56,8 @@ public class SettingsControllerCoverageTests
             _fileStore.Object,
             _settingsService.Object,
             _lifetime.Object,
-            withRetag ? _retag.Object : null,
-            withBroadcaster ? _broadcaster.Object : null,
+            _retag.Object,
+            _broadcaster.Object,
             _history.Object);
 
     private static JsonElement OkJson(ActionResult<object> result) =>
@@ -578,7 +576,7 @@ public class SettingsControllerCoverageTests
     {
         _retag.Setup(r => r.QueueRetagForGlobalDefaultAsync(It.IsAny<CancellationToken>())).ReturnsAsync(3);
 
-        var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "ja" });
+        var result = await CreateController().UpdateDefaultPreferredLanguage(new() { Language = "ja" });
 
         Assert.Equal("Default preferred language updated successfully", OkJson(result).GetProperty("message").GetString());
         _settingsService.Verify(s => s.UpdateDefaultPreferredLanguageAsync("ja", It.IsAny<CancellationToken>()), Times.Once());
@@ -591,7 +589,7 @@ public class SettingsControllerCoverageTests
     {
         _retag.Setup(r => r.QueueRetagForGlobalDefaultAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
-        var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "ko" });
+        var result = await CreateController().UpdateDefaultPreferredLanguage(new() { Language = "ko" });
 
         Assert.IsType<OkObjectResult>(result);
         _retag.Verify(r => r.QueueRetagForGlobalDefaultAsync(It.IsAny<CancellationToken>()), Times.Once());
@@ -601,7 +599,7 @@ public class SettingsControllerCoverageTests
     [Fact]
     public async Task UpdateDefaultPreferredLanguage_NullBodyClearsLanguageAndQueuesRetag()
     {
-        var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(null!);
+        var result = await CreateController().UpdateDefaultPreferredLanguage(null!);
 
         Assert.IsType<OkObjectResult>(result);
         _settingsService.Verify(s => s.UpdateDefaultPreferredLanguageAsync(null, It.IsAny<CancellationToken>()), Times.Once());
@@ -617,7 +615,7 @@ public class SettingsControllerCoverageTests
     {
         _settings.DefaultPreferredLanguage = current;
 
-        var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = requested });
+        var result = await CreateController().UpdateDefaultPreferredLanguage(new() { Language = requested });
 
         Assert.IsType<OkObjectResult>(result);
         _settingsService.Verify(s => s.UpdateDefaultPreferredLanguageAsync(requested, It.IsAny<CancellationToken>()), Times.Once());
@@ -630,20 +628,10 @@ public class SettingsControllerCoverageTests
         var failure = new InvalidOperationException("retag store unavailable");
         _retag.Setup(r => r.QueueRetagForGlobalDefaultAsync(It.IsAny<CancellationToken>())).ThrowsAsync(failure);
 
-        var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "zh" });
+        var result = await CreateController().UpdateDefaultPreferredLanguage(new() { Language = "zh" });
 
         Assert.Equal("Default preferred language updated successfully", OkJson(result).GetProperty("message").GetString());
         VerifyLogged(LogLevel.Warning, "Failed to flag files for metadata backfill", Times.Once(), failure);
-    }
-
-    [Fact]
-    public async Task UpdateDefaultPreferredLanguage_WithoutRetagService_StillUpdatesSetting()
-    {
-        var result = await CreateController(withRetag: false).UpdateDefaultPreferredLanguage(new() { Language = "ja" });
-
-        Assert.IsType<OkObjectResult>(result);
-        _settingsService.Verify(s => s.UpdateDefaultPreferredLanguageAsync("ja", It.IsAny<CancellationToken>()), Times.Once());
-        _retag.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -652,7 +640,7 @@ public class SettingsControllerCoverageTests
         _settingsService.Setup(s => s.UpdateDefaultPreferredLanguageAsync("fr", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Unsupported language 'fr'"));
 
-        var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "fr" });
+        var result = await CreateController().UpdateDefaultPreferredLanguage(new() { Language = "fr" });
 
         Assert.Equal("Unsupported language 'fr'", BadRequestError(result));
         _retag.VerifyNoOtherCalls();
@@ -665,7 +653,7 @@ public class SettingsControllerCoverageTests
         _settingsService.Setup(s => s.UpdateDefaultPreferredLanguageAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var result = await CreateController(withRetag: true).UpdateDefaultPreferredLanguage(new() { Language = "ja" });
+        var result = await CreateController().UpdateDefaultPreferredLanguage(new() { Language = "ja" });
 
         Assert.Equal("Failed to update default preferred language", ServerErrorJson(result).GetProperty("error").GetString());
         VerifyLogged(LogLevel.Error, "Failed to update default preferred language", Times.Once(), failure);
@@ -775,7 +763,7 @@ public class SettingsControllerCoverageTests
             .Setup(f => f.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: false), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed, RemovedCount = 4, Message = "Removed 4 stale database entries." });
 
-        var result = await CreateController(withBroadcaster: true).CleanupDatabase();
+        var result = await CreateController().CleanupDatabase();
 
         var json = OkJson(result);
         Assert.True(json.GetProperty("success").GetBoolean());
@@ -831,7 +819,7 @@ public class SettingsControllerCoverageTests
             .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Failed, Message = "The cleanup failed. No rows were removed." });
 
-        var result = await CreateController(withBroadcaster: true).CleanupDatabase();
+        var result = await CreateController().CleanupDatabase();
 
         var json = ServerErrorJson(result);
         Assert.False(json.GetProperty("success").GetBoolean());
@@ -971,7 +959,7 @@ public class SettingsControllerCoverageTests
                 countsWhenStoreReinitialized = (await check.ComicFiles.CountAsync(), await check.ProcessingHistory.CountAsync());
             });
 
-        var result = await CreateController(withBroadcaster: true, dbFactory: db.Factory).ResetDatabase();
+        var result = await CreateController(dbFactory: db.Factory).ResetDatabase();
 
         var json = OkJson(result);
         Assert.True(json.GetProperty("success").GetBoolean());
@@ -1032,7 +1020,7 @@ public class SettingsControllerCoverageTests
         var failure = new InvalidOperationException("hub down");
         _broadcaster.Setup(b => b.BroadcastFileListUpdateAsync()).ThrowsAsync(failure);
 
-        var result = await CreateController(withBroadcaster: true, dbFactory: db.Factory).ResetDatabase();
+        var result = await CreateController(dbFactory: db.Factory).ResetDatabase();
 
         Assert.True(OkJson(result).GetProperty("success").GetBoolean());
         _fileStore.Verify(f => f.InitializeFromDatabaseAsync(It.IsAny<CancellationToken>()), Times.Once());
@@ -1040,22 +1028,11 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task ResetDatabase_WithoutBroadcaster_Succeeds()
-    {
-        await using var db = await SqliteDb.CreateAsync();
-
-        var result = await CreateController(withBroadcaster: false, dbFactory: db.Factory).ResetDatabase();
-
-        Assert.True(OkJson(result).GetProperty("success").GetBoolean());
-        _fileStore.Verify(f => f.InitializeFromDatabaseAsync(It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
     public async Task ResetDatabase_DatabaseUnavailable_Returns500AndLeavesStoreAlone()
     {
         var failure = new InvalidOperationException("database file is read-only");
 
-        var result = await CreateController(withBroadcaster: true, dbFactory: new ThrowingDbContextFactory(failure)).ResetDatabase();
+        var result = await CreateController(dbFactory: new ThrowingDbContextFactory(failure)).ResetDatabase();
 
         var json = ServerErrorJson(result);
         Assert.False(json.GetProperty("success").GetBoolean());
@@ -1072,7 +1049,7 @@ public class SettingsControllerCoverageTests
         var failure = new InvalidOperationException("file store busy");
         _fileStore.Setup(f => f.InitializeFromDatabaseAsync(It.IsAny<CancellationToken>())).ThrowsAsync(failure);
 
-        var result = await CreateController(withBroadcaster: true, dbFactory: db.Factory).ResetDatabase();
+        var result = await CreateController(dbFactory: db.Factory).ResetDatabase();
 
         var json = ServerErrorJson(result);
         Assert.False(json.GetProperty("success").GetBoolean());

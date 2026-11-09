@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Tests.Helpers;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -39,7 +40,8 @@ public sealed class FilesControllerFileActionsTests
             _seriesLibrary.Object,
             _logger.Object,
             _settings.Object,
-            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, _history.Object, _seriesLibrary.Object, _settings.Object));
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, _history.Object, _seriesLibrary.Object, _settings.Object),
+            Mock.Of<IEventBroadcaster>(), Mock.Of<ISeriesNameResolver>(), Mock.Of<IScheduledJobRunner>(), new FileOperationLock());
     }
 
     private string InRoot(params string[] parts) => Path.Join(new[] { _root }.Concat(parts).ToArray());

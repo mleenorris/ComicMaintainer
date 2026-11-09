@@ -77,6 +77,26 @@ public sealed class ComicProcessorServiceRenameCancellationTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_RowCannotFollowTheRename_StillReportsTheRename()
+    {
+        // The file has moved, so a failure to record it must not report the rename as failed;
+        // the watcher's rename event and the next scan repoint the row.
+        var file = CreateArchive("Saga", "Saga 3.cbz", "Saga", "3");
+        var renamed = Path.Join(_root, "Saga", "Saga - Chapter 0003.cbz");
+        _fileStore
+            .Setup(s => s.UpdateFilePathAsync(file, renamed, It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        using var service = CreateService();
+
+        var result = await service.ProcessFileAsync(file, forceReprocess: false, CancellationToken.None);
+
+        Assert.True(result);
+        Assert.True(File.Exists(renamed));
+        _fileStore.Verify(s => s.MarkFileRenamedAsync(renamed, true, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && e.Success && e.FilePath == renamed);
+    }
+
+    [Fact]
     public async Task RenameFilesAsync_JobCancelledRightAfterTheMove_StillRecordsTheRename()
     {
         var file = CreateArchive("Saga", "Saga 2.cbz", "Saga", "2");
@@ -142,7 +162,7 @@ public sealed class ComicProcessorServiceRenameCancellationTests : IDisposable
         token.IsCancellationRequested ? Task.FromCanceled(token) : Task.CompletedTask;
 
     private ComicProcessorService CreateService() =>
-        new(
+        TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             Mock.Of<ILogger<ComicProcessorService>>(),
             _fileStore.Object,

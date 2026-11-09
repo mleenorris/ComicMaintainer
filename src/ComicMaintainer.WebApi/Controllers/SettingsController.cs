@@ -26,9 +26,9 @@ public class SettingsController : ControllerBase
     private readonly IFileStoreService _fileStore;
     private readonly ISettingsService _settingsService;
     private readonly IHostApplicationLifetime _applicationLifetime;
-    private readonly ISeriesLanguagePreferenceRetagService? _languageRetag;
-    private readonly IEventBroadcaster? _eventBroadcaster;
-    private readonly IProcessingHistoryService? _processingHistory;
+    private readonly ISeriesLanguagePreferenceRetagService _languageRetag;
+    private readonly IEventBroadcaster _eventBroadcaster;
+    private readonly IProcessingHistoryService _processingHistory;
 
     public SettingsController(
         IOptionsMonitor<AppSettings> appSettings, 
@@ -38,9 +38,9 @@ public class SettingsController : ControllerBase
         IFileStoreService fileStore,
         ISettingsService settingsService,
         IHostApplicationLifetime applicationLifetime,
-        ISeriesLanguagePreferenceRetagService? languageRetag = null,
-        IEventBroadcaster? eventBroadcaster = null,
-        IProcessingHistoryService? processingHistory = null)
+        ISeriesLanguagePreferenceRetagService languageRetag,
+        IEventBroadcaster eventBroadcaster,
+        IProcessingHistoryService processingHistory)
     {
         _appSettings = appSettings;
         _logger = logger;
@@ -640,8 +640,7 @@ public class SettingsController : ControllerBase
             // backfill flag over every series that does NOT have a per-series
             // override (those are unaffected by the global default). The
             // scheduled backfill job rewrites the on-disk <Series> tags later.
-            if (!string.Equals(previous, requested, StringComparison.OrdinalIgnoreCase)
-                && _languageRetag is not null)
+            if (!string.Equals(previous, requested, StringComparison.OrdinalIgnoreCase))
             {
                 try
                 {
@@ -749,7 +748,7 @@ public class SettingsController : ControllerBase
 
             _logger.LogInformation("Deleting processing history...");
             await dbContext.ProcessingHistory.ExecuteDeleteAsync(cancellationToken);
-            _processingHistory?.InvalidateTotalCount();
+            _processingHistory.InvalidateTotalCount();
 
             _logger.LogInformation("Deleting comic files...");
             await dbContext.ComicFiles.ExecuteDeleteAsync(cancellationToken);
@@ -764,16 +763,13 @@ public class SettingsController : ControllerBase
             // Notify connected clients that the file list has changed so they
             // can refresh their views in place rather than requiring a full
             // page reload.
-            if (_eventBroadcaster is not null)
+            try
             {
-                try
-                {
-                    await _eventBroadcaster.BroadcastFileListUpdateAsync();
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogWarning(ex, "Failed to broadcast file list update after database reset");
-                }
+                await _eventBroadcaster.BroadcastFileListUpdateAsync();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast file list update after database reset");
             }
 
             return Ok(new { success = true, message = "Database reset completed successfully" });

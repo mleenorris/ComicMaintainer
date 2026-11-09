@@ -17,9 +17,7 @@ public class SeriesMetadataCacheServiceTests
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
-    private readonly Mock<ISeriesFolderCoverWriter> _folderCoverWriter = new();
-    private readonly Mock<ISeriesArchiveCoverWriteQueue> _archiveCoverQueue = new();
-    private readonly Mock<ISeriesArchiveCoverWriter> _archiveCoverWriter = new();
+    private readonly Mock<ISeriesCoverArtifactQueue> _coverArtifacts = new();
 
     public SeriesMetadataCacheServiceTests()
     {
@@ -38,9 +36,7 @@ public class SeriesMetadataCacheServiceTests
             _dbContextFactory,
             _external.Object,
             _imageStore.Object,
-            _folderCoverWriter.Object,
-            _archiveCoverQueue.Object,
-            _archiveCoverWriter.Object,
+            _coverArtifacts.Object,
             settingsMonitor.Object,
             new Mock<ILogger<SeriesMetadataCacheService>>().Object);
     }
@@ -381,7 +377,7 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
-    public async Task ReapplyImageArtifactsAsync_ForcesCoverWriters_WhenCachedImageExists()
+    public async Task ApplyExternalImageAsync_QueuesTheCoverForTheSeriesArtifacts()
     {
         _imageStore.Setup(s => s.DownloadAsync(
                 It.IsAny<string>(),
@@ -392,20 +388,13 @@ public class SeriesMetadataCacheServiceTests
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-xyz.png"))
             .Returns("/library/cache/batman-xyz.png");
 
-        await _service.ApplyExternalImageAsync(
-            "Batman",
-            "https://example.com/cover.png",
-            source: "ComicVine");
+        await _service.ApplyExternalImageAsync("Batman", "https://example.com/cover.png", source: "ComicVine");
 
-        var updated = await _service.ReapplyImageArtifactsAsync("Batman");
-
-        Assert.True(updated);
-        _folderCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
-        _archiveCoverQueue.Verify(w => w.EnqueueWrite("batman", "/library/cache/batman-xyz.png", "image/png", true), Times.Once);
+        _coverArtifacts.Verify(q => q.EnqueueWrite("batman", "/library/cache/batman-xyz.png", "image/png", false), Times.Once);
     }
 
     [Fact]
-    public async Task ReapplyImageArtifactsAsync_EmbedArchiveInline_WritesArchiveSynchronously()
+    public async Task GetCoverSourceAsync_CachedImage_ReturnsTheFileToCopy()
     {
         _imageStore.Setup(s => s.DownloadAsync(
                 It.IsAny<string>(),
@@ -415,34 +404,19 @@ public class SeriesMetadataCacheServiceTests
             .ReturnsAsync(new SeriesImageStoreResult("batman-xyz.png", "image/png", 4096));
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-xyz.png"))
             .Returns("/library/cache/batman-xyz.png");
+        await _service.ApplyExternalImageAsync("Batman", "https://example.com/cover.png", source: "ComicVine");
 
-        await _service.ApplyExternalImageAsync(
-            "Batman",
-            "https://example.com/cover.png",
-            source: "ComicVine");
+        var source = await _service.GetCoverSourceAsync("Batman");
 
-        var updated = await _service.ReapplyImageArtifactsAsync("Batman", embedArchiveInline: true);
-
-        Assert.True(updated);
-        _folderCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
-        // Inline mode embeds the first-archive cover synchronously via the writer
-        // instead of deferring it to the background queue.
-        _archiveCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
-        // The forced re-apply must not also enqueue a background archive write
-        // (the force=false enqueue here comes from the initial ApplyExternalImageAsync).
-        _archiveCoverQueue.Verify(w => w.EnqueueWrite(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), true), Times.Never);
+        Assert.Equal(new SeriesCoverSource("batman", "/library/cache/batman-xyz.png", "image/png"), source);
     }
 
     [Fact]
-    public async Task ReapplyImageArtifactsAsync_ReturnsFalse_WhenSeriesHasNoCachedImage()
+    public async Task GetCoverSourceAsync_NoCachedImage_ReturnsNull()
     {
         await _service.SetUserAliasesAsync("Batman", Array.Empty<string>());
 
-        var updated = await _service.ReapplyImageArtifactsAsync("Batman");
-
-        Assert.False(updated);
-        _folderCoverWriter.Verify(w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-        _archiveCoverQueue.Verify(w => w.EnqueueWrite(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        Assert.Null(await _service.GetCoverSourceAsync("Batman"));
     }
 
     [Fact]

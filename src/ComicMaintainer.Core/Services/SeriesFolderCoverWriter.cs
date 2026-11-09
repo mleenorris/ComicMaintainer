@@ -1,7 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -14,10 +13,6 @@ namespace ComicMaintainer.Core.Services;
 ///
 /// <para>Design notes:</para>
 /// <list type="bullet">
-///   <item><see cref="ISeriesLibraryService"/> is resolved lazily through
-///   <see cref="IServiceScopeFactory"/> because the metadata cache service
-///   (which calls this writer) is itself a dependency of the library
-///   service. Resolving at call-time avoids a construction-time cycle.</item>
 ///   <item>All write paths run through <see cref="ResolveCoverPath"/> which
 ///   pins the file name to <c>cover.&lt;ext&gt;</c> and re-validates that
 ///   the destination stays inside the target folder. The provider URL and
@@ -44,16 +39,16 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
             ["image/webp"] = ".webp"
         };
 
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ISeriesLibraryService _library;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesFolderCoverWriter> _logger;
 
     public SeriesFolderCoverWriter(
-        IServiceScopeFactory scopeFactory,
+        ISeriesLibraryService library,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesFolderCoverWriter> logger)
     {
-        _scopeFactory = scopeFactory;
+        _library = library;
         _settings = settings;
         _logger = logger;
     }
@@ -173,18 +168,18 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
     {
         try
         {
-            // Resolve the library service lazily through a fresh scope so
-            // singleton-vs-singleton construction order remains acyclic.
-            using var scope = _scopeFactory.CreateScope();
-            var library = scope.ServiceProvider.GetRequiredService<ISeriesLibraryService>();
-            var folders = await library.GetFoldersForNormalizedKeyAsync(normalizedKey, cancellationToken);
+            var folders = await _library.GetFoldersForNormalizedKeyAsync(normalizedKey, cancellationToken);
             return folders.Select(f => f.Directory)
                 .Where(d => !string.IsNullOrWhiteSpace(d))
                 .ToList();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogDebug(ex,
+            _logger.LogWarning(ex,
                 "Failed to resolve folders for series cover write/remove for {Key}",
                 LoggingHelper.SanitizeForLog(normalizedKey));
             return Array.Empty<string>();

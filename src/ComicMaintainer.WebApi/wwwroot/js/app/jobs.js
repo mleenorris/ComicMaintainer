@@ -1394,6 +1394,20 @@
             progressModalCloseTimer = null;
         }
 
+        // What to run once a job this page tracks has ended, whichever way it ended.
+        const jobFinishedHandlers = new Map();
+
+        function onJobFinished(jobId, handler) {
+            jobFinishedHandlers.set(jobId, handler);
+        }
+
+        function notifyJobFinished(jobId) {
+            const handler = jobFinishedHandlers.get(jobId);
+            if (!handler) return;
+            jobFinishedHandlers.delete(jobId);
+            handler();
+        }
+
         // The job-tracking API used by other scripts (events.js, file-actions.js,
         // series-metadata.js); the state behind it stays owned by jobs.js.
         window.jobProgress = Object.freeze({
@@ -1401,7 +1415,9 @@
             beginJobStart,
             endJobStart,
             scheduleJobFinalize,
-            scheduleProgressModalClose
+            scheduleProgressModalClose,
+            onJobFinished,
+            notifyJobFinished
         });
         
         function minimizeProgressModal() {

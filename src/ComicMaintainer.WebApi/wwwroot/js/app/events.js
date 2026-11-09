@@ -466,6 +466,7 @@
             if (isTerminalJobStatus(status)) {
                 console.log(`SSE: Job ${jobId} finished with status: ${status}`);
                 scheduleLibraryHealthRefresh(250);
+                jobProgress.notifyJobFinished(jobId);
                 
                 // Allow a brief moment for final updates, then finalize. The
                 // finalize (and the close it schedules) is dropped when another

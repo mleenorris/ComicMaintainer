@@ -405,6 +405,14 @@
             }
         }
 
+        // The folders a finished job combined are no longer candidates. Refreshes
+        // the list only if the dialog is still open; a closed one stays closed.
+        function refreshCombineFoldersIfOpen() {
+            if (document.getElementById('combineFoldersModal').classList.contains('active')) {
+                openCombineFoldersModal();
+            }
+        }
+
         function closeCombineFoldersModal() {
             document.getElementById('combineFoldersModal').classList.remove('active');
         }
@@ -773,6 +781,9 @@
 
                 showMessage(`Combining ${totalItems} file(s) in background${skipped > 0 ? ` (${skipped} skipped)` : ''}`, 'info');
                 showProgressModal(`Combining ${totalItems} file(s)...`);
+                // Registered before tracking starts: a short job can end during
+                // its first status check.
+                jobProgress.onJobFinished(jobId, refreshCombineFoldersIfOpen);
                 await trackJobStatus(jobId, `Combining ${totalItems} file(s)...`);
 
                 // The progress-modal completion handler already refreshes the

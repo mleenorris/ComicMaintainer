@@ -1,6 +1,5 @@
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Middleware;
-using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -47,8 +46,13 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
     {
         // A cancelled request is the client going away (navigation, reader
         // page turn, aborted upload). It is not a server fault, there is no
-        // response to write, and logging it as an error is pure noise.
-        if (IsClientAbort(httpContext, exception))
+        // response to write, and logging it as an error is pure noise. Only the
+        // request's own token counts: a timeout the server imposed on some inner
+        // operation is a real failure, even though it is also a cancellation.
+        // UseExceptionHandler already stops a cancellation or an IOException on
+        // an aborted request before any handler runs, a dropped connection among
+        // them, so this guards only a direct call.
+        if (exception is OperationCanceledException && httpContext.RequestAborted.IsCancellationRequested)
         {
             _logger.LogDebug(
                 "Request {Method} {Path} was aborted by the client",
@@ -97,26 +101,24 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
     }
 
     /// <summary>
-    /// Whether this exception is the client going away rather than a failure of the server.
-    /// A dropped connection also surfaces as a failed read of the request body, not only as a
-    /// cancellation. Only the request's own token counts: a timeout the server imposed on some
-    /// inner operation is a real failure, even though it is also a cancellation.
-    /// </summary>
-    private static bool IsClientAbort(HttpContext httpContext, Exception exception) =>
-        httpContext.RequestAborted.IsCancellationRequested
-        && exception is OperationCanceledException or ConnectionResetException or BadHttpRequestException;
-
-    /// <summary>
     /// The failing action's <see cref="FailureMessageAttribute"/> text, if it has one. The
     /// exception handling middleware has cleared the request's endpoint by the time a handler
     /// runs, so it is read from the feature that records where the exception happened.
     /// </summary>
     private static string? FailureMessageOf(HttpContext httpContext) =>
-        httpContext.Features.Get<IExceptionHandlerFeature>()?.Endpoint?.Metadata
-            .GetMetadata<FailureMessageAttribute>()?.Message;
+        FailedEndpointOf(httpContext)?.Metadata.GetMetadata<FailureMessageAttribute>()?.Message;
+
+    private static Endpoint? FailedEndpointOf(HttpContext httpContext) =>
+        httpContext.Features.Get<IExceptionHandlerFeature>()?.Endpoint;
 
     private void LogUnhandled(HttpContext httpContext, Exception exception, string correlationId)
     {
+        // The route is built into the template, as RequestTimeoutPolicies does, so that each
+        // endpoint fingerprints and therefore files separately. A locked database, say, has only
+        // framework frames at the top of its stack, so a single shared template would fold that
+        // failure on every endpoint into one issue. The pattern is developer-authored text.
+        var route = RequestTimeoutPolicies.EscapeTemplateText(
+            RequestTimeoutPolicies.DescribeEndpoint(FailedEndpointOf(httpContext)));
         var method = LoggingHelper.SanitizeForLog(httpContext.Request.Method);
         var path = LoggingHelper.SanitizeForLog(httpContext.Request.Path.Value);
 
@@ -127,7 +129,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         {
             _logger.LogError(
                 exception,
-                "Unhandled exception for {Method} {Path} on {FilePath} (correlation id {CorrelationId})",
+                "Unhandled exception on " + route + ": {Method} {Path} on {FilePath} (correlation id {CorrelationId})",
                 method,
                 path,
                 LoggingHelper.SanitizePathForLog(filePath.ToString()),
@@ -137,7 +139,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
         _logger.LogError(
             exception,
-            "Unhandled exception for {Method} {Path} (correlation id {CorrelationId})",
+            "Unhandled exception on " + route + ": {Method} {Path} (correlation id {CorrelationId})",
             method,
             path,
             correlationId);

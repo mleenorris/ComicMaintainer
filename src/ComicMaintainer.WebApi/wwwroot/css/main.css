@@ -1654,6 +1654,13 @@
             font-size: 12px;
         }
 
+        .series-detail-details-pending {
+            margin-top: 6px;
+            color: var(--text-muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
         /* ── Overview page (home) ── */
         .overview-rows {
             display: flex;

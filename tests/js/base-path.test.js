@@ -95,7 +95,8 @@ const SERIES_ROUTES = {
     'GET /api/overview': {},
     'GET /api/active-job': {},
     'GET /api/watcher/status': { running: true, enabled: true },
-    'GET /api/files/series': { series: [], total_series: 0, unmarked_count: 0 }
+    'GET /api/files/series': { series: [], total_series: 0, unmarked_count: 0 },
+    'GET /api/files/series/facets': { genres: [], statuses: [], series_without_genres: 0, series_without_status: 0 }
 };
 
 async function bootUnderBase() {

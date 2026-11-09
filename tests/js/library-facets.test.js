@@ -247,3 +247,12 @@ test('a series with no match shows no details block at all', async () => {
     assert.equal(page.$('.series-detail-details'), null);
     assert.doesNotMatch(page.$('.series-detail-summary-body').textContent, /not available yet/);
 });
+
+test('a page without the filter bar is left alone', async () => {
+    const page = await bootWithFacets();
+    page.$('#libraryFacets').remove();
+
+    page.run('syncLibraryFacetsVisibility()');
+
+    assert.equal(page.$('#libraryFacets'), null);
+});

@@ -949,7 +949,7 @@
             const link = seriesSiteLink(series.site_url);
             if (!genres.length && !status && !link) {
                 return series.metadata_source
-                    ? '<div class="series-detail-meta">Genres and status are not available yet. They are added the next time this series\' metadata is refreshed.</div>'
+                    ? '<div class="series-detail-details-pending">Genres and status are not available yet. They are added the next time this series\' metadata is refreshed.</div>'
                     : '';
             }
             return `

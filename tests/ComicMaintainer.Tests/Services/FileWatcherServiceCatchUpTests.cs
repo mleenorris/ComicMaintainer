@@ -329,6 +329,88 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
         Assert.DoesNotContain($"process {newPath}", _calls);
     }
 
+    // A row that cannot be moved must not stop the rest of the catch-up.
+    [Fact]
+    public async Task Startup_MovingOneTrackedFileFails_LogsItAndStillMovesTheOthers()
+    {
+        var oldFirst = Path.Join(_library, "One Piece", "One Piece - Chapter 0001.cbz");
+        var oldSecond = Path.Join(_library, "One Piece", "One Piece - Chapter 0002.cbz");
+        var newFirst = CreateComic("One Piece (1997)", "One Piece - Chapter 0001.cbz");
+        var newSecond = CreateComic("One Piece (1997)", "One Piece - Chapter 0002.cbz");
+        _tracked = [MovedFrom(oldFirst, newFirst), MovedFrom(oldSecond, newSecond)];
+        _store.Setup(s => s.UpdateFilePathAsync(oldFirst, newFirst, It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        await StartWatchingAsync();
+
+        await WaitForLogAsync("Followed 2 tracked file(s) moved while their move was not seen");
+        Assert.Contains($"move {oldSecond} -> {newSecond}", _calls);
+        Assert.Contains(_logs, message => message.Contains("Error moving tracked file", StringComparison.Ordinal));
+    }
+
+    // The files that arrived still get processed when the queued files cannot be read.
+    [Fact]
+    public async Task Startup_ReadingTheFilesStillQueuedFails_LogsItAndStillQueuesArrivals()
+    {
+        var known = CreateComic("Saga", "Saga - Chapter 0001.cbz");
+        var arrived = CreateComic("Saga", "Saga 002.cbz");
+        _tracked = [Tracked(known, processed: true)];
+        _store.Setup(s => s.GetProcessingPendingFilesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        await StartWatchingAsync();
+
+        await WaitForCallAsync($"process {arrived}");
+        await WaitForLogAsync("Queued 1 file(s) that arrived and 0 file(s) that were still queued");
+        Assert.Contains(_logs, message => message.Contains("Error reading the files still queued for processing", StringComparison.Ordinal));
+    }
+
+    // Reading the tracked files is the first thing the scan does; losing that scan must not lose the watcher.
+    [Fact]
+    public async Task Startup_ScanFails_LogsItAndKeepsWatching()
+    {
+        CreateComic("Saga", "Saga 001.cbz");
+        _store.Setup(s => s.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        var service = TestServices.CreateFileWatcher(
+            new TestOptionsMonitor<AppSettings>(Settings()), new QueueLogger(_logs, () => _onLog), _store.Object, _processor.Object);
+        _services.Add(service);
+
+        await service.StartAsync();
+
+        await WaitForLogAsync("Error during incremental directory scan");
+        Assert.True(service.IsRunning);
+    }
+
+    // Recording the pending flag only helps after a restart: a failure must not lose the processing.
+    [Fact]
+    public async Task ArrivingFile_WhoseQueuedStateCannotBeRecorded_IsStillProcessed()
+    {
+        _store.Setup(s => s.SetProcessingPendingAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        await StartWatchingAsync();
+
+        var arrived = MoveIn("Saga 003.cbz", _library);
+
+        await WaitForCallAsync($"process {arrived}");
+        await WaitForLogAsync("Error recording whether a file waits for processing");
+    }
+
+    private static ComicFile MovedFrom(string oldPath, string newPath)
+    {
+        var info = new FileInfo(newPath);
+        return new ComicFile
+        {
+            FilePath = oldPath,
+            FileName = info.Name,
+            FileSize = info.Length,
+            LastModified = info.LastWriteTime,
+            IsRenamed = true,
+            IsNormalized = true,
+            IsProcessed = true,
+        };
+    }
+
     [Fact]
     public async Task Startup_FolderRenamedWhileDownWithANewFile_MovesTheKnownOneAndProcessesTheNewOne()
     {

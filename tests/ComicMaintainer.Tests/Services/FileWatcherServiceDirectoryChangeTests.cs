@@ -92,6 +92,22 @@ public sealed class FileWatcherServiceDirectoryChangeTests : IDisposable
     }
 
     [Fact]
+    public async Task DirectoryRenamed_WhenTrackingItsFilesFails_LogsAndKeepsWatching()
+    {
+        _store.Setup(s => s.FileExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        var oldDir = CreateSeries("Saga", "Saga 001.cbz");
+        var newDir = Path.Join(_library, "Saga (2012)");
+        await StartWatchingAsync();
+
+        Directory.Move(oldDir, newDir);
+
+        await WaitForLogAsync("Error tracking new files in directory");
+        _store.Verify(s => s.MoveDirectoryAsync(oldDir, newDir, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Empty(_processed);
+    }
+
+    [Fact]
     public async Task DirectoryRenamed_FilesWaitingToSettleUnderIt_AreProcessedAtTheirNewPath()
     {
         var oldDir = CreateSeries("Berserk");

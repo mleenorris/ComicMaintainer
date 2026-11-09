@@ -1,9 +1,10 @@
 namespace ComicMaintainer.Core.Utilities;
 
 /// <summary>
-/// Thrown when a file with a comic archive extension is neither a ZIP nor a RAR archive, or is
+/// Thrown when a file with a comic archive extension is neither a ZIP nor a RAR archive, is
 /// damaged so badly that it does not open as one (a truncated download has no ZIP central
-/// directory, for example).
+/// directory, for example), or holds an entry that cannot be read as it stands: encrypted,
+/// or failing its checksum.
 /// </summary>
 /// <remarks>
 /// Derives from <see cref="IOException"/>, so code that already treats a damaged

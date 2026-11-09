@@ -556,6 +556,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// </summary>
     private async Task FollowMovedFilesAsync(IReadOnlyList<(string OldPath, string NewPath)> movedFiles, CancellationToken cancellationToken)
     {
+        var followed = 0;
         for (var i = 0; i < movedFiles.Count; i++)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -568,6 +569,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             {
                 // One file list update for the lot, not one per file.
                 await _fileStore.UpdateFilePathAsync(oldPath, newPath, cancellationToken, broadcastUpdate: i == movedFiles.Count - 1);
+                followed++;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -579,9 +581,9 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             }
         }
 
-        if (movedFiles.Count > 0)
+        if (followed > 0)
         {
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Followed {Count} tracked file(s) moved while their move was not seen"), movedFiles.Count);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Followed {Count} tracked file(s) moved while their move was not seen"), followed);
         }
     }
 

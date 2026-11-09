@@ -343,9 +343,25 @@ public sealed class FileWatcherServiceCatchUpTests : IDisposable
 
         await StartWatchingAsync();
 
-        await WaitForLogAsync("Followed 2 tracked file(s) moved while their move was not seen");
+        await WaitForLogAsync("Followed 1 tracked file(s) moved while their move was not seen");
         Assert.Contains($"move {oldSecond} -> {newSecond}", _calls);
         Assert.Contains(_logs, message => message.Contains("Error moving tracked file", StringComparison.Ordinal));
+    }
+
+    // The summary reports what happened: nothing was followed when every move failed.
+    [Fact]
+    public async Task Startup_NoTrackedFileCouldBeMoved_DoesNotReportAnyAsFollowed()
+    {
+        var oldPath = Path.Join(_library, "One Piece", "One Piece - Chapter 0001.cbz");
+        var newPath = CreateComic("One Piece (1997)", "One Piece - Chapter 0001.cbz");
+        _tracked = [MovedFrom(oldPath, newPath)];
+        _store.Setup(s => s.UpdateFilePathAsync(oldPath, newPath, It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        await StartWatchingAsync();
+
+        Assert.Contains(_logs, message => message.Contains("Error moving tracked file", StringComparison.Ordinal));
+        Assert.DoesNotContain(_logs, message => message.Contains("Followed", StringComparison.Ordinal));
     }
 
     // The files that arrived still get processed when the queued files cannot be read.

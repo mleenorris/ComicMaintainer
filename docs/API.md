@@ -668,7 +668,7 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 }
 ```
 
-**`POST .../apply-match`** takes `canonicalTitle` (required), `aliases`, `source`, `sourceId`, `imageUrl`, `thumbnailUrl`, `synopsis`, `siteUrl`, `genres`, `publicationStatus`, `totalChapters`, `origin` and `localizedTitles`. Send back what search returned. Oversized values are cut or skipped rather than refused.
+**`POST .../apply-match`** takes `canonicalTitle` (required), `aliases`, `source`, `sourceId`, `imageUrl`, `thumbnailUrl`, `synopsis`, `siteUrl`, `genres`, `publicationStatus`, `totalChapters`, `origin` and `localizedTitles`. Send back what search returned. Oversized values are cut or skipped rather than refused: a synopsis is kept to 8,000 characters, and at most 32 genres of up to 64 characters are kept.
 
 **The cached record** has `series_id`, `canonical_title`, `aliases`, `user_aliases`, `series_name`, `is_user_selected_name`, `resolved_series_name`, `source`, `source_id`, `last_lookup_utc`, `lookup_status`, `remote_image_url`, `local_image_file`, `image_content_type`, `image_downloaded_utc`, `image_status`, `preferred_language`, `localized_titles`, `synopsis`, `site_url`, `genres`, `publication_status`, `total_chapters`, `origin`, `metadata_version`, `has_image` and `is_user_image`.
 
@@ -924,7 +924,7 @@ The rules are:
 - A blank base URL keeps the stored URL. Base URLs can't be cleared.
 - Ranges: `logMaxMB` 1 to 2047; `issueNumberPadding` 0 to 10; `staleCleanupMaxRemovalPercent` 0 to 100; `staleCleanupMissingGraceHours` 0 to 720; `processingHistoryRetentionDays` 0 to 3650; `processingHistoryMaxEntries` 0 to 10,000,000; `smtpPort` 1 to 65535; `emailMaxAttachmentMb` 1 to 200; `maxSendsPerHour` 0 to 10,000; `maxSendsPerDay` 0 to 100,000; `minSecondsBetweenSends` 0 to 86,400; `maxIssuesPerDay` 0 to 100; `dedupeWindowHours` 1 to 720. `maxDownloadMB` must not be below `maxMB`.
 
-**Group routes.** `PUT /api/settings/database-cleanup` takes the fields of the `databaseCleanup` group, and a field left out keeps its value. `PUT /api/settings/external-series-metadata`, `email`, `email-rate-limit`, `suwayomi` and `error-reporting` take the fields of the matching group, with one difference: a field left out is read as blank, off or its default, and saved. These are kept when left out instead: secrets (`comicVineApiKey`, `smtpPassword`, `password`, `gitHubToken`), base URLs, and the Suwayomi `downloadsDirectory` and `importDirectory`. An empty string clears a secret or a directory. `fillComicInfoFromProviders` is only available through `PUT /api/settings`.
+**Group routes.** `PUT /api/settings/database-cleanup` takes the fields of the `databaseCleanup` group; a field left out keeps its value, and an empty `staleCleanupSentinelFile` clears it. `PUT /api/settings/external-series-metadata`, `email`, `email-rate-limit`, `suwayomi` and `error-reporting` take the fields of the matching group, with one difference: a field left out is read as blank, off or its default, and saved. These are kept when left out instead: secrets (`comicVineApiKey`, `smtpPassword`, `password`, `gitHubToken`), base URLs, and the Suwayomi `downloadsDirectory` and `importDirectory`. An empty string clears a secret or a directory. `fillComicInfoFromProviders` is only available through `PUT /api/settings`.
 
 **Pinned settings.** Environment variables can pin a setting. See [Errors](#errors) and [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md).
 

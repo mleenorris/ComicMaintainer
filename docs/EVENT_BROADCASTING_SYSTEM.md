@@ -1,459 +1,73 @@
-# Event Broadcasting System
+# Real-Time Events
 
-## Overview
+The server pushes changes to the web interface with Server-Sent Events (SSE). There is one stream,
+`GET /api/events/stream`, and it is one-way: the server sends and clients listen.
 
-The ComicMaintainer now uses a unified **Server-Sent Events (SSE)** broadcasting system for real-time updates, replacing multiple polling mechanisms with efficient push-based event delivery.
+## Message format
 
-## Architecture
+Each event is a `data:` line holding JSON with a `type` and a `data` object:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Frontend (JavaScript)                        │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │         EventSource (SSE Client)                          │  │
-│  │  const eventSource = new EventSource('/api/events/stream')│  │
-│  │                                                             │  │
-│  │  eventSource.onmessage = (event) => {                      │  │
-│  │      const data = JSON.parse(event.data);                  │  │
-│  │      handleServerEvent(data);                              │  │
-│  │  };                                                         │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ SSE Connection
-                               │ (Long-lived HTTP)
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Backend (Flask)                              │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │            /api/events/stream Endpoint                    │  │
-│  │  - Subscribes client to EventBroadcaster                  │  │
-│  │  - Streams events in SSE format                           │  │
-│  │  - Sends heartbeats every 15s                             │  │
-│  └───────────────────────────┬───────────────────────────────┘  │
-│                              │                                   │
-│  ┌───────────────────────────▼───────────────────────────────┐  │
-│  │              EventBroadcaster (Singleton)                 │  │
-│  │  ┌─────────────────────────────────────────────────────┐  │  │
-│  │  │  - Manages set of client queues                      │  │  │
-│  │  │  - Broadcasts events to all connected clients        │  │  │
-│  │  │  - Thread-safe event distribution                    │  │  │
-│  │  │  - Stores last event of each type                    │  │  │
-│  │  └─────────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────┬───────────────────────────────┘  │
-│                              │ Broadcast Events                  │
-│                              ▼                                   │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │          Event Sources (Multiple)                        │   │
-│  │  - Cache rebuild completion                              │   │
-│  │  - File processing (via web interface)                   │   │
-│  │  - Watcher activity detection                            │   │
-│  │  - Job status updates                                    │   │
-│  └─────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+```text
+data: {"type":"job_updated","data":{"job_id":"...","status":"running","progress":{"processed":3,"total":10,"success":3,"errors":0,"percentage":30}}}
 ```
 
-## Event Types
+| Type | Sent when | `data` |
+| --- | --- | --- |
+| `job_updated` | A batch job changes state or progresses | `job_id`, `status`, `progress` with `processed`, `total`, `success`, `errors`, `percentage` |
+| `file_processed` | A file in a batch job finishes, and after single-file metadata edits | `filename`, `success`, `error` |
+| `file_list_updated` | Files are added to or removed from the library, or after a batch of moves | Empty |
+| `watcher_status` | The watcher starts or stops | `running`, `enabled` |
 
-### 1. cache_updated
+Every 30 seconds the server also sends a named `heartbeat` event, so a client can tell a live stream from one a proxy has
+dropped:
 
-**Triggered when:** File list cache is rebuilt or invalidated
-
-**Data:**
-```json
-{
-  "type": "cache_updated",
-  "data": {
-    "rebuild_complete": true,
-    "message": "File cache has been updated"
-  },
-  "timestamp": 1697234567.123
-}
+```text
+event: heartbeat
+data: {}
 ```
 
-**Frontend Action:** Automatically refresh file list
+## Connecting
 
-### 2. watcher_status
+The stream accepts:
 
-**Triggered when:** Watcher service status changes
-
-**Data:**
-```json
-{
-  "type": "watcher_status",
-  "data": {
-    "running": true,
-    "enabled": true
-  },
-  "timestamp": 1697234567.123
-}
-```
-
-**Frontend Action:** Update watcher status indicator
-
-### 3. file_processed
-
-**Triggered when:** A file is processed by watcher or web interface
-
-**Data:**
-```json
-{
-  "type": "file_processed",
-  "data": {
-    "filepath": "/watched_dir/Batman/Batman - Chapter 0001.cbz",
-    "filename": "Batman - Chapter 0001.cbz",
-    "success": true,
-    "error": null
-  },
-  "timestamp": 1697234567.123
-}
-```
-
-**Frontend Action:** File list will be updated by subsequent cache_updated event
-
-### 4. job_updated
-
-**Triggered when:** Batch job status changes
-
-**Data:**
-```json
-{
-  "type": "job_updated",
-  "data": {
-    "job_id": "job-abc123",
-    "status": "running",
-    "progress": {
-      "current": 50,
-      "total": 100,
-      "percent": 50
-    }
-  },
-  "timestamp": 1697234567.123
-}
-```
-
-**Frontend Action:** Update job progress display
-
-## Frontend Integration
-
-### Initialize SSE Connection
-
-```javascript
-// Initialize on page load
-function initEventSource() {
-    eventSource = new EventSource('/api/events/stream');
-    
-    eventSource.onopen = () => {
-        console.log('SSE: Connected to event stream');
-    };
-    
-    eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        handleServerEvent(data);
-    };
-    
-    eventSource.onerror = (error) => {
-        console.warn('SSE: Connection error, will retry');
-        eventSource.close();
-        setTimeout(initEventSource, 5000); // Auto-reconnect
-    };
-}
-```
-
-### Handle Events
-
-```javascript
-function handleServerEvent(data) {
-    switch(data.type) {
-        case 'cache_updated':
-            if (data.data.rebuild_complete) {
-                loadFiles(currentPage, false);
-            }
-            break;
-        case 'watcher_status':
-            updateWatcherStatusDisplay(data.data.running, data.data.enabled);
-            break;
-        case 'file_processed':
-            console.log('File processed:', data.data.filename);
-            break;
-        case 'job_updated':
-            updateJobProgress(data.data.job_id, data.data.progress);
-            break;
-    }
-}
-```
-
-### Cleanup on Page Unload
-
-```javascript
-window.addEventListener('beforeunload', () => {
-    if (eventSource) {
-        eventSource.close();
-    }
-});
-```
-
-## Backend Integration
-
-### Broadcasting Events
-
-```python
-from event_broadcaster import (
-    broadcast_cache_updated,
-    broadcast_watcher_status,
-    broadcast_file_processed,
-    broadcast_job_updated
-)
-
-# Example: Broadcast cache update
-broadcast_cache_updated(rebuild_complete=True)
-
-# Example: Broadcast file processed
-broadcast_file_processed(filepath, success=True)
-
-# Example: Broadcast watcher status
-broadcast_watcher_status(running=True, enabled=True)
-
-# Example: Broadcast job update
-broadcast_job_updated(job_id, status='running', progress={...})
-```
-
-### EventBroadcaster Class
-
-```python
-from event_broadcaster import get_broadcaster
-
-broadcaster = get_broadcaster()
-
-# Get statistics
-client_count = broadcaster.get_client_count()
-event_count = broadcaster.get_event_count()
-
-# Custom event broadcasting
-broadcaster.broadcast('custom_event', {'key': 'value'})
-```
-
-## Performance Characteristics
-
-### Before (Polling)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Cache Rebuild Polling: Every 2 seconds                     │
-│    - 30 requests/minute per client                          │
-│    - 1800 requests/hour per client                          │
-│    - Wasted requests when cache not rebuilding              │
-│                                                              │
-│  Watcher Status Polling: Every 10 seconds                   │
-│    - 6 requests/minute per client                           │
-│    - 360 requests/hour per client                           │
-│                                                              │
-│  Total: 2160 requests/hour per client (mostly wasted)       │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### After (SSE)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  SSE Connection: 1 long-lived HTTP connection                │
-│    - Events pushed only when something changes               │
-│    - Heartbeat every 15 seconds to keep connection alive    │
-│    - ~4 heartbeats/minute                                    │
-│    - ~240 heartbeats/hour                                    │
-│                                                              │
-│  Plus actual events (only when needed):                      │
-│    - cache_updated: ~10-20 events/hour (typical)            │
-│    - file_processed: Varies by activity                     │
-│    - watcher_status: ~5-10 events/hour                      │
-│                                                              │
-│  Total: ~250-270 messages/hour per client                   │
-│  Improvement: 87% reduction in network traffic              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### SSE vs WebSocket Comparison
-
-| Feature | SSE (Chosen) | WebSocket |
-|---------|--------------|-----------|
-| Browser Support | Excellent (all modern browsers) | Excellent |
-| Protocol | HTTP (works with existing infrastructure) | Custom protocol |
-| Direction | Server → Client (perfect for our use case) | Bidirectional |
-| Reconnection | Automatic | Manual implementation needed |
-| Complexity | Simple | More complex |
-| Nginx/Proxy | Works with standard HTTP proxies | Requires special configuration |
-
-**Why SSE?** Our use case is primarily server → client notifications. SSE is simpler, works with existing HTTP infrastructure, and has automatic reconnection built-in.
-
-## Monitoring
-
-### Event Statistics Endpoint
+- **A stream token.** `EventSource` cannot send headers, so the browser calls `POST /api/auth/stream-token` and passes the
+  result as `?access_token=<token>`. A stream token works once, lasts 60 seconds and is refused everywhere else. Session
+  tokens are never accepted in a URL.
+- **An API key** in the `X-API-Key` header, for scripts.
+- **Authelia**, through the reverse proxy.
 
 ```bash
-curl http://localhost:5000/api/events/stats
+curl -N -H "X-API-Key: YOUR_KEY" http://localhost:5000/api/events/stream
 ```
 
-**Response:**
-```json
-{
-  "active_clients": 3,
-  "total_events_broadcast": 1247
-}
-```
+A stream opened with a token or an API key ends at the first heartbeat after its session or key stops being valid.
 
-### Cache Statistics (Enhanced)
+A reverse proxy that buffers responses holds events back, so turn buffering off for this route.
 
-```bash
-curl http://localhost:5000/api/cache/stats
-```
+## The server
 
-Shows cache state and event broadcasting info.
+`EventBroadcasterService` (`IEventBroadcaster`) holds the connected clients. Broadcasts never throw to the caller. Writes
+to one client are serialized, and a client that does not take an event within 10 seconds is disconnected, so it cannot
+hold up the others. Its browser reconnects.
 
-## Error Handling
+## The web interface
 
-### Automatic Reconnection
+`js/app/events.js` manages the connection:
 
-- **SSE Client**: Automatically reconnects on connection loss
-- **Retry Delay**: 5 seconds between reconnection attempts
-- **Exponential Backoff**: Can be added if needed
+- Each connection gets a fresh stream token, so the browser's own reconnect, which reuses the URL, cannot work. Every
+  error closes the stream, and the app reconnects by itself, starting at 5 seconds and backing off to 60.
+- A stream silent for 75 seconds counts as dead and is replaced.
+- While the stream is down, the active job's status is polled every 5 seconds.
+- After 20 consecutive failures the user is told, and the app keeps retrying. It reconnects at once when the browser comes
+  back online or the tab becomes visible.
+- A reconnected stream catches up on the job, the watcher status and the library, since events sent while it was down are
+  lost.
+- Under Authelia, the app returns to the login page only on a definite answer that the session has ended. An outage is
+  retried like any other failure.
 
-### Graceful Degradation
+## Adding an event
 
-- If SSE connection fails, frontend continues to function
-- Polling mechanisms remain as fallback (currently)
-- Manual refresh still available
-
-### Dead Client Cleanup
-
-- Clients with full queues are automatically removed
-- No memory leaks from abandoned connections
-- Queues have max size of 100 events
-
-## Migration Path
-
-### Phase 1 (Current) ✅
-- ✅ SSE infrastructure implemented
-- ✅ Cache update events broadcast
-- ✅ Frontend connects to SSE stream
-- ✅ Cache rebuild polling can be replaced
-- ⚠️ Watcher status polling still active (fallback)
-
-### Phase 2 (Future)
-- [ ] Remove cache rebuild polling entirely
-- [ ] Broadcast watcher status changes via SSE
-- [ ] Remove watcher status polling
-- [ ] Add job progress events
-- [ ] Remove job status polling
-
-### Phase 3 (Optional)
-- [ ] Add file upload progress events
-- [ ] Add library statistics events
-- [ ] Add error notification events
-
-## Best Practices
-
-### Server-Side
-
-1. **Always broadcast after cache changes**
-   ```python
-   # After invalidating cache
-   broadcast_cache_updated(rebuild_complete=False)
-   ```
-
-2. **Broadcast completion events**
-   ```python
-   # After cache rebuild completes
-   broadcast_cache_updated(rebuild_complete=True)
-   ```
-
-3. **Keep event data minimal**
-   - Send only necessary information
-   - Client can fetch details if needed
-
-### Client-Side
-
-1. **Handle connection loss gracefully**
-   - Implement auto-reconnect
-   - Don't break UI if SSE fails
-
-2. **Avoid duplicate actions**
-   - Debounce event handlers if needed
-   - Check state before acting on events
-
-3. **Clean up on unmount**
-   - Close EventSource on page unload
-   - Clear reconnection timers
-
-## Testing
-
-### Manual Testing
-
-1. **Open browser console**
-2. **Watch for SSE connection**:
-   ```
-   SSE: Connected to event stream
-   ```
-
-3. **Trigger cache rebuild** (via Settings → Refresh)
-4. **Watch for events**:
-   ```
-   SSE Event: cache_updated {rebuild_complete: false}
-   SSE Event: cache_updated {rebuild_complete: true}
-   ```
-
-### Automated Testing
-
-```python
-# Test event broadcasting
-def test_event_broadcasting():
-    broadcaster = get_broadcaster()
-    
-    # Subscribe a test client
-    queue = broadcaster.subscribe()
-    
-    # Broadcast event
-    broadcast_cache_updated(rebuild_complete=True)
-    
-    # Check event received
-    event = queue.get(timeout=1)
-    assert event.type == 'cache_updated'
-    assert event.data['rebuild_complete'] == True
-    
-    # Cleanup
-    broadcaster.unsubscribe(queue)
-```
-
-## Troubleshooting
-
-### Events Not Received
-
-1. Check browser console for connection errors
-2. Verify `/api/events/stream` endpoint is accessible
-3. Check for nginx/proxy buffering issues
-4. Verify EventSource is supported in browser
-
-### Too Many Connections
-
-1. Check `get_broadcaster().get_client_count()`
-2. Verify clients are properly unsubscribed on disconnect
-3. Check for page refresh loops
-
-### High Memory Usage
-
-1. Check event queue sizes (max 100 per client)
-2. Verify dead client cleanup is working
-3. Monitor total event count growth
-
-## Summary
-
-The SSE event broadcasting system provides:
-
-- ✅ **87% reduction** in network requests
-- ✅ **Real-time updates** instead of polling delays
-- ✅ **Better user experience** with instant feedback
-- ✅ **Lower server load** from eliminated polling
-- ✅ **Simpler architecture** than WebSockets
-- ✅ **Automatic reconnection** and error handling
-- ✅ **Thread-safe** event distribution
-- ✅ **Scalable** to many concurrent clients
-
-The system is production-ready and can be extended with additional event types as needed.
+1. Add a method to `IEventBroadcaster` and implement it in `EventBroadcasterService`.
+2. Call it from the service that makes the change, after the change is committed.
+3. Handle the new type in `handleServerEvent` in `js/app/events.js`.
+4. Add tests on both sides.

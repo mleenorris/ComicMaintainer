@@ -356,11 +356,6 @@ public class SettingsController : ControllerBase
             return BadRequestProblem("Series image limits must all be greater than 0");
         }
 
-        if (request.MaxDownloadMB < request.MaxMB)
-        {
-            return BadRequestProblem("Max download size must be greater than or equal to max stored size");
-        }
-
         var maxBytes = (int)ToBytes(request.MaxMB)!;
         var maxDownloadBytes = (int)ToBytes(request.MaxDownloadMB)!;
 
@@ -815,6 +810,8 @@ public class SettingsController : ControllerBase
     /// <summary>
     /// Updates the SMTP settings used to email comics to saved ereader devices.
     /// Omit <c>smtpPassword</c> to keep the stored password; send an empty string to clear it.
+    /// Any other field left out is read as blank, off or its default, except that a setting
+    /// the environment pins is left alone. The other group endpoints work the same way.
     /// </summary>
     [HttpPut("email")]
     public async Task<ActionResult> UpdateEmailSettings([FromBody] EmailSettingsRequest request, CancellationToken cancellationToken = default)
@@ -842,24 +839,29 @@ public class SettingsController : ControllerBase
     public class EmailSettingsRequest
     {
         public string? SmtpHost { get; set; }
-        public int SmtpPort { get; set; } = 587;
+
+        /// <summary>SMTP port; 587 when left out.</summary>
+        public int? SmtpPort { get; set; }
+
         public string? SmtpUsername { get; set; }
 
         /// <summary>Null keeps the stored password; empty string clears it.</summary>
         public string? SmtpPassword { get; set; }
 
         /// <summary>Connect with implicit TLS (SMTPS, usually port 465).</summary>
-        public bool SmtpUseSsl { get; set; }
+        public bool? SmtpUseSsl { get; set; }
 
         /// <summary>
         /// Allow a plaintext connection when the server does not advertise
         /// STARTTLS. Only enable for a trusted local relay.
         /// </summary>
-        public bool SmtpAllowInsecure { get; set; }
+        public bool? SmtpAllowInsecure { get; set; }
 
         public string? EmailFromAddress { get; set; }
         public string? EmailFromName { get; set; }
-        public int EmailMaxAttachmentMb { get; set; } = 25;
+
+        /// <summary>Largest attachment in megabytes; 25 when left out.</summary>
+        public int? EmailMaxAttachmentMb { get; set; }
     }
 
     /// <summary>
@@ -888,13 +890,13 @@ public class SettingsController : ControllerBase
     public class EmailRateLimitSettingsRequest
     {
         /// <summary>Most comic emails in any rolling 60-minute window; 0 for no limit.</summary>
-        public int MaxSendsPerHour { get; set; }
+        public int? MaxSendsPerHour { get; set; }
 
         /// <summary>Most comic emails in any rolling 24-hour window; 0 for no limit.</summary>
-        public int MaxSendsPerDay { get; set; }
+        public int? MaxSendsPerDay { get; set; }
 
         /// <summary>Minimum gap between two comic emails; 0 to send back to back.</summary>
-        public int MinSecondsBetweenSends { get; set; }
+        public int? MinSecondsBetweenSends { get; set; }
     }
 
     /// <summary>
@@ -925,7 +927,7 @@ public class SettingsController : ControllerBase
 
     public class SuwayomiSettingsRequest
     {
-        public bool Enabled { get; set; }
+        public bool? Enabled { get; set; }
 
         /// <summary>Base URL of the Suwayomi server, e.g. <c>http://localhost:4567</c>.</summary>
         public string? BaseUrl { get; set; }
@@ -977,7 +979,7 @@ public class SettingsController : ControllerBase
 
     public class ErrorReportingSettingsRequest
     {
-        public bool Enabled { get; set; }
+        public bool? Enabled { get; set; }
 
         /// <summary>Null keeps the stored token; empty string clears it.</summary>
         public string? GitHubToken { get; set; }
@@ -985,24 +987,27 @@ public class SettingsController : ControllerBase
         /// <summary>Optional GitHub login new issues are assigned to.</summary>
         public string? Assignee { get; set; }
 
-        public int MaxIssuesPerDay { get; set; } = 10;
+        /// <summary>Most issues opened in a day; 10 when left out.</summary>
+        public int? MaxIssuesPerDay { get; set; }
 
-        public int DedupeWindowHours { get; set; } = 24;
+        /// <summary>Hours a repeat of the same error counts as a recurrence; 24 when left out.</summary>
+        public int? DedupeWindowHours { get; set; }
 
-        public bool CommentOnRecurrence { get; set; } = true;
+        /// <summary>Comment on the open issue when an error recurs; on when left out.</summary>
+        public bool? CommentOnRecurrence { get; set; }
     }
 
     public class ExternalSeriesMetadataSettingsRequest
     {
-        public bool Enabled { get; set; }
+        public bool? Enabled { get; set; }
 
         /// <summary>Null keeps the stored key; an empty (or blank) string clears it.</summary>
         public string? ComicVineApiKey { get; set; }
 
         public string? ComicVineBaseUrl { get; set; }
-        public bool EnableMangaDex { get; set; }
+        public bool? EnableMangaDex { get; set; }
         public string? MangaDexBaseUrl { get; set; }
-        public bool EnableAniList { get; set; }
+        public bool? EnableAniList { get; set; }
         public string? AniListBaseUrl { get; set; }
     }
 }

@@ -684,7 +684,7 @@ public class SettingsControllerCoverageTests
 
         Assert.IsType<OkObjectResult>(result);
         _settingsService.Verify(s => s.UpdateExternalSeriesMetadataSettingsAsync(
-            false, blank, blank, false, blank, false, blank, It.IsAny<CancellationToken>()), Times.Once());
+            false, blank, blank, null, blank, null, blank, It.IsAny<CancellationToken>()), Times.Once());
         _settingsService.VerifyNoOtherCalls();
     }
 
@@ -714,8 +714,8 @@ public class SettingsControllerCoverageTests
     {
         var failure = new InvalidOperationException("cv-key-do-not-echo rejected");
         _settingsService.Setup(s => s.UpdateExternalSeriesMetadataSettingsAsync(
-                It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<bool>(),
-                It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<bool?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<bool?>(),
+                It.IsAny<string?>(), It.IsAny<bool?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
         await AssertReachesGlobalHandler(failure, () => CreateController().UpdateExternalSeriesMetadata(new() { ComicVineApiKey = "cv-key-do-not-echo" }));
@@ -1108,20 +1108,20 @@ public class SettingsControllerCoverageTests
         {
             case "email":
                 _settingsService.Setup(s => s.UpdateEmailSettingsAsync(
-                        It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<bool>(),
-                        It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                        It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<bool?>(),
+                        It.IsAny<bool?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                     .ThrowsAsync(failure);
                 break;
             case "suwayomi":
                 _settingsService.Setup(s => s.UpdateSuwayomiSettingsAsync(
-                        It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                        It.IsAny<bool?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                         It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                     .ThrowsAsync(failure);
                 break;
             case "error-reporting":
                 _settingsService.Setup(s => s.UpdateErrorReportingSettingsAsync(
-                        It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(),
-                        It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                        It.IsAny<bool?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                        It.IsAny<bool?>(), It.IsAny<CancellationToken>()))
                     .ThrowsAsync(failure);
                 break;
             default:
@@ -1195,12 +1195,12 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task UpdateEmailSettings_EmptyRequest_UsesDefaultsAndKeepsStoredPassword()
+    public async Task UpdateEmailSettings_EmptyRequest_LeavesEveryFieldToTheService()
     {
         await CreateController().UpdateEmailSettings(new SettingsController.EmailSettingsRequest());
 
         _settingsService.Verify(s => s.UpdateEmailSettingsAsync(
-            null, 587, null, null, false, false, null, null, 25, It.IsAny<CancellationToken>()), Times.Once());
+            null, null, null, null, null, null, null, null, null, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     // ---------------------------------------------------------------- email rate limit
@@ -1248,7 +1248,7 @@ public class SettingsControllerCoverageTests
     public async Task UpdateEmailRateLimitSettings_ValidationFailure_ReturnsBadRequestWithServiceMessage()
     {
         _settingsService.Setup(s => s.UpdateEmailRateLimitSettingsAsync(
-                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new SettingsValidationException("Maximum emails per hour must be between 0 and 10000"));
 
         var result = await CreateController().UpdateEmailRateLimitSettings(
@@ -1262,7 +1262,7 @@ public class SettingsControllerCoverageTests
     {
         var failure = new IOException("disk full");
         _settingsService.Setup(s => s.UpdateEmailRateLimitSettingsAsync(
-                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
         await AssertReachesGlobalHandler(failure, () => CreateController().UpdateEmailRateLimitSettings(
@@ -1290,12 +1290,12 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task UpdateSuwayomiSettings_EmptyRequest_KeepsStoredPassword()
+    public async Task UpdateSuwayomiSettings_EmptyRequest_LeavesEveryFieldToTheService()
     {
         await CreateController().UpdateSuwayomiSettings(new SettingsController.SuwayomiSettingsRequest());
 
         _settingsService.Verify(s => s.UpdateSuwayomiSettingsAsync(
-            false, null, null, null, null, null, It.IsAny<CancellationToken>()), Times.Once());
+            null, null, null, null, null, null, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
@@ -1318,12 +1318,12 @@ public class SettingsControllerCoverageTests
     }
 
     [Fact]
-    public async Task UpdateErrorReportingSettings_EmptyRequest_UsesDefaultsAndKeepsStoredToken()
+    public async Task UpdateErrorReportingSettings_EmptyRequest_LeavesEveryFieldToTheService()
     {
         await CreateController().UpdateErrorReportingSettings(new SettingsController.ErrorReportingSettingsRequest());
 
         _settingsService.Verify(s => s.UpdateErrorReportingSettingsAsync(
-            false, null, null, 10, 24, true, It.IsAny<CancellationToken>()), Times.Once());
+            null, null, null, null, null, null, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     private sealed class ThrowingDbContextFactory : IDbContextFactory<ComicMaintainerDbContext>

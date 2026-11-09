@@ -133,6 +133,22 @@ public sealed class SettingsEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task AFieldLeftOutOfAGroupRequest_IsNotRefusedForTheSettingAVariablePins()
+    {
+        _environment.Set("SUWAYOMI_BASE_URL", "http://suwayomi.example:4567");
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var save = await client.PutAsJsonAsync("/api/settings/suwayomi", new { enabled = false });
+
+        Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+        using var read = await client.GetAsync("/api/settings");
+        using var settings = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
+        Assert.False(settings.RootElement.GetProperty("enable_suwayomi").GetBoolean());
+        Assert.Equal("http://suwayomi.example:4567", settings.RootElement.GetProperty("suwayomi_base_url").GetString());
+    }
+
+    [Fact]
     public async Task TheLegacyPostAliases_AreGone()
     {
         await using var factory = CreateFactory();

@@ -300,9 +300,12 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public async Task UpdateSeriesImageLimits_RejectsDownloadSmallerThanStored()
+    public async Task UpdateSeriesImageLimits_LeavesTheOrderOfTheSizesToTheService()
     {
-        // Arrange
+        // Whether the pair is acceptable depends on which of the two the environment pins.
+        _settingsServiceMock
+            .Setup(s => s.UpdateSeriesImageLimitsAsync(25 * 1048576, 5 * 1048576, 2048, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SettingsValidationException("Series image max download bytes must be greater than or equal to series image max bytes"));
         var request = new SettingsController.SeriesImageLimitsRequest
         {
             MaxMB = 25,
@@ -310,12 +313,9 @@ public class SettingsControllerTests
             MaxDimension = 2048
         };
 
-        // Act
         var result = await _controller.UpdateSeriesImageLimits(request);
 
-        // Assert
         Assert.IsType<BadRequestObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateSeriesImageLimitsAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // UpdateWatcherEnabled removed - use UpdateWatcherEnableRename and UpdateWatcherEnableNormalize instead

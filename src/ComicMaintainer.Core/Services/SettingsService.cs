@@ -256,24 +256,31 @@ public class SettingsService : ISettingsService
     }
 
     public async Task UpdateExternalSeriesMetadataSettingsAsync(
-        bool enabled,
+        bool? enabled,
         string? comicVineApiKey,
         string? comicVineBaseUrl,
-        bool enableMangaDex,
+        bool? enableMangaDex,
         string? mangaDexBaseUrl,
-        bool enableAniList,
+        bool? enableAniList,
         string? aniListBaseUrl,
         CancellationToken cancellationToken = default)
     {
         var values = NewValues();
         StageExternalSeriesMetadata(
             values,
-            new ExternalSeriesMetadataUpdate(enabled, comicVineApiKey, comicVineBaseUrl, enableMangaDex, mangaDexBaseUrl, enableAniList, aniListBaseUrl));
+            new ExternalSeriesMetadataUpdate(
+                enabled ?? LeftOut(nameof(AppSettings.EnableExternalSeriesMetadata), false),
+                comicVineApiKey,
+                comicVineBaseUrl,
+                enableMangaDex ?? LeftOut(nameof(AppSettings.EnableMangaDexMetadata), false),
+                mangaDexBaseUrl,
+                enableAniList ?? LeftOut(nameof(AppSettings.EnableAniListMetadata), false),
+                aniListBaseUrl));
         await SaveValuesAsync(values, cancellationToken);
     }
 
     public async Task UpdateSuwayomiSettingsAsync(
-        bool enabled,
+        bool? enabled,
         string? baseUrl,
         string? username,
         string? password,
@@ -284,7 +291,13 @@ public class SettingsService : ISettingsService
         var values = NewValues();
         StageSuwayomi(
             values,
-            new SuwayomiUpdate(enabled, baseUrl ?? string.Empty, username ?? string.Empty, password, downloadsDirectory, importDirectory),
+            new SuwayomiUpdate(
+                enabled ?? LeftOut(nameof(AppSettings.EnableSuwayomi), false),
+                baseUrl ?? LeftOut(nameof(AppSettings.SuwayomiBaseUrl), string.Empty),
+                username ?? LeftOut(nameof(AppSettings.SuwayomiUsername), string.Empty),
+                password,
+                downloadsDirectory,
+                importDirectory),
             _appSettings.CurrentValue);
         await SaveValuesAsync(values, cancellationToken);
     }
@@ -307,40 +320,45 @@ public class SettingsService : ISettingsService
 
     public async Task UpdateEmailSettingsAsync(
         string? smtpHost,
-        int smtpPort,
+        int? smtpPort,
         string? smtpUsername,
         string? smtpPassword,
-        bool smtpUseSsl,
-        bool smtpAllowInsecure,
+        bool? smtpUseSsl,
+        bool? smtpAllowInsecure,
         string? fromAddress,
         string? fromName,
-        int maxAttachmentMegabytes,
+        int? maxAttachmentMegabytes,
         CancellationToken cancellationToken = default)
     {
         var values = NewValues();
         StageEmail(
             values,
             new EmailUpdate(
-                smtpHost ?? string.Empty,
-                smtpPort,
-                smtpUsername ?? string.Empty,
+                smtpHost ?? LeftOut(nameof(AppSettings.SmtpHost), string.Empty),
+                smtpPort ?? LeftOut(nameof(AppSettings.SmtpPort), 587),
+                smtpUsername ?? LeftOut(nameof(AppSettings.SmtpUsername), string.Empty),
                 smtpPassword,
-                smtpUseSsl,
-                smtpAllowInsecure,
-                fromAddress ?? string.Empty,
-                fromName ?? string.Empty,
-                maxAttachmentMegabytes));
+                smtpUseSsl ?? LeftOut(nameof(AppSettings.SmtpUseSsl), false),
+                smtpAllowInsecure ?? LeftOut(nameof(AppSettings.SmtpAllowInsecure), false),
+                fromAddress ?? LeftOut(nameof(AppSettings.EmailFromAddress), string.Empty),
+                fromName ?? LeftOut(nameof(AppSettings.EmailFromName), string.Empty),
+                maxAttachmentMegabytes ?? LeftOut(nameof(AppSettings.EmailMaxAttachmentMegabytes), 25)));
         await SaveValuesAsync(values, cancellationToken);
     }
 
     public async Task UpdateEmailRateLimitSettingsAsync(
-        int maxSendsPerHour,
-        int maxSendsPerDay,
-        int minSecondsBetweenSends,
+        int? maxSendsPerHour,
+        int? maxSendsPerDay,
+        int? minSecondsBetweenSends,
         CancellationToken cancellationToken = default)
     {
         var values = NewValues();
-        StageEmailRateLimit(values, new EmailRateLimitUpdate(maxSendsPerHour, maxSendsPerDay, minSecondsBetweenSends));
+        StageEmailRateLimit(
+            values,
+            new EmailRateLimitUpdate(
+                maxSendsPerHour ?? LeftOut(nameof(AppSettings.EmailMaxSendsPerHour), 0),
+                maxSendsPerDay ?? LeftOut(nameof(AppSettings.EmailMaxSendsPerDay), 0),
+                minSecondsBetweenSends ?? LeftOut(nameof(AppSettings.EmailMinSecondsBetweenSends), 0)));
         await SaveValuesAsync(values, cancellationToken);
     }
 
@@ -353,18 +371,24 @@ public class SettingsService : ISettingsService
     /// only thing an operator supplies is the token that grants access to it.
     /// </remarks>
     public async Task UpdateErrorReportingSettingsAsync(
-        bool enabled,
+        bool? enabled,
         string? gitHubToken,
         string? assignee,
-        int maxIssuesPerDay,
-        int dedupeWindowHours,
-        bool commentOnRecurrence,
+        int? maxIssuesPerDay,
+        int? dedupeWindowHours,
+        bool? commentOnRecurrence,
         CancellationToken cancellationToken = default)
     {
         var values = NewValues();
         StageErrorReporting(
             values,
-            new ErrorReportingUpdate(enabled, gitHubToken, assignee ?? string.Empty, maxIssuesPerDay, dedupeWindowHours, commentOnRecurrence),
+            new ErrorReportingUpdate(
+                enabled ?? LeftOut(nameof(AppSettings.ErrorReportingEnabled), false),
+                gitHubToken,
+                assignee ?? LeftOut(nameof(AppSettings.ErrorReportingAssignee), string.Empty),
+                maxIssuesPerDay ?? LeftOut(nameof(AppSettings.ErrorReportingMaxIssuesPerDay), 10),
+                dedupeWindowHours ?? LeftOut(nameof(AppSettings.ErrorReportingDedupeWindowHours), 24),
+                commentOnRecurrence ?? LeftOut(nameof(AppSettings.ErrorReportingCommentOnRecurrence), true)),
             _appSettings.CurrentValue);
         await SaveValuesAsync(values, cancellationToken);
     }
@@ -464,6 +488,12 @@ public class SettingsService : ISettingsService
 
     private static void StageSeriesImageLimits(Dictionary<string, object?> values, SeriesImageLimitsUpdate limits, AppSettings current)
     {
+        limits = limits with
+        {
+            MaxBytes = ExceptThePinnedValue(nameof(AppSettings.SeriesImageMaxBytes), limits.MaxBytes),
+            MaxDownloadBytes = ExceptThePinnedValue(nameof(AppSettings.SeriesImageMaxDownloadBytes), limits.MaxDownloadBytes),
+        };
+
         if (limits.MaxBytes <= 0)
         {
             throw new SettingsValidationException("Series image max bytes must be greater than 0", "maxBytes");
@@ -492,6 +522,11 @@ public class SettingsService : ISettingsService
 
     private static void StageDatabaseCleanup(Dictionary<string, object?> values, DatabaseCleanupUpdate settings)
     {
+        settings = settings with
+        {
+            StaleCleanupSentinelFile = ExceptThePinnedValue(nameof(AppSettings.StaleCleanupSentinelFile), settings.StaleCleanupSentinelFile),
+        };
+
         if (settings.IntervalHours < 0)
         {
             throw new SettingsValidationException("Cleanup interval hours must be non-negative (0 = only on startup)", nameof(settings));
@@ -556,6 +591,13 @@ public class SettingsService : ISettingsService
 
     private static void StageSuwayomi(Dictionary<string, object?> values, SuwayomiUpdate suwayomi, AppSettings current)
     {
+        suwayomi = suwayomi with
+        {
+            BaseUrl = ExceptThePinnedValue(nameof(AppSettings.SuwayomiBaseUrl), suwayomi.BaseUrl),
+            DownloadsDirectory = ExceptThePinnedValue(nameof(AppSettings.SuwayomiDownloadsDirectory), suwayomi.DownloadsDirectory),
+            ImportDirectory = ExceptThePinnedValue(nameof(AppSettings.SuwayomiImportDirectory), suwayomi.ImportDirectory),
+        };
+
         var normalizedUrl = string.IsNullOrWhiteSpace(suwayomi.BaseUrl) ? null : suwayomi.BaseUrl.Trim().TrimEnd('/');
 
         // Checked against the URL in effect after this save, so a pinned URL the page
@@ -608,6 +650,12 @@ public class SettingsService : ISettingsService
 
     private static void StageEmail(Dictionary<string, object?> values, EmailUpdate email)
     {
+        email = email with
+        {
+            EmailFromAddress = ExceptThePinnedValue(nameof(AppSettings.EmailFromAddress), email.EmailFromAddress),
+            EmailMaxAttachmentMb = ExceptThePinnedValue(nameof(AppSettings.EmailMaxAttachmentMegabytes), email.EmailMaxAttachmentMb),
+        };
+
         if (email.SmtpPort is < 1 or > 65535)
         {
             throw new SettingsValidationException("SMTP port must be between 1 and 65535", "smtpPort");
@@ -673,6 +721,13 @@ public class SettingsService : ISettingsService
 
     private static void StageErrorReporting(Dictionary<string, object?> values, ErrorReportingUpdate reporting, AppSettings current)
     {
+        reporting = reporting with
+        {
+            Assignee = ExceptThePinnedValue(nameof(AppSettings.ErrorReportingAssignee), reporting.Assignee),
+            MaxIssuesPerDay = ExceptThePinnedValue(nameof(AppSettings.ErrorReportingMaxIssuesPerDay), reporting.MaxIssuesPerDay),
+            DedupeWindowHours = ExceptThePinnedValue(nameof(AppSettings.ErrorReportingDedupeWindowHours), reporting.DedupeWindowHours),
+        };
+
         var normalizedAssignee = Normalize(reporting.Assignee);
 
         if (normalizedAssignee is not null && !GitHubNameValidator.IsValidOwner(normalizedAssignee))
@@ -716,6 +771,41 @@ public class SettingsService : ISettingsService
             values["ErrorReportingGitHubToken"] = reporting.GitHubToken.Length == 0 ? null : reporting.GitHubToken.Trim();
         }
     }
+
+    /// <summary>
+    /// What a field left out of a group-endpoint request stands for: <paramref name="unset"/> (blank,
+    /// off or a default, as those endpoints have always read it), or null, which keeps the value,
+    /// when the environment pins the setting. Otherwise a client would be refused over a field it
+    /// never sent.
+    /// </summary>
+    private static T? LeftOut<T>(string settingName, T unset)
+        where T : struct
+        => IsPinned(settingName) ? null : unset;
+
+    /// <inheritdoc cref="LeftOut{T}(string, T)"/>
+    private static string? LeftOut(string settingName, string unset)
+        => IsPinned(settingName) ? null : unset;
+
+    /// <summary>
+    /// Null when <paramref name="value"/> is what the environment already pins the setting to.
+    /// Applied before a group's checks to the fields where the environment accepts more than a
+    /// save does (EMAIL_MAX_ATTACHMENT_MB=500), so a client sending a whole group back is not
+    /// refused for a value it cannot change.
+    /// </summary>
+    private static T? ExceptThePinnedValue<T>(string settingName, T? value)
+        where T : struct
+        => value is { } set && IsPinnedTo(settingName, set) ? null : value;
+
+    /// <inheritdoc cref="ExceptThePinnedValue{T}(string, T?)"/>
+    private static string? ExceptThePinnedValue(string settingName, string? value)
+        => value is not null && IsPinnedTo(settingName, value) ? null : value;
+
+    private static bool IsPinned(string settingName) =>
+        AppSettingsEnvironmentOverrides.Active().Any(o => o.SettingName == settingName);
+
+    private static bool IsPinnedTo(string settingName, object value) =>
+        AppSettingsEnvironmentOverrides.All.Any(o =>
+            o.SettingName == settingName && o.TryGetForcedValue(out var forced) && IsSameValue(forced, value));
 
     /// <summary>Stages a value unless it is null, which means "keep the current value".</summary>
     private static void StageIfSet<T>(Dictionary<string, object?> values, string settingName, T? value)
@@ -764,7 +854,7 @@ public class SettingsService : ISettingsService
     /// </summary>
     private static bool HasUsableToken(string? requestedToken, AppSettings current) =>
         !string.IsNullOrWhiteSpace(requestedToken)
-        || AppSettingsEnvironmentOverrides.Active().Any(o => o.SettingName == nameof(AppSettings.ErrorReportingGitHubToken))
+        || IsPinned(nameof(AppSettings.ErrorReportingGitHubToken))
         || (requestedToken is null && !string.IsNullOrWhiteSpace(current.ErrorReportingGitHubToken));
 
     private Task SaveValueAsync(string settingName, object? value, CancellationToken cancellationToken)

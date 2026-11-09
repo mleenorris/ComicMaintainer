@@ -27,13 +27,15 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
         new(AppSettingsEnvironmentOverrides.All.Select(o => o.Variable).ToArray());
 
     private readonly string _configDir = Path.Join(Path.GetTempPath(), $"SettingsEnvLocks_{Guid.NewGuid():N}");
+    private readonly AppSettings _settings;
     private readonly SettingsService _service;
 
     public AppSettingsEnvironmentOverridesTests()
     {
+        _settings = new AppSettings { ConfigDirectory = _configDir };
         _service = new SettingsService(
             NullLogger<SettingsService>.Instance,
-            new TestOptionsMonitor<AppSettings>(new AppSettings { ConfigDirectory = _configDir }),
+            new TestOptionsMonitor<AppSettings>(_settings),
             new ConfigurationBuilder().Build());
     }
 
@@ -199,6 +201,7 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
         _environment.Set("SMTP_HOST", "pinned.example");
         _environment.Set("SMTP_PORT", "2525");
         _environment.Set("SUWAYOMI_BASE_URL", "http://suwayomi.example:4567/");
+        _settings.SuwayomiBaseUrl = "http://suwayomi.example:4567/";
 
         await _service.UpdateSettingsAsync(new SettingsUpdate
         {
@@ -291,6 +294,201 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
             true, null, null, enableMangaDex: false, null, true, null));
 
         Assert.Equal("ENABLE_MANGADEX_METADATA", Assert.Single(ex.Overrides).Variable);
+    }
+
+    [Theory]
+    [InlineData("email", "SMTP_HOST", "pinned.example", "SmtpHost")]
+    [InlineData("email", "SMTP_PORT", "2525", "SmtpPort")]
+    [InlineData("email", "SMTP_USERNAME", "pinned-user", "SmtpUsername")]
+    [InlineData("email", "SMTP_USE_SSL", "true", "SmtpUseSsl")]
+    [InlineData("email", "SMTP_ALLOW_INSECURE", "true", "SmtpAllowInsecure")]
+    [InlineData("email", "EMAIL_FROM_ADDRESS", "pinned@example.com", "EmailFromAddress")]
+    [InlineData("email", "EMAIL_FROM_NAME", "Pinned", "EmailFromName")]
+    [InlineData("email", "EMAIL_MAX_ATTACHMENT_MB", "500", "EmailMaxAttachmentMegabytes")]
+    [InlineData("email-rate-limit", "EMAIL_MAX_SENDS_PER_HOUR", "5", "EmailMaxSendsPerHour")]
+    [InlineData("email-rate-limit", "EMAIL_MAX_SENDS_PER_DAY", "5", "EmailMaxSendsPerDay")]
+    [InlineData("email-rate-limit", "EMAIL_MIN_SECONDS_BETWEEN_SENDS", "5", "EmailMinSecondsBetweenSends")]
+    [InlineData("suwayomi", "ENABLE_SUWAYOMI", "true", "EnableSuwayomi")]
+    [InlineData("suwayomi", "SUWAYOMI_BASE_URL", "http://suwayomi.example:4567", "SuwayomiBaseUrl")]
+    [InlineData("suwayomi", "SUWAYOMI_USERNAME", "pinned-user", "SuwayomiUsername")]
+    [InlineData("error-reporting", "ERROR_REPORTING_ENABLED", "true", "ErrorReportingEnabled")]
+    [InlineData("error-reporting", "ERROR_REPORTING_ASSIGNEE", "octocat", "ErrorReportingAssignee")]
+    [InlineData("error-reporting", "ERROR_REPORTING_MAX_ISSUES_PER_DAY", "3", "ErrorReportingMaxIssuesPerDay")]
+    [InlineData("error-reporting", "ERROR_REPORTING_DEDUPE_WINDOW_HOURS", "3", "ErrorReportingDedupeWindowHours")]
+    [InlineData("error-reporting", "ERROR_REPORTING_COMMENT_ON_RECURRENCE", "false", "ErrorReportingCommentOnRecurrence")]
+    [InlineData("external-series-metadata", "ENABLE_EXTERNAL_SERIES_METADATA", "true", "EnableExternalSeriesMetadata")]
+    [InlineData("external-series-metadata", "ENABLE_MANGADEX_METADATA", "true", "EnableMangaDexMetadata")]
+    [InlineData("external-series-metadata", "ENABLE_ANILIST_METADATA", "true", "EnableAniListMetadata")]
+    public async Task GroupEndpoint_AFieldLeftOut_IsNotAWriteToThePinnedSetting(string group, string variable, string value, string settingName)
+    {
+        _environment.Set(variable, value);
+
+        var result = await SendEmptyRequestTo(group);
+
+        Assert.IsType<OkObjectResult>(result);
+        var saved = SavedSection();
+        Assert.False(saved.TryGetProperty(settingName, out _), $"{settingName} was written");
+        Assert.NotEmpty(saved.EnumerateObject());
+    }
+
+    [Fact]
+    public async Task GroupEndpoint_AFieldLeftOut_IsReadAsBlankOffOrItsDefaultWhenNothingPinsIt()
+    {
+        foreach (var group in new[] { "email", "email-rate-limit", "suwayomi", "error-reporting", "external-series-metadata" })
+        {
+            Assert.IsType<OkObjectResult>(await SendEmptyRequestTo(group));
+        }
+
+        var saved = SavedSection();
+        Assert.Equal(JsonValueKind.Null, saved.GetProperty("SmtpHost").ValueKind);
+        Assert.Equal(587, saved.GetProperty("SmtpPort").GetInt32());
+        Assert.False(saved.GetProperty("SmtpUseSsl").GetBoolean());
+        Assert.Equal("ComicMaintainer", saved.GetProperty("EmailFromName").GetString());
+        Assert.Equal(25, saved.GetProperty("EmailMaxAttachmentMegabytes").GetInt32());
+        Assert.Equal(0, saved.GetProperty("EmailMaxSendsPerHour").GetInt32());
+        Assert.False(saved.GetProperty("EnableSuwayomi").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, saved.GetProperty("SuwayomiBaseUrl").ValueKind);
+        Assert.False(saved.GetProperty("ErrorReportingEnabled").GetBoolean());
+        Assert.Equal(10, saved.GetProperty("ErrorReportingMaxIssuesPerDay").GetInt32());
+        Assert.Equal(24, saved.GetProperty("ErrorReportingDedupeWindowHours").GetInt32());
+        Assert.True(saved.GetProperty("ErrorReportingCommentOnRecurrence").GetBoolean());
+        Assert.False(saved.GetProperty("EnableMangaDexMetadata").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GroupEndpoint_APinnedFieldThatIsSentDifferently_IsStillRefused()
+    {
+        _environment.Set("SMTP_PORT", "2525");
+        var controller = CreateController(_service);
+
+        var result = await controller.UpdateEmailSettings(new SettingsController.EmailSettingsRequest { SmtpPort = 587 });
+
+        Assert.IsType<ConflictObjectResult>(result);
+        Assert.False(File.Exists(SettingsFile));
+    }
+
+    private Task<ActionResult> SendEmptyRequestTo(string group)
+    {
+        var controller = CreateController(_service);
+        return group switch
+        {
+            "email" => controller.UpdateEmailSettings(new SettingsController.EmailSettingsRequest()),
+            "email-rate-limit" => controller.UpdateEmailRateLimitSettings(new SettingsController.EmailRateLimitSettingsRequest()),
+            "suwayomi" => controller.UpdateSuwayomiSettings(new SettingsController.SuwayomiSettingsRequest()),
+            "error-reporting" => controller.UpdateErrorReportingSettings(new SettingsController.ErrorReportingSettingsRequest()),
+            "external-series-metadata" => controller.UpdateExternalSeriesMetadata(new SettingsController.ExternalSeriesMetadataSettingsRequest()),
+            _ => throw new ArgumentOutOfRangeException(nameof(group), group, null),
+        };
+    }
+
+    [Fact]
+    public async Task Save_AWholeEmailGroupBackWithPinnedValuesASaveWouldReject_IsAccepted()
+    {
+        _environment.Set("EMAIL_MAX_ATTACHMENT_MB", "500");
+        _environment.Set("EMAIL_FROM_ADDRESS", "not-an-address");
+
+        await _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            Email = new EmailUpdate(SmtpPort: 25, EmailFromAddress: "not-an-address", EmailMaxAttachmentMb: 500),
+        });
+
+        var saved = SavedSection();
+        Assert.Equal(25, saved.GetProperty("SmtpPort").GetInt32());
+        Assert.False(saved.TryGetProperty("EmailMaxAttachmentMegabytes", out _));
+        Assert.False(saved.TryGetProperty("EmailFromAddress", out _));
+    }
+
+    [Fact]
+    public async Task Save_AWholeErrorReportingGroupBackWithPinnedValuesASaveWouldReject_IsAccepted()
+    {
+        _environment.Set("ERROR_REPORTING_ASSIGNEE", "not a login!");
+        _environment.Set("ERROR_REPORTING_MAX_ISSUES_PER_DAY", "900");
+        _environment.Set("ERROR_REPORTING_DEDUPE_WINDOW_HOURS", "9000");
+
+        await _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            ErrorReporting = new ErrorReportingUpdate(Assignee: "not a login!", MaxIssuesPerDay: 900, DedupeWindowHours: 9000, CommentOnRecurrence: false),
+        });
+
+        var saved = SavedSection();
+        Assert.False(saved.GetProperty("ErrorReportingCommentOnRecurrence").GetBoolean());
+        Assert.False(saved.TryGetProperty("ErrorReportingAssignee", out _));
+        Assert.False(saved.TryGetProperty("ErrorReportingMaxIssuesPerDay", out _));
+        Assert.False(saved.TryGetProperty("ErrorReportingDedupeWindowHours", out _));
+    }
+
+    [Fact]
+    public async Task Save_AWholeSuwayomiGroupBackWithPinnedValuesASaveWouldReject_IsAccepted()
+    {
+        _environment.Set("SUWAYOMI_BASE_URL", "ftp://pinned.example");
+        _environment.Set("SUWAYOMI_DOWNLOADS_DIR", "/no/such/folder");
+        _environment.Set("SUWAYOMI_IMPORT_DIR", "../outside");
+
+        await _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            Suwayomi = new SuwayomiUpdate(BaseUrl: "ftp://pinned.example/", Username: "reader", DownloadsDirectory: "/no/such/folder", ImportDirectory: "../outside"),
+        });
+
+        var saved = SavedSection();
+        Assert.Equal("reader", saved.GetProperty("SuwayomiUsername").GetString());
+        Assert.False(saved.TryGetProperty("SuwayomiBaseUrl", out _));
+        Assert.False(saved.TryGetProperty("SuwayomiDownloadsDirectory", out _));
+        Assert.False(saved.TryGetProperty("SuwayomiImportDirectory", out _));
+    }
+
+    [Fact]
+    public async Task Save_APinnedSentinelFileASaveWouldReject_IsAccepted()
+    {
+        var sentinel = new string('s', DatabaseCleanupSettings.MaxSentinelFileLength + 1);
+        _environment.Set("STALE_CLEANUP_SENTINEL_FILE", sentinel);
+
+        await _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            DatabaseCleanup = new DatabaseCleanupUpdate(IntervalHours: 2, StaleCleanupSentinelFile: sentinel),
+        });
+
+        var saved = SavedSection();
+        Assert.Equal(2, saved.GetProperty("DatabaseCleanupIntervalHours").GetInt32());
+        Assert.False(saved.TryGetProperty("StaleCleanupSentinelFile", out _));
+    }
+
+    [Fact]
+    public async Task SeriesImageLimits_APinnedPairInTheWrongOrder_IsAcceptedWhenSentBack()
+    {
+        _environment.Set("SERIES_IMAGE_MAX_BYTES", (30 * 1048576).ToString());
+        _environment.Set("SERIES_IMAGE_MAX_DOWNLOAD_BYTES", (20 * 1048576).ToString());
+
+        var result = await CreateController(_service).UpdateSeriesImageLimits(
+            new SettingsController.SeriesImageLimitsRequest { MaxMB = 30, MaxDownloadMB = 20, MaxDimension = 900 });
+
+        Assert.IsType<OkObjectResult>(result);
+        var saved = SavedSection();
+        Assert.Equal(900, saved.GetProperty("SeriesImageMaxDimension").GetInt32());
+        Assert.False(saved.TryGetProperty("SeriesImageMaxBytes", out _));
+        Assert.False(saved.TryGetProperty("SeriesImageMaxDownloadBytes", out _));
+    }
+
+    [Fact]
+    public async Task SeriesImageLimits_TheWrongOrderWithNothingPinned_IsRefused()
+    {
+        var result = await CreateController(_service).UpdateSeriesImageLimits(
+            new SettingsController.SeriesImageLimitsRequest { MaxMB = 30, MaxDownloadMB = 20, MaxDimension = 900 });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.False(File.Exists(SettingsFile));
+    }
+
+    [Fact]
+    public async Task Save_AnOutOfRangeValueOtherThanThePinnedOne_IsStillValidated()
+    {
+        _environment.Set("EMAIL_MAX_ATTACHMENT_MB", "500");
+
+        await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            Email = new EmailUpdate(EmailMaxAttachmentMb: 900),
+        }));
+
+        Assert.False(File.Exists(SettingsFile));
     }
 
     [Fact]

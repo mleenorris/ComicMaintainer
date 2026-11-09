@@ -591,13 +591,6 @@ public static class ArchiveEntryReader
     }
 
     /// <summary>
-    /// Reads a text entry such as ComicInfo.xml under <see cref="MaxComicInfoBytes"/>,
-    /// decoding it as UTF-8 unless a byte order mark says otherwise.
-    /// </summary>
-    /// <exception cref="ArchiveLimitExceededException">The entry exceeds a limit.</exception>
-    public static string ReadText(IArchiveEntry entry) => DecodeText(ReadAllBytes(entry, MaxComicInfoBytes));
-
-    /// <summary>
     /// Reads a ZIP text entry such as ComicInfo.xml under <see cref="MaxComicInfoBytes"/>,
     /// decoding it as UTF-8 unless a byte order mark says otherwise.
     /// </summary>

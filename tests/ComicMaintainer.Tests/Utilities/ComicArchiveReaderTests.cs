@@ -641,6 +641,151 @@ public sealed class ComicArchiveReaderTests : IDisposable
         Assert.False(File.Exists(path));
     }
 
+    // ---- Solid RAR ------------------------------------------------------------------------
+
+    /// <summary>
+    /// A solid RAR 5 of stored entries. Stored data does not need the entries before it, but
+    /// entries flagged solid can only be read through the archive in order, which, unlike
+    /// opening one by itself, also checks its CRC: <paramref name="badCrc"/> tells them apart.
+    /// </summary>
+    private string StoredSolidRar5(string fileName, string? badCrc, params (string Name, byte[] Data)[] entries)
+    {
+        using var output = new MemoryStream();
+        output.Write(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 });
+        using (var main = new MemoryStream())
+        {
+            WriteVInt(main, 1); // main archive header
+            WriteVInt(main, 0);
+            WriteVInt(main, 0x04); // archive flags: solid
+            WriteBlock(output, main.ToArray());
+        }
+
+        for (var i = 0; i < entries.Length; i++)
+        {
+            var (entryName, data) = entries[i];
+            var nameBytes = Encoding.UTF8.GetBytes(entryName);
+            using var file = new MemoryStream();
+            WriteVInt(file, 2); // file header
+            WriteVInt(file, 2); // flags: a data area follows
+            WriteVInt(file, (ulong)data.Length);
+            WriteVInt(file, 0x04); // file flags: CRC present
+            WriteVInt(file, (ulong)data.Length); // unpacked size
+            WriteVInt(file, 0x20);
+            var crc = new byte[4];
+            BinaryPrimitives.WriteUInt32LittleEndian(crc, ComicReaderServiceCoverageTests.StoredRar4.Crc32(data) + (entryName == badCrc ? 1u : 0u));
+            file.Write(crc);
+            WriteVInt(file, i == 0 ? 0UL : 0x40UL); // compression: stored; solid after the first
+            WriteVInt(file, 1); // host OS
+            WriteVInt(file, (ulong)nameBytes.Length);
+            file.Write(nameBytes);
+            WriteBlock(output, file.ToArray());
+            output.Write(data);
+        }
+
+        using (var end = new MemoryStream())
+        {
+            WriteVInt(end, 5);
+            WriteVInt(end, 0);
+            WriteVInt(end, 0);
+            WriteBlock(output, end.ToArray());
+        }
+
+        var path = Path.Join(_dir, fileName);
+        File.WriteAllBytes(path, output.ToArray());
+        return path;
+    }
+
+    private string SolidBook(string? badCrc = null) => StoredSolidRar5(
+        "solid.cbr",
+        badCrc,
+        ("p1.jpg", Bytes("one")),
+        ("p2.jpg", Bytes("two")),
+        ("p3.jpg", Bytes("three")));
+
+    [Fact]
+    public void ReadAllBytes_SolidEntry_IsReadThroughTheArchiveInOrder()
+    {
+        // Opened by itself this entry would come back with its CRC never checked.
+        using var archive = ComicArchiveReader.Open(SolidBook(badCrc: "p2.jpg"));
+
+        Assert.Throws<SharpCompress.Common.InvalidFormatException>(() => archive.GetEntryAt(1)!.ReadAllBytes(1024));
+    }
+
+    [Fact]
+    public void ReadAllBytes_SolidFirstEntry_NeedsNoEarlierEntries()
+    {
+        using var archive = ComicArchiveReader.Open(SolidBook(badCrc: "p1.jpg"));
+
+        Assert.Equal(Bytes("one"), archive.GetEntryAt(0)!.ReadAllBytes(1024));
+    }
+
+    [Fact]
+    public void ReadAllBytes_SolidEntries_CanBeReadInAnyOrder()
+    {
+        using var archive = ComicArchiveReader.Open(SolidBook());
+
+        Assert.Equal(Bytes("two"), archive.GetEntryAt(1)!.ReadAllBytes(1024));
+        Assert.Equal(Bytes("three"), archive.GetEntryAt(2)!.ReadAllBytes(1024));
+        Assert.Equal(Bytes("two"), archive.GetEntryAt(1)!.ReadAllBytes(1024));
+    }
+
+    [Fact]
+    public void ReadAllBytes_SolidArchiveWithFolders_CountsThemWhenReadingInOrder()
+    {
+        // The stored-RAR fixture sets no per-entry solid flag, so go through the internal read.
+        var path = SolidRar("foldered.cbr", ("folder", null), ("p1.jpg", Bytes("one")), ("p2.jpg", Bytes("two")));
+        using var archive = ComicArchiveReader.Open(path);
+
+        Assert.Equal(Bytes("two"), archive.ReadSolidEntry(2, "p2.jpg", 3, 1024));
+    }
+
+    [Fact]
+    public void ReadText_SolidEntry_IsReadInOrderToo()
+    {
+        var path = StoredSolidRar5("info.cbr", badCrc: null, ("p1.jpg", Bytes("one")), ("ComicInfo.xml", Bytes("<ComicInfo/>")));
+        using var archive = ComicArchiveReader.Open(path);
+
+        Assert.Equal("<ComicInfo/>", archive.FindComicInfoEntry()!.ReadText());
+
+        var damaged = StoredSolidRar5("damaged.cbr", badCrc: "ComicInfo.xml", ("p1.jpg", Bytes("one")), ("ComicInfo.xml", Bytes("<ComicInfo/>")));
+        using var damagedArchive = ComicArchiveReader.Open(damaged);
+
+        Assert.Throws<SharpCompress.Common.InvalidFormatException>(() => damagedArchive.FindComicInfoEntry()!.ReadText());
+    }
+
+    [Fact]
+    public void ReadAllBytes_SolidEntryOverTheCap_IsRefusedBeforeAnythingIsDecompressed()
+    {
+        using var archive = ComicArchiveReader.Open(SolidBook());
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => archive.GetEntryAt(2)!.ReadAllBytes(2));
+
+        Assert.Contains("p3.jpg", ex.Message);
+    }
+
+    [Fact]
+    public void ReadSolidEntry_APositionPastTheEnd_IsReportedAsDamage()
+    {
+        using var archive = ComicArchiveReader.Open(SolidBook());
+
+        var ex = Assert.Throws<ComicArchiveFormatException>(() => archive.ReadSolidEntry(5, "p9.jpg", 1, 1024));
+
+        Assert.Contains("p9.jpg", ex.Message);
+        Assert.Equal(Bytes("one"), archive.ReadSolidEntry(0, "p1.jpg", 3, 1024));
+    }
+
+    [Fact]
+    public void ReadSolidEntry_PastTheBudget_IsRefusedAndALaterReadStartsOver()
+    {
+        var path = StoredSolidRar5("budget.cbr", null, ("a.bin", new byte[4096]), ("b.bin", new byte[16]));
+        using var archive = ComicArchiveReader.Open(path);
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => archive.ReadSolidEntry(1, "b.bin", 16, 1024, totalBudgetBytes: 100));
+
+        Assert.Contains("budget.cbr", ex.Message);
+        Assert.Equal(new byte[16], archive.ReadSolidEntry(1, "b.bin", 16, 1024));
+    }
+
     /// <summary>Concatenates the file blocks of two single-file RAR 5 archives.</summary>
     private static byte[] MergeRar5Headers(byte[] first, byte[] second)
     {
@@ -820,7 +965,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
     }
 
     private static ComicArchiveReader.LimitedRewriteStream Limited(byte[] data, long declaredSize, long maxEntryBytes, long totalBudget) =>
-        new(new MemoryStream(data), "p1.jpg", declaredSize, maxEntryBytes, new ComicArchiveReader.RewriteBudget("book.cbz", totalBudget));
+        new(new MemoryStream(data), "p1.jpg", declaredSize, maxEntryBytes, new ComicArchiveReader.DecompressionBudget("book.cbz", totalBudget));
 
     [Fact]
     public void LimitedRewriteStream_WithinLimits_PassesTheDataThrough()

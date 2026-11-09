@@ -486,23 +486,29 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
     }
 
     /// <summary>
-    /// Announces a job's current state and writes it to durable storage.
+    /// Announces a job's current state and writes it to durable storage. The write happens
+    /// even when the announcement fails, so that a job's final state is always recorded.
     /// </summary>
     private async Task PublishAsync(JobEntry entry)
     {
-        if (_eventBroadcaster != null)
+        try
         {
-            var job = Summarize(entry);
-            await _eventBroadcaster.BroadcastJobUpdateAsync(
-                job.JobId,
-                job.Status.ToString().ToLower(),
-                job.ProcessedFiles + job.FailedFiles,
-                job.TotalFiles,
-                job.ProcessedFiles,
-                job.FailedFiles);
+            if (_eventBroadcaster != null)
+            {
+                var job = Summarize(entry);
+                await _eventBroadcaster.BroadcastJobUpdateAsync(
+                    job.JobId,
+                    job.Status.ToString().ToLower(),
+                    job.ProcessedFiles + job.FailedFiles,
+                    job.TotalFiles,
+                    job.ProcessedFiles,
+                    job.FailedFiles);
+            }
         }
-
-        await PersistAsync(entry);
+        finally
+        {
+            await PersistAsync(entry);
+        }
     }
 
     /// <summary>

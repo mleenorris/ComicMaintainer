@@ -187,7 +187,7 @@ public class JobStateStore : IJobStateStore
         return new ProcessingJob
         {
             JobId = entity.JobId,
-            // Only the exact names Apply writes are valid. Enum.TryParse alone also accepts
+            // Only the exact names SaveAsync writes are valid. Enum.TryParse alone also accepts
             // numbers, whitespace and comma-separated names, so "1" would restore as a Running job
             // and "42" as an undefined status: MarkInterruptedAsync matches exact names and never
             // sweeps them, leaving a job that can be neither deleted nor cancelled. Enum.IsDefined

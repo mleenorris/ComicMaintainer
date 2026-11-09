@@ -190,12 +190,16 @@ public sealed class BatchJobRegistryTests
         broadcaster
             .Setup(b => b.BroadcastJobUpdateAsync(It.IsAny<Guid>(), "completed", It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>()))
             .ThrowsAsync(new InvalidOperationException("broadcast failed"));
-        var registry = CreateRegistry(broadcaster: broadcaster.Object);
+        var registry = CreateRegistry(_store.Object, broadcaster.Object);
 
         var jobId = registry.StartJob(Definition(), new[] { "a" });
         var job = await registry.WaitForCompletionAsync(jobId).WaitAsync(Timeout);
 
         Assert.Equal(JobStatus.Completed, job!.Status);
+        // Otherwise a restart would report the finished job as interrupted.
+        _store.Verify(
+            s => s.SaveAsync(It.Is<ProcessingJob>(j => j.JobId == jobId && j.Status == JobStatus.Completed), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

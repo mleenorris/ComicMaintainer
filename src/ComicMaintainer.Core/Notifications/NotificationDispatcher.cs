@@ -23,7 +23,7 @@ namespace ComicMaintainer.Core.Notifications;
 /// <see cref="ILibraryActivityMonitor"/> reports the library idle.</para>
 /// <para>Each target is spaced out (<see cref="MinTimeBetweenSends"/>) and left alone for a
 /// growing time while it keeps failing, so a target that is down costs little and cannot hold
-/// up the others.</para>
+/// up the others. Changing its settings or passing a Send Test ends that early.</para>
 /// </remarks>
 public sealed class NotificationDispatcher : BackgroundService
 {

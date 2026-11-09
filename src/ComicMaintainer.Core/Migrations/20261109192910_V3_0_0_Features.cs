@@ -6,11 +6,44 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ComicMaintainer.Core.Migrations
 {
     /// <inheritdoc />
-    public partial class V3W3_notify_NotificationDeliveries : Migration
+    public partial class V3_0_0_Features : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<string>(
+                name: "GenresJson",
+                table: "SeriesMetadataCache",
+                type: "TEXT",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "Origin",
+                table: "SeriesMetadataCache",
+                type: "TEXT",
+                maxLength: 16,
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "PublicationStatus",
+                table: "SeriesMetadataCache",
+                type: "TEXT",
+                maxLength: 32,
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "SiteUrl",
+                table: "SeriesMetadataCache",
+                type: "TEXT",
+                maxLength: 2048,
+                nullable: true);
+
+            migrationBuilder.AddColumn<int>(
+                name: "TotalChapters",
+                table: "SeriesMetadataCache",
+                type: "INTEGER",
+                nullable: true);
+
             migrationBuilder.CreateTable(
                 name: "NotificationDeliveries",
                 columns: table => new
@@ -57,6 +90,26 @@ namespace ComicMaintainer.Core.Migrations
         {
             migrationBuilder.DropTable(
                 name: "NotificationDeliveries");
+
+            migrationBuilder.DropColumn(
+                name: "GenresJson",
+                table: "SeriesMetadataCache");
+
+            migrationBuilder.DropColumn(
+                name: "Origin",
+                table: "SeriesMetadataCache");
+
+            migrationBuilder.DropColumn(
+                name: "PublicationStatus",
+                table: "SeriesMetadataCache");
+
+            migrationBuilder.DropColumn(
+                name: "SiteUrl",
+                table: "SeriesMetadataCache");
+
+            migrationBuilder.DropColumn(
+                name: "TotalChapters",
+                table: "SeriesMetadataCache");
         }
     }
 }

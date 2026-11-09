@@ -92,6 +92,7 @@
         <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></symbol>
         <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/></symbol>
         <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5h.01"/></symbol>
+        <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 7 2 7H4s2-2 2-7z"/><path d="M10 20a2 2 0 0 0 4 0"/></symbol>
         <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M4 7h4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4h-4a2 2 0 1 0-4 0H4v-4a2 2 0 1 0 0-4z"/></symbol>
         <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 7V5h16v2"/><path d="M12 5v14"/><path d="M9 19h6"/></symbol>
         <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
@@ -563,6 +564,7 @@
                     <button type="button" class="settings-nav-link" data-settings-target="settings-access" onclick="scrollToSettingsSection('settings-access')"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><span>Access</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-watcher" onclick="scrollToSettingsSection('settings-watcher')"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg><span>Watcher</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-ereader" onclick="scrollToSettingsSection('settings-ereader')"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span>Send to Ereader</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-notifications" onclick="scrollToSettingsSection('settings-notifications')"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><span>Notifications</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-error-reporting" onclick="scrollToSettingsSection('settings-error-reporting')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Automated Error Reporting</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-logs" onclick="scrollToSettingsSection('settings-logs')"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Log Rotation</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-database" onclick="scrollToSettingsSection('settings-database')"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg><span>Database Cleanup</span></button>
@@ -767,6 +769,212 @@
                         <div class="form-group">
                            <label for="emailMinSecondsBetweenSends">Minimum Seconds Between Emails</label>
                            <input type="number" id="emailMinSecondsBetweenSends" name="emailMinSecondsBetweenSends" min="0" max="86400" step="1" autocomplete="off" placeholder="0">
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-notifications" aria-labelledby="settings-notifications-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-bell"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-notifications-title">Notifications</h3>
+                                <p class="settings-card-desc">Push notifications, webhooks and Komga or Kavita library scans.</p>
+                            </div>
+                        </header>
+                        <p class="form-hint form-hint--lead">
+                            Each target has its own switch and its own events. New chapters are collected per series, so a batch of files is one message. A job that keeps failing is reported at most once every six hours. Komga and Kavita are asked to scan once the library has gone quiet, never during a rewrite. Addresses on your own network are allowed. Save your settings before using Send Test.
+                        </p>
+
+                        <h4 class="settings-subheading">ntfy</h4>
+                        <div class="form-group">
+                            <label for="notifyNtfyEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyNtfyEnabledCheckbox" name="notifyNtfyEnabled">
+                                <span>Send notifications to ntfy</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyNtfyUrl">Server URL</label>
+                            <input type="url" id="notifyNtfyUrl" name="notifyNtfyUrl" autocomplete="off" spellcheck="false" placeholder="https://ntfy.sh">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyNtfyTopic">Topic</label>
+                            <input type="text" id="notifyNtfyTopic" name="notifyNtfyTopic" autocomplete="off" spellcheck="false" placeholder="my-comics">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyNtfyToken">Access Token</label>
+                            <input type="password" id="notifyNtfyToken" name="notifyNtfyToken" autocomplete="new-password">
+                            <small id="notifyNtfyTokenHint" class="form-hint"></small>
+                            <label for="notifyNtfyClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyNtfyClearTokenCheckbox" name="notifyNtfyClearToken">
+                                <span>Clear stored token on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <span>Send a message for</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyNtfyEventNewChapters"><span>New chapters</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyNtfyEventSuwayomi"><span>Failed Suwayomi imports</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyNtfyEventJobFailed"><span>Failed scheduled jobs</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyNtfyEventJobFindings"><span>Scheduled jobs that report findings</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('ntfy')">Send Test</button>
+                            <small id="notifyNtfyTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">Gotify</h4>
+                        <div class="form-group">
+                            <label for="notifyGotifyEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyGotifyEnabledCheckbox" name="notifyGotifyEnabled">
+                                <span>Send notifications to Gotify</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyGotifyUrl">Server URL</label>
+                            <input type="url" id="notifyGotifyUrl" name="notifyGotifyUrl" autocomplete="off" spellcheck="false" placeholder="https://gotify.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyGotifyToken">Application Token</label>
+                            <input type="password" id="notifyGotifyToken" name="notifyGotifyToken" autocomplete="new-password">
+                            <small id="notifyGotifyTokenHint" class="form-hint"></small>
+                            <label for="notifyGotifyClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyGotifyClearTokenCheckbox" name="notifyGotifyClearToken">
+                                <span>Clear stored token on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <span>Send a message for</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyGotifyEventNewChapters"><span>New chapters</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyGotifyEventSuwayomi"><span>Failed Suwayomi imports</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyGotifyEventJobFailed"><span>Failed scheduled jobs</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyGotifyEventJobFindings"><span>Scheduled jobs that report findings</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('gotify')">Send Test</button>
+                            <small id="notifyGotifyTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">Discord</h4>
+                        <div class="form-group">
+                            <label for="notifyDiscordEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyDiscordEnabledCheckbox" name="notifyDiscordEnabled">
+                                <span>Send notifications to a Discord webhook</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyDiscordUrl">Webhook URL</label>
+                            <input type="password" id="notifyDiscordUrl" name="notifyDiscordUrl" autocomplete="new-password" spellcheck="false" placeholder="https://discord.com/api/webhooks/...">
+                            <small id="notifyDiscordUrlHint" class="form-hint"></small>
+                            <label for="notifyDiscordClearUrlCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyDiscordClearUrlCheckbox" name="notifyDiscordClearUrl">
+                                <span>Clear stored URL on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <span>Send a message for</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyDiscordEventNewChapters"><span>New chapters</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyDiscordEventSuwayomi"><span>Failed Suwayomi imports</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyDiscordEventJobFailed"><span>Failed scheduled jobs</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyDiscordEventJobFindings"><span>Scheduled jobs that report findings</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('discord')">Send Test</button>
+                            <small id="notifyDiscordTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">JSON Webhook</h4>
+                        <div class="form-group">
+                            <label for="notifyWebhookEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyWebhookEnabledCheckbox" name="notifyWebhookEnabled">
+                                <span>POST notifications as JSON to a webhook</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyWebhookUrl">Webhook URL</label>
+                            <input type="password" id="notifyWebhookUrl" name="notifyWebhookUrl" autocomplete="new-password" spellcheck="false" placeholder="https://example.com/hooks/...">
+                            <small id="notifyWebhookUrlHint" class="form-hint"></small>
+                            <label for="notifyWebhookClearUrlCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyWebhookClearUrlCheckbox" name="notifyWebhookClearUrl">
+                                <span>Clear stored URL on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <span>Send a message for</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyWebhookEventNewChapters"><span>New chapters</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyWebhookEventSuwayomi"><span>Failed Suwayomi imports</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyWebhookEventJobFailed"><span>Failed scheduled jobs</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyWebhookEventJobFindings"><span>Scheduled jobs that report findings</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('webhook')">Send Test</button>
+                            <small id="notifyWebhookTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">Komga Library Scan</h4>
+                        <div class="form-group">
+                            <label for="notifyKomgaEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyKomgaEnabledCheckbox" name="notifyKomgaEnabled">
+                                <span>Ask Komga to scan when the library changes</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKomgaUrl">Server URL</label>
+                            <input type="url" id="notifyKomgaUrl" name="notifyKomgaUrl" autocomplete="off" spellcheck="false" placeholder="http://komga.local:25600">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKomgaToken">API Key</label>
+                            <input type="password" id="notifyKomgaToken" name="notifyKomgaToken" autocomplete="new-password">
+                            <small id="notifyKomgaTokenHint" class="form-hint"></small>
+                            <label for="notifyKomgaClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyKomgaClearTokenCheckbox" name="notifyKomgaClearToken">
+                                <span>Clear stored API key on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKomgaLibraryId">Library ID (optional)</label>
+                            <input type="text" id="notifyKomgaLibraryId" name="notifyKomgaLibraryId" autocomplete="off" spellcheck="false">
+                            <small class="form-hint">Leave blank to scan every library.</small>
+                        </div>
+                        <div class="form-group">
+                            <span>Scan when</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyKomgaEventNewChapters"><span>New chapters arrive</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyKomgaEventLibraryChanged"><span>Existing files change (renames, new tags, deletions)</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('komga')">Send Test</button>
+                            <small id="notifyKomgaTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">Kavita Library Scan</h4>
+                        <div class="form-group">
+                            <label for="notifyKavitaEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyKavitaEnabledCheckbox" name="notifyKavitaEnabled">
+                                <span>Ask Kavita to scan when the library changes</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKavitaUrl">Server URL</label>
+                            <input type="url" id="notifyKavitaUrl" name="notifyKavitaUrl" autocomplete="off" spellcheck="false" placeholder="http://kavita.local:5000">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKavitaToken">Auth Key</label>
+                            <input type="password" id="notifyKavitaToken" name="notifyKavitaToken" autocomplete="new-password">
+                            <small id="notifyKavitaTokenHint" class="form-hint"></small>
+                            <label for="notifyKavitaClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyKavitaClearTokenCheckbox" name="notifyKavitaClearToken">
+                                <span>Clear stored Auth Key on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKavitaLibraryId">Library ID (optional)</label>
+                            <input type="text" id="notifyKavitaLibraryId" name="notifyKavitaLibraryId" autocomplete="off" spellcheck="false">
+                            <small class="form-hint">Leave blank to scan every library.</small>
+                        </div>
+                        <div class="form-group">
+                            <span>Scan when</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyKavitaEventNewChapters"><span>New chapters arrive</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyKavitaEventLibraryChanged"><span>Existing files change (renames, new tags, deletions)</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('kavita')">Send Test</button>
+                            <small id="notifyKavitaTestResult" class="form-hint"></small>
                         </div>
                     </section>
                     <section class="settings-card" id="settings-error-reporting" aria-labelledby="settings-error-reporting-title">

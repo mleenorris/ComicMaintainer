@@ -240,7 +240,32 @@ showMessage('Default preferred language updated', 'success');
             error_reporting_assignee: ['errorReportingAssignee'],
             error_reporting_max_issues_per_day: ['errorReportingMaxPerDay'],
             error_reporting_dedupe_window_hours: ['errorReportingDedupeHours'],
-            error_reporting_comment_on_recurrence: ['errorReportingCommentCheckbox']
+            error_reporting_comment_on_recurrence: ['errorReportingCommentCheckbox'],
+            notify_ntfy_enabled: ['notifyNtfyEnabledCheckbox'],
+            notify_ntfy_url: ['notifyNtfyUrl'],
+            notify_ntfy_topic: ['notifyNtfyTopic'],
+            notify_ntfy_token_set: ['notifyNtfyToken', 'notifyNtfyClearTokenCheckbox'],
+            notify_ntfy_events: ['notifyNtfyEventNewChapters', 'notifyNtfyEventSuwayomi', 'notifyNtfyEventJobFailed', 'notifyNtfyEventJobFindings'],
+            notify_gotify_enabled: ['notifyGotifyEnabledCheckbox'],
+            notify_gotify_url: ['notifyGotifyUrl'],
+            notify_gotify_token_set: ['notifyGotifyToken', 'notifyGotifyClearTokenCheckbox'],
+            notify_gotify_events: ['notifyGotifyEventNewChapters', 'notifyGotifyEventSuwayomi', 'notifyGotifyEventJobFailed', 'notifyGotifyEventJobFindings'],
+            notify_discord_enabled: ['notifyDiscordEnabledCheckbox'],
+            notify_discord_webhook_url_set: ['notifyDiscordUrl', 'notifyDiscordClearUrlCheckbox'],
+            notify_discord_events: ['notifyDiscordEventNewChapters', 'notifyDiscordEventSuwayomi', 'notifyDiscordEventJobFailed', 'notifyDiscordEventJobFindings'],
+            notify_webhook_enabled: ['notifyWebhookEnabledCheckbox'],
+            notify_webhook_url_set: ['notifyWebhookUrl', 'notifyWebhookClearUrlCheckbox'],
+            notify_webhook_events: ['notifyWebhookEventNewChapters', 'notifyWebhookEventSuwayomi', 'notifyWebhookEventJobFailed', 'notifyWebhookEventJobFindings'],
+            notify_komga_enabled: ['notifyKomgaEnabledCheckbox'],
+            notify_komga_url: ['notifyKomgaUrl'],
+            notify_komga_api_key_set: ['notifyKomgaToken', 'notifyKomgaClearTokenCheckbox'],
+            notify_komga_library_id: ['notifyKomgaLibraryId'],
+            notify_komga_events: ['notifyKomgaEventNewChapters', 'notifyKomgaEventLibraryChanged'],
+            notify_kavita_enabled: ['notifyKavitaEnabledCheckbox'],
+            notify_kavita_url: ['notifyKavitaUrl'],
+            notify_kavita_api_key_set: ['notifyKavitaToken', 'notifyKavitaClearTokenCheckbox'],
+            notify_kavita_library_id: ['notifyKavitaLibraryId'],
+            notify_kavita_events: ['notifyKavitaEventNewChapters', 'notifyKavitaEventLibraryChanged']
         });
 
         /**
@@ -481,7 +506,9 @@ showMessage('Default preferred language updated', 'success');
                 if (errorReportingMaxPerDay) errorReportingMaxPerDay.value = settingsData.error_reporting_max_issues_per_day ?? 10;
                 if (errorReportingDedupeHours) errorReportingDedupeHours.value = settingsData.error_reporting_dedupe_window_hours ?? 24;
                 if (errorReportingComment) errorReportingComment.checked = settingsData.error_reporting_comment_on_recurrence !== false;
-                 
+
+                loadNotificationSettings(settingsData);
+
                 console.log('[SETTINGS] All settings loaded successfully');
                 updateSettingsNavActive();
                 settingsLoaded = true;
@@ -1443,6 +1470,11 @@ errorEl.textContent = 'An error occurred. Please try again.';
                 };
             }
 
+            const notifications = collectNotificationSettings(unlessPinned);
+            if (notifications) {
+                settingsUpdate.notifications = notifications;
+            }
+
             try {
                 await saveAllSettings(settingsUpdate);
             } catch (error) {
@@ -1479,6 +1511,122 @@ errorEl.textContent = 'An error occurred. Please try again.';
                 showMessage((result && result.message) || 'Test report sent', 'success');
             } catch (error) {
                 showMessage('Failed to send test report: ' + error.message, 'error');
+            }
+        }
+
+        // =================================================================
+        // Notifications and media-server rescans
+        // =================================================================
+
+        // One entry per target. `prefix` is the start of its element ids and
+        // of its GET /api/settings fields; `secret` names the write-only
+        // field (a token, API key or a webhook URL that carries a token).
+        const NOTIFICATION_TARGETS = Object.freeze([
+            { key: 'ntfy', prefix: 'notifyNtfy', field: 'notify_ntfy', secret: 'token', secretSet: 'token_set', topic: true,
+              noSecretHint: 'Optional: only needed when the topic requires a token.', events: 'push' },
+            { key: 'gotify', prefix: 'notifyGotify', field: 'notify_gotify', secret: 'token', secretSet: 'token_set',
+              noSecretHint: 'Required: the token of a Gotify application.', events: 'push' },
+            { key: 'discord', prefix: 'notifyDiscord', field: 'notify_discord', secret: 'url', secretSet: 'webhook_url_set',
+              noSecretHint: 'Paste the webhook URL. It is stored on this instance and never shown again.', events: 'push' },
+            { key: 'webhook', prefix: 'notifyWebhook', field: 'notify_webhook', secret: 'url', secretSet: 'url_set',
+              noSecretHint: 'Paste the URL. It is stored on this instance and never shown again.', events: 'push' },
+            { key: 'komga', prefix: 'notifyKomga', field: 'notify_komga', secret: 'token', secretSet: 'api_key_set', library: true,
+              noSecretHint: 'Required: an API key from an administrator account.', events: 'rescan' },
+            { key: 'kavita', prefix: 'notifyKavita', field: 'notify_kavita', secret: 'token', secretSet: 'api_key_set', library: true,
+              noSecretHint: 'Required: an Auth Key from an administrator account.', events: 'rescan' }
+        ]);
+
+        // Checkbox id suffix to event name, per kind of target.
+        const NOTIFICATION_EVENTS = Object.freeze({
+            push: Object.freeze({
+                NewChapters: 'new-chapters',
+                Suwayomi: 'suwayomi-import-failed',
+                JobFailed: 'job-failed',
+                JobFindings: 'job-findings'
+            }),
+            rescan: Object.freeze({
+                NewChapters: 'new-chapters',
+                LibraryChanged: 'library-changed'
+            })
+        });
+
+        function loadNotificationSettings(settingsData) {
+            for (const target of NOTIFICATION_TARGETS) {
+                const element = suffix => document.getElementById(target.prefix + suffix);
+                if (!element('EnabledCheckbox')) continue;
+
+                element('EnabledCheckbox').checked = !!settingsData[`${target.field}_enabled`];
+                if (target.secret === 'token') {
+                    element('Url').value = settingsData[`${target.field}_url`] || '';
+                }
+                if (target.topic) element('Topic').value = settingsData[`${target.field}_topic`] || '';
+                if (target.library) element('LibraryId').value = settingsData[`${target.field}_library_id`] || '';
+
+                // A secret is never returned by the API; only whether one is stored.
+                const stored = !!settingsData[`${target.field}_${target.secretSet}`];
+                const secretName = target.secret === 'url' ? 'Url' : 'Token';
+                element(secretName).value = '';
+                element(`Clear${secretName}Checkbox`).checked = false;
+                element(`${secretName}Hint`).textContent = stored ? 'Leave blank to keep the stored value.' : target.noSecretHint;
+
+                const chosen = new Set(String(settingsData[`${target.field}_events`] || '').split(','));
+                for (const [suffix, event] of Object.entries(NOTIFICATION_EVENTS[target.events])) {
+                    element(`Event${suffix}`).checked = chosen.has(event);
+                }
+            }
+        }
+
+        /** The "notifications" group of a Save Settings request; null when the section is not on the page. */
+        function collectNotificationSettings(unlessPinned) {
+            if (!document.getElementById('notifyNtfyEnabledCheckbox')) return null;
+
+            const group = {};
+            for (const target of NOTIFICATION_TARGETS) {
+                const element = suffix => document.getElementById(target.prefix + suffix);
+                const value = suffix => element(suffix).value.trim();
+                const pinnedOr = (suffix, resolved) => unlessPinned(`${target.field}_${suffix}`, resolved);
+
+                // Blank keeps the stored secret; clearing it is a separate choice.
+                const secretName = target.secret === 'url' ? 'Url' : 'Token';
+                const secretValue = element(secretName).value;
+                const secret = element(`Clear${secretName}Checkbox`).checked ? '' : (secretValue || null);
+
+                const update = {
+                    enabled: pinnedOr('enabled', element('EnabledCheckbox').checked),
+                    url: target.secret === 'url' ? pinnedOr(target.secretSet, secret) : pinnedOr('url', value('Url')),
+                    events: pinnedOr('events', Object.entries(NOTIFICATION_EVENTS[target.events])
+                        .filter(([suffix]) => element(`Event${suffix}`).checked)
+                        .map(([, event]) => event)
+                        .join(','))
+                };
+                if (target.secret === 'token') update.token = pinnedOr(target.secretSet, secret);
+                if (target.topic) update.topic = pinnedOr('topic', value('Topic'));
+                if (target.library) update.libraryId = pinnedOr('library_id', value('LibraryId'));
+                group[target.key] = update;
+            }
+            return group;
+        }
+
+        /** Sends a target's test notification with its saved settings and shows the answer next to its button. */
+        async function sendNotificationTest(key) {
+            const target = NOTIFICATION_TARGETS.find(entry => entry.key === key);
+            const result = document.getElementById(`${target.prefix}TestResult`);
+            result.textContent = 'Sending…';
+            try {
+                const response = await apiFetch(`/api/notifications/${key}/test`, { method: 'POST', json: false });
+                const body = await response.json().catch(() => null);
+                if (response.ok) {
+                    result.textContent = body?.message || 'Test sent.';
+                    showMessage(result.textContent, 'success');
+                    return;
+                }
+                // The target's own error, in words that are safe to show.
+                result.textContent = body?.error || `Test failed (HTTP ${response.status}).`;
+                showMessage(result.textContent, 'error');
+            } catch (error) {
+                if (error.authHandled) return;
+                result.textContent = `Could not send the test: ${error.message}`;
+                showMessage(result.textContent, 'error', { reference: error });
             }
         }
 

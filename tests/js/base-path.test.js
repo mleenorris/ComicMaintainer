@@ -168,6 +168,7 @@ test('under a base path the Settings page keeps its requests inside it', async (
             'GET /api/logs/files': { files: [] },
             'GET /api/logs': { content: '' },
             'POST /api/error-reports/test': {},
+            'POST /api/notifications/ntfy/test': { message: 'Test sent.' },
             'POST /api/auth/change-password': {},
             'POST /api/backups': { name: 'b.db' }
         })
@@ -185,6 +186,7 @@ test('under a base path the Settings page keeps its requests inside it', async (
         'loadDiagnostics()',
         'loadLogFiles()',
         'sendErrorReportingTest()',
+        "sendNotificationTest('ntfy')",
         'createBackup()'
     ]) {
         await page.run(action);
@@ -204,6 +206,7 @@ test('under a base path the Settings page keeps its requests inside it', async (
         '/api/logs/files',
         '/api/logs',
         '/api/error-reports/test',
+        '/api/notifications/ntfy/test',
         '/api/backups'
     ]) {
         assert.ok(paths.has(BASE + path), `${BASE}${path} was not requested`);

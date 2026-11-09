@@ -149,6 +149,15 @@ test('saving sends every group in one request with the edited values', async () 
             maxIssuesPerDay: 0,
             dedupeWindowHours: 24,
             commentOnRecurrence: true
+        },
+        // None of the fixture's settings are notification targets, so each is blank and off.
+        notifications: {
+            ntfy: { enabled: false, url: '', events: '', token: null, topic: '' },
+            gotify: { enabled: false, url: '', events: '', token: null },
+            discord: { enabled: false, url: null, events: '' },
+            webhook: { enabled: false, url: null, events: '' },
+            komga: { enabled: false, url: '', events: '', token: null, libraryId: '' },
+            kavita: { enabled: false, url: '', events: '', token: null, libraryId: '' }
         }
     });
     const call = callsTo(page, SAVE_ROUTE, since)[0];

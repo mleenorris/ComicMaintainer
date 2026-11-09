@@ -32,4 +32,20 @@ public sealed class SettingsAuthorizationIntegrationTests : IClassFixture<Sessio
 
         Assert.Equal(expected, response.StatusCode);
     }
+
+    [Theory]
+    [InlineData("ReadOnly", HttpStatusCode.Forbidden)]
+    [InlineData("User", HttpStatusCode.Forbidden)]
+    [InlineData("Admin", HttpStatusCode.BadRequest)]
+    public async Task NotificationTest_RequiresAnAdministrator(string role, HttpStatusCode expected)
+    {
+        var (_, token) = await _host.SignInNewUserAsync(role);
+
+        // The Admin case gets past the authorization: no ntfy URL is set in this host.
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/notifications/ntfy/test");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await _host.Client.SendAsync(request);
+
+        Assert.Equal(expected, response.StatusCode);
+    }
 }

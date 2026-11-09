@@ -91,6 +91,52 @@ public sealed class SettingsEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task PutSettings_NotificationTargets_AreSavedAndTheirSecretsNeverReturned()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var save = await client.PutAsJsonAsync("/api/settings", new
+        {
+            notifications = new
+            {
+                ntfy = new { enabled = true, url = "https://ntfy.example/", topic = "comics", token = "tk_secret", events = "job-failed" },
+                discord = new { enabled = true, url = "https://discord.com/api/webhooks/1/hook-secret" },
+                kavita = new { url = "http://kavita.example", token = "kavita-secret", libraryId = "7" },
+            },
+        });
+        Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+
+        using var read = await client.GetAsync("/api/settings");
+        var text = await read.Content.ReadAsStringAsync();
+        using var settings = JsonDocument.Parse(text);
+        var body = settings.RootElement;
+        Assert.True(body.GetProperty("notify_ntfy_enabled").GetBoolean());
+        Assert.Equal("https://ntfy.example", body.GetProperty("notify_ntfy_url").GetString());
+        Assert.Equal("comics", body.GetProperty("notify_ntfy_topic").GetString());
+        Assert.True(body.GetProperty("notify_ntfy_token_set").GetBoolean());
+        Assert.Equal("job-failed", body.GetProperty("notify_ntfy_events").GetString());
+        Assert.True(body.GetProperty("notify_discord_webhook_url_set").GetBoolean());
+        Assert.Equal("7", body.GetProperty("notify_kavita_library_id").GetString());
+        Assert.DoesNotContain("tk_secret", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("hook-secret", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("kavita-secret", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PutSettings_ANotificationUrlThatIsNotHttp_IsRefused()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var save = await client.PutAsJsonAsync("/api/settings", new { notifications = new { webhook = new { url = "ftp://example.com/hook" } } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        using var problem = JsonDocument.Parse(await save.Content.ReadAsStringAsync());
+        Assert.Contains("http(s)", problem.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PutSettings_ARefusedSave_IsAProblemDocumentWithAnErrorAndChangesNothing()
     {
         await using var factory = CreateFactory();

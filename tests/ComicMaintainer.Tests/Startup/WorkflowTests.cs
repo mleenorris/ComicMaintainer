@@ -170,6 +170,22 @@ public sealed class WorkflowTests
         Assert.Contains(Steps(release), s => Scalar(s.Step, "run")?.Contains("git push --atomic origin \"HEAD:refs/heads/dotnet\"") == true);
     }
 
+    [Fact]
+    public void Release_AVersionWithNoTagYet_IsReleasedAsItStandsBeforeAnyIncrement()
+    {
+        var steps = Steps(Load(Release)).ToList();
+        var bump = Scalar(Assert.Single(steps, s => Scalar(s.Step, "id") == "bump").Step, "run")!;
+        var push = Scalar(Assert.Single(steps, s => Scalar(s.Step, "id") == "push").Step, "run")!;
+
+        var tagCheck = bump.IndexOf("refs/tags/v${CURRENT_VERSION}", StringComparison.Ordinal);
+        var increment = bump.IndexOf("BASH_REMATCH[3] + 1", StringComparison.Ordinal);
+
+        Assert.InRange(tagCheck, 0, increment);
+        Assert.Contains("new_version=$CURRENT_VERSION", bump);
+        // The project already holds the version, so there must be nothing to commit for it.
+        Assert.Contains("if [[ \"$BUMPED\" == \"true\" ]]", push);
+    }
+
     [Theory]
     [MemberData(nameof(WorkflowFiles))]
     public void Workflows_UseMaintainedActionsAndLinkTheDotnetBranch(string file)

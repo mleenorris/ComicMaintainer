@@ -19,11 +19,11 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     public const int MaxFinishedJobs = 50;
 
     private readonly ISeriesMetadataCacheService _cache;
-    private readonly IEventBroadcaster? _eventBroadcaster;
-    private readonly IFileStoreService? _fileStore;
-    private readonly IComicProcessorService? _processor;
-    private readonly IOptionsMonitor<AppSettings>? _settings;
-    private readonly ISeriesNameResolver? _seriesNameResolver;
+    private readonly IEventBroadcaster _eventBroadcaster;
+    private readonly IFileStoreService _fileStore;
+    private readonly IComicProcessorService _processor;
+    private readonly IOptionsMonitor<AppSettings> _settings;
+    private readonly ISeriesNameResolver _seriesNameResolver;
     private readonly ILogger<SeriesMetadataRefreshJobService> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<Guid, MetadataRefreshJob> _jobs = new();
@@ -35,12 +35,12 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     public SeriesMetadataRefreshJobService(
         ISeriesMetadataCacheService cache,
         ILogger<SeriesMetadataRefreshJobService> logger,
-        IEventBroadcaster? eventBroadcaster = null,
-        IFileStoreService? fileStore = null,
-        IComicProcessorService? processor = null,
-        TimeProvider? timeProvider = null,
-        IOptionsMonitor<AppSettings>? settings = null,
-        ISeriesNameResolver? seriesNameResolver = null)
+        IEventBroadcaster eventBroadcaster,
+        IFileStoreService fileStore,
+        IComicProcessorService processor,
+        IOptionsMonitor<AppSettings> settings,
+        ISeriesNameResolver seriesNameResolver,
+        TimeProvider? timeProvider = null)
     {
         _cache = cache;
         _logger = logger;
@@ -342,9 +342,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         IReadOnlySet<string> seriesKeys,
         CancellationToken cancellationToken)
     {
-        if (_fileStore is null || _processor is null) return;
-
-        if (_settings?.CurrentValue.WatcherEnableNormalize == false)
+        if (!_settings.CurrentValue.WatcherEnableNormalize)
         {
             _logger.LogWarning(
                 "Metadata refresh job {JobId} will not rewrite per-file metadata because WatcherEnableNormalize is false.",
@@ -384,17 +382,12 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     /// The files of <paramref name="candidates"/> whose cached <c>&lt;Series&gt;</c> differs
     /// from the name normalization would write, decided without opening any archive. The
     /// name depends only on the file's folder and its current tag, so each combination is
-    /// resolved once. Without a resolver every candidate is returned.
+    /// resolved once.
     /// </summary>
     private async Task<List<string>> SelectFilesNeedingRetagAsync(
         IReadOnlyList<ComicFile> candidates,
         CancellationToken cancellationToken)
     {
-        if (_seriesNameResolver is null)
-        {
-            return candidates.Select(f => f.FilePath).ToList();
-        }
-
         var resolvedNames = new Dictionary<(string? Folder, string? Series), string?>();
         var paths = new List<string>();
         foreach (var file in candidates)
@@ -423,7 +416,6 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     // never changes the job's outcome.
     private async Task BroadcastAsync(MetadataRefreshJob job)
     {
-        if (_eventBroadcaster is null) return;
         try
         {
             await _eventBroadcaster.BroadcastJobUpdateAsync(

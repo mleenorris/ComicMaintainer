@@ -18,7 +18,7 @@ public class SeriesNameResolverLibraryRootTests
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
 
     private SeriesNameResolver CreateResolver() =>
-        new(
+        TestServices.CreateSeriesNameResolver(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = Root,

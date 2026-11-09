@@ -45,7 +45,7 @@ public class JobStatePersistenceTests : IDisposable
 
     private ComicProcessorService CreateProcessor()
     {
-        return new ComicProcessorService(
+        return TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
             new Mock<ILogger<ComicProcessorService>>().Object,
             _fileStore.Object,

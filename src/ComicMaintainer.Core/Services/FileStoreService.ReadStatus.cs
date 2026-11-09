@@ -27,9 +27,7 @@ public partial class FileStoreService
         // Captured before reading: a change committed while we read bumps the version, so
         // whatever we cache here is never served for the newer version.
         var cacheKey = ReadPathsCacheKey(userId, GetReadStateVersion(userId));
-        if (_memoryCache != null &&
-            _memoryCache.TryGetValue(cacheKey, out HashSet<string>? cached) &&
-            cached != null)
+        if (_memoryCache.TryGetValue(cacheKey, out HashSet<string>? cached) && cached != null)
         {
             return cached;
         }
@@ -42,7 +40,7 @@ public partial class FileStoreService
             .ToListAsync(cancellationToken);
 
         var set = new HashSet<string>(paths, StringComparer.Ordinal);
-        _memoryCache?.Set(cacheKey, set, ReadPathsCacheTtl);
+        _memoryCache.Set(cacheKey, set, ReadPathsCacheTtl);
         return set;
     }
 
@@ -55,7 +53,7 @@ public partial class FileStoreService
     {
         var stale = ReadPathsCacheKey(userId, GetReadStateVersion(userId));
         MarkReadStateChanged(userId);
-        _memoryCache?.Remove(stale);
+        _memoryCache.Remove(stale);
     }
 
     /// <summary>

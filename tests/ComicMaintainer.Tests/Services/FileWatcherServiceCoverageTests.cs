@@ -843,7 +843,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
 
     private FileWatcherService CreateService(IOptionsMonitor<AppSettings> monitor, IEventBroadcaster? broadcaster = null)
     {
-        var service = new FileWatcherService(monitor, _logger, _store.Object, _processor.Object, broadcaster, _time);
+        var service = TestServices.CreateFileWatcher(monitor, _logger, _store.Object, _processor.Object, broadcaster, _time);
         _services.Add(service);
         return service;
     }

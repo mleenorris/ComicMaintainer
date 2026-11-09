@@ -42,7 +42,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
     }
 
     private DatabaseCleanupHostedService CreateService(IOptionsMonitor<AppSettings> options, TimeSpan? startupDelay = null) =>
-        new(_mockFileStore.Object, options, _mockLogger.Object, startupDelay: startupDelay ?? TimeSpan.Zero);
+        TestServices.CreateDatabaseCleanup(_mockFileStore.Object, options, _mockLogger.Object, startupDelay: startupDelay ?? TimeSpan.Zero);
 
     private static StaleCleanupResult Completed(int removed) =>
         new() { Status = StaleCleanupStatus.Completed, RemovedCount = removed };
@@ -217,7 +217,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
         });
         var history = new Mock<IProcessingHistoryService>();
         history.Setup(h => h.PruneAsync(30, 1000, It.IsAny<CancellationToken>())).ReturnsAsync(250);
-        using var service = new DatabaseCleanupHostedService(
+        using var service = TestServices.CreateDatabaseCleanup(
             _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
             startupDelay: TimeSpan.Zero, historyService: history.Object);
 
@@ -232,7 +232,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
     {
         SetupCleanup(new StaleCleanupResult { Status = StaleCleanupStatus.WatchedDirectoryEmpty, Message = "unmounted" });
         var history = new Mock<IProcessingHistoryService>();
-        using var service = new DatabaseCleanupHostedService(
+        using var service = TestServices.CreateDatabaseCleanup(
             _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
             startupDelay: TimeSpan.Zero, historyService: history.Object);
 
@@ -247,7 +247,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
         var history = new Mock<IProcessingHistoryService>();
         history.Setup(h => h.PruneAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("database is locked"));
-        using var service = new DatabaseCleanupHostedService(
+        using var service = TestServices.CreateDatabaseCleanup(
             _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
             startupDelay: TimeSpan.Zero, historyService: history.Object);
 
@@ -279,7 +279,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
             }));
             await db.SaveChangesAsync();
         }
-        using var service = new DatabaseCleanupHostedService(
+        using var service = TestServices.CreateDatabaseCleanup(
             _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
             dbContextFactory: factory, startupDelay: TimeSpan.Zero);
 

@@ -187,7 +187,7 @@ public sealed class FileStoreServiceScopeReadTests : IAsyncLifetime
         Assert.Single(await StatusesAsync("alice"));
     }
 
-    private FileStoreService CreateService() => new(
+    private FileStoreService CreateService() => TestServices.CreateFileStore(
         new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = Library }),
         NullLogger<FileStoreService>.Instance,
         _factory,

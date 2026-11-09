@@ -278,7 +278,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     }
 
     private FileStoreService CreateService(string? userId, IMemoryCache? cache = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = _library,

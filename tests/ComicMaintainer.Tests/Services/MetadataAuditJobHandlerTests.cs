@@ -57,9 +57,8 @@ public class MetadataAuditJobHandlerTests
             fileStore.Object,
             processor.Object,
             factory,
-            new TestOptionsMonitor<AppSettings>(new AppSettings()),
             new Mock<ILogger<MetadataAuditJobHandler>>().Object,
-            seriesNameResolver: resolver.Object);
+            resolver.Object);
 
         await handler.ExecuteAsync(null, CancellationToken.None);
 
@@ -106,9 +105,8 @@ public class MetadataAuditJobHandlerTests
             fileStore.Object,
             processor.Object,
             factory,
-            new TestOptionsMonitor<AppSettings>(new AppSettings()),
             new Mock<ILogger<MetadataAuditJobHandler>>().Object,
-            seriesNameResolver: resolver.Object);
+            resolver.Object);
 
         await handler.ExecuteAsync(null, CancellationToken.None);
 

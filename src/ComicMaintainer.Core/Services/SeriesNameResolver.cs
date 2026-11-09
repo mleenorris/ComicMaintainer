@@ -19,14 +19,14 @@ public class SeriesNameResolver : ISeriesNameResolver
 
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesNameResolver> _logger;
-    private readonly ISeriesMetadataCacheService? _cache;
-    private readonly IExternalSeriesMetadataService? _externalMetadata;
+    private readonly ISeriesMetadataCacheService _cache;
+    private readonly IExternalSeriesMetadataService _externalMetadata;
 
     public SeriesNameResolver(
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesNameResolver> logger,
-        ISeriesMetadataCacheService? cache = null,
-        IExternalSeriesMetadataService? externalMetadata = null)
+        ISeriesMetadataCacheService cache,
+        IExternalSeriesMetadataService externalMetadata)
     {
         _settings = settings;
         _logger = logger;
@@ -121,8 +121,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         }
 
         // Step 3: localized-title back-reference.
-        if (_cache is not null
-            && !string.IsNullOrWhiteSpace(metadata?.Series)
+        if (!string.IsNullOrWhiteSpace(metadata?.Series)
             && !string.IsNullOrWhiteSpace(folderSeries)
             && !string.Equals(metadata!.Series, folderSeries, StringComparison.OrdinalIgnoreCase))
         {
@@ -180,7 +179,7 @@ public class SeriesNameResolver : ISeriesNameResolver
                 // provider. Honor the caller's mutateCache flag: read-only
                 // resolution paths (e.g. previews) must not write back.
                 SeriesMetadataCacheRecord? persisted = null;
-                if (mutateCache && _cache is not null)
+                if (mutateCache)
                 {
                     try
                     {
@@ -335,7 +334,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         RecordLookups lookups,
         CancellationToken cancellationToken)
     {
-        if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
+        if (string.IsNullOrWhiteSpace(seriesName)) return null;
         if (lookups.TryGetValue(seriesName, out var known)) return known;
 
         var key = _cache.NormalizeKey(seriesName);
@@ -361,7 +360,7 @@ public class SeriesNameResolver : ISeriesNameResolver
 
     private async Task<SeriesMetadataCacheRecord?> LookupUserSelectedRecordAsync(string seriesName, RecordLookups lookups, CancellationToken cancellationToken)
     {
-        if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
+        if (string.IsNullOrWhiteSpace(seriesName)) return null;
         try
         {
             var record = await ResolveRecordByTitleAsync(seriesName, lookups, cancellationToken);
@@ -385,7 +384,7 @@ public class SeriesNameResolver : ISeriesNameResolver
 
     private async Task<SeriesMetadataCacheRecord?> LookupMatchedRecordAsync(string seriesName, RecordLookups lookups, CancellationToken cancellationToken)
     {
-        if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
+        if (string.IsNullOrWhiteSpace(seriesName)) return null;
         try
         {
             var record = await ResolveRecordByTitleAsync(seriesName, lookups, cancellationToken);
@@ -412,7 +411,7 @@ public class SeriesNameResolver : ISeriesNameResolver
 
     private async Task<ExternalSeriesMetadata?> LookupExternalSeriesMetadataAsync(string seriesName, CancellationToken cancellationToken)
     {
-        if (_externalMetadata is null || string.IsNullOrWhiteSpace(seriesName)) return null;
+        if (string.IsNullOrWhiteSpace(seriesName)) return null;
         try
         {
             return await _externalMetadata.LookupSeriesAsync(seriesName, cancellationToken);
@@ -452,7 +451,7 @@ public class SeriesNameResolver : ISeriesNameResolver
     /// </summary>
     private async Task<bool> AnyCandidateClearedAsync(IReadOnlyList<string> candidates, RecordLookups lookups, CancellationToken cancellationToken)
     {
-        if (_cache is null || candidates.Count == 0) return false;
+        if (candidates.Count == 0) return false;
         foreach (var candidate in candidates.Where(candidate => !string.IsNullOrWhiteSpace(candidate)))
         {
             try
@@ -486,8 +485,7 @@ public class SeriesNameResolver : ISeriesNameResolver
     /// </summary>
     private async Task EnsureFolderNameIsAliasAsync(string? folderSeriesName, string resolvedSeries, CancellationToken cancellationToken)
     {
-        if (_cache is null
-            || string.IsNullOrWhiteSpace(folderSeriesName)
+        if (string.IsNullOrWhiteSpace(folderSeriesName)
             || string.IsNullOrWhiteSpace(resolvedSeries)
             || string.Equals(folderSeriesName, UnknownSeries, StringComparison.OrdinalIgnoreCase)
             || string.Equals(resolvedSeries, UnknownSeries, StringComparison.OrdinalIgnoreCase)

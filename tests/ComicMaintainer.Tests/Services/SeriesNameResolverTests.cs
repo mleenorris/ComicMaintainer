@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -20,7 +21,7 @@ public class SeriesNameResolverTests
         _options.Setup(o => o.CurrentValue).Returns(_settings);
         _cache.Setup(c => c.NormalizeKey(It.IsAny<string?>()))
               .Returns<string?>(s => string.IsNullOrWhiteSpace(s) ? "unknown-series" : s.ToLowerInvariant().Replace(' ', '-'));
-        return new SeriesNameResolver(
+        return TestServices.CreateSeriesNameResolver(
             _options.Object,
             new Mock<ILogger<SeriesNameResolver>>().Object,
             _cache.Object,

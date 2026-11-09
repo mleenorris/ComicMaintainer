@@ -197,7 +197,7 @@ public sealed class FileStoreServiceUniqueRaceTests : IAsyncLifetime
     }
 
     private FileStoreService CreateService(string? userId = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = _library,

@@ -41,7 +41,7 @@ public sealed class FileStoreServiceArchiveMetadataTests : IAsyncLifetime
             await db.Database.EnsureCreatedAsync();
         }
 
-        _store = new FileStoreService(
+        _store = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = Library, DuplicateDirectory = string.Empty }),
             NullLogger<FileStoreService>.Instance,
             _factory);
@@ -172,7 +172,7 @@ public sealed class FileStoreServiceArchiveMetadataTests : IAsyncLifetime
         Directory.CreateDirectory(Path.Join(_root, "Saga"));
         var path = Path.Join(_root, "Saga", "Saga 001.cbz");
         await File.WriteAllTextAsync(path, "v1");
-        var store = new FileStoreService(
+        var store = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _root, DuplicateDirectory = string.Empty }),
             NullLogger<FileStoreService>.Instance,
             _factory);
@@ -199,7 +199,7 @@ public sealed class FileStoreServiceArchiveMetadataTests : IAsyncLifetime
         await _store.RecordArchiveMetadataAsync(two, Archive("Saga", "2", "Chapter Two"));
         var metadataCache = new Mock<ISeriesMetadataCacheService>();
         metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<SeriesMetadataCacheRecord>());
-        var library = new SeriesLibraryService(
+        var library = TestServices.CreateSeriesLibrary(
             _store,
             metadataCache.Object,
             new TestOptionsMonitor<AppSettings>(new AppSettings()),

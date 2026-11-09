@@ -141,7 +141,7 @@ public sealed class ComicProcessorServiceLibraryRootTests : IDisposable
                 }
             })
             .Returns(Task.CompletedTask);
-        return new ComicProcessorService(
+        return TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             Mock.Of<ILogger<ComicProcessorService>>(),
             _fileStore.Object,

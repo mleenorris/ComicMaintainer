@@ -52,7 +52,7 @@ public class FileStoreServiceReadStatusQueryTests : IAsyncLifetime
         }
 
         _userContext = new TestUserContextAccessor("user-a");
-        _service = new FileStoreService(
+        _service = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
             new Mock<ILogger<FileStoreService>>().Object,
             factory,

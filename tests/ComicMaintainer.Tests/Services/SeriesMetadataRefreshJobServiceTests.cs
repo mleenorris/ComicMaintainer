@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -41,20 +42,17 @@ public class SeriesMetadataRefreshJobServiceTests
     }
 
     private SeriesMetadataRefreshJobService CreateService(
-        bool withBroadcaster = true,
-        bool withFileStore = true,
-        bool withProcessor = true,
         TimeProvider? timeProvider = null,
         AppSettings? settings = null,
         bool withResolver = false) => new(
             _cache.Object,
             _logger,
-            withBroadcaster ? _broadcaster.Object : null,
-            withFileStore ? _fileStore.Object : null,
-            withProcessor ? _processor.Object : null,
-            timeProvider,
-            settings is null ? null : Mock.Of<IOptionsMonitor<AppSettings>>(o => o.CurrentValue == settings),
-            withResolver ? _resolver.Object : null);
+            _broadcaster.Object,
+            _fileStore.Object,
+            _processor.Object,
+            new TestOptionsMonitor<AppSettings>(settings ?? new AppSettings()),
+            withResolver ? _resolver.Object : TestServices.ResolverThatRetagsEveryFile(),
+            timeProvider);
 
     private void SetupCleanup(int removed) =>
         _cache.Setup(c => c.CleanupStaleSiblingRecordsAsync(It.IsAny<CancellationToken>()))
@@ -110,7 +108,7 @@ public class SeriesMetadataRefreshJobServiceTests
     {
         SetupRefresh("Alpha", "success");
         SetupRefresh("Beta", "success");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { " Alpha ", "alpha", "", "   ", null!, "Beta", "BETA " });
 
@@ -154,7 +152,7 @@ public class SeriesMetadataRefreshJobServiceTests
         SetupRefresh("Gamma", "not_found");
         SetupRefresh("Delta", "error", source: "MangaDex");
         SetupRefresh("Epsilon", lookupStatus: null);
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha", "Beta", "Gamma", "Delta", "Epsilon" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -186,7 +184,7 @@ public class SeriesMetadataRefreshJobServiceTests
         _cache.Setup(c => c.RefreshAsync("Broken", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("provider exploded"));
         SetupRefresh("Healthy", "success", source: "AniList");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Broken", "Healthy" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -208,7 +206,7 @@ public class SeriesMetadataRefreshJobServiceTests
         var titles = Enumerable.Range(0, 25).Select(i => $"Series {i:00}").ToArray();
         _cache.Setup(c => c.RefreshAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord { LookupStatus = "success" });
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(titles);
         var job = await WaitForCleanupAsync(service, jobId);
@@ -225,7 +223,7 @@ public class SeriesMetadataRefreshJobServiceTests
         SetupRefresh("Beta", "not_found");
         _cache.Setup(c => c.RefreshAsync("Gamma", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha", "Beta", "Gamma" });
         await WaitForCleanupAsync(service, jobId);
@@ -243,20 +241,6 @@ public class SeriesMetadataRefreshJobServiceTests
     }
 
     [Fact]
-    public async Task RunJob_WithoutBroadcaster_StillCompletes()
-    {
-        SetupRefresh("Alpha", "success");
-        var service = CreateService(withBroadcaster: false, withFileStore: false, withProcessor: false);
-
-        var jobId = await service.StartAsync(new[] { "Alpha" });
-        var job = await WaitForCleanupAsync(service, jobId);
-
-        Assert.Equal(JobStatus.Completed, job.Status);
-        Assert.Equal(1, job.Successes);
-        _broadcaster.VerifyNoOtherCalls();
-    }
-
-    [Fact]
     public async Task RunJob_BroadcasterThrowsSynchronously_FailureIsSwallowedAndJobCompletes()
     {
         _broadcaster
@@ -264,7 +248,7 @@ public class SeriesMetadataRefreshJobServiceTests
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>()))
             .Throws(new InvalidOperationException("hub unavailable"));
         SetupRefresh("Alpha", "success");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -426,7 +410,7 @@ public class SeriesMetadataRefreshJobServiceTests
     {
         SetupCleanup(removed: 3);
         SetupRefresh("Alpha", "success");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha" });
 
@@ -663,7 +647,7 @@ public class SeriesMetadataRefreshJobServiceTests
         SetupOwner("Attack on Titan", "shingeki-no-kyojin", "Attack on Titan");
         SetupOwner("AoT", "shingeki-no-kyojin", "Attack on Titan");
         SetupRefreshOf("Attack on Titan", "shingeki-no-kyojin", "Attack on Titan", metadataVersion: 3);
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Attack on Titan", "AoT" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -693,7 +677,7 @@ public class SeriesMetadataRefreshJobServiceTests
                 UserAliases = new List<string>()
             });
         SetupRefreshOf("Attack on Titan", "shingeki", "Attack on Titan", metadataVersion: 4);
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Shingeki", "Attack on Titan" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -711,7 +695,7 @@ public class SeriesMetadataRefreshJobServiceTests
         SetupOwner("Monster", "monster", "Monster");
         SetupRefreshOf("Pluto", "pluto", "Pluto", metadataVersion: 3);
         SetupRefreshOf("Monster", "monster", "Monster", metadataVersion: 3);
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Pluto", "Monster" });
         await WaitForCleanupAsync(service, jobId);
@@ -728,7 +712,7 @@ public class SeriesMetadataRefreshJobServiceTests
         _cache.Setup(c => c.RefreshAsync("Attack on Titan", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ExternalMetadataUnavailableException(
                 "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s"));
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Attack on Titan", "AoT" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -782,7 +766,7 @@ public class SeriesMetadataRefreshJobServiceTests
             .ThrowsAsync(new ExternalMetadataUnavailableException(
                 "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s"));
         SetupRefresh("Beta", "success");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha", "Beta" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -832,24 +816,6 @@ public class SeriesMetadataRefreshJobServiceTests
         Assert.Equal(0, job.Failures);
     }
 
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task RunJob_WithoutFileStoreOrProcessor_SkipsRetag(bool withFileStore, bool withProcessor)
-    {
-        SetupRefresh("Alpha", "success");
-        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
-        var service = CreateService(withFileStore: withFileStore, withProcessor: withProcessor);
-
-        var jobId = await service.StartAsync(new[] { "Alpha" });
-        var job = await WaitForCleanupAsync(service, jobId);
-
-        Assert.Equal(JobStatus.Completed, job.Status);
-        _fileStore.Verify(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Never);
-        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
     [Fact]
     public async Task RunJob_EveryRefreshThrows_NothingToRetag()
     {
@@ -877,7 +843,7 @@ public class SeriesMetadataRefreshJobServiceTests
     public async Task GetJob_ReturnsASnapshotThatDoesNotExposeInternalState()
     {
         SetupRefresh("Alpha", "success", source: "AniList");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
         var jobId = await service.StartAsync(new[] { "Alpha" });
         await WaitForCleanupAsync(service, jobId);
 
@@ -924,7 +890,7 @@ public class SeriesMetadataRefreshJobServiceTests
     public async Task StartAsync_ForgetsFinishedJobsOnceTheirRetentionHasPassed()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 5, 1, 12, 0, 0, TimeSpan.Zero));
-        var service = CreateService(withFileStore: false, withProcessor: false, timeProvider: clock);
+        var service = CreateService(timeProvider: clock);
 
         var first = await RunEmptyJobAsync(service);
         var finished = service.GetJob(first)!;
@@ -953,7 +919,7 @@ public class SeriesMetadataRefreshJobServiceTests
                 refreshStarted.TrySetResult();
                 return refreshResult.Task;
             });
-        var service = CreateService(withFileStore: false, withProcessor: false, timeProvider: clock);
+        var service = CreateService(timeProvider: clock);
         var running = await service.StartAsync(new[] { "Alpha" });
         await refreshStarted.Task.WaitAsync(WaitTimeout);
 
@@ -975,7 +941,7 @@ public class SeriesMetadataRefreshJobServiceTests
     [Fact]
     public async Task StartAsync_KeepsAtMostMaxFinishedJobs_ForgettingTheOldestFirst()
     {
-        var service = CreateService(withFileStore: false, withProcessor: false, timeProvider: new FakeTimeProvider());
+        var service = CreateService(timeProvider: new FakeTimeProvider());
         var jobIds = new List<Guid>();
         for (var i = 0; i <= SeriesMetadataRefreshJobService.MaxFinishedJobs; i++)
         {

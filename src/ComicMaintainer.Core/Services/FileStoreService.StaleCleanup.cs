@@ -332,11 +332,6 @@ public partial class FileStoreService
 
     private async Task BroadcastFileListUpdateAfterCleanupAsync()
     {
-        if (_eventBroadcaster is null)
-        {
-            return;
-        }
-
         try
         {
             await _eventBroadcaster.BroadcastFileListUpdateAsync();

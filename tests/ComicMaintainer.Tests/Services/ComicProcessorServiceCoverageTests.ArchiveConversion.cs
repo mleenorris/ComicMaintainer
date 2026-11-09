@@ -272,7 +272,7 @@ public partial class ComicProcessorServiceCoverageTests
         services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
             options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
         using var provider = services.BuildServiceProvider();
-        var fileStore = new FileStoreService(
+        var fileStore = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<FileStoreService>.Instance,
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>(),
@@ -309,7 +309,7 @@ public partial class ComicProcessorServiceCoverageTests
             options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
         using var provider = services.BuildServiceProvider();
         var factory = provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var fileStore = new FileStoreService(
+        var fileStore = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<FileStoreService>.Instance,
             factory);
@@ -353,7 +353,7 @@ public partial class ComicProcessorServiceCoverageTests
             options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
         using var provider = services.BuildServiceProvider();
         var factory = new FailingDbContextFactory(provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
-        var fileStore = new FileStoreService(
+        var fileStore = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<FileStoreService>.Instance,
             factory);
@@ -548,7 +548,7 @@ public partial class ComicProcessorServiceCoverageTests
         services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
             options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
         using var provider = services.BuildServiceProvider();
-        var fileStore = new FileStoreService(
+        var fileStore = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<FileStoreService>.Instance,
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());

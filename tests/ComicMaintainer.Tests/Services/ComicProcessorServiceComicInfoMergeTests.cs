@@ -270,7 +270,7 @@ public sealed class ComicProcessorServiceComicInfoMergeTests : IDisposable
 
     private ComicProcessorService CreateService()
     {
-        var service = new ComicProcessorService(
+        var service = TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<ComicProcessorService>.Instance,
             _fileStore.Object,

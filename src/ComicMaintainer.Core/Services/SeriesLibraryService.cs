@@ -19,8 +19,8 @@ public partial class SeriesLibraryService : ISeriesLibraryService
     private readonly ISeriesMetadataCacheService _metadataCache;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesLibraryService> _logger;
-    private readonly ISeriesNameResolver? _seriesNameResolver;
-    private readonly IUserContextAccessor? _userContext;
+    private readonly ISeriesNameResolver _seriesNameResolver;
+    private readonly IUserContextAccessor _userContext;
 
     /// <summary>
     /// Safety net on top of version-based invalidation: a snapshot is never
@@ -48,8 +48,8 @@ public partial class SeriesLibraryService : ISeriesLibraryService
         ISeriesMetadataCacheService metadataCache,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesLibraryService> logger,
-        ISeriesNameResolver? seriesNameResolver = null,
-        IUserContextAccessor? userContext = null)
+        ISeriesNameResolver seriesNameResolver,
+        IUserContextAccessor userContext)
     {
         _userContext = userContext;
         _fileStore = fileStore;

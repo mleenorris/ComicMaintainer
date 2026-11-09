@@ -54,9 +54,9 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<FileStoreService> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
-    private readonly IEventBroadcaster? _eventBroadcaster;
-    private readonly IMemoryCache? _memoryCache;
-    private readonly IUserContextAccessor? _userContext;
+    private readonly IEventBroadcaster _eventBroadcaster;
+    private readonly IMemoryCache _memoryCache;
+    private readonly IUserContextAccessor _userContext;
     private long _changeVersion;
 
     /// <summary>Per-user read-state counters; see <see cref="GetReadStateVersion"/>.</summary>
@@ -168,9 +168,9 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
         IOptionsMonitor<AppSettings> settings,
         ILogger<FileStoreService> logger,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
-        IEventBroadcaster? eventBroadcaster = null,
-        IMemoryCache? memoryCache = null,
-        IUserContextAccessor? userContext = null)
+        IEventBroadcaster eventBroadcaster,
+        IMemoryCache memoryCache,
+        IUserContextAccessor userContext)
     {
         _settings = settings;
         _logger = logger;
@@ -189,7 +189,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
     {
         get
         {
-            var userId = _userContext?.UserId;
+            var userId = _userContext.UserId;
             return string.IsNullOrEmpty(userId) ? null : userId;
         }
     }
@@ -298,7 +298,6 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
         // so the next request recomputes them from the database.
         MarkChanged();
 
-        if (_eventBroadcaster is null) return;
         try
         {
             await _eventBroadcaster.BroadcastFileListUpdateAsync();

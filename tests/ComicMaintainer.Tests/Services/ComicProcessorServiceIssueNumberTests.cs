@@ -33,7 +33,7 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
             FilenameFormat = AppSettings.DefaultFilenameFormat,
             IssueNumberPadding = 4
         };
-        _service = new ComicProcessorService(
+        _service = TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<ComicProcessorService>.Instance,
             _fileStore.Object,

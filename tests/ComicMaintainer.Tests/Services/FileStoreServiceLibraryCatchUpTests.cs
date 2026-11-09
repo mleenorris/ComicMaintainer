@@ -198,7 +198,7 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
     private static readonly StaleCleanupOptions ConfirmedCleanup = new(IsManual: true, Confirmed: true);
 
     private FileStoreService CreateService() =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _library, DuplicateDirectory = string.Empty }),
             NullLogger<FileStoreService>.Instance,
             _factory);

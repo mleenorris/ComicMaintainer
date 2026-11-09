@@ -45,7 +45,7 @@ public class DatabaseCleanupHostedServiceCoverageTests
             .Callback<Action<AppSettings, string?>>(l => listener = l)
             .Returns(subscription.Object);
 
-        using var service = new DatabaseCleanupHostedService(_fileStore.Object, options.Object, _logger.Object, startupDelay: TimeSpan.Zero);
+        using var service = TestServices.CreateDatabaseCleanup(_fileStore.Object, options.Object, _logger.Object, startupDelay: TimeSpan.Zero);
         await service.StartAsync(CancellationToken.None);
         await service.StopAsync(CancellationToken.None);
 
@@ -64,7 +64,7 @@ public class DatabaseCleanupHostedServiceCoverageTests
     public async Task SettingsChange_WithUnchangedInterval_KeepsTheExistingSchedule()
     {
         var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings { DatabaseCleanupIntervalHours = 6 });
-        using var service = new DatabaseCleanupHostedService(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
+        using var service = TestServices.CreateDatabaseCleanup(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
 
         await service.StartAsync(CancellationToken.None);
         monitor.Set(new AppSettings { DatabaseCleanupIntervalHours = 6, MaxWorkers = 7 });
@@ -77,7 +77,7 @@ public class DatabaseCleanupHostedServiceCoverageTests
     public async Task StopAsync_AfterDispose_IgnoresTheDisposedCancellationSource()
     {
         var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings { DatabaseCleanupIntervalHours = 0 });
-        using var service = new DatabaseCleanupHostedService(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
+        using var service = TestServices.CreateDatabaseCleanup(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
         await service.StartAsync(CancellationToken.None);
 
         service.Dispose();
@@ -100,7 +100,7 @@ public class DatabaseCleanupHostedServiceCoverageTests
                 return release.Task;
             });
         var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings { DatabaseCleanupIntervalHours = 0 });
-        using var service = new DatabaseCleanupHostedService(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
+        using var service = TestServices.CreateDatabaseCleanup(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
 
         await service.StartAsync(CancellationToken.None);
         var firstRun = service.StartupRun;
@@ -129,7 +129,7 @@ public class DatabaseCleanupHostedServiceCoverageTests
             .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
             .Returns(release.Task);
         var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings { DatabaseCleanupIntervalHours = 0 });
-        using var service = new DatabaseCleanupHostedService(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
+        using var service = TestServices.CreateDatabaseCleanup(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
 
         // Application start must not wait for the watcher's catch-up.
         await service.StartAsync(CancellationToken.None).WaitAsync(Timeout);
@@ -158,7 +158,7 @@ public class DatabaseCleanupHostedServiceCoverageTests
                 return new StaleCleanupResult { Status = StaleCleanupStatus.Completed };
             });
         var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings { DatabaseCleanupIntervalHours = 0 });
-        using var service = new DatabaseCleanupHostedService(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
+        using var service = TestServices.CreateDatabaseCleanup(_fileStore.Object, monitor, _logger.Object, startupDelay: TimeSpan.Zero);
         await service.StartAsync(CancellationToken.None).WaitAsync(Timeout);
         await waiting.Task.WaitAsync(Timeout);
 

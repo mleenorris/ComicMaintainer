@@ -989,7 +989,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         string duplicateDirectory = "",
         IEventBroadcaster? broadcaster = null,
         string? watchedDirectory = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = watchedDirectory ?? _library,

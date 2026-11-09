@@ -55,16 +55,14 @@ public partial class SeriesLibraryService
         var perUser = bakeReadState || IsReadStateFilter(normalizedFilter);
 
         // Sources that don't report change versions (e.g. test doubles) can't be
-        // validated, so they are built fresh. A per-user snapshot without a user
-        // context to key on can't tell users apart and must not be shared either.
-        if ((perUser && _userContext is null)
-            || _fileStore is not IChangeVersionSource fileVersions
+        // validated, so they are built fresh.
+        if (_fileStore is not IChangeVersionSource fileVersions
             || _metadataCache is not IChangeVersionSource metadataVersions)
         {
             return await BuildGroupsSnapshotAsync(filter, bakeReadState, default, cancellationToken);
         }
 
-        var cacheKey = new GroupsCacheKey(normalizedFilter, perUser ? _userContext!.UserId : null);
+        var cacheKey = new GroupsCacheKey(normalizedFilter, perUser ? _userContext.UserId : null);
 
         // Capture versions BEFORE reading any inputs: a write that lands while
         // we build bumps the version afterwards, so the stored snapshot is
@@ -136,7 +134,7 @@ public partial class SeriesLibraryService
             return null;
         }
 
-        var userId = _userContext?.UserId;
+        var userId = _userContext.UserId;
         return string.IsNullOrEmpty(userId)
             ? NoReadPaths
             : await readState.GetReadFilePathsAsync(userId, cancellationToken);
@@ -296,9 +294,7 @@ public partial class SeriesLibraryService
             }
             else if (!displayTitleByRecordKey.TryGetValue(record.NormalizedKey, out displayTitle!))
             {
-                displayTitle = (_seriesNameResolver is not null
-                    ? _seriesNameResolver.ResolveForRecord(record)
-                    : SeriesDisplayTitleResolver.Resolve(record, _settings.CurrentValue.DefaultPreferredLanguage)) ?? string.Empty;
+                displayTitle = _seriesNameResolver.ResolveForRecord(record);
                 displayTitleByRecordKey[record.NormalizedKey] = displayTitle;
             }
             if (string.IsNullOrWhiteSpace(displayTitle))

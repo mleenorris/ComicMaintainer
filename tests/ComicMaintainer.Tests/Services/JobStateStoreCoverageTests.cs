@@ -215,7 +215,7 @@ public class JobStateStoreCoverageTests : IAsyncLifetime
             OperationName = "ProcessAll",
             StartTime = DateTime.UtcNow
         });
-        using var processor = new ComicProcessorService(
+        using var processor = TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(new AppSettings()),
             NullLogger<ComicProcessorService>.Instance,
             Mock.Of<IFileStoreService>(),

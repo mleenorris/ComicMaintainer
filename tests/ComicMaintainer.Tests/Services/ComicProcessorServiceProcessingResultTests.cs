@@ -132,7 +132,7 @@ public sealed class ComicProcessorServiceProcessingResultTests : IDisposable
     }
 
     private ComicProcessorService CreateService() =>
-        new(
+        TestServices.CreateComicProcessor(
             new TestOptionsMonitor<AppSettings>(_settings),
             Mock.Of<ILogger<ComicProcessorService>>(),
             _fileStore.Object,

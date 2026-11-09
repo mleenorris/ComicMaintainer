@@ -44,7 +44,7 @@ public class FileStoreServiceTests : IDisposable
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         // Read state is per-user, so the service under test needs a user in scope.
-        _service = new FileStoreService(options, logger, dbContextFactory, userContext: _userContext);
+        _service = TestServices.CreateFileStore(options, logger, dbContextFactory, userContext: _userContext);
     }
 
     public void Dispose()
@@ -411,7 +411,7 @@ public class FileStoreServiceTests : IDisposable
         var options = new TestOptionsMonitor<AppSettings>(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var newService = new FileStoreService(options, logger, dbContextFactory);
+        var newService = TestServices.CreateFileStore(options, logger, dbContextFactory);
         
         // Verify data is in database before initialization
         using (var scope = _serviceProvider.CreateScope())
@@ -553,7 +553,7 @@ public class FileStoreServiceTests : IDisposable
         var options = new TestOptionsMonitor<AppSettings>(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var newService = new FileStoreService(options, logger, dbContextFactory);
+        var newService = TestServices.CreateFileStore(options, logger, dbContextFactory);
         
         await newService.InitializeFromDatabaseAsync();
         
@@ -1136,7 +1136,7 @@ public class FileStoreServiceTests : IDisposable
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         var mockBroadcaster = new Mock<Core.Interfaces.IEventBroadcaster>();
         
-        var service = new FileStoreService(options, logger, dbContextFactory, mockBroadcaster.Object);
+        var service = TestServices.CreateFileStore(options, logger, dbContextFactory, mockBroadcaster.Object);
 
         // Act
         await service.AddFileAsync(filePath);
@@ -1158,38 +1158,18 @@ public class FileStoreServiceTests : IDisposable
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         
         // Add file without broadcaster first
-        var serviceWithoutBroadcaster = new FileStoreService(options, logger, dbContextFactory, null);
+        var serviceWithoutBroadcaster = TestServices.CreateFileStore(options, logger, dbContextFactory, null);
         await serviceWithoutBroadcaster.AddFileAsync(filePath);
         
         // Test remove with broadcaster
         var mockBroadcaster = new Mock<Core.Interfaces.IEventBroadcaster>();
-        var service = new FileStoreService(options, logger, dbContextFactory, mockBroadcaster.Object);
+        var service = TestServices.CreateFileStore(options, logger, dbContextFactory, mockBroadcaster.Object);
 
         // Act
         await service.RemoveFileAsync(filePath);
 
         // Assert
         mockBroadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
-    }
-
-    [Fact]
-    public async Task AddFileAsync_WithoutEventBroadcaster_DoesNotThrow()
-    {
-        // Arrange
-        var filePath = Path.Join(_testDirectory, "test_no_broadcaster.cbz");
-        File.WriteAllText(filePath, "test content");
-        
-        var settings = new AppSettings { WatchedDirectory = _testDirectory };
-        var options = new TestOptionsMonitor<AppSettings>(settings);
-        var logger = new Mock<ILogger<FileStoreService>>().Object;
-        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        
-        var service = new FileStoreService(options, logger, dbContextFactory, null);
-
-        // Act & Assert - should not throw
-        await service.AddFileAsync(filePath);
-        var files = await service.GetAllFilesAsync();
-        Assert.Contains(files, f => f.FilePath == filePath);
     }
 
     // ---- UpdateFilePathAsync tests ----
@@ -1516,7 +1496,7 @@ public class FileStoreServiceTests : IDisposable
             service!.MarkFileReadAsync(filePath, true).GetAwaiter().GetResult());
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var factory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        service = new FileStoreService(
+        service = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
             logger,
             factory,
@@ -1543,7 +1523,7 @@ public class FileStoreServiceTests : IDisposable
             options.UseInMemoryDatabase($"TestDb_{Guid.NewGuid()}").AddInterceptors(interceptor));
         using var provider = services.BuildServiceProvider();
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        var service = new FileStoreService(
+        var service = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
             new Mock<ILogger<FileStoreService>>().Object,
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>(),

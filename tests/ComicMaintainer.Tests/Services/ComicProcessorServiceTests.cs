@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using System.IO.Compression;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -43,28 +44,12 @@ public class ComicProcessorServiceTests : IDisposable
         
         _mockOptions.Setup(o => o.CurrentValue).Returns(_settings);
         
-        _service = new ComicProcessorService(
+        _service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
             externalSeriesMetadata: _mockExternalSeriesMetadata.Object);
-    }
-
-    [Fact]
-    public void Constructor_WithoutResolver_CreatesFallbackResolverLoggerFromFactory()
-    {
-        var loggerFactory = new Mock<ILoggerFactory>();
-        loggerFactory.Setup(f => f.CreateLogger(It.IsAny<string>())).Returns(Mock.Of<ILogger>());
-
-        using var service = new ComicProcessorService(
-            _mockOptions.Object,
-            _mockLogger.Object,
-            _mockFileStore.Object,
-            _mockHistoryService.Object,
-            loggerFactory: loggerFactory.Object);
-
-        loggerFactory.Verify(f => f.CreateLogger(typeof(SeriesNameResolver).FullName!), Times.Once());
     }
 
     [Fact]
@@ -487,7 +472,7 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        var serviceWithBroadcaster = new ComicProcessorService(
+        var serviceWithBroadcaster = TestServices.CreateComicProcessor(
             _mockOptions.Object, 
             _mockLogger.Object, 
             _mockFileStore.Object,
@@ -534,7 +519,7 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        var service = new ComicProcessorService(
+        var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -588,7 +573,7 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        var service = new ComicProcessorService(
+        var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -634,7 +619,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task RunCustomBatchJobAsync_PostLoopReport_AddsTheProblemToTheJobWithoutChangingItsCounts()
     {
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        var service = new ComicProcessorService(
+        var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1485,7 +1470,7 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Construct a service with the cache wired in so the user-selected-name
         // path is exercised.
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1566,7 +1551,7 @@ public class ComicProcessorServiceTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1648,7 +1633,7 @@ public class ComicProcessorServiceTests : IDisposable
             .Setup(c => c.GetAsync(It.Is<string>(k => k != "batman"), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SeriesMetadataCacheRecord?)null);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1749,7 +1734,7 @@ public class ComicProcessorServiceTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1880,7 +1865,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1927,7 +1912,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1972,7 +1957,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2013,7 +1998,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2053,7 +2038,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2105,7 +2090,7 @@ public class ComicProcessorServiceTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2163,7 +2148,7 @@ public class ComicProcessorServiceTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2211,7 +2196,7 @@ public class ComicProcessorServiceTests : IDisposable
                 UserAliases = new List<string> { "Saga Deluxe" },
             });
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,

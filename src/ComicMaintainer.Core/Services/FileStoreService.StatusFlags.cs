@@ -176,16 +176,13 @@ public partial class FileStoreService
                 "ClearProcessedStatusAsync: Cleared renamed/normalized/processed/duplicate flags on {Count} file(s)",
                 updated);
 
-            if (_eventBroadcaster != null)
+            try
             {
-                try
-                {
-                    await _eventBroadcaster.BroadcastFileListUpdateAsync();
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogDebug(ex, "ClearProcessedStatusAsync: file list broadcast failed");
-                }
+                await _eventBroadcaster.BroadcastFileListUpdateAsync();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _logger.LogDebug(ex, "ClearProcessedStatusAsync: file list broadcast failed");
             }
         }
 

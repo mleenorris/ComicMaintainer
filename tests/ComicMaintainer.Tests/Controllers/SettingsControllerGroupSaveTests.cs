@@ -55,7 +55,10 @@ public sealed class SettingsControllerGroupSaveTests : IDisposable
             Mock.Of<IComicProcessorService>(),
             Mock.Of<IFileStoreService>(),
             _settingsService,
-            Mock.Of<IHostApplicationLifetime>());
+            Mock.Of<IHostApplicationLifetime>(),
+            Mock.Of<ISeriesLanguagePreferenceRetagService>(),
+            Mock.Of<IEventBroadcaster>(),
+            Mock.Of<IProcessingHistoryService>());
 
         File.WriteAllText(_settingsPath, SeededSettings);
     }

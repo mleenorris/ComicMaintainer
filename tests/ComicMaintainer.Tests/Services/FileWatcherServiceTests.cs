@@ -99,7 +99,7 @@ public class FileWatcherServiceTests : IDisposable
 
         _mockOptions.Setup(o => o.CurrentValue).Returns(_settings);
 
-        _service = new FileWatcherService(
+        _service = TestServices.CreateFileWatcher(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -159,7 +159,7 @@ public class FileWatcherServiceTests : IDisposable
         var mockDisabledOptions = new Mock<IOptionsMonitor<AppSettings>>();
         mockDisabledOptions.Setup(o => o.CurrentValue).Returns(disabledSettings);
         
-        var disabledService = new FileWatcherService(
+        var disabledService = TestServices.CreateFileWatcher(
             mockDisabledOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -186,7 +186,7 @@ public class FileWatcherServiceTests : IDisposable
         var mockDisabledOptions = new Mock<IOptionsMonitor<AppSettings>>();
         mockDisabledOptions.Setup(o => o.CurrentValue).Returns(disabledSettings);
 
-        using var disabledService = new FileWatcherService(
+        using var disabledService = TestServices.CreateFileWatcher(
             mockDisabledOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -646,7 +646,7 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        using var service = new FileWatcherService(
+        using var service = TestServices.CreateFileWatcher(
             monitor,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -684,7 +684,7 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        using var service = new FileWatcherService(
+        using var service = TestServices.CreateFileWatcher(
             monitor,
             _mockLogger.Object,
             _mockFileStore.Object,

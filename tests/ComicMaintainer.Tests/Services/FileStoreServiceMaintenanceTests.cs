@@ -269,7 +269,7 @@ public sealed class FileStoreServiceMaintenanceTests : IDisposable
     // ---- helpers ------------------------------------------------------------------------
 
     private FileStoreService CreateService() =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = _library,

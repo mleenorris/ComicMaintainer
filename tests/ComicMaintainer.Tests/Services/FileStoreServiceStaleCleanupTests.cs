@@ -571,7 +571,7 @@ public sealed class FileStoreServiceStaleCleanupTests : IAsyncLifetime
 
     private async Task<FileStoreService> CreateServiceAsync()
     {
-        var service = new FileStoreService(
+        var service = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<FileStoreService>.Instance,
             _factory,

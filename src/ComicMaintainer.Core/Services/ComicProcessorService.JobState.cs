@@ -19,16 +19,13 @@ public partial class ComicProcessorService
     {
         var snapshot = CloneJob(job);
 
-        if (_eventBroadcaster != null)
-        {
-            await _eventBroadcaster.BroadcastJobUpdateAsync(
-                snapshot.JobId,
-                snapshot.Status.ToString().ToLower(),
-                snapshot.ProcessedFiles + snapshot.FailedFiles,
-                snapshot.TotalFiles,
-                snapshot.ProcessedFiles,
-                snapshot.FailedFiles);
-        }
+        await _eventBroadcaster.BroadcastJobUpdateAsync(
+            snapshot.JobId,
+            snapshot.Status.ToString().ToLower(),
+            snapshot.ProcessedFiles + snapshot.FailedFiles,
+            snapshot.TotalFiles,
+            snapshot.ProcessedFiles,
+            snapshot.FailedFiles);
 
         await PersistJobStateAsync(snapshot);
     }
@@ -45,11 +42,6 @@ public partial class ComicProcessorService
     /// </remarks>
     private async Task PersistJobStateAsync(ProcessingJob snapshot)
     {
-        if (_jobStateStore == null)
-        {
-            return;
-        }
-
         await WithJobPersistenceLockAsync(snapshot.JobId, async () =>
         {
             if (_deletedPersistedJobs.ContainsKey(snapshot.JobId))
@@ -159,27 +151,24 @@ public partial class ComicProcessorService
             return false;
         }
 
-        if (_jobStateStore != null)
+        // Deleting only from memory would resurrect the job on the next restart.
+        await WithJobPersistenceLockAsync(jobId, async () =>
         {
-            // Deleting only from memory would resurrect the job on the next restart.
-            await WithJobPersistenceLockAsync(jobId, async () =>
+            _deletedPersistedJobs[jobId] = true;
+            try
             {
-                _deletedPersistedJobs[jobId] = true;
-                try
-                {
-                    await _jobStateStore.DeleteAsync(jobId, cancellationToken);
-                }
-                catch
-                {
-                    _deletedPersistedJobs.TryRemove(jobId, out _);
-                    throw;
-                }
+                await _jobStateStore.DeleteAsync(jobId, cancellationToken);
+            }
+            catch
+            {
+                _deletedPersistedJobs.TryRemove(jobId, out _);
+                throw;
+            }
 
-                _persistedTerminalJobs.TryRemove(jobId, out _);
-                _lastPersistedStatus.TryRemove(jobId, out _);
-                _lastPersistedAt.TryRemove(jobId, out _);
-            });
-        }
+            _persistedTerminalJobs.TryRemove(jobId, out _);
+            _lastPersistedStatus.TryRemove(jobId, out _);
+            _lastPersistedAt.TryRemove(jobId, out _);
+        });
 
         var removed = _jobs.TryRemove(jobId, out _);
         _jobCancellationTokens.TryRemove(jobId, out _);

@@ -7,6 +7,7 @@ using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace ComicMaintainer.Tests.Services;
@@ -313,7 +314,17 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
             IFileStoreService fileStore,
             IProcessingHistoryService history,
             Action<int, string, string> beforeReplace)
-            : base(new TestOptionsMonitor<AppSettings>(settings), logger, fileStore, history)
+            : base(
+                  new TestOptionsMonitor<AppSettings>(settings),
+                  logger,
+                  fileStore,
+                  history,
+                  Mock.Of<IEventBroadcaster>(),
+                  Mock.Of<ISeriesMetadataCacheService>(),
+                  TestServices.CreateSeriesNameResolver(new TestOptionsMonitor<AppSettings>(settings), NullLogger<SeriesNameResolver>.Instance),
+                  Mock.Of<IJobStateStore>(),
+                  Mock.Of<IComicEmailService>(),
+                  new FileOperationLock())
         {
             _beforeReplace = beforeReplace;
         }

@@ -89,16 +89,13 @@ public partial class FileStoreService
         MarkChanged();
 
         // Broadcast file list update to connected clients
-        if (_eventBroadcaster != null)
+        try
         {
-            try
-            {
-                await _eventBroadcaster.BroadcastFileListUpdateAsync();
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                _logger.LogWarning(ex, "Failed to broadcast file list update");
-            }
+            await _eventBroadcaster.BroadcastFileListUpdateAsync();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Failed to broadcast file list update");
         }
     }
 
@@ -161,16 +158,13 @@ public partial class FileStoreService
         MarkChanged();
 
         // Broadcast file list update to connected clients
-        if (_eventBroadcaster != null)
+        try
         {
-            try
-            {
-                await _eventBroadcaster.BroadcastFileListUpdateAsync();
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                _logger.LogWarning(ex, "Failed to broadcast file list update");
-            }
+            await _eventBroadcaster.BroadcastFileListUpdateAsync();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Failed to broadcast file list update");
         }
     }
 
@@ -441,7 +435,7 @@ public partial class FileStoreService
         _logger.LogDebug("Updated file path in memory store: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
 
         // Broadcast file list update
-        if (broadcastUpdate && _eventBroadcaster != null)
+        if (broadcastUpdate)
         {
             try
             {

@@ -43,7 +43,7 @@ public class SeriesLibraryServiceCoverageTests
     private SeriesLibraryService CreateService(
         ISeriesNameResolver? resolver = null,
         IUserContextAccessor? user = null,
-        IOptionsMonitor<AppSettings>? settings = null) => new(
+        IOptionsMonitor<AppSettings>? settings = null) => TestServices.CreateSeriesLibrary(
         _fileStore.Object,
         _metadataCache.Object,
         settings ?? _settings.Object,

@@ -55,7 +55,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync(filter: "processed");
 
@@ -78,7 +78,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -108,7 +108,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -139,7 +139,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -191,7 +191,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -229,7 +229,7 @@ public class SeriesLibraryServiceTests
         var monitor = new Mock<IOptionsMonitor<AppSettings>>();
         monitor.Setup(m => m.CurrentValue).Returns(new AppSettings { DefaultPreferredLanguage = "ja" });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, monitor.Object, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, monitor.Object, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -248,7 +248,7 @@ public class SeriesLibraryServiceTests
         };
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -270,7 +270,7 @@ public class SeriesLibraryServiceTests
         };
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
@@ -315,7 +315,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -349,7 +349,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         // New pinned-name id.
         var byPinnedId = await service.GetSeriesIssuesAsync("revenge-of-the-iron-blooded-sword-hound");
@@ -370,7 +370,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var result = await service.GetSeriesIssuesAsync("does-not-exist");
 
         Assert.Null(result);
@@ -390,7 +390,7 @@ public class SeriesLibraryServiceTests
         }).Cast<ComicFile>().ToList();
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
 
@@ -421,7 +421,7 @@ public class SeriesLibraryServiceTests
         }).Cast<ComicFile>().ToList();
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
@@ -448,7 +448,7 @@ public class SeriesLibraryServiceTests
         };
         _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
 
@@ -485,7 +485,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var summaries = await service.GetSeriesSummariesAsync();
         var seriesId = summaries.Series.Single().Id;
 
@@ -501,7 +501,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
         var result = await service.GetTitlesForSeriesIdAsync("nope");
 
         Assert.Empty(result);
@@ -539,7 +539,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -591,7 +591,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -635,7 +635,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -694,7 +694,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var matched = await service.GetSeriesAsync(filter: "matched");
         Assert.Single(matched.Series);
@@ -749,7 +749,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "unmatched");
 
@@ -810,7 +810,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var missing = await service.GetSeriesAsync(filter: "missing");
 
@@ -860,7 +860,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -909,7 +909,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -960,7 +960,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -1010,7 +1010,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -1051,7 +1051,7 @@ public class SeriesLibraryServiceTests
         _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync(filter: "missing");
 
@@ -1094,7 +1094,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -1156,7 +1156,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -1212,7 +1212,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -1274,7 +1274,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -1336,7 +1336,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesSummariesAsync();
 
@@ -1412,7 +1412,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -1463,7 +1463,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var seriesList = await service.GetSeriesAsync();
         Assert.Single(seriesList.Series);
@@ -1487,7 +1487,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetFoldersForSeriesIdAsync("does-not-exist");
 
@@ -1509,7 +1509,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         // Next from the last issue of Series A: no adjacent issue.
         var atEnd = await service.GetAdjacentIssueAsync("/library/Series A/Series A 002.cbz", "next");
@@ -1551,7 +1551,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var next = await service.GetAdjacentIssueAsync("/library/Series A/Series A 159.cbz", "next");
         Assert.True(next.HasAdjacent);
@@ -1578,7 +1578,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         // part 2 comes before part 10 (natural order).
         var next = await service.GetAdjacentIssueAsync("/library/S/S 160 part 2.cbz", "next");
@@ -1620,7 +1620,7 @@ public class SeriesLibraryServiceTests
                 }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         // Sanity check: the two folders really are merged into one series card.
         var library = await service.GetSeriesAsync();
@@ -1657,7 +1657,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var next = await service.GetAdjacentIssueAsync("/library/a/Series A/Series A 001.cbz", "next");
         Assert.True(next.HasAdjacent);
@@ -1670,7 +1670,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
-        var service = new SeriesLibraryService(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
 
         var result = await service.GetAdjacentIssueAsync("/library/Nope/Nope 001.cbz", "next");
 

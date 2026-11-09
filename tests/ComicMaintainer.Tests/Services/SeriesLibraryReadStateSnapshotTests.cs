@@ -87,7 +87,7 @@ public class SeriesLibraryReadStateSnapshotTests
         LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
     };
 
-    private SeriesLibraryService CreateService() => new(
+    private SeriesLibraryService CreateService() => TestServices.CreateSeriesLibrary(
         _fileStore.Object,
         _metadataCache.Object,
         _settings.Object,

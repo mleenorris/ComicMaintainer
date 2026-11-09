@@ -211,7 +211,7 @@ public sealed class FileStoreServiceDeliveryPathsTests : IAsyncLifetime
         Assert.Equal(unchanged, Assert.Single(await DeliveriesAsync()).CondensedFilePaths);
     }
 
-    private FileStoreService Service() => new(
+    private FileStoreService Service() => TestServices.CreateFileStore(
         new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _library, DuplicateDirectory = string.Empty }),
         NullLogger<FileStoreService>.Instance,
         _factory);

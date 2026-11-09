@@ -55,7 +55,7 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
             await db.Database.EnsureCreatedAsync();
         }
 
-        _service = new FileStoreService(
+        _service = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
             _logger.Object,
             _factory,

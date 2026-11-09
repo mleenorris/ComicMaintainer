@@ -26,8 +26,6 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<ISeriesNameResolver> _resolver = new();
-    private readonly Mock<ISeriesMetadataCacheService> _cache = new();
-    private readonly AppSettings _settings = new();
     private ServiceProvider _provider = null!;
     private IDbContextFactory<ComicMaintainerDbContext> _dbFactory = null!;
 
@@ -56,14 +54,12 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
         await _connection.DisposeAsync();
     }
 
-    private MetadataAuditJobHandler CreateHandler(bool withResolver = true, bool withCache = false) => new(
+    private MetadataAuditJobHandler CreateHandler() => new(
         _fileStore.Object,
         _processor.Object,
         _dbFactory,
-        new TestOptionsMonitor<AppSettings>(_settings),
         Mock.Of<ILogger<MetadataAuditJobHandler>>(),
-        withCache ? _cache.Object : null,
-        withResolver ? _resolver.Object : null);
+        _resolver.Object);
 
     private void SetupTrackedFiles(params string[] paths) =>
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()))
@@ -417,75 +413,6 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
         Assert.Equal("Scanned 4: 0 series mismatch, 0 missing chapter, 0 unreadable.", summary);
         Assert.Empty(await ReadFindingsAsync());
         _fileStore.Verify(f => f.GetFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(4));
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_WithoutResolverOrCache_ExpectsTheFolderName()
-    {
-        const string underscoreFolder = "/library/Re_Zero/c001.cbz";
-        const string wrongTag = "/library/Expected Folder/c001.cbz";
-        const string noFolder = "c001.cbz";
-        const string rootFile = "/c002.cbz";
-        SetupTrackedFiles(underscoreFolder, wrongTag, noFolder, rootFile);
-        // Underscores in folder names stand in for ':' (not allowed on disk).
-        SetupDiskMetadata(underscoreFolder, new ComicMetadata { Series = "Re:Zero", Issue = "1" });
-        SetupDiskMetadata(wrongTag, new ComicMetadata { Series = "Wrong", Issue = "1" });
-        SetupDiskMetadata(noFolder, new ComicMetadata { Series = "Anything", Issue = "1" });
-        SetupDiskMetadata(rootFile, new ComicMetadata { Series = "Anything", Issue = "1" });
-
-        var summary = await CreateHandler(withResolver: false).ExecuteAsync(null, CancellationToken.None);
-
-        Assert.Equal("Scanned 4: 1 series mismatch, 0 missing chapter, 0 unreadable.", summary);
-        var finding = Assert.Single(await ReadFindingsAsync());
-        Assert.Equal(wrongTag, finding.FilePath);
-        Assert.Equal("Expected Folder", finding.ExpectedSeries);
-        Assert.Equal("Series 'Wrong' does not match expected 'Expected Folder'.", finding.Details);
-        _resolver.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_WithoutResolver_UsesTheCachedDisplayTitleForTheFolder()
-    {
-        _settings.DefaultPreferredLanguage = "en";
-        _cache.Setup(c => c.NormalizeKey(It.IsAny<string?>()))
-            .Returns<string?>(title => (title ?? string.Empty).ToLowerInvariant().Replace(' ', '-'));
-        _cache.Setup(c => c.NormalizeKey("Unkeyable")).Returns(string.Empty);
-        void SetupRecord(string key, SeriesMetadataCacheRecord record) =>
-            _cache.Setup(c => c.GetAsync(key, It.IsAny<CancellationToken>())).ReturnsAsync(record);
-        SetupRecord("localized", new SeriesMetadataCacheRecord
-        {
-            CanonicalTitle = "Canonical",
-            LocalizedTitles = new List<LocalizedTitle> { new("Japanese Title", "ja"), new("English Title", "en") },
-        });
-        SetupRecord("pinned", new SeriesMetadataCacheRecord { CanonicalTitle = "Canonical", SeriesName = "  Pinned Name " });
-        SetupRecord("padded", new SeriesMetadataCacheRecord { CanonicalTitle = "  Padded Canonical  " });
-        SetupRecord("blank-canonical", new SeriesMetadataCacheRecord { CanonicalTitle = "  " });
-        _cache.Setup(c => c.GetAsync("broken", It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("cache offline"));
-
-        var expectations = new Dictionary<string, string>
-        {
-            ["/library/Localized/c001.cbz"] = "English Title",
-            ["/library/Pinned/c001.cbz"] = "Pinned Name",
-            ["/library/Padded/c001.cbz"] = "Padded Canonical",
-            ["/library/Blank Canonical/c001.cbz"] = "Blank Canonical",
-            ["/library/Uncached/c001.cbz"] = "Uncached",
-            ["/library/Broken/c001.cbz"] = "Broken",
-            ["/library/Unkeyable/c001.cbz"] = "Unkeyable",
-        };
-        SetupTrackedFiles(expectations.Keys.ToArray());
-        foreach (var path in expectations.Keys)
-        {
-            SetupDiskMetadata(path, new ComicMetadata { Series = "Tagged Differently", Issue = "1" });
-        }
-
-        var summary = await CreateHandler(withResolver: false, withCache: true).ExecuteAsync(null, CancellationToken.None);
-
-        Assert.Equal("Scanned 7: 7 series mismatch, 0 missing chapter, 0 unreadable.", summary);
-        var findings = await ReadFindingsAsync();
-        Assert.All(findings, f => Assert.Equal(nameof(MetadataAuditFindingType.SeriesMismatch), f.FindingType));
-        Assert.Equal(expectations, findings.ToDictionary(f => f.FilePath, f => f.ExpectedSeries!));
-        _cache.Verify(c => c.GetAsync(string.Empty, It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]

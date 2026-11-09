@@ -64,4 +64,40 @@ public class SeriesFromPathTests
         Assert.Null(SeriesFromPath.FromFolder(Path.Join(Root, "Batman 001.cbz"), Root, Duplicates));
         Assert.Null(SeriesFromPath.FromFolder(Path.Join(Duplicates, "Batman 001.cbz"), Root, Duplicates));
     }
+
+    // Paths the operating system would reject are not "in" anything.
+    [Fact]
+    public void IsDirectlyInLibraryRoot_UnusableFilePath_IsFalse()
+    {
+        Assert.False(SeriesFromPath.IsDirectlyInLibraryRoot("bad\0name.cbz", Root));
+    }
+
+    [Fact]
+    public void IsDirectlyInLibraryRoot_AnUnusableRootIsSkipped()
+    {
+        Assert.True(SeriesFromPath.IsDirectlyInLibraryRoot(Path.Join(Root, "Batman 001.cbz"), "bad\0root", Root));
+        Assert.False(SeriesFromPath.IsDirectlyInLibraryRoot(Path.Join(Root, "Batman 001.cbz"), "bad\0root"));
+    }
+
+    [Fact]
+    public void IsDirectlyInLibraryRoot_ThePathOfADriveRoot_HasNoParentFolder()
+    {
+        var driveRoot = Path.GetPathRoot(Path.GetTempPath())!;
+
+        Assert.False(SeriesFromPath.IsDirectlyInLibraryRoot(driveRoot, Root));
+    }
+
+    [Fact]
+    public void FromFolder_AFileDirectlyOnADrive_HasNoSeriesFolder()
+    {
+        var driveRoot = Path.GetPathRoot(Path.GetTempPath())!;
+
+        Assert.Null(SeriesFromPath.FromFolder(Path.Join(driveRoot, "Batman 001.cbz")));
+    }
+
+    [Fact]
+    public void FromFileName_ANameThatIsOnlyAnExtension_HasNoSeries()
+    {
+        Assert.Null(SeriesFromPath.FromFileName(Path.Join(Root, ".cbz")));
+    }
 }

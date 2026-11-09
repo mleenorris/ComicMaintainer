@@ -147,6 +147,29 @@ public sealed class EmailControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task EditingDevicesSendingSeriesAndCondensingAreRefusedWithoutAUserId()
+    {
+        var controller = CreateController(Anonymous());
+        var condense = new EmailController.CondenseRequest { SeriesId = SeriesId, CondenseMode = "all" };
+
+        var responses = new[]
+        {
+            (await controller.UpdateDevice(3, new EmailController.DeviceRequest { Name = "Kindle" }, CancellationToken.None)).Result,
+            (await controller.SendSeries(new EmailController.SendSeriesRequest { SeriesId = SeriesId }, CancellationToken.None)).Result,
+            (await controller.PlanCondense(condense, CancellationToken.None)).Result,
+            await controller.DownloadCondensedBook(condense, CancellationToken.None),
+            (await controller.UpsertSubscription(new EmailController.SubscriptionRequest { SeriesTitle = "Saga", DeviceId = 3 }, CancellationToken.None)).Result,
+        };
+
+        Assert.All(responses, response =>
+            Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(response).StatusCode));
+        _devices.VerifyNoOtherCalls();
+        _email.VerifyNoOtherCalls();
+        _builds.VerifyNoOtherCalls();
+        _seriesLibrary.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task UpdateDevice_OfAnotherUser_IsNotFound()
     {
         // The service answers null for a device outside the caller's scope.

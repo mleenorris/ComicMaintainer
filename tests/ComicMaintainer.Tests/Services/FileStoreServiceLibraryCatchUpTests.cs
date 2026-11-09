@@ -43,6 +43,23 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
         TestIO.TryDeleteDirectory(_library);
     }
 
+    // Remembering the scan is bookkeeping for the next startup: failing it must not fail the scan that just finished.
+    [Fact]
+    public async Task RecordingAndForgettingAScan_WhenTheDatabaseFails_DoNotThrowAndReportNotScanned()
+    {
+        var store = CreateService();
+        await store.RecordLibraryScannedAsync(_library);
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            await db.Database.ExecuteSqlRawAsync("DROP TABLE LibraryScans");
+        }
+
+        await store.RecordLibraryScannedAsync(_library);
+        await store.ForgetLibraryScanAsync();
+
+        Assert.False(await store.IsLibraryScannedAsync(_library));
+    }
+
     [Fact]
     public async Task IsLibraryScanned_FalseUntilAScanIsRecorded()
     {

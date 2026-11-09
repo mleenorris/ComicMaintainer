@@ -1,1038 +1,1095 @@
-# ComicMaintainer API Documentation
+# ComicMaintainer REST API
 
-This document provides detailed information about the ComicMaintainer REST API endpoints.
+This is the reference for people writing scripts and integrations. The web app and the Android app use the same API.
 
-## Table of Contents
+Related documents:
 
-- [Overview](#overview)
-- [Base URL](#base-url)
+- [POSTMAN_API_COLLECTION.md](POSTMAN_API_COLLECTION.md): a ready-made Postman collection for these routes.
+- [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md): every environment variable and what it does.
+- [OPDS.md](OPDS.md): setting up comic reader apps. [NOTIFICATIONS.md](NOTIFICATIONS.md): notification targets.
+- [AUTHELIA.md](AUTHELIA.md) and [REVERSE_PROXY.md](REVERSE_PROXY.md): running behind a proxy.
+
+## Contents
+
+- [Conventions](#conventions)
 - [Authentication](#authentication)
-- [Health Check](#health-check)
-- [Diagnostics](#diagnostics)
-- [File Management](#file-management)
-- [Job Management](#job-management)
+- [Rate limits](#rate-limits)
+- [Errors](#errors)
+- [Paging](#paging)
+- [Caching](#caching)
+- [Request timeouts](#request-timeouts)
+- [Authentication routes](#authentication-routes)
+- [Files](#files)
+- [Library browsing](#library-browsing)
+- [Folder combine](#folder-combine)
+- [Batch jobs](#batch-jobs)
+- [Processed status](#processed-status)
+- [Comic reader](#comic-reader)
+- [Reader progress, preferences and sessions](#reader-progress-preferences-and-sessions)
+- [Series metadata](#series-metadata)
+- [Series images](#series-images)
+- [Email delivery](#email-delivery)
+- [Suwayomi](#suwayomi)
+- [Scheduled jobs](#scheduled-jobs)
 - [Settings](#settings)
-- [Suwayomi Downloads](#suwayomi-downloads)
-- [Events](#events)
-- [Database Backups](#database-backups)
-- [Request Correlation](#request-correlation)
-- [Error Responses](#error-responses)
+- [Notifications](#notifications)
+- [Database backups](#database-backups)
+- [Error reports](#error-reports)
+- [Diagnostics and logs](#diagnostics-and-logs)
+- [Other application routes](#other-application-routes)
+- [Event stream](#event-stream)
+- [OPDS catalog](#opds-catalog)
+- [Health, metrics and Swagger](#health-metrics-and-swagger)
+- [Deprecated aliases](#deprecated-aliases)
 
-## Overview
+## Conventions
 
-The ComicMaintainer API is a RESTful API that provides programmatic access to the comic file management system. The API returns JSON responses and uses standard HTTP response codes.
+**Base URL.** The default is `http://<host>:5000`. If `BASE_PATH` is set (for example `/comics`), put it in front of every path in this document: `https://example.com/comics/api/files`. The app accepts a request with or without that prefix, so a reverse proxy can either forward it or strip it. See [BASE_PATH](ENVIRONMENT_VARIABLES.md#reverse-proxy-and-base-path).
 
-## Base URL
+**JSON.** Bodies are JSON unless a route says otherwise. Property names in a request body are matched without regard to case. Response names are shown as the API sends them. Older routes use `snake_case` and newer ones use `camelCase`; a few send both.
 
+**Dates.** Dates are ISO 8601 in UTC unless a field is described as Unix seconds. `modified`, `latest_modified` and the history `timestamp` are Unix seconds.
+
+**Enums.** Enums are sent as numbers unless a route says otherwise. The reader's `ReaderMode` is `0` SinglePage, `1` Longstrip, `2` DoublePage, `3` DoublePageManga, `4` FitWidth, `5` FitHeight. `ReadingDirection` is `0` LeftToRight, `1` RightToLeft.
+
+**Naming a file.** Routes name a file in one of two ways:
+
+- `filePath` query parameter: the absolute path, URL-encoded. This is the value of `relative_path` in a file listing (despite its name, that field holds the absolute path).
+- `{encodedFilePath}` path segment: the same absolute path as URL-safe base64 of its UTF-8 bytes (`+` becomes `-`, `/` becomes `_`, padding may be left out).
+
+```bash
+# Make an {encodedFilePath} from a path
+printf '%s' '/watched_dir/Batman/Batman 001.cbz' | base64 -w0 | tr '+/' '-_' | tr -d '='
 ```
-http://localhost:5000
-```
 
-Replace `localhost:5000` with your actual host and port.
+Single-file routes accept only paths inside the watched directory; anything else gets `400`. Batch job routes also accept the duplicates directory. Any request with a `filePath` query parameter that contains a `..` segment or points outside the watched, duplicates and config directories is refused with `400 {"error":"Invalid file path"}` before it reaches the route.
+
+**Series identifiers.** Three different values are used:
+
+| Placeholder | Where it comes from |
+|---|---|
+| `{seriesId}` | `id` from `GET /api/files/series` |
+| `{seriesTitle}` | A series title, URL-encoded. Canonical title, folder title or alias all work |
+| `{normalizedKey}` | `series_id` from a metadata record, or the key at the end of `external_image_url` |
+
+**Long-running work.** Routes that start background work answer immediately with a job id. Follow it with `GET /api/jobs/{jobId}` or the [event stream](#event-stream).
 
 ## Authentication
 
-Currently, the API does not require authentication. Consider adding authentication if exposing the API to the internet.
+Every route needs a signed-in caller unless its table says `Public`. There are four ways to sign in:
 
-## Health Check
+| Scheme | How to send it | Where it works |
+|---|---|---|
+| Session token (JWT) | `Authorization: Bearer <token>` from `POST /api/auth/login` | Everywhere except `/opds` |
+| API key | `X-API-Key: cm_...` header | Everywhere except `/opds` (there it is sent as the Basic password) |
+| Authelia | Forward-auth headers from a trusted proxy, when `AUTHELIA_ENABLED=true` | Everywhere except `/opds` |
+| HTTP Basic | `Authorization: Basic ...` | Only under `/opds`. It is refused everywhere else |
 
-### GET /health
-### GET /api/health
+A fifth credential, the single-use **stream token**, opens the [event stream](#event-stream) and nothing else. No other route accepts a credential in its URL. Session tokens and API keys in query strings are never read.
 
-Health check endpoint for container orchestration.
-
-**Response (200 OK - Healthy):**
-```json
-{
-  "status": "healthy",
-  "version": "1.0.0",
-  "checks": {
-    "watched_dir": "ok",
-    "database": "ok",
-    "watcher": "running"
-  },
-  "file_count": 1234
-}
-```
-
-**Response (503 Service Unavailable - Unhealthy):**
-```json
-{
-  "status": "unhealthy",
-  "version": "1.0.0",
-  "checks": {
-    "watched_dir": "error: Directory not found",
-    "database": "ok",
-    "watcher": "not_running"
-  }
-}
-```
-
-## Diagnostics
-
-### GET /api/diagnostics
-
-A single snapshot of the running instance, intended for troubleshooting and bug reports.
-Unlike `/health`, which is a liveness probe for container orchestration, this returns the
-full operational picture in one call.
-
-**Authorization:** administrator (`CanAdminister`). Non-administrators receive `403`.
-
-**Response (200 OK):**
-```json
-{
-  "generatedAtUtc": "2026-09-29T16:46:45.126Z",
-  "correlationId": "0HNOU94L3SUEB:00000001",
-  "application": {
-    "version": "2.0.310.0",
-    "environment": "Production",
-    "startedAtUtc": "2026-09-29T16:45:20.625Z",
-    "uptimeSeconds": 84
-  },
-  "runtime": {
-    "framework": ".NET 10.0.12",
-    "operatingSystem": "Ubuntu 24.04.5 LTS",
-    "architecture": "X64",
-    "processorCount": 4,
-    "workingSetBytes": 221270016,
-    "managedHeapBytes": 36993696,
-    "threadCount": 24
-  },
-  "health": {
-    "status": "Healthy",
-    "totalDurationMs": 16,
-    "entries": [
-      { "name": "database", "status": "Healthy", "description": "Database is reachable.", "durationMs": 8 }
-    ]
-  },
-  "watcher": {
-    "running": true,
-    "renameEnabled": true,
-    "normalizeEnabled": true,
-    "fileStabilityDelaySeconds": 30
-  },
-  "library": { "total": 1234, "processed": 1200, "unprocessed": 34, "duplicates": 2 },
-  "jobs": { "total": 12, "running": 0, "interrupted": 1, "failed": 0, "lastStartedUtc": "2026-09-29T15:02:11.000Z" },
-  "storage": [
-    { "name": "Watched", "path": "/watched", "exists": true, "writable": true, "freeBytes": 89380139008, "totalBytes": 154894188544 }
-  ],
-  "logs": {
-    "directory": "/Config",
-    "files": [
-      { "name": "debug20260929.log", "sizeBytes": 126002, "lastWriteUtc": "2026-09-29T16:46:45.154Z" }
-    ]
-  }
-}
-```
-
-Each section is gathered independently. A section that cannot be read is replaced by
-`{ "error": "..." }` rather than failing the whole request, so a broken probe (for example an
-unmounted storage path) never hides the rest of the snapshot.
-
-## File Management
-
-### GET /api/files
-
-List all comic files in the watched directory.
-
-**Query Parameters:**
-- `page` (optional) - Page number (default: 1)
-- `per_page` (optional) - Results per page (default: 100, max: 100)
-- `search` (optional) - Search term for filtering files
-- `filter` (optional) - Status filter: `all`, `marked`, `unmarked`, `duplicates`
-
-**Response:**
-```json
-{
-  "files": [
-    {
-      "relative_path": "/comics/Batman/Batman #001.cbz",
-      "name": "Batman #001.cbz",
-      "size": 12345678,
-      "modified": 1234567890,
-      "processed": true,
-      "renamed": true,
-      "normalized": true,
-      "duplicate": false,
-      "read": false
-    }
-  ],
-  "page": 1,
-  "total_pages": 5,
-  "total_files": 450,
-  "unmarked_count": 12
-}
-```
-
-Despite its name, `relative_path` holds the file's full path. It identifies the file, so use it
-wherever an endpoint takes a file path, such as `{encodedFilePath}` below. `modified` is in Unix
-seconds.
-
-### GET /api/files/{encodedFilePath}/tags
-
-Get the metadata stored in a file's `ComicInfo.xml`.
-
-`{encodedFilePath}` is the file's full path, encoded as UTF-8 and then as base64url
-(`-` and `_` in place of `+` and `/`; the trailing `=` padding is optional). The file
-must be inside the watched directory. For example, `/comics/Batman/Batman #001.cbz`
-is encoded as `L2NvbWljcy9CYXRtYW4vQmF0bWFuICMwMDEuY2J6`:
+### Session tokens
 
 ```bash
-printf '%s' '/comics/Batman/Batman #001.cbz' | base64 | tr -d '\n=' | tr '+/' '-_'
+TOKEN=$(curl -s -X POST http://localhost:5000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"your-password"}' | jq -r .token)
+
+curl -H "Authorization: Bearer $TOKEN" 'http://localhost:5000/api/files?per_page=20'
 ```
 
-```python
-import base64
-path = '/comics/Batman/Batman #001.cbz'
-encoded = base64.urlsafe_b64encode(path.encode()).decode().rstrip('=')
-```
+A session token lasts 24 hours by default (`JwtSettings__ExpirationMinutes`). Signing out, changing the password, changing the account's role, or disabling or deleting the account ends it at once.
 
-**Response:**
-```json
-{
-  "series": "Batman",
-  "title": "The Dark Knight",
-  "issue": "1",
-  "volume": "2016",
-  "publisher": "DC Comics",
-  "year": 2023,
-  "summary": "Gotham's protector returns.",
-  "authors": ["Tom King"],
-  "tags": ["Superhero"],
-  "isUserEdited": false,
-  "userLockedFieldsMask": 0
-}
-```
+### API keys
 
-`authors` holds the `<Writer>` entries and `tags` the `<Tag>` entries. Fields the file
-does not set are `null` (or `[]`). A file without a `ComicInfo.xml` reports only `series`,
-taken from its folder name, and `issue`, taken from its file name. `isUserEdited` and
-`userLockedFieldsMask` are not stored in the file: they are always `false` and `0` here,
-and the endpoints below ignore them.
+Create a key with `POST /api/auth/api-key` or under **Settings > OPDS Catalog**. It starts with `cm_` and is shown only once; the server stores a hash.
 
-`400` when the path cannot be decoded (`Invalid file path`) or is outside the watched
-directory (`File path is outside the allowed directory`). `404` when the file does not
-exist, is not a comic archive, or cannot be read.
+- Send it in the `X-API-Key` header. Query strings and `Authorization: Bearer` are never accepted for keys.
+- A key acts as the account that owns it, with that account's current roles. Each account has one key; creating a new one replaces the old one.
+- Creating a key needs the current password (`currentPassword`), unless the session comes from Authelia.
+- A request authenticated with an API key cannot create a key or change the password (`403`).
+- Changing the password or signing out of all sessions revokes the key.
 
-### PUT /api/files/{encodedFilePath}/tags
+### Authelia
 
-Replace the metadata of one file. Requires library write permission. `{encodedFilePath}`
-is encoded as for `GET`, and the body takes the fields of the `GET` response.
+With `AUTHELIA_ENABLED=true`, the app trusts the `Remote-User`, `Remote-Groups`, `Remote-Email` and `Remote-Name` headers, but only on requests from the addresses in `AUTHELIA_TRUSTED_PROXIES`. Accounts are created on first sign-in. Session tokens and API keys keep working alongside it. See [AUTHELIA.md](AUTHELIA.md).
 
-**Request Body:**
-```json
-{
-  "series": "Batman",
-  "issue": "1",
-  "title": "The Dark Knight",
-  "publisher": "DC Comics",
-  "year": 2023,
-  "authors": ["Tom King"]
-}
-```
+### HTTP Basic
 
-Returns `200` with an empty body. The metadata replaces the file's `ComicInfo.xml`
-rather than being merged into it: every field the body leaves out is removed, as is
-every text or number field set to `null`. `authors` and `tags` cannot be `null` (that
-is rejected with a `400` validation error); send `[]` or leave them out to clear them.
-Elements the API does not model, such as `<Genre>` or `<Penciller>`, are always
-dropped, even when you send back exactly what `GET` returned.
+HTTP Basic is accepted only on the routes under `/opds`. Send the username with either the account's password or its API key as the password. With Authelia enabled, only the API key works, because accounts Authelia created have no local password their owner knows. See [OPDS catalog](#opds-catalog).
 
-`400` for the same path errors as `GET`, and `400` (`Failed to update tags`) when the
-file does not exist or is not a comic archive.
+### Access levels
 
-### POST /api/files/tags
+The route tables below use these levels:
 
-Write the same metadata to one or more files. Requires library write permission.
+| Access | Who may call it |
+|---|---|
+| Public | Anyone, with no credentials |
+| Signed in | Any signed-in account, including the `ReadOnly` role |
+| Library write | Any signed-in account that is not in the `ReadOnly` role |
+| Admin | Accounts in the `Admin` role. With Authelia enabled and `AUTHELIA_ADMIN_GROUPS` empty, every account that is not `ReadOnly` counts as an administrator |
+| Admin role | Accounts in the `Admin` role, with no Authelia exception |
+| OPDS Basic | HTTP Basic, under `/opds` only |
 
-`files` lists plain paths (not base64url-encoded); empty entries are ignored.
-`metadata` takes the fields of the `GET` response and replaces each file's
-`ComicInfo.xml` as `PUT` does. Every field it leaves out, including `issue`, is removed
-from every file, and leaving out `metadata` altogether clears all their tags. Use `PUT`
-for per-file fields such as `issue`.
+The roles are `Admin`, `User` and `ReadOnly`. A self-registered account gets `User`.
 
-**Request Body:**
-```json
-{
-  "files": ["/comics/Batman/Batman #001.cbz"],
-  "metadata": {
-    "series": "Batman",
-    "issue": "1",
-    "title": "The Dark Knight",
-    "publisher": "DC Comics",
-    "year": 2023
-  }
-}
-```
+### Account protection
 
-**Response (200 OK):** empty body; every file was updated.
+- Five wrong passwords in a row lock the account for 15 minutes. Sign-in, change-password, API-key creation and OPDS Basic passwords all count. The app has no way to unlock an account early.
+- Every sign-in failure answers `401 {"error":"Invalid username or password"}`, including for disabled and locked accounts.
+- Passwords published as examples with earlier versions are refused at sign-in, setup, registration and password change.
 
-**Response (207 Multi-Status):** some files could not be updated (missing, not a comic
-archive, or unreadable); the rest were.
-```json
-{
-  "failed": ["/comics/Batman/Batman #002.cbz"]
-}
-```
+## Rate limits
 
-**Error Response (400 - Bad Request):** the request is invalid, an outside path was
-provided, or none of the files could be updated.
-```json
-{
-  "error": "Failed to update tags",
-  "failed": ["/comics/Batman/Batman #001.cbz"]
-}
-```
+| Limit | Applies to | Allowance |
+|---|---|---|
+| General | Every request | 1000 per minute per signed-in user, 100 per minute per anonymous client address |
+| Sign-in attempts | `POST /api/auth/login`, `register`, `setup`, `change-password`, `api-key`, and OPDS Basic credential checks | 10 attempts per 5 minutes per client address, shared across all of them |
 
-A request whose `files` is missing or an empty list is rejected with `400`
-(`No files provided`). A request naming any file outside the watched directory is
-rejected with `400` (`One or more file paths are outside the allowed directory`)
-before any file is updated. If `files` is explicitly `null`, model validation rejects
-the request with `400` (`The Files field is required.`), rather than returning
-`No files provided`.
+A refused request gets `429` with a `Retry-After` header (seconds) and `{"error":"Too many requests. Please try again in 3 minutes."}`. Behind a reverse proxy, set `TRUSTED_PROXIES`, or every client behind the proxy shares one allowance.
 
-### POST /api/files/cleanup-stale
+## Errors
 
-Remove stale database entries for files that no longer exist on disk. This is useful when files have been moved or deleted outside the application, leaving orphaned records in the database.
+Check the HTTP status first, then read the `error` field. Three body shapes are used.
 
-**Response:**
-```json
-{
-  "success": true,
-  "removedCount": 15,
-  "message": "Removed 15 stale database entries"
-}
-```
+**Problem document** (`application/problem+json`). Unexpected failures, settings refusals, notification tests and OPDS refusals use this shape, with an `error` string added:
 
-**Error Response (499 - Cancelled):**
-```json
-{
-  "error": "Cleanup operation was cancelled"
-}
-```
-
-**Error Response (500 - Internal Server Error):**
-```json
-{
-  "error": "Failed to cleanup stale entries"
-}
-```
-
-**Note:** This endpoint scans all files in the database and removes entries where the file no longer exists on the filesystem. The operation also removes entries from the in-memory cache to ensure consistency.
-
-## Job Management
-
-### POST /api/jobs/process-all
-
-Start asynchronous processing of all files.
-
-**Response:**
-```json
-{
-  "job_id": "job-abc123",
-  "total_items": 450
-}
-```
-
-When there is no file to work on, no job is created and the response is
-`{ "job_id": "00000000-0000-0000-0000-000000000000", "total_items": 0 }`. The
-other library-wide starters (`rename-all`, `normalize-all`, `process-unmarked`,
-`rename-unmarked`, `normalize-unmarked`, `remove-metadata-all`) answer the same
-way; the web UI then reports that there is nothing to do instead of tracking a job.
-
-### POST /api/jobs/process-selected
-
-Start asynchronous processing of selected files.
-
-**Request Body:**
-```json
-{
-  "files": [
-    "/comics/Batman/Batman #001.cbz",
-    "/comics/Superman/Superman #001.cbz"
-  ]
-}
-```
-
-**Response:**
-```json
-{
-  "job_id": "job-xyz789",
-  "total_items": 2
-}
-```
-
-### GET /api/jobs/{job_id}
-
-Get status of a specific job.
-
-**Response:**
-```json
-{
-  "id": "job-abc123",
-  "status": "processing",
-  "created_at": 1234567890.0,
-  "started_at": 1234567891.0,
-  "progress": {
-    "processed": 45,
-    "total": 450,
-    "success": 44,
-    "errors": 1,
-    "percentage": 10
-  },
-  "results": [
-    {
-      "file": "/comics/Batman/Batman #001.cbz",
-      "status": "success",
-      "new_path": "/comics/Batman - Chapter 0001.cbz"
-    }
-  ]
-}
-```
-
-### GET /api/jobs
-
-List all jobs.
-
-**Response:**
-```json
-{
-  "jobs": [
-    {
-      "id": "job-abc123",
-      "status": "completed",
-      "created_at": 1234567890.0,
-      "progress": {
-        "processed": 450,
-        "total": 450,
-        "percentage": 100
-      }
-    }
-  ]
-}
-```
-
-### DELETE /api/jobs/{job_id}
-
-Delete a job from history.
-
-**Response:**
-```json
-{
-  "success": true
-}
-```
-
-### POST /api/jobs/{job_id}/cancel
-
-Cancel a running job.
-
-**Response:**
-```json
-{
-  "success": true,
-  "job_id": "job-abc123"
-}
-```
-
-## Settings
-
-Changing a setting requires the `CanAdminister` policy. This normally means the
-`Admin` role, but when Authelia is enabled without `AUTHELIA_ADMIN_GROUPS`, every
-signed-in user who is not `ReadOnly` (local accounts included) passes it; see
-[Role Mapping](AUTHELIA.md#role-mapping). Each
-`PUT /api/settings/...` endpoint below also accepts `POST`, a legacy alias with the
-same body and response.
-
-### GET /api/settings/filename-format
-
-Get the current filename format template and the built-in default (the
-format "Reset Filename Format" on the settings page restores).
-
-**Response:**
-```json
-{
-  "format": "{series} - Chapter {issue}",
-  "default": "{series} - Chapter {issue}"
-}
-```
-
-### PUT /api/settings/filename-format
-
-Update the filename format template.
-
-**Request Body:**
-```json
-{
-  "format": "{series} v{volume} #{issue_no_pad}"
-}
-```
-
-**Response:**
-```json
-{
-  "message": "Filename format updated successfully"
-}
-```
-
-A blank format is not saved; the response is `500` with
-`{"error": "Failed to update filename format"}`.
-
-### GET /api/settings/issue-number-padding
-
-Get the minimum number of digits `{issue}` is padded to in generated filenames
-(default 4, so issue 1 becomes `0001`). `{issue_no_pad}` is never padded.
-
-**Response:**
-```json
-{
-  "padding": 4
-}
-```
-
-### PUT /api/settings/issue-number-padding
-
-Set issue number padding.
-
-**Request Body:**
-```json
-{
-  "padding": 6
-}
-```
-
-**Response:**
-```json
-{
-  "message": "Issue number padding updated successfully"
-}
-```
-
-`padding` must be between 0 and 10; other values are rejected with `400` and
-`{ "error": "..." }`.
-
-### GET /api/settings/watcher-enable-rename
-### GET /api/settings/watcher-enable-normalize
-
-Whether processing renames files, or normalizes their metadata.
-
-**Response:**
-```json
-{
-  "enabled": true
-}
-```
-
-### PUT /api/settings/watcher-enable-rename
-### PUT /api/settings/watcher-enable-normalize
-
-Turn renaming or normalizing on or off in the full processing pipeline. Despite the
-names, these settings apply to processing runs on request and processing jobs, not only
-to the watcher: with a step off, the pipeline skips it but still marks the file as
-renamed or normalized. Rename-only (`/api/jobs/rename-selected`) and normalize-only
-(`/api/jobs/normalize-selected`) jobs are exceptions and perform their operation even
-when the corresponding setting is off. With both settings off, the watcher still tracks
-files but processes none of them automatically.
-
-**Request Body:**
-```json
-{
-  "enabled": false
-}
-```
-
-**Response:**
-```json
-{
-  "message": "Watcher enable rename updated successfully"
-}
-```
-
-(`Watcher enable normalize updated successfully` for the normalize setting.)
-
-### GET /api/watcher
-
-Get the file watcher state. `GET /api/watcher/status` is a legacy alias.
-
-**Response:**
-```json
-{
-  "running": true,
-  "enabled": true
-}
-```
-
-`enabled` always equals `running`. The watcher runs whenever the watched directory
-exists and cannot be stopped through the API; use the `watcher-enable-rename` and
-`watcher-enable-normalize` settings above to control what it does.
-
-`PUT /api/watcher` and `POST /api/watcher/enable` are deprecated no-ops kept for old
-clients and scheduled for removal in v3.0. They change nothing: `PUT` returns the
-current state as `enabled` (equal to `running`) with a `message` saying the watcher is
-controlled by the rename and normalize settings, and `POST` returns `200` with an
-empty body.
-
-## Suwayomi Downloads
-
-Queue downloads for missing issues on a connected [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server, and find series on its sources to add to its library. All endpoints require authentication; `POST` requires library write permission.
-
-### GET /api/suwayomi/status
-
-Probe the configured server.
-
-**Response:**
-```json
-{
-  "enabled": true,
-  "configured": true,
-  "connected": true,
-  "serverName": "Suwayomi-Server",
-  "version": "1.1.0",
-  "error": null
-}
-```
-
-### GET /api/suwayomi/series
-
-Search the Suwayomi library by title.
-
-**Query Parameters:**
-- `query` (string, optional) - Title to match. Omit to list the first entries.
-- `limit` (int, optional) - Maximum results, 1-100 (default 20).
-
-**Response:**
-```json
-{
-  "series": [
-    { "id": 4, "title": "Solo Leveling", "inLibrary": true, "thumbnailUrl": "/api/v1/manga/4/thumbnail" }
-  ]
-}
-```
-
-### GET /api/suwayomi/series/{id}/chapters
-
-List the chapters Suwayomi knows about for one of its series.
-
-**Response:**
-```json
-{
-  "chapters": [
-    { "id": 41, "name": "Chapter 1", "chapterNumber": 1, "isDownloaded": true }
-  ]
-}
-```
-
-### POST /api/suwayomi/download-missing
-
-Queue downloads for the issue numbers a series is missing locally.
-
-**Request Body:**
-```json
-{
-  "seriesTitle": "Solo Leveling",
-  "alternateTitles": ["Ore dake Level Up na Ken", "Na Honjaman Level Up"],
-  "suwayomiSeriesId": 4,
-  "issueNumbers": [2, 3]
-}
-```
-
-`suwayomiSeriesId` is optional. When supplied, only that Suwayomi library entry is checked. When omitted, exact matches in the Suwayomi library are checked first; any requested issue numbers they do not contain are then sought across every installed catalogue source. Source-search results, including previously checked library entries, are refreshed and can supply downloads without being added to the Suwayomi library.
-
-`alternateTitles` is optional too: the series' other titles (the web UI sends its canonical title and aliases), for when Suwayomi lists the series under a different name. Each installed source is searched with `seriesTitle` first, across pages until an exact match is found or results are exhausted; if there is no exact match, `alternateTitles` are searched in order the same way. Candidates are ranked by an exact match on `seriesTitle`, an exact match on each alternate title in the order given, and then a prefix/substring match on `seriesTitle`. Partial matches are used only when no exact match was found, and only for one normalized title. Matching ignores punctuation and case, and alternate titles are never matched partially. Both title fields are ignored when `suwayomiSeriesId` is given.
-
-**Response:**
-```json
-{
-  "series": { "id": 4, "title": "Solo Leveling", "inLibrary": true },
-  "queuedChapters": [
-    { "id": 42, "name": "Chapter 2", "chapterNumber": 2, "isDownloaded": false }
-  ],
-  "unmatchedIssueNumbers": [3],
-  "alreadyDownloadedIssueNumbers": [],
-  "discoveryFailures": []
-}
-```
-
-At most four source searches run concurrently. A source that fails does not prevent another source from supplying a chapter; each non-fatal failure is returned as `{ "target": "...", "error": "..." }` in `discoveryFailures`. Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable before any matching entry can be checked, or no matching series is found in the Suwayomi library or installed sources.
-
-### GET /api/suwayomi/sources
-
-List the catalogue sources installed on the server (one per extension and language), ordered by display name. Suwayomi's Local source is left out. Source ids are 64-bit numbers, returned as strings.
-
-**Response:**
-```json
-{
-  "sources": [
-    { "id": "2499283573021220255", "name": "MangaDex", "lang": "en", "displayName": "MangaDex (EN)" }
-  ]
-}
-```
-
-`lang` is `all` for a source that covers several languages. Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured or the server is unreachable.
-
-### GET /api/suwayomi/sources/{sourceId}/series
-
-Search one source's site for series. Suwayomi asks the site itself, so an answer can take up to a minute. The titles closest to `query` come first; otherwise the source's order is kept, including results that only match an alternative title.
-
-**Query Parameters:**
-- `query` (string, required) - Title to search for, up to 200 characters.
-- `page` (int, optional) - Page of the source's results, 1-100 (default 1).
-
-**Response:**
-```json
-{
-  "series": [
-    { "id": 812, "title": "Solo Leveling", "inLibrary": false, "thumbnailUrl": "/api/v1/manga/812/thumbnail" }
-  ],
-  "hasNextPage": true
-}
-```
-
-`id` is the series' id on the Suwayomi server, as taken by the thumbnail and add endpoints below. Returns `400` with `{ "error": "..." }` for a missing or overlong `query`, a `page` out of range, or when Suwayomi cannot search the source.
-
-### GET /api/suwayomi/series/{id}/thumbnail
-
-Serve the cover of a Suwayomi series, fetched with the configured server credentials. `thumbnailUrl` in the results above is a path on the Suwayomi server, which browsers cannot load from a server that requires a login. The response is a JPEG, PNG, GIF or WebP image, typed by its content rather than the server's header, and may be cached privately for a day. Covers over 10 MiB are refused. Returns `404` with `{ "error": "..." }` when the cover cannot be fetched.
-
-### POST /api/suwayomi/series/{id}/add
-
-Add a series to the Suwayomi library (unless it is already there) and queue downloads for the chapters this library does not have. No request body.
-
-Suwayomi first refreshes the series' chapter list from the source. Chapters are then left out when:
-- their number matches an issue of a local series whose title, canonical title or alias equals the Suwayomi title (ignoring case, spacing and punctuation);
-- Suwayomi has already downloaded a chapter with that number;
-- another chapter has the same number (usually another scanlation group's release); the first one in the source's list is queued;
-- they have no chapter number (extras, notices) while other chapters do. When no chapter has a number, as with a oneshot, every chapter not yet downloaded is queued.
-
-**Response:**
-```json
-{
-  "series": { "id": 812, "title": "Solo Leveling", "inLibrary": true, "thumbnailUrl": "/api/v1/manga/812/thumbnail" },
-  "alreadyInLibrary": false,
-  "localSeriesTitle": "Solo Leveling",
-  "downloads": {
-    "chapterCount": 14,
-    "queuedChapters": [
-      { "id": 9051, "name": "Chapter 12", "chapterNumber": 12, "isDownloaded": false },
-      { "id": 9052, "name": "Chapter 13", "chapterNumber": 13, "isDownloaded": false }
-    ],
-    "alreadyInLocalLibraryCount": 11,
-    "alreadyDownloadedCount": 0,
-    "duplicateChapterCount": 0,
-    "unnumberedChapterCount": 1
-  }
-}
-```
-
-`localSeriesTitle` is `null` when no local series has the Suwayomi title. The downloaded chapters reach the library through the download import below. Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable, or it has no series with that id. When the series was added but its chapters could not be queued, the error says so (for example `Added 'Solo Leveling' to the Suwayomi library, but its chapters could not be queued: ...`); repeating the request queues them without adding the series again.
-
-### Importing Suwayomi downloads
-
-Suwayomi saves chapters as `<downloads>/<source>/<series>/<chapter>.cbz`. When a downloads folder is configured, the `suwayomi-download-import` scheduled job (enabled by default, every 15 minutes; see the **Scheduled Jobs** page) moves each finished archive into the library as `<series folder>/<chapter>.cbz`, then removes the download folders it emptied. The file watcher then processes the moved files like any other new file. Importing works whether or not the Suwayomi integration above is enabled.
-
-The series folder is, in order: a folder in the import folder named like the Suwayomi series folder (ignoring case, spacing and punctuation); the existing library folder of the one series whose title, canonical title or alias matches; or a new folder named after the Suwayomi series folder in the import folder. A name already taken gets a ` (2)`, ` (3)`, … suffix. Archives written in the last 30 seconds (or the watcher's stability delay, if longer), archives that cannot be opened, and archives directly in the downloads folder are left in place. Chapters saved as loose images are not imported; enable **Save as CBZ archive** in Suwayomi's download settings.
-
-Each archive is first moved under a hidden staging name (`.tmp_<id>.suwayomi-import`) that neither the file watcher nor Library Scan picks up, then renamed to its chapter name. Staged moves are recorded in `suwayomi-import-pending.json` in the config folder, so a chapter staged when ComicMaintainer stopped is published on the next run (or dropped, if its download is still in place, so that it is imported afresh). A permission error stops the run and is shown in its summary.
-
-The folders are set with `PUT /api/settings/suwayomi` (administrators only), alongside the server settings, or with the `SUWAYOMI_DOWNLOADS_DIR` and `SUWAYOMI_IMPORT_DIR` environment variables:
-
-```json
-{
-  "enabled": true,
-  "baseUrl": "http://suwayomi:4567",
-  "downloadsDirectory": "/suwayomi/downloads/mangas",
-  "importDirectory": "Manga"
-}
-```
-
-- `downloadsDirectory` - Absolute path to the folder Suwayomi saves chapters to, as mounted in this service. It must exist and must neither contain nor sit inside the watched, duplicates, config or temp directories. ComicMaintainer needs write access to it.
-- `importDirectory` - Library folder that new series folders are created in: relative to the watched directory, or absolute inside it. Empty means the watched directory itself.
-
-Omit either field to keep its stored value; send `""` to clear it (clearing `downloadsDirectory` turns importing off). An invalid folder returns `400` with `{ "error": "..." }`. `GET /api/settings` returns the current values as `suwayomi_downloads_directory` and `suwayomi_import_directory`.
-
-## Events
-
-### GET /api/events
-
-Server-Sent Events (SSE) endpoint for real-time updates.
-
-**Event Types:**
-
-1. **file_processed**
-   ```json
-   {
-     "type": "file_processed",
-     "data": {
-       "file": "/comics/Batman/Batman #001.cbz",
-       "success": true
-     }
-   }
-   ```
-
-2. **job_updated**
-   ```json
-   {
-     "type": "job_updated",
-     "data": {
-       "job_id": "job-abc123",
-       "status": "processing",
-       "progress": {
-         "processed": 45,
-         "total": 450,
-         "percentage": 10
-       }
-     }
-   }
-   ```
-
-3. **watcher_status**
-   ```json
-   {
-     "type": "watcher_status",
-     "data": {
-       "enabled": true
-     }
-   }
-   ```
-
-### GET /api/events/stats
-
-Get event broadcasting statistics.
-
-**Response:**
-```json
-{
-  "active_clients": 3,
-  "total_events_broadcast": 1234
-}
-```
-
-## Database Backups
-
-Online backups of the SQLite database (taken with `VACUUM INTO`, so they are
-consistent while the app is running). Backups are written to
-`{CONFIG_DIR}/backups` (override with `AppSettings__DatabaseBackupDirectory`)
-and named `comicmaintainer-yyyyMMdd-HHmmss.db` (UTC; safety backups taken before
-a restore end in `-prerestore`).
-
-**Every endpoint — including the reads — requires the `Admin` role
-(`CanAdminister` policy).** A backup is a full copy of the database and
-contains password hashes and stored credentials (SMTP, ComicVine, Suwayomi).
-The `{name}` parameter must be a generated backup name; anything else
-(including path traversal attempts) is rejected with `400`.
-
-### GET /api/backups
-
-List backups, newest first.
-
-```json
-{
-  "backups": [
-    { "name": "comicmaintainer-20261020-040000.db", "size_bytes": 1048576, "created_utc": "2026-10-20T04:00:00Z" }
-  ],
-  "restore_pending": false
-}
-```
-
-### POST /api/backups
-
-Create a backup now. Returns the new backup (`name`, `size_bytes`, `created_utc`).
-Returns `409` if the database file does not exist.
-
-### GET /api/backups/{name}/download
-
-Download a backup (`application/vnd.sqlite3`). `404` if it does not exist.
-
-### DELETE /api/backups/{name}
-
-Delete a backup. `404` if it does not exist.
-
-### POST /api/backups/{name}/restore
-
-Stage a restore from an existing backup. The file is validated (SQLite header,
-`PRAGMA integrity_check`, ComicMaintainer schema), a safety backup of the
-current database is taken, and the file is staged as
-`comicmaintainer.db.restore-pending`. **The restore is applied on the next
-restart**, before migrations run.
-
-```json
-{
-  "source": "comicmaintainer-20261020-040000.db",
-  "safety_backup": { "name": "comicmaintainer-20261021-090000-prerestore.db", "size_bytes": 1050000, "created_utc": "2026-10-21T09:00:00Z" },
-  "restart_required": true,
-  "message": "Restore staged. Restart ComicMaintainer to apply it."
-}
-```
-
-`400` when the backup fails validation, `404` when it does not exist.
-
-### POST /api/backups/upload-restore
-
-Upload a database file as `multipart/form-data` (field `file`, max 2 GiB) and
-stage it as a restore. Same validation, safety backup and response as above.
-
-```bash
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  -F "file=@comicmaintainer-20261020-040000.db" \
-  http://localhost:5000/api/backups/upload-restore
-```
-
-### DELETE /api/backups/restore-pending
-
-Discard a staged restore before restarting. `404` when none is pending.
-
-A `database-backup` scheduled job (enabled by default, every 1440 minutes)
-creates a backup and prunes old ones down to `DatabaseBackupRetention`
-(default 7). Manage it like any other job under **Scheduled Jobs**.
-
-## Version
-
-### GET /api/version
-
-Get application version.
-
-**Response:**
-```json
-{
-  "version": "1.0.0"
-}
-```
-
-## Request Correlation
-
-Every request is assigned a correlation ID and it is returned in the **`X-Correlation-Id`**
-response header:
-
-```bash
-curl -i http://localhost:5000/api/version | grep -i x-correlation-id
-# X-Correlation-Id: 0HNOU94L3SUDV:00000001
-```
-
-If the request already carries an `X-Correlation-Id` header, that value is reused so a trace can
-span a reverse proxy or a calling service. Supplied values are sanitised (only `A-Z a-z 0-9 - _ :`
-survive, so header injection is not possible) and truncated to 64 characters.
-
-The same id is written to every log line the request produces (`[{CorrelationId}]` in the debug
-log; non-request lines show `-`) and is returned in the `correlationId` field of error responses,
-so a failure reported by a user can be matched to the exact server log lines:
-
-```bash
-grep '0HNOU94L3SUDV:00000001' /Config/*.log
-```
-
-## Error Responses
-
-The API uses standard HTTP response codes:
-
-- **200 OK** - Request succeeded
-- **400 Bad Request** - Invalid request parameters
-- **401 Unauthorized** - Authentication required or the token has expired
-- **403 Forbidden** - Authenticated, but the account lacks the required capability
-- **404 Not Found** - Resource not found
-- **500 Internal Server Error** - Server error
-- **503 Service Unavailable** - Service is unhealthy
-
-**Error Response Format:**
-
-Most endpoints return a simple object:
-```json
-{
-  "error": "Description of the error"
-}
-```
-
-An unhandled server error returns an [RFC 7807](https://datatracker.ietf.org/doc/html/rfc7807)
-problem document (`application/problem+json`) carrying the correlation id:
 ```json
 {
   "type": "https://datatracker.ietf.org/doc/html/rfc9110#section-15.6.1",
   "title": "An unexpected error occurred.",
   "status": 500,
-  "correlationId": "0HNOU94L3SUDV:00000001"
+  "detail": "Error retrieving files",
+  "instance": "/api/files",
+  "correlationId": "0HN8V2JKQ3M1T:00000002",
+  "error": "Error retrieving files"
 }
 ```
 
-The exception message and stack trace are only included when the server runs in the Development
-environment; in production the correlation id is the link to the full detail in the log.
+Exception text is never returned, except when the app runs with `ASPNETCORE_ENVIRONMENT=Development`.
 
-## Rate Limiting
+**Framework problem document.** A failed model bind (`400`), a route's bare `404`, and an unsupported content type (`415`) are problem documents with `title`, `status`, `traceId` and `correlationId`. A `400` from a failed bind also has an `errors` object. These have no `error` string.
 
-Requests are rate-limited per minute: 100 for each client address that is not signed in, and 1000 for each signed-in
-user. Requests over the limit are delayed until the next minute, or rejected with `429 Too Many Requests` when too
-many are already waiting (10 per client address, 100 per user). Behind a reverse proxy, set `TRUSTED_PROXIES` so that
-signed-out clients are counted by the address the proxy forwards in `X-Forwarded-For` instead of all sharing the
-proxy's; see [Trusted Proxies and Rate Limiting](REVERSE_PROXY.md#trusted-proxies-and-rate-limiting).
+**Simple object.** Most expected failures are `{"error":"..."}`. A few routes in `/api/files` and `/api/series-images` answer `400` with a plain text sentence instead. Treat any non-2xx status as a failure, whatever the body.
 
-## CORS
+**Correlation id.** Every response carries an `X-Correlation-Id` header with the id used in the server log for that request. You may send your own `X-Correlation-Id` (letters, digits, `-`, `_` and `:`, up to 64 characters). Unexpected `500` and `504` bodies repeat it as `correlationId`. Quote it when reporting a problem.
 
-CORS is not currently configured. If you need to access the API from a different origin, consider adding CORS headers.
+| Status | Meaning |
+|---|---|
+| `200`, `202`, `204` | Success. `202` means the work continues in the background |
+| `207` | `POST /api/files/tags` updated some files but not all; the body lists `failed` |
+| `304` | Your cached copy is current (see [Caching](#caching)) |
+| `400` | The request is invalid or refused; the file could not be processed; a settings value is out of range |
+| `401` | No valid credentials: `{"error":"Unauthorized","message":"Authentication required"}` |
+| `403` | Not allowed for this account: `{"error":"Forbidden","message":"Insufficient permissions"}`, or a route's own reason |
+| `404` | Not found. An unknown path under `/api` answers `{"error":"Not Found","message":"The requested endpoint does not exist"}` |
+| `409` | A conflict: a setting the environment pins, a cleanup that needs confirmation, a library that is busy, and similar |
+| `412` | `GET /api/series-images/{normalizedKey}` with a failed `If-Match` or `If-Unmodified-Since` |
+| `415` | The body has an unsupported content type |
+| `422` | An archive is over the read limits; `error` names the entry and the limit |
+| `429` | Rate limited |
+| `499` | The client went away during a delete, a read-status change or a stale cleanup; nothing changed |
+| `500` | An unexpected failure |
+| `502` | A test email, test notification or test error report was refused by the remote service. `error` is a fixed reason |
+| `503` | External metadata providers could not answer. See [Series metadata](#series-metadata) |
+| `504` | The request ran past its [timeout](#request-timeouts): `{"error":"...","correlationId":"..."}` |
 
-## Examples
+**Pinned settings.** A write that would change a setting an environment variable pins gets `409`, and nothing is saved. The body names what was refused:
 
-### Using curl
+```json
+{
+  "title": "The setting is set by the environment.",
+  "status": 409,
+  "detail": "Set by the environment and cannot be changed here: SMTP_HOST. Remove the variable and restart to edit the setting in the app.",
+  "error": "Set by the environment and cannot be changed here: SMTP_HOST. Remove the variable and restart to edit the setting in the app.",
+  "env_locked": [{ "field": "smtp_host", "variable": "SMTP_HOST" }]
+}
+```
+
+Settings `400` responses are problem documents with `title: "The settings were not saved."` and the reason in `detail` and `error`.
+
+## Paging
+
+Paged routes use one of these forms:
+
+| Form | Routes | Behaviour |
+|---|---|---|
+| `page`, `per_page` | `/api/files`, `/api/files/series`, `/api/files/series/{seriesId}/issues` | Defaults are page 1 and 100 per page. `per_page=-1` returns everything. A page past the end returns the last page |
+| `offset`, `limit` | `/api/files/series` (when `limit` is above 0), `/api/files/folders` | Default `limit` is 100 for folders |
+| `limit`, `offset` | `/api/processing-history` | Default 50. `limit` must be 1 to 1000, otherwise `400` |
+| `limit`, `offset` | `/api/email/deliveries` | Default 50, limited to 1 to 500 |
+| `offset`, `limit` | `/api/scheduled-jobs/metadata-audit/findings` | Default 200. A `limit` outside 1 to 1000 becomes 200 |
+| `limit` only | `/api/error-reports` (1 to 200), `/api/metadata/search` (1 to 50), `/api/series-images/candidates` (1 to 25), `/api/suwayomi/series` (1 to 100) | Out-of-range values are moved into the range |
+| `page` | `/api/suwayomi/sources/{sourceId}/series` (1 to 100), OPDS feeds | OPDS feeds hold 50 entries per page |
+
+`/api/files` and `/api/files/series` report `page`, `total_pages` and `total_files` or `total_series`.
+
+## Caching
+
+Every `/api` and `/opds` response is sent `Cache-Control: no-store, private`, with these exceptions:
+
+| Routes | Headers | Revalidation |
+|---|---|---|
+| `GET /api/files`, `/counts`, `/folders`, `/folders/files`, `/folders/{encodedPath}/files`, `/series`, `/series/facets`, `/series/{seriesId}/issues` | Weak `ETag`, `Cache-Control: private, no-cache` | `If-None-Match` gets `304`. The tag includes the caller's own read state |
+| `GET /api/comicreader/page`, `/api/comicreader/cover`, OPDS pages and covers | Strong `ETag`, `Last-Modified`, `Cache-Control: private, max-age=3600` | `If-None-Match` gets `304`. These must not be stored in shared caches |
+| OPDS file download | Strong `ETag`, `Last-Modified`, `Cache-Control: private, max-age=3600` | Range requests are supported |
+| `GET /api/series-images/{normalizedKey}` | Strong `ETag`, `Last-Modified`, `Cache-Control: private, max-age=300` | `If-None-Match` or `If-Modified-Since` gets `304` |
+| `GET /api/suwayomi/series/{seriesId}/thumbnail` | `Cache-Control: private, max-age=86400` | None |
+
+## Request timeouts
+
+| Limit | Routes |
+|---|---|
+| 30 seconds | Default |
+| 10 minutes | `POST /api/email/send`, `send-series`, `condense-plan`, `condense-builds`; `POST /api/backups`, `POST /api/backups/{name}/restore`; `POST /api/metadata/refresh/{seriesTitle}`; `GET /api/suwayomi/sources/{sourceId}/series`; `POST /api/suwayomi/series/{seriesId}/add` |
+| None | Downloads, `POST /api/email/condense-download`, `POST /api/backups/upload-restore`, `POST /api/suwayomi/download-missing`, `GET /api/events/stream`, OPDS file downloads |
+
+A timed-out request gets `504`.
+
+## Authentication routes
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `POST` | `/api/auth/login` | Public | Sign in with a password |
+| `POST` | `/api/auth/register` | Public | Create an account, when allowed |
+| `GET` | `/api/auth/setup-required` | Public | Whether first-run setup is available |
+| `POST` | `/api/auth/setup` | Public | Create the first administrator |
+| `GET` | `/api/auth/status` | Public | How the caller is signed in |
+| `GET` | `/api/auth/user` | Signed in | The current account |
+| `POST` | `/api/auth/change-password` | Signed in | Change the password |
+| `POST` | `/api/auth/api-key` | Signed in | Create or replace the API key |
+| `GET` | `/api/auth/api-key` | Signed in | Whether a key exists |
+| `DELETE` | `/api/auth/api-key` | Signed in | Revoke the key |
+| `POST` | `/api/auth/stream-token` | Signed in | Get a token for the event stream |
+| `POST` | `/api/auth/logout` | Signed in | End this session, or all of them |
+
+**`POST /api/auth/login`** takes `{"username":"...","password":"..."}` and returns `{"token":"..."}`.
+
+**`POST /api/auth/register`** takes `{"username","password","email","fullName"}`. It works for anyone when `allow_registration` is on, and always for an administrator. Otherwise it answers `401`, or `403` for a signed-in non-administrator. Passwords need at least 8 characters with an upper-case letter, a lower-case letter and a digit.
+
+**`GET /api/auth/setup-required`** returns `{"setupRequired":true}`.
+
+**`POST /api/auth/setup`** takes `{"username","password","email","setupToken"}`. It works only while no account exists at all and Authelia is off. `setupToken` is the code printed in the server log at startup, or the value of `SETUP_TOKEN`. It answers `403` when setup is not available or the code is wrong.
+
+**`GET /api/auth/status`** returns `{"autheliaEnabled","isAuthenticated","username","authMethod","requiresLogin"}`. `authMethod` is `jwt`, `authelia` or `api_key`.
+
+**`GET /api/auth/user`** returns `{"username","userId","email","roles","authMethod","canModifyLibrary","canAdminister"}`.
+
+**`POST /api/auth/change-password`** takes `{"currentPassword","newPassword"}` and returns `{"message","token"}`. Every session of the account ends and the API key is revoked; use the returned `token` from now on.
+
+**`POST /api/auth/api-key`** takes `{"currentPassword":"..."}` (not needed under Authelia) and returns `{"apiKey":"cm_...","header":"X-API-Key"}`. A wrong password answers `403`.
+
+**`GET /api/auth/api-key`** returns `{"hasApiKey","createdAt","lastUsedAt","header"}`. Dates are UTC with a `Z` suffix.
+
+**`DELETE /api/auth/api-key`** answers `204`, or `404` if the account has no key.
+
+**`POST /api/auth/stream-token`** returns `{"token":"...","expiresIn":60}`. See [Event stream](#event-stream).
+
+**`POST /api/auth/logout`** takes an optional `{"allSessions":true}` and answers `204`. `allSessions` also revokes the API key.
+
+## Files
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/files` | Signed in | One page of files |
+| `GET` | `/api/files/counts` | Signed in | Library totals |
+| `GET` | `/api/files/scan-unmarked` | Signed in | Counts of processed and unprocessed files |
+| `GET` | `/api/files/metadata` | Signed in | A file's metadata, by `filePath` |
+| `PUT` | `/api/files/metadata` | Library write | Update a file's tags, by `filePath` |
+| `PATCH` | `/api/files/metadata` | Library write | Save a tag edit to the database and lock fields |
+| `GET` | `/api/files/series-resolution` | Signed in | Explain which series name a file resolves to |
+| `GET` | `/api/files/{encodedFilePath}/tags` | Signed in | A file's metadata |
+| `PUT` | `/api/files/{encodedFilePath}/tags` | Library write | Update a file's tags |
+| `POST` | `/api/files/tags` | Library write | Update tags on several files |
+| `DELETE` | `/api/files/{encodedFilePath}/metadata` | Library write | Remove `ComicInfo.xml` from a file |
+| `POST` | `/api/files/process` | Library write | Process one file now, by `filePath` |
+| `POST` | `/api/files/{encodedFilePath}/process` | Library write | Process one file now |
+| `POST` | `/api/files/{encodedFilePath}/rename` | Library write | Start a rename job for one file |
+| `POST` | `/api/files/process-batch` | Library write | Start a process job for a list of files |
+| `DELETE` | `/api/files/{encodedFilePath}` | Library write | Delete a file |
+| `POST` | `/api/files/{encodedFilePath}/read` | Signed in | Mark a file read or unread for the caller |
+| `POST` | `/api/files/read-batch` | Signed in | Mark several files |
+| `POST` | `/api/files/read-all` | Signed in | Mark a whole library, series or folder |
+| `POST` | `/api/files/cleanup-stale` | Library write | Remove rows for files no longer on disk |
+
+**`GET /api/files`** takes `filter`, `search`, `page`, `per_page`, `sort` (`name`, `date` or `size`) and `direction` (`asc` or `desc`). It returns:
+
+```json
+{
+  "files": [{
+    "relative_path": "/watched_dir/Batman/Batman 001.cbz",
+    "name": "Batman 001.cbz",
+    "size": 123456,
+    "modified": 1760000000,
+    "processed": true,
+    "renamed": true,
+    "normalized": true,
+    "duplicate": false,
+    "read": false
+  }],
+  "page": 1,
+  "total_pages": 3,
+  "total_files": 250,
+  "unmarked_count": 12
+}
+```
+
+Filter values for the listing routes:
+
+| Value | Meaning |
+|---|---|
+| (none) | Everything |
+| `marked`, `unmarked` | Fully processed, or not |
+| `duplicates` | Flagged as duplicates |
+| `renamed`, `normalized` | That step is done |
+| `read`, `unread` | Read state for the caller |
+| `matched`, `unmatched` | Series with or without a provider match (series routes) |
+| `missing` | Series with gaps in their issue numbers (series routes) |
+
+**`GET /api/files/counts`** returns `{"total","processed","unprocessed","duplicates","combinableFolders"}`.
+
+**`GET /api/files/scan-unmarked`** returns `{"total_count","unmarked_count","marked_count"}`.
+
+**Metadata.** The metadata object is `{"series","title","issue","volume","publisher","year","summary","authors":[],"tags":[],"isUserEdited","userLockedFieldsMask"}`.
+
+- `GET` metadata routes answer `404` when the file has none.
+- `PUT /api/files/metadata?filePath=` and `PUT /api/files/{encodedFilePath}/tags` merge: a field left out or sent as `null` keeps its value. They answer an empty `200`.
+- `PATCH /api/files/metadata?filePath=` takes `{"metadata":{...},"lockFields":["series"]}`. It records the edit in the database, asks the Metadata Backfill job to write it into the archive, and returns `202 {"filePath","metadataVersion"}`.
+- `DELETE /api/files/{encodedFilePath}/metadata` returns `{"success":true,"cleared":1,"filePath":"..."}`. `filePath` is the file's path afterwards, because a CBR, RAR or ZIP becomes a CBZ. It fails with `400` for those formats while conversion is off.
+
+**`POST /api/files/tags`** takes:
+
+```json
+{ "files": ["/watched_dir/a.cbz"], "metadata": { "series": "Batman" }, "fields": ["series"] }
+```
+
+`fields` is optional. When present, only the listed fields are applied, and a listed field with no value is removed. When absent, every field that has a value is applied and nothing is removed. Field names are `series`, `title`, `issue` (or `number`), `volume`, `publisher`, `year`, `summary` (or `description`), `authors` (or `writer`, `writers`) and `tags`. It answers `200`, `207 {"failed":[...]}` when only some files failed, and `400` when all failed, when a field name is unknown (`Unknown metadata field: x`), or when no field is given (`No metadata fields specified`).
+
+**`GET /api/files/series-resolution?filePath=`** returns `{"filePath","actualSeries","resolvedSeries","winningStep","candidates","folderSeries","matchedCacheKey","appliedLanguage","explanation","matchesActual"}` and changes nothing.
+
+**Processing a file.** `POST /api/files/process?filePath=` and `POST /api/files/{encodedFilePath}/process?forceReprocess=true` run in the request and answer an empty `200`. They answer `400` when the file could not be fully processed: a duplicate target, an unreadable archive, a failed write or rename, or no series name.
+
+**`POST /api/files/{encodedFilePath}/rename`** takes `?forceReprocess=true` and returns `{"message","jobId"}`.
+
+**`POST /api/files/process-batch`** takes a JSON array of paths and returns `{"jobId":"..."}`.
+
+**`DELETE /api/files/{encodedFilePath}`** answers `200` or `404`, or `499` if the client gave up while waiting for the file's lock.
+
+**Read state.** Read state is per user.
+
+- `POST /api/files/{encodedFilePath}/read` takes `{"read":true}`.
+- `POST /api/files/read-batch` takes `{"files":[...],"read":true}`. A failed save answers `500` and saves nothing.
+- `POST /api/files/read-all` takes `{"read":true,"scope":"library"}`. `scope` is `library` (the default), `series` or `folder`, and the last two need `id` (series id, or folder key). It returns `{"success":true,"updated":250}`.
+
+**`POST /api/files/cleanup-stale`** and **`POST /api/settings/cleanup-database`** share their behaviour. A row is removed only after two runs at least `stale_cleanup_missing_grace_hours` apart have found its file missing. The response is:
+
+```json
+{
+  "success": false,
+  "status": "ConfirmationRequired",
+  "requiresConfirmation": true,
+  "message": "...",
+  "removedCount": 0,
+  "trackedCount": 1000,
+  "missingCount": 900,
+  "removableCount": 900,
+  "uncheckedCount": 0,
+  "maxRemovalPercent": 10,
+  "error": "..."
+}
+```
+
+| Status | When |
+|---|---|
+| `200` | The cleanup ran |
+| `409`, `requiresConfirmation: true` | The library holds no comics, the removal is over `maxRemovalPercent`, or files have not been missing long enough. Repeat with `?confirm=true` to remove everything missing now |
+| `409`, `requiresConfirmation: false` | The watched directory or sentinel file is missing. Confirmation cannot override this |
+| `499`, `500` | The request was cancelled, or the cleanup failed. Nothing was removed |
+
+## Library browsing
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/files/series` | Signed in | One page of series |
+| `GET` | `/api/files/series/facets` | Signed in | Genres and statuses in the library |
+| `GET` | `/api/files/series/{seriesId}/issues` | Signed in | The issues of a series |
+| `GET` | `/api/files/series/{seriesId}/folders` | Signed in | The folders a series is stored in |
+| `GET` | `/api/files/folders` | Signed in | Folders with file counts |
+| `GET` | `/api/files/folders/files` | Signed in | Files directly in the library root |
+| `GET` | `/api/files/folders/{encodedPath}/files` | Signed in | Files in one folder |
+| `GET` | `/api/overview` | Signed in | The home page rows |
+
+**`GET /api/files/series`** takes `filter`, `search`, `page`, `per_page`, `sort`, `direction`, `genre`, `status`, `offset` and `limit`. `genre` matches regardless of case, and `genre=none` or `status=none` selects series with no such data yet. Status values are `ongoing`, `completed`, `hiatus`, `cancelled` and `upcoming`. Totals and paging apply to the filtered list. With `limit` above 0, `offset` and `limit` replace `page` and the response also has `offset` and `limit`.
+
+```json
+{
+  "series": [{
+    "id": "batman",
+    "title": "Batman",
+    "canonical_title": "Batman",
+    "aliases": [],
+    "metadata_source": "AniList",
+    "issue_count": 12,
+    "total_size": 123456,
+    "latest_modified": 1760000000,
+    "cover_file_path": "/watched_dir/Batman/Batman 001.cbz",
+    "has_external_image": true,
+    "external_image_url": "/api/series-images/batman",
+    "lookup_status": "success",
+    "last_lookup_utc": "2026-01-01T00:00:00Z",
+    "synopsis": null,
+    "genres": ["Action"],
+    "publication_status": "ongoing",
+    "site_url": null
+  }],
+  "page": 1,
+  "total_pages": 1,
+  "total_series": 1,
+  "unmarked_count": 0
+}
+```
+
+With `include_issues=true`, each entry also holds its `issues`. Leave it off for large libraries.
+
+**`GET /api/files/series/facets`** returns `{"genres":[{"value","count"}],"statuses":[{"value","count"}],"series_without_genres","series_without_status"}`.
+
+**`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read"}`.
+
+**`GET /api/files/series/{seriesId}/folders`** takes `filter` and returns `{"id","title","folders":[{"directory","file_count","total_size"}],"combine_group_key","suggested_destination_directory"}`.
+
+**`GET /api/files/folders`** takes `filter`, `search`, `sort`, `direction`, `offset` and `limit`, and returns `{"folders","offset","limit","total_folders","unmarked_count"}`.
+
+**`GET /api/files/folders/{encodedPath}/files`** and **`GET /api/files/folders/files`** take `filter`, `search`, `sort` and `direction`, and return `{"path","files"}`. Use the second form for the library root, whose key is empty.
+
+**`GET /api/overview`** returns `{"continue_reading":[],"series_updates":[],"newly_added_series":[]}`. Cards are series summaries, and `continue_reading` cards add `resume_file_path`, `resume_page` and `last_read_utc`.
+
+## Folder combine
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/files/combinable-folders` | Signed in | Groups of folders that look like one series |
+| `POST` | `/api/files/combine-folders/preview` | Library write | Plan a combine and change nothing |
+| `POST` | `/api/files/combine-folders` | Library write | Start a combine job |
+
+**`GET /api/files/combinable-folders`** returns `{"groups":[...]}`. Each group has `groupKey`, `seriesName`, `volume`, `totalFileCount`, `suggestedDestinationDirectory`, `suggestionReason` and `folders`; each folder has `directory`, `fileCount`, `totalSize`, `newestFileAddedAt`, `oldestFileAddedAt`, `newestFileModifiedAt`, `sampleFileNames` and `isSuggested`.
+
+Both `POST` routes take:
+
+```json
+{ "groupKey": "...", "destinationDirectory": "/watched_dir/Batman", "sourceDirectories": ["/watched_dir/Batman (2016)"] }
+```
+
+`groupKey` may also be `series:<seriesId>`, as returned by the series folders route.
+
+The preview returns `{"destination","sources","moves":[{"sourcePath","destinationPath","conflict","skipped","reason"}],"foldersToRemove":[{"directory","disposableFiles","disposableFileCount"}],"foldersToKeep":[{"directory","reason","leftovers","leftoverCount"}]}`.
+
+The combine answers `202` with `{"jobId","job_id","totalItems","total_items","destination","sources","skipped","skippedResults"}`. If there is nothing to move, it answers `202` with `{"destination","sources","moved":0,"skipped","failed":0,"totalItems":0,"results"}` and no job id. Source folders that still hold anything other than disposable files are kept and listed in the job's `reported_problems`.
+
+## Batch jobs
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `POST` | `/api/jobs/{operation}-{scope}` | Library write | Start a batch job |
+| `GET` | `/api/jobs` | Signed in | List jobs |
+| `GET` | `/api/jobs/{jobId}` | Signed in | One job's status and results |
+| `POST` | `/api/jobs/{jobId}/cancel` | Library write | Cancel a running job |
+| `DELETE` | `/api/jobs/{jobId}` | Library write | Delete a job's record |
+| `GET` | `/api/active-job` | Signed in | The running job, if any |
+
+The operations and the scopes each one supports are:
+
+| Operation | `selected` | `all` | `unmarked` |
+|---|---|---|---|
+| `process` | yes | yes | yes |
+| `rename` | yes | yes | yes |
+| `normalize` | yes | yes | yes |
+| `remove-metadata` | yes | yes | no |
+| `update-metadata` | yes | no | no |
+| `delete` | yes | no | no |
+
+So the concrete routes are:
+
+- `POST /api/jobs/process-selected`, `POST /api/jobs/process-all`, `POST /api/jobs/process-unmarked`
+- `POST /api/jobs/rename-selected`, `POST /api/jobs/rename-all`, `POST /api/jobs/rename-unmarked`
+- `POST /api/jobs/normalize-selected`, `POST /api/jobs/normalize-all`, `POST /api/jobs/normalize-unmarked`
+- `POST /api/jobs/remove-metadata-selected`, `POST /api/jobs/remove-metadata-all`
+- `POST /api/jobs/update-metadata-selected`
+- `POST /api/jobs/delete-selected`
+
+Any other combination answers `404`.
+
+The body is:
+
+```json
+{
+  "files": ["/watched_dir/Batman/Batman 001.cbz"],
+  "forceReprocess": false,
+  "metadata": { "publisher": "DC" },
+  "fields": ["publisher"]
+}
+```
+
+- `files` is needed for the `selected` scope. Blank entries are dropped, and a list of only blanks is `400 {"error":"No files specified"}`.
+- `metadata` and `fields` apply to `update-metadata`. `fields` works as in [`POST /api/files/tags`](#files). Unknown or empty fields are `400`.
+- `forceReprocess` can also be sent as `?forceReprocess=true`.
+- `selected` paths must be inside the watched or duplicates directory after resolving links, or the whole request is `400 {"error":"One or more file paths are outside the allowed directory"}`. `delete-selected` is stricter: the entry itself and its directory must be inside, with no `..` segment or trailing separator.
+- The `all` and `unmarked` scopes leave out files flagged as duplicates. To act on a duplicate, name it with a `selected` route.
+- The `all` and `unmarked` routes need no body. A non-JSON body is `415`, and malformed JSON is `400`.
+
+The response carries both spellings:
+
+```json
+{ "job_id": "...", "total_items": 25, "jobId": "...", "totalItems": 25 }
+```
+
+When nothing qualifies, the id is the empty GUID and `total_items` is 0.
+
+**`GET /api/jobs/{jobId}`** returns:
+
+```json
+{
+  "job_id": "...",
+  "status": "running",
+  "total_items": 25,
+  "processed_items": 10,
+  "failed_items": 1,
+  "current_file": "...",
+  "start_time": "2026-01-01T00:00:00Z",
+  "end_time": null,
+  "results": [{ "file": "...", "success": false, "error": "the reason" }],
+  "reported_problems": [{ "subject": "/watched_dir/Old", "message": "..." }]
+}
+```
+
+`status` is `queued`, `running`, `completed`, `failed`, `cancelled` or `interrupted`. `interrupted` means the app stopped while the job was running.
+
+**`GET /api/jobs`** returns `{"jobs":[...],"count":3}`, with the summary fields above. **`POST /api/jobs/{jobId}/cancel`** returns `{"success":true}`, or `404`. **`DELETE /api/jobs/{jobId}`** answers `204`, or `404`.
+
+**`GET /api/active-job`** returns `{"active":false}` when nothing is running. Otherwise it returns the summary fields plus `job_title`. After a restart it also reports the most recent interrupted job, so a client can explain why work stopped.
+
+## Processed status
+
+These routes clear the renamed, normalized and processed flags, so the next run processes the files again.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `POST` | `/api/status/clear-selected` | Library write | Clear a list of files: `{"files":[...]}` |
+| `POST` | `/api/status/clear-series/{seriesId}` | Library write | Clear every issue of a series |
+| `POST` | `/api/status/clear-folder` | Library write | Clear a folder and everything below it: `{"folder":"..."}` |
+
+They return `{"cleared","requested"}`, plus `seriesId` and `seriesTitle` for a series, or `folder` for a folder.
+
+## Comic reader
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/comicreader/info` | Signed in | `{"fileName","filePath","pageCount"}` |
+| `GET` | `/api/comicreader/pages` | Signed in | `{"pages":[...],"count"}`: page names |
+| `GET` | `/api/comicreader/page` | Signed in | One page as an image; `page` starts at 1 |
+| `GET` | `/api/comicreader/cover` | Signed in | The cover thumbnail |
+| `GET` | `/api/comicreader/adjacent` | Signed in | Next or previous issue in the series |
+| `GET` | `/api/comicreader/progress` | Signed in | `{"currentPage"}` |
+| `POST` | `/api/comicreader/progress` | Signed in | Save the page: `?filePath=&page=` |
+| `POST` | `/api/comicreader/mark-read` | Signed in | Mark as read: `?filePath=` |
+
+All take `filePath`. **`adjacent`** also takes `direction` (`next`, the default, or `prev`) and returns `{"hasAdjacent","filePath","fileName"}`; it never leaves the series.
+
+`POST /api/comicreader/progress` saves the resume page and the per-user progress together. It answers `500` if the write fails; retry it.
+
+`info`, `pages`, `page` and `cover` answer `422 {"error":"..."}` for an archive over the read limits. The error names the entry and the limit: more than 20,000 entries, a page over 100 MiB, or a page over 16 MiB that expands more than 100:1.
+
+## Reader progress, preferences and sessions
+
+These hold reading state per user, under a `contentId` you choose.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/reader/progress/{contentId}` | Signed in | Saved progress, or `404` |
+| `PUT` | `/api/reader/progress/{contentId}` | Signed in | Save progress |
+| `GET` | `/api/reader/preferences` | Signed in | Reader defaults |
+| `PUT` | `/api/reader/preferences` | Signed in | Save reader defaults |
+| `POST` | `/api/reader/session/start` | Signed in | Start a reading session |
+| `POST` | `/api/reader/session/end` | Signed in | End one of the caller's sessions |
+
+`PUT /api/reader/progress/{contentId}` takes `{"currentPage","totalPages","readerMode","readingDirection"}` and answers `204`. The saved record is `{"userId","contentId","currentPage","totalPages","percentComplete","lastReadAt","completedAt","lastReaderMode","readingDirection"}`.
+
+Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","autoHideChrome","fitPreference"}`.
+
+`POST /api/reader/session/start` takes `{"contentId","startPage","incognito"}`. `POST /api/reader/session/end` takes `{"sessionId","endPage"}`. Both return the session. Another user's session answers `404`, the same as an unknown id. An incognito session never changes the durable progress.
+
+## Series metadata
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/metadata/providers` | Signed in | Health of each provider |
+| `GET` | `/api/metadata/search` | Signed in | Search providers |
+| `POST` | `/api/metadata/refresh-all` | Library write | Queue a refresh of every series |
+| `POST` | `/api/metadata/match-unmatched` | Library write | Queue a lookup for unmatched series |
+| `POST` | `/api/metadata/refresh-selected` | Library write | Queue a refresh of listed series |
+| `POST` | `/api/metadata/refresh/folder` | Library write | Queue a refresh for one series card |
+| `POST` | `/api/metadata/refresh/{seriesTitle}` | Library write | Refresh one series |
+| `GET` | `/api/metadata/refresh/job/{jobId}` | Signed in | A refresh job's status |
+| `GET` | `/api/metadata/series/{seriesTitle}` | Signed in | The cached record |
+| `POST` | `/api/metadata/series/{seriesTitle}/apply-match` | Library write | Adopt a search result |
+| `DELETE` | `/api/metadata/series/{seriesTitle}/external` | Library write | Clear provider data |
+| `PUT` | `/api/metadata/series/{seriesTitle}/aliases` | Library write | Replace user aliases: `{"aliases":[...]}` |
+| `DELETE` | `/api/metadata/series/{seriesTitle}/aliases/{alias}` | Library write | Remove one user alias |
+| `PUT` | `/api/metadata/series/{seriesTitle}/preferred-language` | Library write | `{"language":"en"}`; `null` clears |
+| `PUT` | `/api/metadata/series/{seriesTitle}/name` | Library write | Pin the shown name: `{"name":"..."}`; `null` reverts to automatic |
+
+**`GET /api/metadata/providers`** returns `{"providers":[{"name","enabled","configured","reachable","status_message","last_error","last_success_utc","last_failure_utc","success_count","failure_count","rate_limited","rate_limited_until_utc"}]}`.
+
+**Refresh jobs.** The three queueing routes and `refresh/folder` return `{"jobId","totalSeries"}`. `match-unmatched` returns a null `jobId` when nothing is unmatched. `refresh-selected` takes `{"series":[...]}`. `refresh/folder` takes `{"seriesId":"...","titles":[...]}` (either is enough) and also returns `titles`.
+
+**`POST /api/metadata/refresh/{seriesTitle}`** waits for the lookup and returns the record. With `?queue=true` it answers `202 {"jobId","totalSeries":1}` instead.
+
+**`GET /api/metadata/refresh/job/{jobId}`** returns `{"jobId","status","series","totalSeries","processedSeries","successes","notFound","failures","currentSeries","startTime","endTime","recentResults":[{"seriesTitle","status","source","timestampUtc","error"}]}`. Unlike other enums, `status` is a name such as `Running`. A provider outage counts in `failures`, with the reason in `recentResults[].error`. Refresh jobs only retag series whose match or title changed.
+
+**`GET /api/metadata/search`** takes `query` and `limit`. Results from all providers are interleaved, then sorted by `match_score`:
+
+```json
+{
+  "query": "batman",
+  "results": [{
+    "canonical_title": "Batman",
+    "aliases": [],
+    "source": "AniList",
+    "source_id": "12345",
+    "image_url": "https://...",
+    "thumbnail_url": "https://...",
+    "synopsis": "...",
+    "site_url": "https://...",
+    "genres": ["Action"],
+    "publication_status": "ongoing",
+    "total_chapters": null,
+    "origin": "US",
+    "match_score": 100,
+    "localized_titles": [{ "title": "Batman", "language": "en" }]
+  }]
+}
+```
+
+**`POST .../apply-match`** takes `canonicalTitle` (required), `aliases`, `source`, `sourceId`, `imageUrl`, `thumbnailUrl`, `synopsis`, `siteUrl`, `genres`, `publicationStatus`, `totalChapters`, `origin` and `localizedTitles`. Send back what search returned. Oversized values are cut or skipped rather than refused: a synopsis is kept to 8,000 characters, and at most 32 genres of up to 64 characters are kept.
+
+**The cached record** has `series_id`, `canonical_title`, `aliases`, `user_aliases`, `series_name`, `is_user_selected_name`, `resolved_series_name`, `source`, `source_id`, `last_lookup_utc`, `lookup_status`, `remote_image_url`, `local_image_file`, `image_content_type`, `image_downloaded_utc`, `image_status`, `preferred_language`, `localized_titles`, `synopsis`, `site_url`, `genres`, `publication_status`, `total_chapters`, `origin`, `metadata_version`, `has_image` and `is_user_image`.
+
+**Provider outages.** When nothing was found and a provider could not answer, `POST /api/metadata/refresh/{seriesTitle}` and `GET /api/metadata/search` answer:
+
+```json
+{ "error": "MangaDex did not answer in time", "providers": ["MangaDex"], "retry_after_seconds": 30 }
+```
+
+with status `503`. The text is fixed wording built from the provider name and the kind of failure. Records that were already matched are left alone.
+
+## Series images
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/series-images/candidates` | Signed in | Search providers for cover images |
+| `GET` | `/api/series-images/{normalizedKey}` | Signed in | The cached image |
+| `DELETE` | `/api/series-images/{normalizedKey}` | Library write | Clear the cached image |
+| `PUT` | `/api/series-images/{seriesTitle}` | Library write | Upload an image |
+| `POST` | `/api/series-images/{seriesTitle}/from-provider` | Library write | Download and use a candidate |
+| `POST` | `/api/series-images/apply-current/all` | Library write | Start a job that re-applies every cover |
+| `POST` | `/api/series-images/apply-current/selected` | Library write | The same for `{"series":[...]}` |
+
+- **`candidates`** takes `query` and `limit` and returns `{"query","candidates":[{"source","canonical_title","image_url","thumbnail_url"}]}`. A provider outage is `503` with the fixed reason as plain text.
+- **Upload** is `multipart/form-data` with one field named `file`, up to 20 MiB. It returns the metadata record.
+- **`from-provider`** takes `{"imageUrl","source"}`. The URL must be public; private addresses are refused with `400`. It answers `409` when a user-uploaded image is in place.
+- **`apply-current`** returns `{"job_id","total_items","totalSeries","skippedSeries"}`. The id is the empty GUID when no series has a cover to apply.
+
+## Email delivery
+
+Devices, subscriptions and deliveries are private to the user who owns them. Another user's item answers `404`, the same as one that does not exist. An administrator can act on everyone's by id, and listings include everyone's with `?all=true`.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/email/status` | Signed in | `{"configured","from_address","max_attachment_mb"}` |
+| `GET` | `/api/email/devices` | Signed in | `{"devices":[...]}` |
+| `POST` | `/api/email/devices` | Library write | Add a device |
+| `PUT` | `/api/email/devices/{deviceId}` | Library write | Update a device |
+| `DELETE` | `/api/email/devices/{deviceId}` | Library write | Delete a device |
+| `POST` | `/api/email/devices/{deviceId}/test` | Library write | Send a test email |
+| `POST` | `/api/email/send` | Library write | Queue files for delivery |
+| `POST` | `/api/email/send-series` | Library write | Queue every issue of a series |
+| `POST` | `/api/email/condense-plan` | Library write | Describe the books a condense would make |
+| `POST` | `/api/email/condense-download` | Library write | Build one book and stream it |
+| `POST` | `/api/email/condense-builds` | Library write | Build a book in the background |
+| `GET` | `/api/email/condense-builds` | Signed in | The caller's builds |
+| `GET` | `/api/email/condense-builds/{buildId}` | Signed in | One build's progress |
+| `GET` | `/api/email/condense-builds/{buildId}/download` | Signed in | Download a finished book |
+| `POST` | `/api/email/condense-builds/{buildId}/cancel` | Library write | Stop a build |
+| `DELETE` | `/api/email/condense-builds/{buildId}` | Library write | Forget a build and its file |
+| `GET` | `/api/email/subscriptions` | Signed in | `{"subscriptions":[...]}`; optional `series` |
+| `PUT` | `/api/email/subscriptions` | Library write | Create or update a subscription |
+| `DELETE` | `/api/email/subscriptions/{subscriptionId}` | Library write | Remove a subscription |
+| `GET` | `/api/email/deliveries` | Signed in | One page of delivery history |
+| `POST` | `/api/email/deliveries/{deliveryId}/cancel` | Library write | Cancel one delivery |
+| `POST` | `/api/email/deliveries/cancel-pending` | Library write | Cancel everything not yet sent |
+
+**Devices** take `{"name","emailAddress","deliveryFormat"}`, where `deliveryFormat` is `original`, `epub` or `azw3`. A device is `{"id","name","emailAddress","deliveryFormat","createdAt","updatedAt","ownerUserId"}`. Saving an address the same user already has answers `409`.
+
+**`POST /api/email/devices/{deviceId}/test`** answers `200 {"message":"Test email sent"}`. It answers `400` when email delivery cannot be used yet (`error` says why), and `502 {"error":"..."}` when the mail server refuses. The `error` is a fixed reason, such as "The mail server rejected the login. Check the SMTP username and password in Settings."
+
+**`POST /api/email/send`** takes:
+
+```json
+{
+  "files": ["/watched_dir/a.cbz"],
+  "deviceId": 1,
+  "deliveryFormat": "epub",
+  "skipAlreadyDelivered": true,
+  "condenseMode": "none",
+  "issuesPerBook": null
+}
+```
+
+`condenseMode` is `none` (default), `count` or `all`. `count` needs `issuesPerBook` of at least 2. A book can hold up to 500 issues and about 2 GiB. It returns `{"queued":[...],"skipped":{}}`.
+
+**`POST /api/email/send-series`** takes the same with `seriesId` in place of `files`, and returns `{"series","queued","skipped"}`. A series over 1000 issues is `400`.
+
+**Condensing.** `condense-plan`, `condense-download` and `condense-builds` take `{"files","seriesId","condenseMode","issuesPerBook","bookIndex","deliveryFormat","deviceId","skipAlreadyDelivered"}`. `seriesId` wins over `files`, and `deliveryFormat` is `epub` or `azw3`.
+
+`condense-plan` returns `{"mode","total_issues","issues_per_book","max_attachment_bytes","max_book_bytes","can_email","oversized_book_count","books":[{"display_name","issue_count","estimated_bytes","exceeds_attachment_limit","exceeds_book_size_limit"}],"skipped"}`.
+
+`condense-builds` answers `202` with a build object: `{"build_id","status","display_name","issue_count","created_at","started_at","completed_at","error","file_size_bytes","expires_at","delivery_format","progress":{"phase","completed_pages","total_pages","completed_issues","total_issues","current_issue","pass","total_passes","percentage"}}`. `status` is `queued`, `running`, `completed`, `failed` or `cancelled`. Builds are private to the user who started them. A download that is not ready, or a cancel of a finished build, is `409`.
+
+**`PUT /api/email/subscriptions`** takes `{"seriesTitle","deviceId","deliveryFormat","enabled"}`. `deliveryFormat` may also be `device`, to inherit the device's format.
+
+**`GET /api/email/deliveries`** takes `limit`, `offset` and `all`, and returns `{"deliveries","total","offset","limit","pending_count","rate_limited_until"}`. A delivery has `id`, `filePath`, `fileName`, `deviceId`, `deviceName`, `deviceEmail`, `deliveryFormat`, `status` (`pending`, `sent`, `failed` or `cancelled`), `source` (`manual` or `auto`), `errorMessage`, `createdAt`, `sentAt`, `issueCount`, `attemptCount`, `nextAttemptAt` and `ownerUserId`.
+
+**Cancelling a delivery** answers `200 {"cancelled":true,"delivery"}`. It answers `202 {"cancelled":false,"stopping":true,"delivery"}` while it is being prepared, and `409` when it is already sending or finished. **`cancel-pending`** takes `all` and returns `{"cancelled","stopping","sending"}`.
+
+## Suwayomi
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/suwayomi/status` | Signed in | `{"enabled","configured","connected","serverName","version","error"}` |
+| `GET` | `/api/suwayomi/series` | Signed in | Search the Suwayomi library: `query`, `limit` |
+| `GET` | `/api/suwayomi/series/{seriesId}/chapters` | Signed in | `{"chapters":[{"id","name","chapterNumber","isDownloaded"}]}` |
+| `GET` | `/api/suwayomi/series/{seriesId}/thumbnail` | Signed in | The series' cover |
+| `GET` | `/api/suwayomi/sources` | Signed in | `{"sources":[{"id","name","lang","displayName"}]}` |
+| `GET` | `/api/suwayomi/sources/{sourceId}/series` | Signed in | Search a source: `query`, `page` |
+| `POST` | `/api/suwayomi/series/{seriesId}/add` | Library write | Add a series and queue what the library lacks |
+| `POST` | `/api/suwayomi/download-missing` | Library write | Queue missing issues |
+
+Most failures are `400 {"error":"..."}` with a fixed reason. A thumbnail that cannot be read is `404`.
+
+**`GET /api/suwayomi/series`** returns `{"series":[{"id","title","inLibrary","source","thumbnailUrl"}]}`. **`GET /api/suwayomi/sources/{sourceId}/series`** returns `{"series","hasNextPage"}`; the search term is limited to 200 characters.
+
+**`POST /api/suwayomi/download-missing`** takes `{"seriesTitle","alternateTitles":[],"suwayomiSeriesId":null,"issueNumbers":[1,2,3]}`. It returns `{"series","queuedChapters","unmatchedIssueNumbers","alreadyDownloadedIssueNumbers","discoveryFailures":[{"target","error"}],"cutShortSearches":[{"target","reason"}]}`. `cutShortSearches` lists searches that stopped at a limit; they are not failures.
+
+## Scheduled jobs
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/scheduled-jobs` | Admin | List jobs |
+| `GET` | `/api/scheduled-jobs/{jobKey}` | Admin | One job |
+| `PUT` | `/api/scheduled-jobs/{jobKey}` | Admin | Change its schedule and options |
+| `POST` | `/api/scheduled-jobs/{jobKey}/run` | Admin | Run it now |
+| `GET` | `/api/scheduled-jobs/metadata-audit/findings` | Admin | Findings from the metadata audit |
+
+Job keys are `database-backup`, `file-naming-audit`, `library-scan`, `metadata-audit`, `metadata-backfill`, `missing-issues-check`, `series-language-audit` and `suwayomi-download-import`.
+
+A job is `{"jobKey","displayName","description","enabled","intervalMinutes","lastRunUtc","nextRunUtc","lastDurationMs","lastStatus","lastMessage","optionsJson"}`. `PUT` takes `{"enabled","intervalMinutes","optionsJson"}`; `intervalMinutes` must be positive when enabled. `run` answers `202 {"jobKey","queued"}`.
+
+The findings route takes `type`, `offset` and `limit`, and returns `{"total","offset","limit","findings":[{"id","filePath","findingType","expectedSeries","actualSeries","actualIssue","details","detectedAtUtc"}]}`.
+
+## Settings
+
+Any signed-in account can read settings. Every write needs Admin. Writes use `PUT`.
+
+| Method | Path | Access | Body or response |
+|---|---|---|---|
+| `GET` | `/api/settings` | Signed in | Everything, see below |
+| `PUT` | `/api/settings` | Admin | Save any groups in one write, see below |
+| `GET` | `/api/settings/filename-format` | Signed in | `{"format","default"}` |
+| `PUT` | `/api/settings/filename-format` | Admin | `{"format":"{series} - Chapter {issue}"}` |
+| `GET` | `/api/settings/issue-number-padding` | Signed in | `{"padding"}` |
+| `PUT` | `/api/settings/issue-number-padding` | Admin | `{"padding":4}` (0 to 10) |
+| `GET` | `/api/settings/log-max-bytes` | Signed in | `{"maxMB"}` |
+| `PUT` | `/api/settings/log-max-bytes` | Admin | `{"maxMB":10}` (up to 2047). Needs a restart |
+| `GET` | `/api/settings/watcher-enable-rename` | Signed in | `{"enabled"}` |
+| `PUT` | `/api/settings/watcher-enable-rename` | Admin | `{"enabled":true}` |
+| `GET` | `/api/settings/watcher-enable-normalize` | Signed in | `{"enabled"}` |
+| `PUT` | `/api/settings/watcher-enable-normalize` | Admin | `{"enabled":true}` |
+| `GET` | `/api/settings/convert-rar-to-cbz-on-write` | Signed in | `{"enabled"}` |
+| `PUT` | `/api/settings/convert-rar-to-cbz-on-write` | Admin | `{"enabled":true}` |
+| `GET` | `/api/settings/write-cover-to-first-archive` | Signed in | `{"enabled"}` |
+| `PUT` | `/api/settings/write-cover-to-first-archive` | Admin | `{"enabled":true}` |
+| `GET` | `/api/settings/write-cover-to-series-folder` | Signed in | `{"enabled"}` |
+| `PUT` | `/api/settings/write-cover-to-series-folder` | Admin | `{"enabled":true}` |
+| `GET` | `/api/settings/download-external-series-images` | Signed in | `{"enabled"}` |
+| `PUT` | `/api/settings/download-external-series-images` | Admin | `{"enabled":true}` |
+| `GET` | `/api/settings/series-image-limits` | Signed in | `{"maxMB","maxDownloadMB","maxDimension"}` |
+| `PUT` | `/api/settings/series-image-limits` | Admin | Same fields, all above 0 |
+| `GET` | `/api/settings/database-cleanup-interval-hours` | Signed in | `{"hours"}` |
+| `PUT` | `/api/settings/database-cleanup-interval-hours` | Admin | `{"hours":12}`; 0 runs only after a start |
+| `GET` | `/api/settings/database-cleanup` | Signed in | All cleanup settings |
+| `PUT` | `/api/settings/database-cleanup` | Admin | See below |
+| `GET` | `/api/settings/default-library-view` | Signed in | `{"view"}` |
+| `PUT` | `/api/settings/default-library-view` | Admin | `{"view":"series"}` (`files` or `series`) |
+| `GET` | `/api/settings/allow-registration` | Signed in | `{"enabled"}` |
+| `PUT` | `/api/settings/allow-registration` | Admin | `{"enabled":false}` |
+| `GET` | `/api/settings/default-preferred-language` | Signed in | `{"language"}` |
+| `PUT` | `/api/settings/default-preferred-language` | Admin | `{"language":"en"}` (`en`, `ja`, `ko`, `zh`, or `null`) |
+| `PUT` | `/api/settings/external-series-metadata` | Admin | See below |
+| `PUT` | `/api/settings/email` | Admin | See below |
+| `PUT` | `/api/settings/email-rate-limit` | Admin | See below |
+| `PUT` | `/api/settings/suwayomi` | Admin | See below |
+| `PUT` | `/api/settings/error-reporting` | Admin | See below |
+| `POST` | `/api/settings/cleanup-database` | Admin | See [`POST /api/files/cleanup-stale`](#files) |
+| `POST` | `/api/settings/reset` | Admin | Delete all tracked files and history |
+| `POST` | `/api/settings/restart` | Admin role | Stop the app so its supervisor restarts it |
+
+A successful write returns `{"message":"..."}`, and the new value is in effect when it returns. `POST /api/settings/reset` cancels active jobs and returns `{"success":true,"message"}`.
+
+**`GET /api/settings`** returns these fields, plus `env_locked`. Secrets are never returned; the `*_set` fields say whether one is stored.
+
+- Files: `filename_format`, `issue_number_padding`, `watcher_enable_rename`, `watcher_enable_normalize`, `convert_rar_to_cbz_on_write`, `log_max_bytes`.
+- Cleanup: `database_cleanup_interval_hours`, `stale_cleanup_max_removal_percent`, `stale_cleanup_missing_grace_hours`, `stale_cleanup_sentinel_file`, `processing_history_retention_days`, `processing_history_max_entries`.
+- Metadata: `enable_external_series_metadata`, `comicvine_api_key_set`, `comicvine_base_url`, `enable_mangadex_metadata`, `mangadex_base_url`, `enable_anilist_metadata`, `anilist_base_url`, `fill_comicinfo_from_providers`.
+- Suwayomi: `enable_suwayomi`, `suwayomi_base_url`, `suwayomi_username`, `suwayomi_password_set`, `suwayomi_downloads_directory`, `suwayomi_import_directory`.
+- Library: `default_library_view`, `allow_registration`, `default_preferred_language`, `write_cover_to_first_archive`, `write_cover_to_series_folder`, `download_external_series_images`, `series_image_max_bytes`, `series_image_max_download_bytes`, `series_image_max_dimension`.
+- Email: `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password_set`, `smtp_use_ssl`, `smtp_allow_insecure`, `email_from_address`, `email_from_name`, `email_max_attachment_mb`, `email_max_sends_per_hour`, `email_max_sends_per_day`, `email_min_seconds_between_sends`.
+- Error reporting: `error_reporting_enabled`, `error_reporting_github_owner`, `error_reporting_github_repo`, `error_reporting_github_token_set`, `error_reporting_assignee`, `error_reporting_max_issues_per_day`, `error_reporting_dedupe_window_hours`, `error_reporting_comment_on_recurrence`.
+- Notifications: for each of `ntfy`, `gotify`, `discord`, `webhook`, `komga` and `kavita`, `notify_<target>_enabled` and `notify_<target>_events`, plus the target's `notify_ntfy_url`, `notify_ntfy_topic`, `notify_ntfy_token_set`, `notify_gotify_url`, `notify_gotify_token_set`, `notify_discord_webhook_url_set`, `notify_webhook_url_set`, `notify_komga_url`, `notify_komga_api_key_set`, `notify_komga_library_id`, `notify_kavita_url`, `notify_kavita_api_key_set`, `notify_kavita_library_id`. `notify_ntfy_topic` is an empty string for anyone who is not an administrator.
+- OPDS: `opds_enabled`.
+- `env_locked`: one `{"field","variable"}` entry for each field an environment variable pins.
+
+**`PUT /api/settings`** saves everything in one write. On a `400` or `409`, nothing changes. Every group and field is optional.
+
+```json
+{
+  "filenameFormat": "{series} - Chapter {issue}",
+  "logMaxMB": 10,
+  "issueNumberPadding": 4,
+  "databaseCleanup": {
+    "intervalHours": 12,
+    "staleCleanupMaxRemovalPercent": 10,
+    "staleCleanupMissingGraceHours": 6,
+    "staleCleanupSentinelFile": "",
+    "processingHistoryRetentionDays": 90,
+    "processingHistoryMaxEntries": 50000
+  },
+  "externalSeriesMetadata": {
+    "enabled": true,
+    "comicVineApiKey": null,
+    "comicVineBaseUrl": null,
+    "enableMangaDex": true,
+    "mangaDexBaseUrl": null,
+    "enableAniList": true,
+    "aniListBaseUrl": null,
+    "fillComicInfoFromProviders": true
+  },
+  "seriesImageLimits": { "maxMB": 5, "maxDownloadMB": 25, "maxDimension": 2048 },
+  "email": {
+    "smtpHost": "smtp.example.com",
+    "smtpPort": 587,
+    "smtpUsername": "user",
+    "smtpPassword": null,
+    "smtpUseSsl": false,
+    "smtpAllowInsecure": false,
+    "emailFromAddress": "comics@example.com",
+    "emailFromName": "ComicMaintainer",
+    "emailMaxAttachmentMb": 25
+  },
+  "emailRateLimit": { "maxSendsPerHour": 0, "maxSendsPerDay": 0, "minSecondsBetweenSends": 0 },
+  "suwayomi": {
+    "enabled": false,
+    "baseUrl": "http://suwayomi:4567",
+    "username": "",
+    "password": null,
+    "downloadsDirectory": "",
+    "importDirectory": ""
+  },
+  "errorReporting": {
+    "enabled": false,
+    "gitHubToken": null,
+    "assignee": "",
+    "maxIssuesPerDay": 10,
+    "dedupeWindowHours": 24,
+    "commentOnRecurrence": true
+  },
+  "notifications": {
+    "ntfy": { "enabled": true, "url": "https://ntfy.sh", "token": null, "topic": "my-topic", "events": "new-chapters,job-failed" },
+    "komga": { "enabled": false, "url": "http://komga:25600", "token": null, "libraryId": "", "events": "new-chapters,library-changed" }
+  },
+  "opds": { "enabled": false }
+}
+```
+
+The rules are:
+
+- `null` or a left-out field keeps the current value. An empty string clears a text field.
+- A blank base URL keeps the stored URL. Base URLs can't be cleared.
+- Ranges: `logMaxMB` 1 to 2047; `issueNumberPadding` 0 to 10; `staleCleanupMaxRemovalPercent` 0 to 100; `staleCleanupMissingGraceHours` 0 to 720; `processingHistoryRetentionDays` 0 to 3650; `processingHistoryMaxEntries` 0 to 10,000,000; `smtpPort` 1 to 65535; `emailMaxAttachmentMb` 1 to 200; `maxSendsPerHour` 0 to 10,000; `maxSendsPerDay` 0 to 100,000; `minSecondsBetweenSends` 0 to 86,400; `maxIssuesPerDay` 0 to 100; `dedupeWindowHours` 1 to 720. `maxDownloadMB` must not be below `maxMB`.
+
+**Group routes.** `PUT /api/settings/database-cleanup` takes the fields of the `databaseCleanup` group; a field left out keeps its value, and an empty `staleCleanupSentinelFile` clears it. `PUT /api/settings/external-series-metadata`, `email`, `email-rate-limit`, `suwayomi` and `error-reporting` take the fields of the matching group, with one difference: a field left out is read as blank, off or its default, and saved. These are kept when left out instead: secrets (`comicVineApiKey`, `smtpPassword`, `password`, `gitHubToken`), base URLs, and the Suwayomi `downloadsDirectory` and `importDirectory`. An empty string clears a secret or a directory. `fillComicInfoFromProviders` is only available through `PUT /api/settings`.
+
+**Pinned settings.** Environment variables can pin a setting. See [Errors](#errors) and [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md).
+
+- A value equal to the pinned one is accepted, whatever the field's limits.
+- Any other value gets `409`.
+- A field left out never touches a pinned setting.
+- A pinned secret is never compared: any write to it gets `409`.
+
+## Notifications
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `POST` | `/api/notifications/{target}/test` | Admin | Send a test using the saved settings |
+
+`{target}` is `ntfy`, `gotify`, `discord`, `webhook`, `komga` or `kavita`. On Komga and Kavita, this requests a real library scan.
+
+| Status | Meaning |
+|---|---|
+| `200` | `{"message":"Test sent to ntfy."}` |
+| `400` | The target's settings are incomplete |
+| `404` | Unknown target |
+| `409` | A scan was requested while the library is busy |
+| `502` | The target refused or could not be reached; `error` holds its reason |
+
+Failures are problem documents with an `error` string. Targets are configured with the `notifications` group of `PUT /api/settings`. Each target takes `enabled`, `url`, `token`, `topic`, `libraryId` and `events`; the fields a target has no use for are ignored. For Discord and the webhook, `url` is the secret webhook URL. `null` keeps a value, and an empty string clears it. Events are:
+
+- ntfy, Gotify, Discord and webhook: `new-chapters`, `suwayomi-import-failed`, `job-failed`, `job-findings`.
+- Komga and Kavita: `new-chapters`, `library-changed`.
+
+See [NOTIFICATIONS.md](NOTIFICATIONS.md) for delivery behaviour.
+
+## Database backups
+
+All backup routes are Admin only, because a backup holds password hashes and stored credentials.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/backups` | Admin | `{"backups":[{"name","size_bytes","created_utc"}],"restore_pending"}` |
+| `POST` | `/api/backups` | Admin | Create a backup now |
+| `GET` | `/api/backups/{name}/download` | Admin | Download a backup |
+| `DELETE` | `/api/backups/{name}` | Admin | Delete a backup: `{"deleted":"..."}` |
+| `POST` | `/api/backups/{name}/restore` | Admin | Validate a backup and stage it |
+| `POST` | `/api/backups/upload-restore` | Admin | Upload a database (field `file`, up to 2 GiB) and stage it |
+| `DELETE` | `/api/backups/restore-pending` | Admin | Discard a staged restore: `{"cancelled":true}` |
+
+A restore takes a safety backup first and applies at the next restart. It returns `{"source","safety_backup":{"name","size_bytes","created_utc"},"restart_required":true,"message"}`. It answers `400` for a file that is not a valid backup, and `409` when it cannot be staged.
+
+## Error reports
+
+These routes show the local record of [automated error reporting](ENVIRONMENT_VARIABLES.md#error-reporting). All need Admin, except `POST /api/client-errors`.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/error-reports` | Admin | Latest failures: `limit`, `state` |
+| `GET` | `/api/error-reports/{fingerprint}` | Admin | One failure with its stack trace |
+| `POST` | `/api/error-reports/{fingerprint}/mute` | Admin | Count it but never file it |
+| `POST` | `/api/error-reports/{fingerprint}/unmute` | Admin | Stop muting it |
+| `POST` | `/api/error-reports/test` | Admin | File a harmless test report |
+| `POST` | `/api/client-errors` | Signed in | Report a browser error |
+
+`state` is `new`, `reported`, `muted` or `failed`. **`POST /api/error-reports/test`** answers `200 {"message","outcome","fingerprint"}`. It answers `400` when reporting is off, no token is set, the daily cap is reached or the report is muted, and `502` when GitHub could not be reached or refused the token.
+
+**`POST /api/client-errors`** takes `{"name","message","stack","source","url","kind"}`, where `kind` is `Error` or `UnhandledRejection`. It always answers `202` for a well-formed body.
+
+## Diagnostics and logs
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/diagnostics` | Admin | A snapshot of the running instance |
+| `GET` | `/api/logs` | Admin | A log file's last lines |
+| `GET` | `/api/logs/files` | Admin | Log files of one type |
+
+**`GET /api/diagnostics`** returns `{"generatedAtUtc","correlationId","application","runtime","health","watcher","library","jobs","storage","logs"}`. A section that cannot be read reports its own `error`.
+
+**`GET /api/logs`** takes `type` (`app`, `watcher`, `metadata`, `auth` or `debug`, the default), `lines` (default 500, at most 10,000, 0 means the maximum) and `filename`. It returns `{"content","total_lines","shown_lines","filename"}`, newest entries first.
+
+**`GET /api/logs/files`** takes `type` and returns `{"files":[{"filename","last_modified","size_mb"}],"count"}`.
+
+## Other application routes
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/version` | Public | `{"version","platform":".NET"}` |
+| `GET` | `/api/watcher` | Signed in | `{"running","enabled"}` |
+| `GET` | `/api/processing-history` | Signed in | Processing history: `limit`, `offset` |
+| `GET` | `/api/preferences` | Signed in | The caller's preferences |
+| `PUT` | `/api/preferences` | Signed in | Save the caller's preferences |
+| `GET` | `/sw.js` | Public | The service worker |
+| `GET` | `/manifest.json` | Public | The PWA manifest |
+
+**`GET /api/watcher`**: the watcher runs while rename or normalize is enabled in settings; this route only reports it.
+
+**`GET /api/processing-history`** returns `{"history":[...],"total"}`. An entry has `timestamp` (Unix seconds), `filepath`, `operation_type`, `success`, `error_message`, and `before_`/`after_` values for `filename`, `title`, `series`, `issue`, `publisher`, `year` and `volume`.
+
+**Preferences** are `{"theme","perPage","readingMode","libraryViewMode","filterMode","sortMode","sortDirection"}`, all optional. `theme` is `light` or `dark`, `readingMode` is `manga` or `webcomic`, `libraryViewMode` is `files` or `series`, `sortMode` is `name`, `date` or `size`, and `perPage` is 1 to 1000. `filterMode` takes the filter values above, plus `all`. The response also has `filenameFormat`, `issueNumberPadding` and `watcherEnabled`. `theme` stays `null` until the user chooses one.
+
+## Event stream
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/events/stream` | Signed in | Server-sent events |
+
+Browsers' `EventSource` cannot send headers, so fetch a stream token first:
 
 ```bash
-# Health check
-curl http://localhost:5000/health
-
-# List files
-curl http://localhost:5000/api/files?page=1&per_page=100
-
-# Start processing all files
-curl -X POST http://localhost:5000/api/jobs/process-all
-
-# Get job status
-curl http://localhost:5000/api/jobs/job-abc123
-
-# Update filename format
-curl -X PUT http://localhost:5000/api/settings/filename-format \
-  -H "Content-Type: application/json" \
-  -d '{"format": "{series} - Chapter {issue}"}'
+ST=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:5000/api/auth/stream-token | jq -r .token)
+curl -N "http://localhost:5000/api/events/stream?access_token=$ST"
 ```
 
-### Using Python
+A stream token is valid for 60 seconds, once, and only on this route. Fetch a new one for every connection. The route also accepts a session token in the `Authorization` header, an API key and Authelia headers.
 
-```python
-import requests
+Each message is `data: {"type":"...","data":{...}}`:
 
-# Health check
-response = requests.get('http://localhost:5000/health')
-print(response.json())
+| `type` | `data` |
+|---|---|
+| `job_updated` | `{"job_id","status","progress":{"processed","total","success","errors","percentage"}}` |
+| `file_processed` | `{"filename","success","error"}` |
+| `watcher_status` | `{"running","enabled"}` |
+| `file_list_updated` | `{}` |
 
-# List files
-response = requests.get('http://localhost:5000/api/files', params={'page': 1})
-files = response.json()
+Every 30 seconds the server sends a named heartbeat, `event: heartbeat` with `data: {}`. A stream opened with a token or API key ends at the first heartbeat after the session or key ends.
 
-# Start processing
-response = requests.post('http://localhost:5000/api/jobs/process-all')
-job = response.json()
-print(f"Job ID: {job['job_id']}")
-```
+## OPDS catalog
 
-### Using JavaScript
+The catalog is off until `opds_enabled` is on. While it is off, every route under `/opds` answers `404`, even with no credentials. All routes use HTTP Basic. See [OPDS.md](OPDS.md) for app setup.
 
-```javascript
-// Health check
-fetch('http://localhost:5000/health')
-  .then(response => response.json())
-  .then(data => console.log(data));
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/opds/v1.2` | OPDS Basic | The root feed |
+| `GET` | `/opds/v1.2/catalog` | OPDS Basic | The root feed |
+| `GET` | `/opds/v1.2/continue-reading` | OPDS Basic | The caller's Continue Reading row |
+| `GET` | `/opds/v1.2/series-updates` | OPDS Basic | Series with new issues |
+| `GET` | `/opds/v1.2/newly-added` | OPDS Basic | Series added recently |
+| `GET` | `/opds/v1.2/series` | OPDS Basic | All series: `page` |
+| `GET` | `/opds/v1.2/series/{seriesId}` | OPDS Basic | One series' issues: `page` |
+| `GET` | `/opds/v1.2/search` | OPDS Basic | Search: `q` (up to 200 characters), `page` |
+| `GET` | `/opds/v1.2/opensearch.xml` | OPDS Basic | OpenSearch description |
+| `GET` | `/opds/v1.2/issues/{id}/cover` | OPDS Basic | A cover image |
+| `GET` | `/opds/v1.2/issues/{id}/pages/{pageNumber}` | OPDS Basic | One page for page streaming; `pageNumber` starts at 0 |
+| `GET` | `/opds/v1.2/issues/{id}/file` | OPDS Basic | The original file, with range support |
+| `HEAD` | `/opds/v1.2/issues/{id}/file` | OPDS Basic | The file's headers |
 
-// List files
-fetch('http://localhost:5000/api/files?page=1')
-  .then(response => response.json())
-  .then(data => console.log(data.files));
+- Links in the feeds are path-absolute and include `BASE_PATH`.
+- `{id}` is an opaque number from the feed. Paths are never exposed.
+- Only page requests record reading progress. Reaching the last page marks the issue read.
+- Refusals are problem documents. A missing or wrong credential is `401` with `WWW-Authenticate: Basic realm="ComicMaintainer OPDS", charset="UTF-8"`. Too many attempts is `429` with `Retry-After`. An archive over the read limits is `422`.
 
-// Start processing
-fetch('http://localhost:5000/api/jobs/process-all', {
-  method: 'POST'
-})
-  .then(response => response.json())
-  .then(data => console.log('Job ID:', data.job_id));
-```
+## Health, metrics and Swagger
 
-## Need Help?
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/health` | Public | Liveness: `200 Healthy` while the process serves requests |
+| `GET` | `/health/ready` | Public | Readiness: also checks the database; `503 Unhealthy` when it cannot be reached |
+| `GET` | `/metrics` | Public, or token | Prometheus metrics, only when `TELEMETRY__PROMETHEUSENABLED=true`. If `TELEMETRY__METRICSTOKEN` is set, send `Authorization: Bearer <token>` |
+| `GET` | `/swagger` | Public | Swagger UI, only in Development or with `API__ENABLESWAGGER=true`. The document is at `/swagger/v1/swagger.json` |
 
-For questions or issues, please:
-- Check the [README](../README.md)
-- Review the [DEBUG_LOGGING_GUIDE](DEBUG_LOGGING_GUIDE.md)
-- Open an issue on GitHub
+The health routes answer plain text.
+
+## Deprecated aliases
+
+These routes still work. New scripts should use the replacement.
+
+| Method | Path | Access | Replacement |
+|---|---|---|---|
+| `POST` | `/api/rename-file` | Library write | `POST /api/files/{encodedFilePath}/rename`. Takes `?filePath=&forceReprocess=` |
+| `DELETE` | `/api/delete-file` | Library write | `DELETE /api/files/{encodedFilePath}`. Takes `?filePath=` |
+| `GET` | `/api/watcher/status` | Signed in | `GET /api/watcher` |
+| `POST` | `/api/preferences` | Signed in | `PUT /api/preferences` |

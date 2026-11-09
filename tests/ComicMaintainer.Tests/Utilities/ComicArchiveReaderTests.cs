@@ -261,6 +261,64 @@ public sealed class ComicArchiveReaderTests : IDisposable
         Assert.Equal(root, ComicArchiveReader.IsRootComicInfoName(name));
     }
 
+    // ---- Encrypted ZIP entries -----------------------------------------------------------
+
+    /// <summary>A ZIP whose entries have the encrypted flag set, in both places a reader may look.</summary>
+    private string EncryptedZip(string name, params (string Name, byte[] Data)[] entries)
+    {
+        var path = Zip(name, entries);
+        var bytes = File.ReadAllBytes(path);
+        for (var i = 0; i + 8 < bytes.Length; i++)
+        {
+            var signature = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i));
+            if (signature == 0x04034b50)
+            {
+                bytes[i + 6] |= 1;
+            }
+            else if (signature == 0x02014b50)
+            {
+                bytes[i + 8] |= 1;
+            }
+        }
+
+        File.WriteAllBytes(path, bytes);
+        return path;
+    }
+
+    [Fact]
+    public void ReadAllBytes_EncryptedZipEntry_IsRefusedWithAClearReason()
+    {
+        // System.IO.Compression would inflate the ciphertext as if it were the page.
+        using var archive = ComicArchiveReader.Open(EncryptedZip("locked.cbz", ("p1.jpg", new byte[32])));
+
+        var ex = Assert.Throws<ComicArchiveFormatException>(() => archive.GetEntryAt(0)!.ReadAllBytes(1024));
+
+        Assert.Contains("p1.jpg", ex.Message);
+        Assert.Contains("encrypted", ex.Message);
+    }
+
+    [Fact]
+    public void ReadText_EncryptedZipEntry_IsRefusedWithAClearReason()
+    {
+        using var archive = ComicArchiveReader.Open(EncryptedZip("locked.cbz", ("ComicInfo.xml", Bytes("<ComicInfo/>"))));
+
+        var ex = Assert.Throws<ComicArchiveFormatException>(() => archive.FindComicInfoEntry()!.ReadText());
+
+        Assert.Contains("encrypted", ex.Message);
+    }
+
+    [Fact]
+    public void CopyFileEntriesTo_EncryptedZipEntry_IsRefusedWithAClearReason()
+    {
+        using var archive = ComicArchiveReader.Open(EncryptedZip("locked.cbz", ("p1.jpg", new byte[32])));
+        using var output = new MemoryStream();
+        using var writer = new ZipWriter(output, new ZipWriterOptions(CompressionType.Deflate) { LeaveStreamOpen = true });
+
+        var ex = Assert.Throws<ComicArchiveFormatException>(() => archive.CopyFileEntriesTo(writer, _ => true));
+
+        Assert.Contains("encrypted", ex.Message);
+    }
+
     // ---- RAR 5 dictionary --------------------------------------------------------------
 
     /// <summary>

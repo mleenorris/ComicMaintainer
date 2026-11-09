@@ -287,6 +287,39 @@ public partial class ComicProcessorServiceCoverageTests
     }
 
     [Fact]
+    public async Task NormalizeFilesAsync_EncryptedComicInfo_ReportsThat()
+    {
+        var service = CreateService();
+        var path = WriteZipNamed("Series/locked.cbz", ("ComicInfo.xml", Utf8("<ComicInfo/>")));
+        SetEncryptedFlag(path);
+
+        var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { path }));
+
+        Assert.Equal(1, job.FailedFiles);
+        Assert.Contains("encrypted", job.Errors[path]);
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == job.Errors[path]);
+    }
+
+    private static void SetEncryptedFlag(string zipPath)
+    {
+        var bytes = File.ReadAllBytes(zipPath);
+        for (var i = 0; i + 8 < bytes.Length; i++)
+        {
+            var signature = BitConverter.ToUInt32(bytes, i);
+            if (signature == 0x04034b50)
+            {
+                bytes[i + 6] |= 1;
+            }
+            else if (signature == 0x02014b50)
+            {
+                bytes[i + 8] |= 1;
+            }
+        }
+
+        File.WriteAllBytes(zipPath, bytes);
+    }
+
+    [Fact]
     public async Task NormalizeFilesAsync_RarMissingAVolume_ReportsThat()
     {
         // ComicInfo.xml goes on in a next volume that is not there, which SharpCompress reports.

@@ -550,11 +550,37 @@ public sealed class ComicArchiveReader : IDisposable
         // and would shift the timestamp.
         public DateTime? LastModified => _entry.LastWriteTime.LocalDateTime;
 
-        public override byte[] ReadAllBytes(long maxBytes) => ArchiveEntryReader.ReadAllBytes(_entry, maxBytes);
+        public override byte[] ReadAllBytes(long maxBytes)
+        {
+            EnsureNotEncrypted();
+            return ArchiveEntryReader.ReadAllBytes(_entry, maxBytes);
+        }
 
-        public override string ReadText() => ArchiveEntryReader.ReadText(_entry);
+        public override string ReadText()
+        {
+            EnsureNotEncrypted();
+            return ArchiveEntryReader.ReadText(_entry);
+        }
 
-        public Stream OpenStream() => _entry.Open();
+        public Stream OpenStream()
+        {
+            EnsureNotEncrypted();
+            return _entry.Open();
+        }
+
+        /// <summary>
+        /// System.IO.Compression ignores the encrypted flag and inflates the ciphertext, which at
+        /// best fails with a misleading error and at worst comes back as garbage.
+        /// </summary>
+        private void EnsureNotEncrypted()
+        {
+            if (_entry.IsEncrypted)
+            {
+                throw new ComicArchiveFormatException(
+                    $"Archive entry '{Name}' is encrypted, and password-protected archives are not supported.",
+                    innerException: null);
+            }
+        }
     }
 
     private sealed class RarEntry : ComicArchiveEntry, ICopyableEntry

@@ -25,16 +25,16 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
 
     private readonly ConcurrentDictionary<Guid, JobEntry> _entries = new();
     private readonly ILogger<BatchJobRegistry> _logger;
-    private readonly IJobStateStore? _jobStateStore;
-    private readonly IEventBroadcaster? _eventBroadcaster;
+    private readonly IJobStateStore _jobStateStore;
+    private readonly IEventBroadcaster _eventBroadcaster;
     private readonly ComicMaintainerMetrics? _metrics;
     private readonly int _maxWorkers;
 
     public BatchJobRegistry(
         IOptionsMonitor<AppSettings> settings,
         ILogger<BatchJobRegistry> logger,
-        IJobStateStore? jobStateStore = null,
-        IEventBroadcaster? eventBroadcaster = null,
+        IJobStateStore jobStateStore,
+        IEventBroadcaster eventBroadcaster,
         ComicMaintainerMetrics? metrics = null)
     {
         _logger = logger;
@@ -87,14 +87,11 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
                 entry.Job.Errors[subject] = message;
             }
 
-            if (owner._eventBroadcaster != null)
-            {
-                var name = Path.GetFileName(subject.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                await owner._eventBroadcaster.BroadcastFileProcessedAsync(
-                    string.IsNullOrEmpty(name) ? subject : name,
-                    false,
-                    message);
-            }
+            var name = Path.GetFileName(subject.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            await owner._eventBroadcaster.BroadcastFileProcessedAsync(
+                string.IsNullOrEmpty(name) ? subject : name,
+                false,
+                message);
         }
     }
 
@@ -231,27 +228,24 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
             return false;
         }
 
-        if (_jobStateStore != null)
+        // Deleting only from memory would resurrect the job on the next restart.
+        await entry.PersistenceGate.WaitAsync(CancellationToken.None);
+        try
         {
-            // Deleting only from memory would resurrect the job on the next restart.
-            await entry.PersistenceGate.WaitAsync(CancellationToken.None);
+            entry.Deleted = true;
             try
             {
-                entry.Deleted = true;
-                try
-                {
-                    await _jobStateStore.DeleteAsync(jobId, cancellationToken);
-                }
-                catch
-                {
-                    entry.Deleted = false;
-                    throw;
-                }
+                await _jobStateStore.DeleteAsync(jobId, cancellationToken);
             }
-            finally
+            catch
             {
-                entry.PersistenceGate.Release();
+                entry.Deleted = false;
+                throw;
             }
+        }
+        finally
+        {
+            entry.PersistenceGate.Release();
         }
 
         return _entries.TryRemove(jobId, out _);
@@ -432,10 +426,7 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
 
                 await PublishAsync(entry);
 
-                if (_eventBroadcaster != null)
-                {
-                    await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(item.File), success, error);
-                }
+                await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(item.File), success, error);
             });
 
         if (definition.PostLoopAsync is not null)
@@ -493,17 +484,14 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
     {
         try
         {
-            if (_eventBroadcaster != null)
-            {
-                var job = Summarize(entry);
-                await _eventBroadcaster.BroadcastJobUpdateAsync(
-                    job.JobId,
-                    job.Status.ToString().ToLower(),
-                    job.ProcessedFiles + job.FailedFiles,
-                    job.TotalFiles,
-                    job.ProcessedFiles,
-                    job.FailedFiles);
-            }
+            var job = Summarize(entry);
+            await _eventBroadcaster.BroadcastJobUpdateAsync(
+                job.JobId,
+                job.Status.ToString().ToLower(),
+                job.ProcessedFiles + job.FailedFiles,
+                job.TotalFiles,
+                job.ProcessedFiles,
+                job.FailedFiles);
         }
         finally
         {
@@ -524,11 +512,6 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
     /// </remarks>
     private async Task PersistAsync(JobEntry entry)
     {
-        if (_jobStateStore == null)
-        {
-            return;
-        }
-
         await entry.PersistenceGate.WaitAsync(CancellationToken.None);
         try
         {
@@ -584,7 +567,7 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
             _entries.TryRemove(job.JobId, out _);
         }
 
-        if (expired.Count == 0 || _jobStateStore == null)
+        if (expired.Count == 0)
         {
             return;
         }

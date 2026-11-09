@@ -2200,7 +2200,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         IFileStoreService? fileStore = null)
     {
         var settings = new TestOptionsMonitor<AppSettings>(_settings);
-        var jobRegistry = new BatchJobRegistry(settings, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: _broadcaster.Object, metrics: metrics);
+        var jobRegistry = TestServices.CreateBatchJobRegistry(settings, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: _broadcaster.Object, metrics: metrics);
 
         // Series resolution goes through the real SeriesNameResolver, logging to the same
         // logger, so its warnings can be asserted alongside the processor's.
@@ -2225,7 +2225,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Action? beforeFallbackRename = null,
         int linkError = 0)
     {
-        var jobRegistry = new BatchJobRegistry(new TestOptionsMonitor<AppSettings>(_settings), NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: _broadcaster.Object);
+        var jobRegistry = TestServices.CreateBatchJobRegistry(new TestOptionsMonitor<AppSettings>(_settings), NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: _broadcaster.Object);
         var service = new UnsupportedRenameAt2ComicProcessorService(
             _settings,
             _logger,

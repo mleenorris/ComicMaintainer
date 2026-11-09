@@ -215,7 +215,7 @@ public class JobStateStoreCoverageTests : IAsyncLifetime
             OperationName = "ProcessAll",
             StartTime = DateTime.UtcNow
         });
-        using var jobs = new BatchJobRegistry(
+        using var jobs = TestServices.CreateBatchJobRegistry(
             new TestOptionsMonitor<AppSettings>(new AppSettings()),
             NullLogger<BatchJobRegistry>.Instance,
             _store);

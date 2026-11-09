@@ -47,7 +47,7 @@ public class JobStatePersistenceTests : IDisposable
 
     private BatchJobRegistry? _jobs;
 
-    private BatchJobRegistry Jobs => _jobs ??= new BatchJobRegistry(
+    private BatchJobRegistry Jobs => _jobs ??= TestServices.CreateBatchJobRegistry(
         new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
         NullLogger<BatchJobRegistry>.Instance,
         _jobStateStore.Object);

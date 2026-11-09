@@ -830,7 +830,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task Dispose_WithoutManagedDisposal_LeavesRunningJobsAlone()
     {
-        _jobs = new BatchJobRegistry(new TestOptionsMonitor<AppSettings>(_settings), _logger, eventBroadcaster: _broadcaster.Object);
+        _jobs = TestServices.CreateBatchJobRegistry(new TestOptionsMonitor<AppSettings>(_settings), _logger, eventBroadcaster: _broadcaster.Object);
         var service = new UnmanagedDisposeService(
             new TestOptionsMonitor<AppSettings>(_settings), _logger, _fileStore.Object, _history.Object, _broadcaster.Object, _jobs);
         _services.Add(service);
@@ -1004,7 +1004,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     private ComicProcessorService CreateService(IJobStateStore? jobStateStore = null, IFileStoreService? fileStore = null)
     {
         var settings = new TestOptionsMonitor<AppSettings>(_settings);
-        _jobs = new BatchJobRegistry(settings, _logger, jobStateStore, _broadcaster.Object);
+        _jobs = TestServices.CreateBatchJobRegistry(settings, _logger, jobStateStore, _broadcaster.Object);
         var service = TestServices.CreateComicProcessor(
             settings,
             _logger,

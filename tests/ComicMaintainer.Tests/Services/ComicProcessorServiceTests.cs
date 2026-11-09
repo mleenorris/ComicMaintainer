@@ -46,7 +46,7 @@ public class ComicProcessorServiceTests : IDisposable
         
         _mockOptions.Setup(o => o.CurrentValue).Returns(_settings);
         
-        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance);
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance);
         _service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
@@ -476,7 +476,7 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
         var serviceWithBroadcaster = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
@@ -525,7 +525,7 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
         var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
@@ -581,7 +581,7 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
         var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
@@ -629,7 +629,7 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task RunCustomBatchJobAsync_PostLoopReport_AddsTheProblemToTheJobWithoutChangingItsCounts()
     {
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        _jobs = new BatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
         var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,

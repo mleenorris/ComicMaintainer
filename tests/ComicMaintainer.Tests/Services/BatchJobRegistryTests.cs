@@ -37,7 +37,7 @@ public sealed class BatchJobRegistryTests
     }
 
     private static BatchJobRegistry CreateRegistry(IJobStateStore? store = null, IEventBroadcaster? broadcaster = null) =>
-        new(
+        TestServices.CreateBatchJobRegistry(
             new TestOptionsMonitor<AppSettings>(new AppSettings()),
             NullLogger<BatchJobRegistry>.Instance,
             store,
@@ -436,11 +436,18 @@ public sealed class BatchJobRegistryTests
     [Fact]
     public async Task Retention_ForgetsOldFinishedJobsBeyondTheMostRecent()
     {
+        var pruned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _store
+            .Setup(s => s.PruneAsync(It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback(() => pruned.TrySetResult())
+            .ReturnsAsync(0);
         var registry = CreateRegistry(_store.Object);
         var old = FinishedJobs(BatchJobRetention.KeepMostRecent + 10, BatchJobRetention.MaxAge + TimeSpan.FromDays(1)).ToList();
         registry.RestoreJobs(old);
 
         await RunToCompletionAsync(registry, "a");
+        // Retention is housekeeping that runs once waiters have been released.
+        await pruned.Task.WaitAsync(Timeout);
 
         var kept = registry.GetJobSummaries();
         Assert.Equal(BatchJobRetention.KeepMostRecent, kept.Count);

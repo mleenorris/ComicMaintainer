@@ -85,11 +85,24 @@ public static class TestServices
                 loggerFactory?.CreateLogger<SeriesNameResolver>() ?? NullLogger<SeriesNameResolver>.Instance,
                 cache,
                 externalSeriesMetadata),
-            jobRegistry ?? new BatchJobRegistry(settings, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: eventBroadcaster, metrics: metrics),
+            jobRegistry ?? CreateBatchJobRegistry(settings, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: eventBroadcaster, metrics: metrics),
             comicEmail ?? Mock.Of<IComicEmailService>(),
             fileLock ?? new FileOperationLock(),
             metrics);
     }
+
+    public static BatchJobRegistry CreateBatchJobRegistry(
+        IOptionsMonitor<AppSettings> settings,
+        ILogger<BatchJobRegistry> logger,
+        IJobStateStore? jobStateStore = null,
+        IEventBroadcaster? eventBroadcaster = null,
+        ComicMaintainerMetrics? metrics = null)
+        => new(
+            settings,
+            logger,
+            jobStateStore ?? Mock.Of<IJobStateStore>(),
+            eventBroadcaster ?? Mock.Of<IEventBroadcaster>(),
+            metrics);
 
     public static SeriesNameResolver CreateSeriesNameResolver(
         IOptionsMonitor<AppSettings> settings,

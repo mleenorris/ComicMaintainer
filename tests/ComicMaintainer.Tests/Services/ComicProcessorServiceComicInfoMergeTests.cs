@@ -270,7 +270,7 @@ public sealed class ComicProcessorServiceComicInfoMergeTests : IDisposable
 
     private BatchJobRegistry? _jobRegistryInstance;
 
-    private BatchJobRegistry Jobs => _jobRegistryInstance ??= new BatchJobRegistry(
+    private BatchJobRegistry Jobs => _jobRegistryInstance ??= TestServices.CreateBatchJobRegistry(
         new TestOptionsMonitor<AppSettings>(_settings),
         NullLogger<BatchJobRegistry>.Instance);
 

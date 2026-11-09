@@ -1048,13 +1048,6 @@
             return parts.join(' · ');
         }
 
-        // Only the per-delivery endpoint is scoped to the caller's own
-        // deliveries, so in the all-users view it is offered on those only.
-        function canCancelEmailDelivery(delivery) {
-            if (String(delivery.status || '').toLowerCase() !== 'pending') return false;
-            return !emailDeliveryHistoryAllUsers || delivery.ownerUserId === userCapabilities.userId;
-        }
-
         function renderEmailDeliveryHistory(deliveries) {
             const list = document.getElementById('emailDeliveryHistoryList');
             if (!list) return;
@@ -1074,7 +1067,7 @@
                     ${describeEmailDeliveryAttempts(delivery)
                         ? html`<div class="combine-folders-meta">${describeEmailDeliveryAttempts(delivery)}</div>`
                         : ''}
-                    ${canCancelEmailDelivery(delivery)
+                    ${String(delivery.status || '').toLowerCase() === 'pending'
                         ? html`<button class="btn btn-small" type="button" data-requires-write onclick="cancelEmailDelivery('${jsArg(delivery.id)}', this)">Cancel</button>`
                         : ''}
                 </div>

@@ -681,19 +681,26 @@ test('opening the history again starts with the administrator\'s own deliveries'
     assert.equal(callsTo(page, 'GET', '/api/email/deliveries').at(-1).query.all, undefined);
 });
 
-test('in the all-users view only the administrator\'s own pending deliveries can be cancelled one by one', async t => {
-    const pending = owner => emailDelivery({ id: owner === 'user-1' ? 1 : 2, status: 'pending', ownerUserId: owner });
+test('in the all-users view an administrator can cancel any user\'s pending delivery', async t => {
+    const pending = (id, owner) => emailDelivery({ id, status: 'pending', ownerUserId: owner });
     const page = await bootPage({
-        routes: { 'GET /api/email/deliveries': { deliveries: [pending('user-1'), pending('someone-else')], pending_count: 2 } }
+        routes: {
+            'GET /api/email/deliveries': { deliveries: [pending(1, 'user-1'), pending(2, 'someone-else'), pending(3, null)], pending_count: 3 },
+            'POST /api/email/deliveries/2/cancel': { cancelled: true, delivery: emailDelivery({ id: 2, status: 'cancelled' }) }
+        }
     });
     t.after(() => page.close());
     await openHistory(page);
-    assert.equal(page.$$('#emailDeliveryHistoryList button').length, 2, 'the caller\'s own history lists each with its button');
-
     page.input('#emailDeliveryHistoryAllUsers', true);
     await page.settle();
 
-    assert.equal(page.$$('#emailDeliveryHistoryList button').length, 1);
+    const buttons = page.$$('#emailDeliveryHistoryList button');
+    assert.equal(buttons.length, 3);
+
+    buttons[1].click();
+    await page.settle();
+
+    assert.equal(callsTo(page, 'POST', '/api/email/deliveries/2/cancel').length, 1);
 });
 
 test('Cancel All Pending in the all-users view cancels every user\'s, and says so', async t => {

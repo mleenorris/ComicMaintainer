@@ -1,325 +1,121 @@
 # SWAG Configuration Comparison: Subdomain vs Subfolder
 
-This document compares the two deployment methods for ComicMaintainer with SWAG.
-
-## Quick Comparison
+This document compares the two ways of deploying ComicMaintainer with SWAG.
 
 | Feature | Subdomain | Subfolder |
 |---------|-----------|-----------|
 | **URL** | `https://comics.yourdomain.com` | `https://yourdomain.com/comics` |
-| **DNS Required** | Yes (CNAME or A record) | No (uses main domain) |
-| **BASE_PATH Setting** | Not required | **Required** (`BASE_PATH=/comics`) |
-| **Config File** | `comicmaintainer.subdomain.conf` | `comicmaintainer.subfolder.conf` |
-| **SSL Certificate** | Automatic (Let's Encrypt) | Uses main domain cert |
-| **Complexity** | Simple | Slightly more complex |
-| **Recommended For** | Dedicated comic management | Multiple services on one domain |
+| **DNS** | CNAME or A record for the subdomain | Nothing beyond the main domain |
+| **`BASE_PATH`** | Must stay unset | **Required** (`BASE_PATH=/comics`) |
+| **Config file** | `comicmaintainer.subdomain.conf` | `comicmaintainer.subfolder.conf` |
+| **Certificate** | The subdomain must be in SWAG's `SUBDOMAINS` | Uses the main domain's certificate |
 
-## Subdomain Deployment
+## Subdomain
 
-### When to Use
-- ✅ You want a dedicated subdomain for ComicMaintainer
-- ✅ You're comfortable managing DNS records
-- ✅ You want the simplest configuration
-- ✅ You plan to use multiple subdomains for different services
+Choose this when you can add a DNS record. It is the simpler setup: the app is at the root of its own address and has no prefix to deal with.
 
-### Configuration
-
-**DNS Setup:**
-```
-Type: CNAME
-Name: comics
-Value: yourdomain.com
-```
-
-**ComicMaintainer Environment:**
 ```yaml
 environment:
-  - WATCHED_DIR=/watched_dir
   - PUID=1000
   - PGID=1000
-  # No BASE_PATH needed
+  - TRUSTED_PROXIES=172.18.0.0/16  # Subnet of swag-network
+  # No BASE_PATH
 ```
 
-**SWAG Config Location:**
-```
-/path/to/swag/config/nginx/proxy-confs/comicmaintainer.subdomain.conf
-```
-
-**Access URL:**
-```
-https://comics.yourdomain.com
-```
-
-### Key Config Lines
+The key lines of the config file:
 
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name comics.*;  # Matches any subdomain starting with 'comics'
-    
+    server_name comics.*;
+
     location / {
-        proxy_pass http://comicmaintainer:5000;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
+        set $upstream_app comicmaintainer;
+        set $upstream_port 5000;
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
         proxy_buffering off;
         proxy_read_timeout 600s;
     }
 }
 ```
 
-## Subfolder Deployment
+## Subfolder
 
-### When to Use
-- ✅ You want to avoid managing DNS records
-- ✅ You want multiple services under one domain
-- ✅ You're already using the domain for other services
-- ✅ You prefer path-based routing
+Choose this when you want several services under one domain and would rather not add DNS records.
 
-### Configuration
-
-**DNS Setup:**
-```
-No additional DNS required - uses main domain
-```
-
-**ComicMaintainer Environment:**
 ```yaml
 environment:
-  - WATCHED_DIR=/watched_dir
-  - BASE_PATH=/comics  # REQUIRED!
+  - BASE_PATH=/comics              # Required
   - PUID=1000
   - PGID=1000
+  - TRUSTED_PROXIES=172.18.0.0/16  # Subnet of swag-network
 ```
 
-**SWAG Config Location:**
-```
-/path/to/swag/config/nginx/proxy-confs/comicmaintainer.subfolder.conf
-```
-
-**Access URL:**
-```
-https://yourdomain.com/comics
-```
-
-### Key Config Lines
+The key lines of the config file:
 
 ```nginx
 location /comics {
-    return 301 $scheme://$host/comics/;  # Redirect to trailing slash
+    return 301 $scheme://$host/comics/;  # Redirect to the trailing slash
 }
 
 location ^~ /comics/ {
-    proxy_pass http://comicmaintainer:5000/;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-Host $host;
-    proxy_set_header X-Forwarded-Prefix /comics;  # Critical for subfolder
+    set $upstream_app comicmaintainer;
+    set $upstream_port 5000;
+    set $upstream_proto http;
+    proxy_pass $upstream_proto://$upstream_app:$upstream_port;  # No path after the port
     proxy_buffering off;
     proxy_read_timeout 600s;
 }
 ```
 
-## Common Configuration Elements
+The `proxy_pass` line must end at the port. When `proxy_pass` contains variables, nginx uses a path written after the port, even a single `/`, as the whole request path, so every request would reach the app as `/`. Without a path the request goes through unchanged, with `/comics` on it, and ComicMaintainer removes the prefix because of `BASE_PATH`.
 
-Both configurations include the same essential settings:
+## What Both Config Files Share
 
-### WebSocket/SSE Support
-```nginx
-proxy_set_header Upgrade $http_upgrade;
-proxy_set_header Connection "upgrade";
-proxy_http_version 1.1;
-```
+- `proxy_buffering off` and `proxy_cache off`, for the Server-Sent Events that carry real-time updates
+- 600-second proxy timeouts
+- The same upstream: container `comicmaintainer`, port 5000
+- Commented-out includes for Authelia, Authentik and LDAP. The [SWAG README](README.md#adding-a-sign-in-in-front-of-the-app) explains what each does and why HTTP Basic does not work with this app
 
-### Timeouts for Batch Operations
-```nginx
-proxy_connect_timeout 600s;
-proxy_send_timeout 600s;
-proxy_read_timeout 600s;
-send_timeout 600s;
-```
-
-### Server-Sent Events Settings
-```nginx
-proxy_buffering off;
-proxy_cache off;
-```
-
-### Container Reference
-```nginx
-set $upstream_app comicmaintainer;
-set $upstream_port 5000;
-set $upstream_proto http;
-```
-
-## Authentication
-
-Both configurations support the same authentication methods:
-
-### HTTP Basic Auth
-```nginx
-auth_basic "Restricted";
-auth_basic_user_file /config/nginx/.htpasswd;
-```
-
-### Authelia
-```nginx
-include /config/nginx/authelia-server.conf;  # In server block
-include /config/nginx/authelia-location.conf;  # In location block
-```
-
-### Authentik
-```nginx
-include /config/nginx/authentik-server.conf;  # In server block
-include /config/nginx/authentik-location.conf;  # In location block
-```
-
-### LDAP
-```nginx
-include /config/nginx/ldap-server.conf;  # In server block
-include /config/nginx/ldap-location.conf;  # In location block
-```
-
-## Migration Between Methods
+## Switching Between Them
 
 ### From Subdomain to Subfolder
 
-1. **Update ComicMaintainer:**
-   ```yaml
-   environment:
-     - BASE_PATH=/comics  # Add this
-   ```
-
-2. **Copy new config:**
+1. Add `BASE_PATH=/comics` to the ComicMaintainer container.
+2. Replace the config file:
    ```bash
    cp comicmaintainer.subfolder.conf /path/to/swag/config/nginx/proxy-confs/
-   ```
-
-3. **Remove old config:**
-   ```bash
    rm /path/to/swag/config/nginx/proxy-confs/comicmaintainer.subdomain.conf
    ```
-
-4. **Restart containers:**
-   ```bash
-   docker restart comicmaintainer swag
-   ```
+3. Restart: `docker restart comicmaintainer swag`
 
 ### From Subfolder to Subdomain
 
-1. **Update ComicMaintainer:**
-   ```yaml
-   environment:
-     # Remove BASE_PATH
-   ```
-
-2. **Configure DNS:**
-   - Add CNAME: `comics.yourdomain.com → yourdomain.com`
-
-3. **Copy new config:**
+1. Remove `BASE_PATH` from the ComicMaintainer container.
+2. Add the DNS record, and add the subdomain to SWAG's `SUBDOMAINS` if you list them there.
+3. Replace the config file:
    ```bash
    cp comicmaintainer.subdomain.conf /path/to/swag/config/nginx/proxy-confs/
-   ```
-
-4. **Remove old config:**
-   ```bash
    rm /path/to/swag/config/nginx/proxy-confs/comicmaintainer.subfolder.conf
    ```
+4. Restart: `docker restart comicmaintainer swag`
 
-5. **Restart containers:**
-   ```bash
-   docker restart comicmaintainer swag
-   ```
+An installed web app (PWA) is tied to its address, so reinstall it after switching. Saved offline comics do not move to the new address either.
 
 ## Troubleshooting
 
-### Subdomain Issues
-
-**Problem: 502 Bad Gateway**
-```bash
-# Check DNS resolution
-nslookup comics.yourdomain.com
-
-# Check container name
-docker ps | grep comicmaintainer
-
-# Check network
-docker network inspect swag-network
-```
-
-**Problem: Certificate errors**
-```bash
-# Check SWAG logs
-docker logs swag | grep -i cert
-
-# Verify subdomain in SWAG env
-docker exec swag env | grep SUBDOMAINS
-```
-
-### Subfolder Issues
-
-**Problem: 404 Not Found**
-```bash
-# Verify BASE_PATH is set
-docker exec comicmaintainer env | grep BASE_PATH
-
-# Should show: BASE_PATH=/comics
-```
-
-**Problem: Assets not loading**
-```bash
-# Check browser console for 404s
-# Verify X-Forwarded-Prefix in config
-docker exec swag cat /config/nginx/proxy-confs/comicmaintainer.subfolder.conf | grep X-Forwarded-Prefix
-```
-
-**Problem: Redirect loops**
-```bash
-# Ensure both location blocks exist:
-# 1. location /comics (redirect to trailing slash)
-# 2. location ^~ /comics/ (actual proxy)
-```
-
-## Best Practices
-
 ### Subdomain
-- ✅ Use when you want clean, dedicated URLs
-- ✅ Easier for users to remember
-- ✅ Better for sharing links
-- ✅ Simpler configuration
+
+| Problem | What to check |
+|---|---|
+| 502 Bad Gateway | `nslookup comics.yourdomain.com`, `docker ps \| grep comicmaintainer`, `docker network inspect swag-network` |
+| Certificate errors | `docker logs swag \| grep -i cert`, `docker exec swag env \| grep SUBDOMAINS` |
 
 ### Subfolder
-- ✅ Use when consolidating services
-- ✅ Saves on DNS records
-- ✅ Good for internal tools
-- ✅ Easier to manage multiple services
 
-## Examples in Production
-
-### Subdomain Example
-```
-Main site: https://yourdomain.com (website)
-Comics:    https://comics.yourdomain.com (ComicMaintainer)
-Books:     https://books.yourdomain.com (Calibre)
-Media:     https://media.yourdomain.com (Plex)
-```
-
-### Subfolder Example
-```
-Main site: https://yourdomain.com (website)
-Comics:    https://yourdomain.com/comics (ComicMaintainer)
-Books:     https://yourdomain.com/books (Calibre)
-Media:     https://yourdomain.com/media (Plex)
-```
-
-## Summary
-
-**Choose Subdomain if:**
-- You want the simplest setup
-- You're comfortable with DNS
-- You want dedicated, memorable URLs
-
-**Choose Subfolder if:**
-- You want to minimize DNS management
-- You're hosting multiple services
-- You prefer path-based organization
-
-Both methods are fully supported and work equally well!
+| Problem | What to check |
+|---|---|
+| Every address shows the start page | `proxy_pass` must end at the port, with no `/` after it |
+| Files fail to load, or 404 | `docker exec comicmaintainer env \| grep BASE_PATH` should show `BASE_PATH=/comics` |
+| `/comics` does not redirect | Both location blocks must exist: `location /comics` for the redirect and `location ^~ /comics/` for the proxy |

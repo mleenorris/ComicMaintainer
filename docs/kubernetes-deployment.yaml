@@ -12,7 +12,10 @@
 #   kubectl create namespace comicmaintainer
 #   kubectl -n comicmaintainer create secret generic comicmaintainer-secrets \
 #     --from-literal=jwt-secret="$(openssl rand -base64 48)" \
-#     --from-literal=admin-password='choose-a-strong-password'
+#     --from-literal=admin-password='<a password of your own>'
+#
+# The password needs at least 8 characters with an upper-case letter, a lower-case letter and a digit. Example
+# passwords published with this project, such as Admin123!, are refused.
 #
 # Then: kubectl apply -f kubernetes-deployment.yaml
 
@@ -39,6 +42,9 @@ data:
   ADMIN_USERNAME: "admin"
   JWT_SECRET_FILE: "/run/secrets/comicmaintainer/jwt-secret"
   ADMIN_PASSWORD_FILE: "/run/secrets/comicmaintainer/admin-password"
+  # Behind an ingress, list the addresses it connects from (often the cluster's pod CIDR), or every client shares one
+  # limit of 10 sign-in attempts per 5 minutes. See docs/REVERSE_PROXY.md.
+  # TRUSTED_PROXIES: "10.244.0.0/16"
 
 ---
 # PersistentVolumeClaim for config storage: the SQLite database, its backups, DataProtection keys and logs.
@@ -230,8 +236,12 @@ metadata:
   name: comicmaintainer
   namespace: comicmaintainer
   annotations:
-    # Example for nginx ingress controller
+    # Examples for the ingress-nginx controller. Real-time updates are Server-Sent Events, which must not be buffered,
+    # and a database backup upload can be up to 2 GB.
     # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    # nginx.ingress.kubernetes.io/proxy-body-size: "2g"
   labels:
     app: comicmaintainer
 spec:

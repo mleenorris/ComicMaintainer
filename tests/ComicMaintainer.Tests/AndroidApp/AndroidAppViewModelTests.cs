@@ -812,7 +812,7 @@ public sealed class FilesViewModelTests
     [Fact]
     public void AfterDisposal_SessionEndsAreIgnored()
     {
-        var viewModel = Create();
+        using var viewModel = Create();
         viewModel.Files.Add(First);
 
         viewModel.Dispose();

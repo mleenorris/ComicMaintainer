@@ -213,8 +213,8 @@ public sealed class LibraryActivityMonitorTests : IDisposable
     [Fact]
     public async Task ALongRun_KeepsTheLibraryBusy_UntilItEnds()
     {
-        var first = _runs.BeginRun();
-        var second = _runs.BeginRun();
+        using var first = _runs.BeginRun();
+        using var second = _runs.BeginRun();
         Assert.True(await Monitor().IsBusyAsync(default));
 
         first.Dispose();

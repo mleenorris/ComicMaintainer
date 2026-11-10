@@ -150,7 +150,7 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
         var store = CreateService();
         var gone = await SeedGoneFileAsync(store);
 
-        var lease = store.SuspendStaleCleanup();
+        using var lease = store.SuspendStaleCleanup();
 
         var cleanup = store.CleanupStaleEntriesAsync(ConfirmedCleanup);
 
@@ -169,8 +169,8 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
     {
         var store = CreateService();
         var gone = await SeedGoneFileAsync(store);
-        var first = store.SuspendStaleCleanup();
-        var second = store.SuspendStaleCleanup();
+        using var first = store.SuspendStaleCleanup();
+        using var second = store.SuspendStaleCleanup();
 
         var cleanup = store.CleanupStaleEntriesAsync(ConfirmedCleanup);
         first.Dispose();
@@ -190,7 +190,7 @@ public sealed class FileStoreServiceLibraryCatchUpTests : IAsyncLifetime
     {
         var store = CreateService();
         var gone = await SeedGoneFileAsync(store);
-        var lease = store.SuspendStaleCleanup();
+        using var lease = store.SuspendStaleCleanup();
         using var cts = new CancellationTokenSource();
 
         var cleanup = store.CleanupStaleEntriesAsync(ConfirmedCleanup, cts.Token);

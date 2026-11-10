@@ -524,7 +524,7 @@ public sealed class BatchJobRegistryTests
     public async Task CancelActiveJobs_StopsEveryRunningJobAndCountsThem()
     {
         var registry = CreateRegistry();
-        var started = new CountdownEvent(2);
+        using var started = new CountdownEvent(2);
         var finished = FinishedJob(DateTime.UtcNow);
         registry.RestoreJobs(new[] { finished });
 
@@ -548,7 +548,7 @@ public sealed class BatchJobRegistryTests
     [Fact]
     public async Task Dispose_CancelsRunningJobs()
     {
-        var registry = CreateRegistry();
+        using var registry = CreateRegistry();
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var jobId = registry.StartJob(Definition(async (_, token) =>
         {

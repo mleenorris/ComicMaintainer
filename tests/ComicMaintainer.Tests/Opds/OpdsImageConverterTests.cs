@@ -53,7 +53,7 @@ public sealed class OpdsImageConverterTests
     {
         var running = 0;
         var mostAtOnce = 0;
-        var entered = new SemaphoreSlim(0);
+        using var entered = new SemaphoreSlim(0);
         using var release = new ManualResetEventSlim();
         var converter = new OpdsImageConverter(_ =>
         {
@@ -87,7 +87,7 @@ public sealed class OpdsImageConverterTests
     [Fact]
     public async Task AClientThatLeavesWhileWaitingGivesUpWithoutTakingASlot()
     {
-        var started = new SemaphoreSlim(0);
+        using var started = new SemaphoreSlim(0);
         using var release = new ManualResetEventSlim();
         var converter = new OpdsImageConverter(_ =>
         {

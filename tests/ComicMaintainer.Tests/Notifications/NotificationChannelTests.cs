@@ -366,8 +366,11 @@ public sealed class NotificationChannelTests
     [Fact]
     public void Http_CreateRequest_MarksTheRequestSoItIsLeftOutOfTraces()
     {
-        Assert.True(NotificationHttpClient.IsNotificationRequest(Request()));
-        Assert.False(NotificationHttpClient.IsNotificationRequest(new HttpRequestMessage(HttpMethod.Get, "https://x.example/")));
+        using var notification = Request();
+        using var other = new HttpRequestMessage(HttpMethod.Get, "https://x.example/");
+
+        Assert.True(NotificationHttpClient.IsNotificationRequest(notification));
+        Assert.False(NotificationHttpClient.IsNotificationRequest(other));
     }
 
     [Fact]

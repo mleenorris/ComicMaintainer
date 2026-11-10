@@ -106,7 +106,8 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
     {
         var client = _factory.CreateClient();
 
-        var response = await client.SendAsync(new HttpRequestMessage(new HttpMethod(method), path));
+        using var request = new HttpRequestMessage(new HttpMethod(method), path);
+        var response = await client.SendAsync(request);
 
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
         Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? string.Empty);

@@ -121,14 +121,28 @@ requests through to ComicMaintainer without redirecting them. Then sign in with 
 
 ## Building
 
-You need the .NET 10 SDK, the Android workload, a JDK and the Android SDK:
+You need the .NET 10 SDK, the Android workload, a JDK and the Android SDK.
+
+On Windows, `scripts/android-local.ps1` installs all of them under `%USERPROFILE%\android-toolchain` without
+administrator rights. It builds the APK the same way CI does, checks it, and runs it on an emulator:
+
+```powershell
+# Installs a JDK, the Android SDK, the emulator and a system image. This accepts the Android SDK licences.
+powershell -ExecutionPolicy Bypass -File scripts\android-local.ps1 setup
+
+# Builds the Release APK, checks its signature and contents, then installs and launches it on an emulator
+powershell -ExecutionPolicy Bypass -File scripts\android-local.ps1 all
+```
+
+The steps can also run one at a time (`build`, `verify`, `emulator`), and `verify` and `emulator` take `-Apk <path>` to
+check an APK built elsewhere, such as one attached to a release. The emulator needs Windows Hypervisor Platform: in an
+administrator PowerShell run `Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All`, then restart
+Windows. From inside the emulator, a server running on the same PC is at `http://10.0.2.2:<port>`.
+
+On other systems, install a JDK 17 and the Android SDK (platform 36 and build tools 36.0.0), then the workload:
 
 ```bash
 dotnet workload install maui-android
-
-# Installs the JDK and Android SDK, if you do not have them. This accepts the Android SDK license.
-dotnet build src/ComicMaintainer.MauiApp -t:InstallAndroidDependencies -f net10.0-android \
-  -p:AndroidSdkDirectory=$HOME/android-sdk -p:JavaSdkDirectory=$HOME/jdk -p:AcceptAndroidSDKLicenses=true
 ```
 
 The app has its own solution, `src/ComicMaintainer.Android.sln`, so that `ComicMaintainer.sln` builds without any of this.

@@ -34,7 +34,7 @@ public class SeriesLibraryReadStateSnapshotTests
         File("/library/Batman/Batman 002.cbz"),
         File("/library/Saga/Saga 001.cbz"),
     ];
-    private long _fileVersion = 1;
+    private readonly long _fileVersion = 1;
     private Func<string?, Task>? _beforeFileLoad;
 
     public SeriesLibraryReadStateSnapshotTests()

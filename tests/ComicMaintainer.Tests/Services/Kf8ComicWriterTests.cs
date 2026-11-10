@@ -24,8 +24,10 @@ public sealed class Kf8ComicWriterTests : IDisposable
         {
             Directory.Delete(_workDir, recursive: true);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            // Best effort: a leftover temp folder harms nothing.
+            Console.Error.WriteLine($"Failed to delete test directory '{_workDir}' due to IO error: {ex.Message}");
         }
     }
 

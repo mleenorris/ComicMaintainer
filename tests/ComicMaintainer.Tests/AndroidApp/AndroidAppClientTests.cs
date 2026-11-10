@@ -74,7 +74,10 @@ namespace ComicMaintainer.Tests.AndroidApp
         [Fact]
         public void ToString_DoesNotRevealTheSecret()
         {
-            Assert.DoesNotContain("secret", new ApiCredential(CredentialKind.Session, "secret", "https://a.test/").ToString()!, StringComparison.Ordinal);
+            // Held as a plain object, the way a log message or a format string sees it.
+            object credential = new ApiCredential(CredentialKind.Session, "secret", "https://a.test/");
+
+            Assert.DoesNotContain("secret", credential.ToString()!, StringComparison.Ordinal);
         }
     }
 

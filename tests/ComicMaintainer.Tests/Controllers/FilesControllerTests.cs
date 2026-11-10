@@ -1055,8 +1055,9 @@ public class FilesControllerTests
         _mockFileStore.Setup(fs => fs.RemoveFileAsync(filePath, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
-        // Act and assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.DeleteFile(filePath));
+        // Act and assert (the action is async, so the exception is in the task it returns)
+        var delete = _controller.DeleteFile(filePath);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => delete);
         
         // Cleanup: delete the test file if it still exists
         if (File.Exists(filePath))

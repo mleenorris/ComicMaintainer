@@ -134,7 +134,7 @@ public class ComicArchiveTests : IDisposable
     {
         // Arrange
         var filePath = CreateTestCbzArchive("test.cbz");
-        var archive = new ComicArchive(filePath);
+        using var archive = new ComicArchive(filePath);
 
         // Act & Assert - Should not throw
         archive.Dispose();

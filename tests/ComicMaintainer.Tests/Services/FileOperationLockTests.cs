@@ -172,9 +172,12 @@ public sealed class FileOperationLockTests : IDisposable
     private static void InterlockedMax(ref int target, int value)
     {
         int current;
-        while ((current = Volatile.Read(ref target)) < value &&
-               Interlocked.CompareExchange(ref target, value, current) != current)
+        while ((current = Volatile.Read(ref target)) < value)
         {
+            if (Interlocked.CompareExchange(ref target, value, current) == current)
+            {
+                return;
+            }
         }
     }
 }

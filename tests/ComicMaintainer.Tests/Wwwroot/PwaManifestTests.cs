@@ -60,9 +60,8 @@ public class PwaManifestTests : IClassFixture<WebApplicationFactory<Program>>
         var icons = root.GetProperty("icons").EnumerateArray().ToList();
         Assert.Contains(icons, icon => icon.GetProperty("sizes").GetString() == "192x192");
         Assert.Contains(icons, icon => icon.GetProperty("sizes").GetString() == "512x512");
-        foreach (var icon in icons)
+        foreach (var src in icons.Select(icon => icon.GetProperty("src").GetString()!))
         {
-            var src = icon.GetProperty("src").GetString()!;
             Assert.StartsWith("__BASE_PATH__/", src, StringComparison.Ordinal);
             var file = src["__BASE_PATH__/".Length..];
             Assert.True(File.Exists(Path.Join(WwwrootFiles.WwwRoot, file)), $"Manifest icon {src} is not shipped");

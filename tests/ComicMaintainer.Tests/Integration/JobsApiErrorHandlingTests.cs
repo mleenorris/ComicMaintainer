@@ -65,7 +65,8 @@ public sealed class JobsApiErrorHandlingTests : IDisposable
         await using var factory = CreateFactory(registry.Object, fileStore.Object);
         using var client = factory.CreateClient();
 
-        using var response = await client.SendAsync(new HttpRequestMessage(new HttpMethod(method), url));
+        using var request = new HttpRequestMessage(new HttpMethod(method), url);
+        using var response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();

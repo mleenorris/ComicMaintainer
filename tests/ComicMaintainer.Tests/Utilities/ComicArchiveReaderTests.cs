@@ -136,7 +136,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
     [Fact]
     public void Dispose_CanBeCalledTwice()
     {
-        var archive = ComicArchiveReader.Open(Rar("book.cbr", ("p1.jpg", Bytes("page"))));
+        using var archive = ComicArchiveReader.Open(Rar("book.cbr", ("p1.jpg", Bytes("page"))));
         archive.Dispose();
         archive.Dispose();
         Assert.Throws<ObjectDisposedException>(() => archive.EnumerateEntries());
@@ -439,15 +439,11 @@ public sealed class ComicArchiveReaderTests : IDisposable
         // SharpCompress only allocates a window for compressed, non-directory entries.
         var path = Path.Join(_dir, "stored.cbr");
         File.WriteAllBytes(path, Rar5(13, method: 0));
-        using (var _ = ComicArchiveReader.Open(path))
-        {
-        }
+        ComicArchiveReader.Open(path).Dispose();
 
         var folder = Path.Join(_dir, "folder.cbr");
         File.WriteAllBytes(folder, Rar5(13, directory: true));
-        using (var _ = ComicArchiveReader.Open(folder))
-        {
-        }
+        ComicArchiveReader.Open(folder).Dispose();
     }
 
     [Fact]
@@ -464,9 +460,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
         var bytes = MergeRar5Headers(Rar5(0, fileHeaders: 1), Rar5(13, fileHeaders: 1));
         File.WriteAllBytes(path, bytes);
 
-        using (var _ = ComicArchiveReader.OpenForEntry(path, 0))
-        {
-        }
+        ComicArchiveReader.OpenForEntry(path, 0).Dispose();
 
         Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.OpenForEntry(path, 1));
         Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));
@@ -599,7 +593,8 @@ public sealed class ComicArchiveReaderTests : IDisposable
     /// <summary>How many entries SharpCompress itself lists before it stops, however it stops.</summary>
     private static int EntriesSharpCompressLists(byte[] archive)
     {
-        using var rar = RarArchive.OpenArchive(new MemoryStream(archive));
+        using var stream = new MemoryStream(archive);
+        using var rar = RarArchive.OpenArchive(stream);
         var count = 0;
         try
         {
@@ -641,8 +636,9 @@ public sealed class ComicArchiveReaderTests : IDisposable
     public void EnsureRarHeaders_ChecksEveryEntrySharpCompressLists(string layout, byte[] archive)
     {
         var listed = EntriesSharpCompressLists(archive);
+        using var stream = new MemoryStream(archive);
 
-        var checkedHeaders = ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(archive), "x.cbr");
+        var checkedHeaders = ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "x.cbr");
 
         Assert.True(listed == checkedHeaders, $"{layout}: SharpCompress lists {listed}, the check saw {checkedHeaders}");
     }
@@ -759,8 +755,12 @@ public sealed class ComicArchiveReaderTests : IDisposable
     }
 
     [Fact]
-    public void EnsureRarHeaders_NothingAfterTheSignature_IsFine() =>
-        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes()), "x.cbr"));
+    public void EnsureRarHeaders_NothingAfterTheSignature_IsFine()
+    {
+        using var stream = new MemoryStream(Rar5Bytes());
+
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "x.cbr"));
+    }
 
     [Fact]
     public void EnsureRarHeaders_AHeaderSizeThatIsNotAValidNumber_EndsTheCheck()
@@ -769,17 +769,19 @@ public sealed class ComicArchiveReaderTests : IDisposable
         using var output = new MemoryStream();
         output.Write(Rar5Bytes());
         output.Write(new byte[] { 1, 2, 3, 4, 0xFF, 0xFF, 0xFF, 0xFF });
+        using var stream = new MemoryStream(output.ToArray());
 
-        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(output.ToArray()), "x.cbr"));
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "x.cbr"));
     }
 
     [Fact]
     public void EnsureRarHeaders_HeaderWithExtraAreaTimeAndCrc_IsStillParsed()
     {
         var body = FileHeaderBody(type: 2, headerFlags: 0x03, fileFlags: 0x06, dictionaryPower: 13, extraArea: true);
+        using var stream = new MemoryStream(Rar5Bytes(body));
 
         Assert.Throws<ArchiveLimitExceededException>(() =>
-            ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
+            ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "x.cbr"));
     }
 
     [Fact]
@@ -787,8 +789,9 @@ public sealed class ComicArchiveReaderTests : IDisposable
     {
         // SharpCompress never unpacks a service block, so no window is ever allocated for one.
         var body = FileHeaderBody(type: 3, headerFlags: 0, fileFlags: 0, dictionaryPower: 13, name: "QO");
+        using var stream = new MemoryStream(Rar5Bytes(body));
 
-        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "x.cbr"));
     }
 
     [Theory]
@@ -797,9 +800,10 @@ public sealed class ComicArchiveReaderTests : IDisposable
     public void EnsureRarHeaders_BlocksSharpCompressCannotPass_EndTheCheck(ulong type)
     {
         var archive = Rar5Of(Block(new byte[] { (byte)type, 0, 0 }), FileBlock(dictionaryPower: 13));
+        using var stream = new MemoryStream(archive);
 
         Assert.Equal(0, EntriesSharpCompressLists(archive));
-        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(archive), "x.cbr"));
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "x.cbr"));
     }
 
     [Fact]
@@ -812,16 +816,18 @@ public sealed class ComicArchiveReaderTests : IDisposable
         WriteVInt(body, 0x06);
         WriteVInt(body, 1000);
         WriteVInt(body, 0x20);
+        using var stream = new MemoryStream(Rar5Bytes(body.ToArray()));
 
-        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body.ToArray())), "x.cbr"));
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "x.cbr"));
     }
 
     [Fact]
     public void EnsureRarHeaders_ADataAreaPastAnyFile_EndsTheCheck()
     {
         var body = FileHeaderBody(2, headerFlags: 0x02, fileFlags: 0, dictionaryPower: 0, dataSize: ulong.MaxValue >> 1);
+        using var stream = new MemoryStream(Rar5Bytes(body));
 
-        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "x.cbr"));
     }
 
     [Fact]
@@ -829,9 +835,10 @@ public sealed class ComicArchiveReaderTests : IDisposable
     {
         var mainHeader = new byte[] { 1, 0, 0 };
         var blocks = Enumerable.Repeat(mainHeader, (2 * ArchiveEntryReader.MaxEntries) + 17).ToArray();
+        using var stream = new MemoryStream(Rar5Bytes(blocks));
 
         var ex = Assert.Throws<ArchiveLimitExceededException>(() =>
-            ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(blocks)), "many.cbr"));
+            ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "many.cbr"));
 
         Assert.Contains("many.cbr", ex.Message);
     }
@@ -842,8 +849,12 @@ public sealed class ComicArchiveReaderTests : IDisposable
     [InlineData(new byte[] { 2, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01 })] // extra area size does not fit
     [InlineData(new byte[] { 2, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01 })] // data size does not fit
     [InlineData(new byte[] { 2, 0, 0xFF, 0xFF, 0xFF, 0x01 })] // file flags do not fit
-    public void EnsureRarHeaders_MalformedFields_EndTheCheck(byte[] body) =>
-        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(new MemoryStream(Rar5Bytes(body)), "x.cbr"));
+    public void EnsureRarHeaders_MalformedFields_EndTheCheck(byte[] body)
+    {
+        using var stream = new MemoryStream(Rar5Bytes(body));
+
+        Assert.Equal(0, ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, "x.cbr"));
+    }
 
     [Fact]
     public void Open_Rar5VolumeSet_WithinTheLimits_Opens()

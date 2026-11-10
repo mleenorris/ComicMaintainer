@@ -105,6 +105,7 @@ public sealed class FilesControllerFileLockTests : IDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     public async Task DeleteFile_WaitsForAnOperationHoldingTheFilesLock(bool restfulEndpoint)
     {
         var comic = CreateComic(Path.Join(_root, "Foo"), "Foo 001.cbz");
@@ -127,6 +128,7 @@ public sealed class FilesControllerFileLockTests : IDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     public async Task DeleteFile_AsksMediaServersToRescan_OnceTheFileIsGone(bool restfulEndpoint)
     {
         var comic = CreateComic(Path.Join(_root, "Foo"), "Foo 001.cbz");
@@ -146,7 +148,7 @@ public sealed class FilesControllerFileLockTests : IDisposable
         var renamed = Path.Join(_root, "Foo", "Foo 001.cbz");
 
         var inFlight = await _fileLock.Inner.AcquireAsync(comic);
-        var delete = DeleteAsync(CreateController(), comic, restfulEndpoint: true);
+        var delete = CreateController().DeleteFileByEncodedPath(Encode(comic));
         await WaitUntilAsync(() => _fileLock.Requested.Contains(comic), $"the delete to ask for the lock of {comic}");
 
         // The processing that held the lock renames the archive.
@@ -179,10 +181,9 @@ public sealed class FilesControllerFileLockTests : IDisposable
         _fileStore.Verify(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-#pragma warning disable CS0618 // Covers the deprecated /api/delete-file alias too.
+    [Obsolete("Covers the deprecated /api/delete-file alias until it is removed in v3.0.")]
     private static Task<ActionResult> DeleteAsync(FilesController controller, string path, bool restfulEndpoint) =>
         restfulEndpoint ? controller.DeleteFileByEncodedPath(Encode(path)) : controller.DeleteFile(path);
-#pragma warning restore CS0618
 
     private FilesController CreateController()
     {

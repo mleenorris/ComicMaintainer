@@ -75,7 +75,7 @@ public sealed class ArchiveFormatSupportTests : IDisposable
         (string, byte[])[] pages = { ("page2.jpg", Bytes("two")), ("page10.jpg", Bytes("ten")), ("page1.png", Bytes("one")) };
         var path = format == "zip"
             ? Zip(name, pages)
-            : Rar(name, pages.Select(p => (p.Item1, (byte[]?)p.Item2)).ToArray());
+            : Rar(name, [.. pages]);
         using var reader = CreateReader();
 
         Assert.Equal(3, await reader.GetPageCountAsync(path));

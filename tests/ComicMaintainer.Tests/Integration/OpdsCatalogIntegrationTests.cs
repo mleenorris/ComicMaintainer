@@ -69,7 +69,7 @@ public sealed class OpdsCatalogIntegrationTests : IClassFixture<OpdsHostFixture>
     [Fact]
     public async Task AClientWalksTheCatalogWithAPassword()
     {
-        var (user, series, comic, seriesEntry) = await UserWithComicAsync(("p1.jpg", "first page"), ("p2.jpg", "second page"), ("p3.jpg", "third page"));
+        var (user, _, comic, seriesEntry) = await UserWithComicAsync(("p1.jpg", "first page"), ("p2.jpg", "second page"), ("p3.jpg", "third page"));
 
         using var catalogResponse = await _host.GetAsync(Catalog, user.UserName, OpdsTestHost.Password);
         var catalog = await OpdsTestHost.ReadFeedAsync(catalogResponse);
@@ -469,7 +469,7 @@ public sealed class OpdsCatalogIntegrationTests : IClassFixture<OpdsHostFixture>
     [Fact]
     public async Task TheFeedReportsProgressPerUserAndNumberedFromOne()
     {
-        var (user, series, comic, seriesEntry) = await UserWithComicAsync(("p1.jpg", "first"), ("p2.jpg", "second"), ("p3.jpg", "third"));
+        var (user, _, comic, seriesEntry) = await UserWithComicAsync(("p1.jpg", "first"), ("p2.jpg", "second"), ("p3.jpg", "third"));
         var other = await _host.CreateUserAsync();
         var id = await _host.FileIdAsync(comic);
         using (await _host.GetAsync($"/opds/v1.2/issues/{id}/pages/1", user.UserName, OpdsTestHost.Password))

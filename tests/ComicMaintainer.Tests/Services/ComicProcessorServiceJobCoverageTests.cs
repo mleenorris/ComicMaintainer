@@ -694,7 +694,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public void GetAllJobs_ReturnsRestoredJobsNewestFirst()
     {
-        var service = CreateService();
+        CreateService();
         var older = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Completed, StartTime = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) };
         var newest = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Interrupted, StartTime = new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc) };
         var middle = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Failed, StartTime = new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc) };
@@ -707,7 +707,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteJobAsync_UnknownJob_ReturnsFalse()
     {
-        var service = CreateService();
+        CreateService();
 
         Assert.False(await _jobs.DeleteJobAsync(Guid.NewGuid()));
     }
@@ -715,7 +715,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public async Task DeleteJobAsync_ActiveJob_IsRefusedAndKept()
     {
-        var service = CreateService();
+        CreateService();
         var running = new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Running, StartTime = DateTime.UtcNow };
         _jobs.RestoreJobs(new[] { running });
 
@@ -729,7 +729,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     [Fact]
     public void CancelJob_UnknownJob_ReturnsFalseWithWarning()
     {
-        var service = CreateService();
+        CreateService();
 
         Assert.False(_jobs.CancelJob(Guid.NewGuid()));
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot cancel job {JobId}: no active cancellation token found"));
@@ -903,7 +903,7 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
                 }
             })
             .Returns(Task.CompletedTask);
-        var service = CreateService(store.Object);
+        CreateService(store.Object);
 
         var jobId = await _jobs.RunCustomBatchJobAsync(
             "CustomOp",

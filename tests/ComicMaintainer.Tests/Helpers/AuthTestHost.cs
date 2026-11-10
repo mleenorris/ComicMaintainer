@@ -83,7 +83,9 @@ internal sealed class AuthTestHost : IAsyncDisposable
         var roles = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
         foreach (var role in new[] { "Admin", "User", "ReadOnly" })
         {
-            if (!await roles.RoleExistsAsync(role))
+            // RoleExistsAsync is asynchronous, so it cannot be the predicate of a Where.
+            var exists = await roles.RoleExistsAsync(role);
+            if (!exists)
             {
                 await roles.CreateAsync(new ApplicationRole { Name = role, Description = $"{role} role" });
             }

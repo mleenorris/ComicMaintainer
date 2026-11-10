@@ -271,11 +271,11 @@ public sealed class OpdsControllerTests : IDisposable
     [Fact]
     public async Task CoverEdgeCases()
     {
-        _covers.Setup(c => c.GetValidator(It.IsAny<string>())).Returns((FileCoverValidator?)null);
+        _covers.Setup(c => c.GetValidator(It.IsAny<string>())).Returns(default(FileCoverValidator?));
         Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Cover(Id, default)));
 
         _covers.Setup(c => c.GetValidator(It.IsAny<string>())).Returns(new FileCoverValidator(4, DateTimeOffset.UtcNow, "orig"));
-        _covers.Setup(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((FileCoverCacheEntry?)null);
+        _covers.Setup(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(default(FileCoverCacheEntry?));
         Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Cover(Id, default)));
 
         _covers.Setup(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new ArchiveLimitExceededException("too big"));
@@ -525,7 +525,7 @@ public sealed class OpdsControllerTests : IDisposable
     public async Task AnUnknownSeriesIsNotFound()
     {
         _library.Setup(l => l.GetSeriesIssuesAsync("nope", null, 1, OpdsController.PageSize, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SeriesIssuesResult?)null);
+            .ReturnsAsync(default(SeriesIssuesResult?));
 
         var result = await CreateController().Series("nope");
 
@@ -709,7 +709,7 @@ public sealed class OpdsControllerTests : IDisposable
     [Fact]
     public async Task AnIdTheStoreDoesNotKnowIsNotFoundOnEveryFileRoute()
     {
-        _fileStore.Setup(s => s.GetFilePathAsync(Id, It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
+        _fileStore.Setup(s => s.GetFilePathAsync(Id, It.IsAny<CancellationToken>())).ReturnsAsync(default(string?));
 
         await AssertEveryFileRouteIsNotFoundAsync();
     }

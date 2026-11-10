@@ -216,10 +216,11 @@ public sealed class SessionTokenIntegrationTests : IClassFixture<SessionTokenInt
         return body.RootElement.GetProperty("token").GetString()!;
     }
 
-    private Task<HttpResponseMessage> OpenStreamAsync(string streamToken) =>
-        _host.Client.SendAsync(
-            new HttpRequestMessage(HttpMethod.Get, "/api/events/stream?access_token=" + streamToken),
-            HttpCompletionOption.ResponseHeadersRead);
+    private async Task<HttpResponseMessage> OpenStreamAsync(string streamToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events/stream?access_token=" + streamToken);
+        return await _host.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+    }
 
     private async Task<HttpStatusCode> GetStatusAsync(string path, string? bearer = null)
     {
@@ -233,11 +234,11 @@ public sealed class SessionTokenIntegrationTests : IClassFixture<SessionTokenInt
         return response.StatusCode;
     }
 
-    private Task<HttpResponseMessage> PostAsync(string path, string bearer, object? body = null)
+    private async Task<HttpResponseMessage> PostAsync(string path, string bearer, object? body = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = body is null ? null : JsonContent.Create(body) };
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = body is null ? null : JsonContent.Create(body) };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
-        return _host.Client.SendAsync(request);
+        return await _host.Client.SendAsync(request);
     }
 
     /// <summary>The app in JWT mode on a database and config directory of its own.</summary>

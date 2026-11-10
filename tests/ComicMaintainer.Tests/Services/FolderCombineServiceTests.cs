@@ -31,7 +31,7 @@ public sealed class FolderCombineServiceTests : IDisposable
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
     private readonly List<ProcessingHistoryEntry> _historyEntries = new();
     private readonly RecordingBatchJobReport _jobReport;
-    private List<ComicFile> _files = new();
+    private readonly List<ComicFile> _files = new();
 
     public FolderCombineServiceTests()
     {

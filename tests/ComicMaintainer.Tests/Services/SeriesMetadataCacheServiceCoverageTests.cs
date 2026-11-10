@@ -447,7 +447,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         _external.Setup(e => e.ForgetNoMatch("New Series")).Callback(() => order.Add("forget"));
         _external.Setup(e => e.LookupSeriesAsync("New Series", It.IsAny<CancellationToken>()))
             .Callback(() => order.Add("lookup"))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
 
         await _service.RefreshAsync("New Series");
 

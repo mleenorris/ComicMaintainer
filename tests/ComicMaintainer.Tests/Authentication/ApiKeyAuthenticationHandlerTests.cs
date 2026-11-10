@@ -85,7 +85,7 @@ public sealed class ApiKeyAuthenticationHandlerTests : IAsyncLifetime
     [Fact]
     public async Task Authenticate_WithAKeyNoActiveAccountHas_Fails()
     {
-        _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync((ApplicationUser?)null);
+        _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync(default(ApplicationUser?));
 
         var result = await AuthenticateAsync(CreateContext(Key));
 

@@ -449,7 +449,7 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
         _authService.Verify(a => a.GetUserByApiKeyAsync(Key), Times.Exactly(2));
         Assert.Equal(ApiKeys.AuthMethod, remembered.Principal!.FindFirstValue("auth_method"));
 
-        _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync((ApplicationUser?)null);
+        _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync(default(ApplicationUser?));
 
         var result = await AuthenticateAsync(CreateContext(credentials));
 
@@ -621,7 +621,7 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
     }
 
     private void RefusePassword() =>
-        _authService.Setup(a => a.VerifyPasswordAsync(Username, Password, It.IsAny<string?>())).ReturnsAsync((ApplicationUser?)null);
+        _authService.Setup(a => a.VerifyPasswordAsync(Username, Password, It.IsAny<string?>())).ReturnsAsync(default(ApplicationUser?));
 
     private void VerifyNoPasswordCheck() =>
         _authService.Verify(a => a.VerifyPasswordAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);

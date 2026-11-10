@@ -84,8 +84,9 @@ public sealed class ArchiveEntryReaderTests : IDisposable
     public void ReadBounded_KnownLength_ReturnsExactlyTheData()
     {
         var data = Encoding.ASCII.GetBytes("page bytes");
+        using var stream = new MemoryStream(data);
 
-        var read = ArchiveEntryReader.ReadBounded(new MemoryStream(data), "p1.jpg", data.Length, maxBytes: 1024);
+        var read = ArchiveEntryReader.ReadBounded(stream, "p1.jpg", data.Length, maxBytes: 1024);
 
         Assert.Equal(data, read);
     }
@@ -94,7 +95,7 @@ public sealed class ArchiveEntryReaderTests : IDisposable
     public void ReadBounded_StreamLongerThanItsDeclaredLength_IsRefused()
     {
         // A header that understates the size must not let the data through.
-        var stream = new MemoryStream(new byte[100]);
+        using var stream = new MemoryStream(new byte[100]);
 
         var ex = Assert.Throws<ArchiveLimitExceededException>(
             () => ArchiveEntryReader.ReadBounded(stream, "p1.jpg", declaredLength: 10, maxBytes: 1024));
@@ -106,7 +107,9 @@ public sealed class ArchiveEntryReaderTests : IDisposable
     [Fact]
     public void ReadBounded_TruncatedStream_ReturnsWhatWasRead()
     {
-        var read = ArchiveEntryReader.ReadBounded(new MemoryStream(new byte[] { 1, 2, 3 }), "p1.jpg", declaredLength: 10, maxBytes: 1024);
+        using var stream = new MemoryStream(new byte[] { 1, 2, 3 });
+
+        var read = ArchiveEntryReader.ReadBounded(stream, "p1.jpg", declaredLength: 10, maxBytes: 1024);
 
         Assert.Equal(new byte[] { 1, 2, 3 }, read);
     }
@@ -116,8 +119,9 @@ public sealed class ArchiveEntryReaderTests : IDisposable
     {
         var data = new byte[200_000];
         Random.Shared.NextBytes(data);
+        using var stream = new MemoryStream(data);
 
-        var read = ArchiveEntryReader.ReadBounded(new MemoryStream(data), "p1.jpg", declaredLength: -1, maxBytes: data.Length);
+        var read = ArchiveEntryReader.ReadBounded(stream, "p1.jpg", declaredLength: -1, maxBytes: data.Length);
 
         Assert.Equal(data, read);
     }
@@ -230,17 +234,17 @@ public sealed class ArchiveEntryReaderTests : IDisposable
     [Fact]
     public void CountZipEntries_CountsTheCentralDirectory()
     {
-        var zip = BuildZip(Pages(5));
+        using var stream = new MemoryStream(BuildZip(Pages(5)));
 
-        Assert.Equal(5, ArchiveEntryReader.CountZipEntries(new MemoryStream(zip), stopAfter: 100));
+        Assert.Equal(5, ArchiveEntryReader.CountZipEntries(stream, stopAfter: 100));
     }
 
     [Fact]
     public void CountZipEntries_StopsJustPastTheLimit()
     {
-        var zip = BuildZip(Pages(50));
+        using var stream = new MemoryStream(BuildZip(Pages(50)));
 
-        Assert.Equal(11, ArchiveEntryReader.CountZipEntries(new MemoryStream(zip), stopAfter: 10));
+        Assert.Equal(11, ArchiveEntryReader.CountZipEntries(stream, stopAfter: 10));
     }
 
     [Fact]
@@ -252,8 +256,9 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         var eocd = zip.Length - 22;
         BinaryPrimitives.WriteUInt16LittleEndian(zip.AsSpan(eocd + 8), 1);
         BinaryPrimitives.WriteUInt16LittleEndian(zip.AsSpan(eocd + 10), 1);
+        using var stream = new MemoryStream(zip);
 
-        Assert.Equal(7, ArchiveEntryReader.CountZipEntries(new MemoryStream(zip), stopAfter: 100));
+        Assert.Equal(7, ArchiveEntryReader.CountZipEntries(stream, stopAfter: 100));
     }
 
     [Fact]
@@ -265,25 +270,26 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         {
             Assert.Equal(3, archive.Entries.Count);
         }
+        using var stream = new MemoryStream(zip);
 
-        Assert.Equal(3, ArchiveEntryReader.CountZipEntries(new MemoryStream(zip), stopAfter: 100));
+        Assert.Equal(3, ArchiveEntryReader.CountZipEntries(stream, stopAfter: 100));
     }
 
     [Fact]
     public void CountZipEntries_FindsTheRecordBeforeAnArchiveComment()
     {
-        var zip = BuildZip(Pages(4), comment: "scanned by someone");
+        using var stream = new MemoryStream(BuildZip(Pages(4), comment: "scanned by someone"));
 
-        Assert.Equal(4, ArchiveEntryReader.CountZipEntries(new MemoryStream(zip), stopAfter: 100));
+        Assert.Equal(4, ArchiveEntryReader.CountZipEntries(stream, stopAfter: 100));
     }
 
     [Fact]
     public void CountZipEntries_FindsTheRecordBeforeALongArchiveComment()
     {
         // Past the first kilobyte searched, so the whole 64 KiB window is.
-        var zip = BuildZip(Pages(4), comment: new string('c', 30_000));
+        using var stream = new MemoryStream(BuildZip(Pages(4), comment: new string('c', 30_000)));
 
-        Assert.Equal(4, ArchiveEntryReader.CountZipEntries(new MemoryStream(zip), stopAfter: 100));
+        Assert.Equal(4, ArchiveEntryReader.CountZipEntries(stream, stopAfter: 100));
     }
 
     [Fact]
@@ -304,10 +310,10 @@ public sealed class ArchiveEntryReaderTests : IDisposable
     [Fact]
     public void EnsureZipEntryCountWithinLimit_TooManyEntriesBehindALongComment_IsRefused()
     {
-        var zip = BuildZip(Pages(ArchiveEntryReader.MaxEntries + 1, size: 0), comment: new string('c', 5_000));
+        using var stream = new MemoryStream(BuildZip(Pages(ArchiveEntryReader.MaxEntries + 1, size: 0), comment: new string('c', 5_000)));
 
         Assert.Throws<ArchiveLimitExceededException>(
-            () => ArchiveEntryReader.EnsureZipEntryCountWithinLimit(new MemoryStream(zip), "many.cbz"));
+            () => ArchiveEntryReader.EnsureZipEntryCountWithinLimit(stream, "many.cbz"));
     }
 
     [Fact]
@@ -318,10 +324,11 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         var full = BuildBareCentralDirectory(ArchiveEntryReader.MaxEntries);
         var overfull = BuildBareCentralDirectory(ArchiveEntryReader.MaxEntries + 1);
         using var fullStream = new ReadCountingStream(full);
+        using var overfullStream = new MemoryStream(overfull);
 
         ArchiveEntryReader.EnsureZipEntryCountWithinLimit(fullStream, "full.cbz");
         var ex = Assert.Throws<ArchiveLimitExceededException>(
-            () => ArchiveEntryReader.EnsureZipEntryCountWithinLimit(new MemoryStream(overfull), "overfull.cbz"));
+            () => ArchiveEntryReader.EnsureZipEntryCountWithinLimit(overfullStream, "overfull.cbz"));
 
         Assert.InRange(fullStream.BytesRead, 22, 1024);
         Assert.Contains("overfull.cbz", ex.Message);
@@ -330,8 +337,12 @@ public sealed class ArchiveEntryReaderTests : IDisposable
     [Theory]
     [InlineData(new byte[0])]
     [InlineData(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 })]
-    public void CountZipEntries_NotAZip_ReturnsZero(byte[] bytes) =>
-        Assert.Equal(0, ArchiveEntryReader.CountZipEntries(new MemoryStream(bytes), stopAfter: 100));
+    public void CountZipEntries_NotAZip_ReturnsZero(byte[] bytes)
+    {
+        using var stream = new MemoryStream(bytes);
+
+        Assert.Equal(0, ArchiveEntryReader.CountZipEntries(stream, stopAfter: 100));
+    }
 
     [Fact]
     public void OpenZip_TooManyEntries_IsRefusedBeforeTheEntryListIsBuilt()

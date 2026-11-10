@@ -131,16 +131,7 @@ public abstract class AniListSeriesMetadataProviderBase : ExternalSeriesMetadata
             return Array.Empty<ExternalSeriesMetadata>();
         }
 
-        var output = new List<ExternalSeriesMetadata>();
-        foreach (var item in media.EnumerateArray())
-        {
-            if (ParseMedia(item) is { } metadata)
-            {
-                output.Add(metadata);
-            }
-        }
-
-        return output;
+        return media.EnumerateArray().Select(item => ParseMedia(item)).OfType<ExternalSeriesMetadata>().ToList();
     }
 
     private protected override ExternalSeriesMetadata? ParseGetByIdResult(JsonElement root)

@@ -20,6 +20,9 @@ public sealed record OpdsFeedInfo(
     string? Up = null,
     OpdsPaging? Paging = null);
 
+/// <summary>Where a paged feed is in its result, for the OPDS paging links.</summary>
+
+/// <summary>Where a paged feed is in its result, for the OPDS paging links.</summary>
 /// <param name="Page">The page being returned, from 1.</param>
 /// <param name="TotalPages">How many pages the result has.</param>
 /// <param name="ItemsPerPage">The size of a page.</param>

@@ -87,6 +87,7 @@ public partial class FileStoreService
         return allFiles;
     }
 
+    /// <summary>Counts all files, the processed and unprocessed ones, and the duplicates.</summary>
     /// <remarks>
     /// Counted in SQL with the same predicates as <see cref="GetUnmarkedCountAsync"/> and the
     /// file-list filters, so <c>/api/files/counts</c>, the list's <c>unmarked_count</c> and the

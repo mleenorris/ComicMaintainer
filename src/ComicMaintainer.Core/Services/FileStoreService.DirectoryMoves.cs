@@ -68,11 +68,13 @@ public partial class FileStoreService
 
                 foreach (var row in rows)
                 {
-                    if (occupied.TryGetValue(Rebase(row.FilePath), out var existing))
+                    if (!occupied.TryGetValue(Rebase(row.FilePath), out var existing))
                     {
-                        MergeIntoMovedRow(row, existing);
-                        dbContext.ComicFiles.Remove(existing);
+                        continue;
                     }
+
+                    MergeIntoMovedRow(row, existing);
+                    dbContext.ComicFiles.Remove(existing);
                 }
 
                 // Clear the destinations before renaming onto them: the path index is unique.

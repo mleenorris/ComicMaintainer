@@ -60,16 +60,7 @@ public class MangaDexSeriesMetadataService : ExternalSeriesMetadataProviderBase
             return Array.Empty<ExternalSeriesMetadata>();
         }
 
-        var output = new List<ExternalSeriesMetadata>();
-        foreach (var item in data.EnumerateArray())
-        {
-            if (ParseManga(item) is { } metadata)
-            {
-                output.Add(metadata);
-            }
-        }
-
-        return output;
+        return data.EnumerateArray().Select(item => ParseManga(item)).OfType<ExternalSeriesMetadata>().ToList();
     }
 
     private protected override ExternalSeriesMetadata? ParseGetByIdResult(JsonElement root)

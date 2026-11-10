@@ -51,6 +51,14 @@ jobs:
             - '**/coveragereport'
             - '**/*.min.js'
             - '**/*.min.css'
+          # ArchiveEntryReader reads SharpCompress internals through [UnsafeAccessor] methods. They are
+          # managed code, but they are declared extern, so these two rules report every one of them as
+          # native code. scripts/dev.ps1 uses the same configuration.
+          query-filters:
+            - exclude:
+                id: cs/unmanaged-code
+            - exclude:
+                id: cs/call-to-unmanaged-code
 
     - name: Setup .NET
       if: matrix.language == 'csharp'

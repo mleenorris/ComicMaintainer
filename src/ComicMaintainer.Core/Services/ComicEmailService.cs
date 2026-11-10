@@ -1245,8 +1245,9 @@ public class ComicEmailService : IComicEmailService
                 ex,
                 "The server ran out of memory while preparing this delivery. Try again when it is less busy, or send fewer issues per book.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Cancellation is handled above; anything else fails this delivery.
             MarkFailed(delivery, ex, ex.Message);
         }
         finally

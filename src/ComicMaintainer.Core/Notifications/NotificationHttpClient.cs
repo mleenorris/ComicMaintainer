@@ -155,12 +155,9 @@ public sealed class NotificationHttpClient
     private static string CleanErrorText(string body, IReadOnlyCollection<string?> secrets)
     {
         var text = body;
-        foreach (var secret in secrets)
+        foreach (var secret in secrets.OfType<string>().Where(secret => secret.Length > 0))
         {
-            if (!string.IsNullOrEmpty(secret))
-            {
-                text = text.Replace(secret, "***", StringComparison.Ordinal);
-            }
+            text = text.Replace(secret, "***", StringComparison.Ordinal);
         }
 
         text = LoggingHelper.SanitizeForLog(text).Trim();

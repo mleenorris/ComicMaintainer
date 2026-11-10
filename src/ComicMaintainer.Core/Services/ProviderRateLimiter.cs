@@ -66,6 +66,9 @@ internal sealed class ProviderRateLimiter : IDisposable
     private readonly SlidingWindowRateLimiter? _budget;
     private readonly TimeSpan _budgetSegment;
 
+    /// <summary>Creates a limiter that paces a provider's requests and can also cap them per budget window.</summary>
+
+    /// <summary>Creates a limiter that paces a provider's requests and can also cap them per budget window.</summary>
     /// <param name="name">Name used in diagnostics.</param>
     /// <param name="permitLimit">Requests allowed per <paramref name="window"/>; values below 1 become 1.</param>
     /// <param name="window">Length of the pace window.</param>

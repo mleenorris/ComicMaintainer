@@ -193,6 +193,7 @@ public sealed class ComicArchiveReader : IDisposable
     {
         var totalBytes = firstFile.Length;
         var set = RarArchive.OpenArchive(filePath, RarReaderOptions);
+        var returnSet = false;
         try
         {
             var volumes = ((IArchive)set).Volumes.ToList();
@@ -204,16 +205,19 @@ public sealed class ComicArchiveReader : IDisposable
                 }
 
                 firstFile.Dispose();
+                returnSet = true;
                 return (set, totalBytes);
             }
         }
-        catch
+        finally
         {
-            set.Dispose();
-            throw;
+            // Only the multi-volume set is handed to the caller; a refusal or a single file closes it here.
+            if (!returnSet)
+            {
+                set.Dispose();
+            }
         }
 
-        set.Dispose();
         firstFile.Position = 0;
         return (RarArchive.OpenArchive(firstFile, RarReaderOptions), totalBytes);
     }
@@ -289,14 +293,10 @@ public sealed class ComicArchiveReader : IDisposable
     /// </remarks>
     public IReadOnlyList<ComicArchivePage> ListPages()
     {
-        var pages = new List<ComicArchivePage>();
-        foreach (var entry in EnumerateEntries())
-        {
-            if (!entry.IsDirectory && IsPageImageName(entry.Name))
-            {
-                pages.Add(new ComicArchivePage(entry.Name, entry.Position));
-            }
-        }
+        var pages = EnumerateEntries()
+            .Where(entry => !entry.IsDirectory && IsPageImageName(entry.Name))
+            .Select(entry => new ComicArchivePage(entry.Name, entry.Position))
+            .ToList();
 
         // OrderBy is stable, so entries with equal names keep their archive order.
         return pages.OrderBy(p => p.Name, new NaturalStringComparer()).ToList();

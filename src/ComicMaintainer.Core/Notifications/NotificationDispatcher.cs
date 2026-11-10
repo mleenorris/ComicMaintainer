@@ -190,7 +190,9 @@ public sealed class NotificationDispatcher : BackgroundService
         await Task.WhenAny(delay, raised);
         await waiting.CancelAsync();
         await delay.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-        await ((Task)raised).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        // SuppressThrowing is refused for a Task<T>, so await it as a plain Task.
+        Task raisedTask = raised;
+        await raisedTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
     /// <summary>

@@ -341,11 +341,7 @@ public class ComicEmailQueue : IComicEmailQueue
                 {
                     await deliveryService.ProcessDeliveryAsync(deliveryId, cancellationToken);
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
                     // Out of memory included: there is one consumer, and a single
                     // book too large to build must not end all later deliveries.
@@ -395,7 +391,7 @@ public class ComicEmailQueue : IComicEmailQueue
             {
                 return;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 // Out of memory included: a sweep that ended here would strand
                 // whatever is pending until the next restart.

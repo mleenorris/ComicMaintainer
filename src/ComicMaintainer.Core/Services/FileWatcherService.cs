@@ -326,21 +326,27 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         {
             var previous = _latestScan;
             var linked = CancellationTokenSource.CreateLinkedTokenSource(_scanCts.Token, cancellationToken);
-            _latestScan = Task.Run(async () =>
-            {
-                try
-                {
-                    await previous.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-                    await scan(linked.Token);
-                }
-                finally
-                {
-                    linked.Dispose();
-                    cleanupHold?.Dispose();
-                }
-            }, CancellationToken.None);
+            _latestScan = Task.Run(() => RunQueuedScanAsync(previous, scan, linked, cleanupHold), CancellationToken.None);
 
             return _latestScan;
+        }
+    }
+
+    /// <summary>
+    /// Runs one queued scan after the one before it, then releases the token source and the stale-cleanup hold that
+    /// <see cref="QueueScan"/> took when the scan was queued.
+    /// </summary>
+    private static async Task RunQueuedScanAsync(
+        Task previous,
+        Func<CancellationToken, Task> scan,
+        CancellationTokenSource linked,
+        IDisposable? cleanupHold)
+    {
+        using (cleanupHold)
+        using (linked)
+        {
+            await previous.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await scan(linked.Token);
         }
     }
 

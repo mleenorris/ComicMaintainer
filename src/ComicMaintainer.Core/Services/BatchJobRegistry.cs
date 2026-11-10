@@ -271,12 +271,9 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
     public int CancelActiveJobs()
     {
         var cancelled = 0;
-        foreach (var entry in _entries.Values)
+        foreach (var cancellation in _entries.Values.Select(entry => entry.Cancellation).OfType<CancellationTokenSource>())
         {
-            if (entry.Cancellation is { } cancellation && TryCancel(cancellation))
-            {
-                cancelled++;
-            }
+            cancelled += TryCancel(cancellation) ? 1 : 0;
         }
 
         return cancelled;

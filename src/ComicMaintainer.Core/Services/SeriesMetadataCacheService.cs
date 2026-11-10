@@ -195,10 +195,12 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             {
                 foreach (var titleKey in TitleKeysOf(entity))
                 {
-                    if (!owners.TryGetValue(titleKey, out var owner) || IsMoreAuthoritative(entity, owner))
+                    if (owners.TryGetValue(titleKey, out var owner) && !IsMoreAuthoritative(entity, owner))
                     {
-                        owners[titleKey] = entity;
+                        continue;
                     }
+
+                    owners[titleKey] = entity;
                 }
             }
 

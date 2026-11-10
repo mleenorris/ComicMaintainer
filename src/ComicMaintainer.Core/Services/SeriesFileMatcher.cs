@@ -52,15 +52,7 @@ public static class SeriesFileMatcher
     public static HashSet<string> KeysOf(IEnumerable<string?> titles)
     {
         ArgumentNullException.ThrowIfNull(titles);
-        var keys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var title in titles)
-        {
-            if (SeriesKey.TryNormalize(title) is { } key)
-            {
-                keys.Add(key);
-            }
-        }
-        return keys;
+        return new HashSet<string>(titles.Select(title => SeriesKey.TryNormalize(title)).OfType<string>(), StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -145,18 +137,10 @@ public static class SeriesFileMatcher
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(seriesKeys);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var selected = new List<ComicFile>();
-        foreach (var file in files)
-        {
-            if (file is not null
-                && !string.IsNullOrWhiteSpace(file.FilePath)
-                && BelongsTo(file, seriesKeys)
-                && seen.Add(file.FilePath))
-            {
-                selected.Add(file);
-            }
-        }
-        return selected;
+        // DistinctBy keeps the first file of each path, as a seen-set would.
+        return files
+            .Where(file => file is not null && !string.IsNullOrWhiteSpace(file.FilePath) && BelongsTo(file, seriesKeys))
+            .DistinctBy(file => file.FilePath, StringComparer.Ordinal)
+            .ToList();
     }
 }

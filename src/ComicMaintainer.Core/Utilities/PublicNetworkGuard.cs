@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -178,21 +179,33 @@ public static class PublicNetworkGuard
 
     private static bool StartsWith(byte[] bytes, ReadOnlySpan<byte> prefix) => bytes.AsSpan().StartsWith(prefix);
 
-    private static bool IsBlockedIPv4(ReadOnlySpan<byte> b) =>
-        b[0] == 0                                       // 0.0.0.0/8 "this network"
-        || b[0] == 10                                   // 10.0.0.0/8 private
-        || (b[0] == 100 && (b[1] & 0xC0) == 64)         // 100.64.0.0/10 shared address space (CGNAT)
-        || b[0] == 127                                  // 127.0.0.0/8 loopback
-        || (b[0] == 169 && b[1] == 254)                 // 169.254.0.0/16 link-local, cloud metadata
-        || (b[0] == 172 && (b[1] & 0xF0) == 16)         // 172.16.0.0/12 private
-        || (b[0] == 192 && b[1] == 0 && b[2] == 0)      // 192.0.0.0/24 IETF protocol assignments
-        || (b[0] == 192 && b[1] == 0 && b[2] == 2)      // 192.0.2.0/24 TEST-NET-1
-        || (b[0] == 192 && b[1] == 88 && b[2] == 99)    // 192.88.99.0/24 6to4 relay anycast
-        || (b[0] == 192 && b[1] == 168)                 // 192.168.0.0/16 private
-        || (b[0] == 198 && (b[1] & 0xFE) == 18)         // 198.18.0.0/15 benchmarking
-        || (b[0] == 198 && b[1] == 51 && b[2] == 100)   // 198.51.100.0/24 TEST-NET-2
-        || (b[0] == 203 && b[1] == 0 && b[2] == 113)    // 203.0.113.0/24 TEST-NET-3
-        || b[0] >= 224;                                 // 224.0.0.0/4 multicast, 240.0.0.0/4 reserved, broadcast
+    // IPv4 blocks that are not on the public internet, as (network address, prefix length).
+    private static readonly (uint Network, int PrefixLength)[] BlockedIPv4Blocks =
+    [
+        (IPv4(0, 0, 0), 8),       // 0.0.0.0/8 "this network"
+        (IPv4(10, 0, 0), 8),      // 10.0.0.0/8 private
+        (IPv4(100, 64, 0), 10),   // 100.64.0.0/10 shared address space (CGNAT)
+        (IPv4(127, 0, 0), 8),     // 127.0.0.0/8 loopback
+        (IPv4(169, 254, 0), 16),  // 169.254.0.0/16 link-local, cloud metadata
+        (IPv4(172, 16, 0), 12),   // 172.16.0.0/12 private
+        (IPv4(192, 0, 0), 24),    // 192.0.0.0/24 IETF protocol assignments
+        (IPv4(192, 0, 2), 24),    // 192.0.2.0/24 TEST-NET-1
+        (IPv4(192, 88, 99), 24),  // 192.88.99.0/24 6to4 relay anycast
+        (IPv4(192, 168, 0), 16),  // 192.168.0.0/16 private
+        (IPv4(198, 18, 0), 15),   // 198.18.0.0/15 benchmarking
+        (IPv4(198, 51, 100), 24), // 198.51.100.0/24 TEST-NET-2
+        (IPv4(203, 0, 113), 24),  // 203.0.113.0/24 TEST-NET-3
+        (IPv4(224, 0, 0), 3),     // 224.0.0.0/4 multicast and 240.0.0.0/4 reserved, broadcast included
+    ];
+
+    private static uint IPv4(byte first, byte second, byte third) =>
+        ((uint)first << 24) | ((uint)second << 16) | ((uint)third << 8);
+
+    private static bool IsBlockedIPv4(ReadOnlySpan<byte> bytes)
+    {
+        var address = BinaryPrimitives.ReadUInt32BigEndian(bytes);
+        return BlockedIPv4Blocks.Any(block => (address & (uint.MaxValue << (32 - block.PrefixLength))) == block.Network);
+    }
 }
 
 /// <summary>

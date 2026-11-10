@@ -195,12 +195,14 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
         var merged = new List<ExternalSeriesMetadata>(limit);
         for (var index = 0; merged.Count < limit && lists.Any(list => index < list.Count); index++)
         {
-            foreach (var list in lists)
+            foreach (var list in lists.Where(list => index < list.Count))
             {
-                if (index < list.Count && merged.Count < limit)
+                if (merged.Count >= limit)
                 {
-                    merged.Add(list[index]);
+                    break;
                 }
+
+                merged.Add(list[index]);
             }
         }
 

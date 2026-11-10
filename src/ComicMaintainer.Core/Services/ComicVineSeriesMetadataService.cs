@@ -111,16 +111,7 @@ public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
             return Array.Empty<ExternalSeriesMetadata>();
         }
 
-        var output = new List<ExternalSeriesMetadata>();
-        foreach (var item in results.EnumerateArray())
-        {
-            if (ParseVolume(item) is { } metadata)
-            {
-                output.Add(metadata);
-            }
-        }
-
-        return output;
+        return results.EnumerateArray().Select(item => ParseVolume(item)).OfType<ExternalSeriesMetadata>().ToList();
     }
 
     /// <summary>A volume detail answer carries the volume as the <c>results</c> object.</summary>

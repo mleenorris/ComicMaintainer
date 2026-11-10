@@ -18,6 +18,38 @@ You need:
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - Node.js 22.22+, 24.15+ or 26+, for the web UI's tests
 - Docker, for the container smoke test
+- CodeQL and Trivy, only to run the security scans locally
+
+### Setting up a Windows machine
+
+`scripts/dev.ps1` installs everything above except Docker, at the versions CI uses, under
+`%USERPROFILE%\comicmaintainer-tools`. It needs no administrator rights, and it keeps an existing .NET 10 SDK or
+Node.js if they are recent enough:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 setup            # add -Android for the Android toolchain
+. .\scripts\dev.ps1 env                                                   # put the tools on PATH in this session
+```
+
+On Linux or macOS, install the versions named at the top of `scripts/dev.ps1` with your package manager; the `ci`
+command below then finds them on PATH when run with PowerShell 7.
+
+### Running CI's checks locally
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 ci                 # everything
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 ci -Only codeql    # or any of: build, unit, integration,
+                                                                            #   js, nuget, codeql, docker
+```
+
+`ci` runs the same steps as the workflows: the strict build, unit tests with the coverage gate, integration tests,
+the JavaScript tests and their coverage gates, the NuGet advisory check, CodeQL's security-and-quality queries for C#,
+JavaScript and the workflows, and, when Docker is installed, the image build, container smoke test and Trivy scan. It
+ends with a summary and fails if any step failed. The CodeQL findings are listed in
+`%USERPROFILE%\comicmaintainer-tools\ci-results\codeql-findings.txt`, with the SARIF files beside them.
+
+Two differences from CI remain: the macOS file-operation job only runs on a Mac, and coverage reads about one point
+lower on Windows than on Linux, so the unit step's gate is 96.3% on Windows and CI's 97% elsewhere.
 
 ## Building and running
 
@@ -82,6 +114,8 @@ npm run test:coverage   # fails below 99% lines, 97% branches, 99% functions
 docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
 ./scripts/container-smoke-test.sh
 ```
+
+`scripts/dev.ps1 ci` runs all of these the way CI does; see [Running CI's checks locally](#running-cis-checks-locally).
 
 [tests/README.md](tests/README.md) describes the test layout and helpers.
 

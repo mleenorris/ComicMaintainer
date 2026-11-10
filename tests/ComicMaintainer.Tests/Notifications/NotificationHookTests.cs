@@ -352,7 +352,7 @@ public sealed class JobFindingsTests
         TrackedFiles(new ComicFile { FilePath = "/a/x.cbz", IsRenamed = false });
         var jobId = Guid.NewGuid();
         _processor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
-        _jobs.Setup(j => j.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync((ProcessingJob?)null);
+        _jobs.Setup(j => j.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(default(ProcessingJob?));
 
         Assert.False((await FileNaming().ExecuteWithFindingsAsync("""{"autoCorrect":true}""", default)).HasFindings);
     }

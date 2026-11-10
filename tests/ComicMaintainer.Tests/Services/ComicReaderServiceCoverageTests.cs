@@ -152,7 +152,7 @@ public class ComicReaderServiceCoverageTests : IDisposable
         private static readonly uint[] CrcTable = BuildCrcTable();
 
         public static void Write(string path, params (string Name, byte[]? Data)[] entries) =>
-            Write(path, entries.Select(e => (e.Name, e.Data, (uint?)null)));
+            Write(path, entries.Select((string, byte[]?, uint?) (e) => (e.Name, e.Data, null)));
 
         /// <summary>
         /// Like <c>Write</c>, but each entry's header declares <c>UnpackedSize</c>
@@ -160,7 +160,7 @@ public class ComicReaderServiceCoverageTests : IDisposable
         /// archive would.
         /// </summary>
         public static void WriteDeclaringSizes(string path, params (string Name, byte[] Data, uint UnpackedSize)[] entries) =>
-            Write(path, entries.Select(e => (e.Name, (byte[]?)e.Data, (uint?)e.UnpackedSize)));
+            Write(path, entries.Select((string, byte[]?, uint?) (e) => (e.Name, e.Data, e.UnpackedSize)));
 
         private static void Write(string path, IEnumerable<(string Name, byte[]? Data, uint? UnpackedSize)> entries)
         {

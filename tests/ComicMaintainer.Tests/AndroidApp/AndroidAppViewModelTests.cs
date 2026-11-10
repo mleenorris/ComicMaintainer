@@ -522,7 +522,7 @@ public sealed class FilesViewModelTests
         await viewModel.LoadFilesCommand.ExecuteAsync(null);
 
         Assert.Equal([First, Second], viewModel.Files);
-        Assert.Equal((1, "unmarked", (string?)null), Assert.Single(_api.Loads));
+        Assert.Equal((1, "unmarked", null), Assert.Single(_api.Loads));
         Assert.Equal("Page 1 of 3", viewModel.PageText);
         Assert.False(viewModel.IsLoading);
     }
@@ -596,7 +596,7 @@ public sealed class FilesViewModelTests
         viewModel.SelectedFilter = "🔁 Duplicates";
         await Task.Yield();
 
-        Assert.Equal((1, "duplicates", (string?)null), Assert.Single(_api.Loads));
+        Assert.Equal((1, "duplicates", null), Assert.Single(_api.Loads));
     }
 
     [Fact]
@@ -836,7 +836,7 @@ public sealed class FilesViewModelTests
             await Task.Delay(25);
         }
 
-        Assert.Equal((1, (string?)null, "batman"), Assert.Single(_api.Loads));
+        Assert.Equal((1, null, "batman"), Assert.Single(_api.Loads));
     }
 }
 

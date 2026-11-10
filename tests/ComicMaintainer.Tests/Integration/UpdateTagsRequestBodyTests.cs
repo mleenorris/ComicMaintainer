@@ -158,7 +158,7 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
         using var response = await client.PostAsJsonAsync("/api/files/tags", new
         {
             files = new[] { path },
-            metadata = new { publisher = "DC Comics", title = (string?)null, series = "Ignored" },
+            metadata = new { publisher = "DC Comics", title = default(string?), series = "Ignored" },
             fields = new[] { "publisher", "title" },
         });
 

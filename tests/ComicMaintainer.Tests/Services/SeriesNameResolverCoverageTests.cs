@@ -641,7 +641,7 @@ public class SeriesNameResolverCoverageTests
         _cache.Setup(c => c.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SeriesMetadataCacheRecord?)null);
         _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
         var resolver = CreateResolver();
 
         var result = await resolver.ResolveAsync(

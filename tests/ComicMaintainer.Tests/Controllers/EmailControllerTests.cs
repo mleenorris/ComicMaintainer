@@ -174,7 +174,7 @@ public sealed class EmailControllerTests : IDisposable
     {
         // The service answers null for a device outside the caller's scope.
         _devices.Setup(d => d.UpdateDeviceAsync(It.IsAny<EmailAccessScope>(), 3, "Mine", null, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((EreaderDeviceDto?)null);
+            .ReturnsAsync(default(EreaderDeviceDto?));
 
         var result = await CreateController().UpdateDevice(
             3,

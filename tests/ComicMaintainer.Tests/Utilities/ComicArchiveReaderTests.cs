@@ -439,15 +439,11 @@ public sealed class ComicArchiveReaderTests : IDisposable
         // SharpCompress only allocates a window for compressed, non-directory entries.
         var path = Path.Join(_dir, "stored.cbr");
         File.WriteAllBytes(path, Rar5(13, method: 0));
-        using (var _ = ComicArchiveReader.Open(path))
-        {
-        }
+        ComicArchiveReader.Open(path).Dispose();
 
         var folder = Path.Join(_dir, "folder.cbr");
         File.WriteAllBytes(folder, Rar5(13, directory: true));
-        using (var _ = ComicArchiveReader.Open(folder))
-        {
-        }
+        ComicArchiveReader.Open(folder).Dispose();
     }
 
     [Fact]
@@ -464,9 +460,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
         var bytes = MergeRar5Headers(Rar5(0, fileHeaders: 1), Rar5(13, fileHeaders: 1));
         File.WriteAllBytes(path, bytes);
 
-        using (var _ = ComicArchiveReader.OpenForEntry(path, 0))
-        {
-        }
+        ComicArchiveReader.OpenForEntry(path, 0).Dispose();
 
         Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.OpenForEntry(path, 1));
         Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.Open(path));

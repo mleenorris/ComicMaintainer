@@ -240,7 +240,7 @@ public sealed class ComicReaderServicePageIndexTests : IDisposable
     {
         var cbr = Path.Join(_dir, "many.cbr");
         ComicReaderServiceCoverageTests.StoredRar4.Write(cbr, Enumerable.Range(0, ArchiveEntryReader.MaxEntries + 1)
-            .Select(i => ($"p{i:D5}.jpg", (byte[]?)Array.Empty<byte>())).ToArray());
+            .Select((string, byte[]?) (i) => ($"p{i:D5}.jpg", Array.Empty<byte>())).ToArray());
 
         var ex = await Assert.ThrowsAsync<ArchiveLimitExceededException>(() => _service.GetPageCountAsync(cbr));
 

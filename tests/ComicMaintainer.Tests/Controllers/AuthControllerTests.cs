@@ -396,7 +396,7 @@ public class AuthControllerTests
             .Setup(s => s.SetupAdminAsync("admin", "Password123!", null, "ABCDE-FGHJK", It.IsAny<string?>()))
             .ReturnsAsync((SetupOutcome.Created, null));
 
-        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null, "ABCDE-FGHJK"));
+        var result = await _controller.CompleteFirstRunSetup(new SetupRequest("admin", "Password123!", null, "ABCDE-FGHJK"));
 
         Assert.IsType<OkObjectResult>(result);
         _mockAuthService.Verify(s => s.SetupAdminAsync("admin", "Password123!", null, "ABCDE-FGHJK", It.IsAny<string?>()), Times.Once);
@@ -421,7 +421,7 @@ public class AuthControllerTests
             .Setup(s => s.IsSetupRequiredAsync())
             .ReturnsAsync(false);
 
-        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null, "ABCDE-FGHJK"));
+        var result = await _controller.CompleteFirstRunSetup(new SetupRequest("admin", "Password123!", null, "ABCDE-FGHJK"));
 
         var forbidden = Assert.IsType<ObjectResult>(result);
         Assert.Equal(403, forbidden.StatusCode);
@@ -445,7 +445,7 @@ public class AuthControllerTests
             .Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
             .ReturnsAsync((outcome, "why"));
 
-        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null, "wrong"));
+        var result = await _controller.CompleteFirstRunSetup(new SetupRequest("admin", "Password123!", null, "wrong"));
 
         var failure = Assert.IsAssignableFrom<ObjectResult>(result);
         Assert.Equal(expectedStatus, failure.StatusCode);

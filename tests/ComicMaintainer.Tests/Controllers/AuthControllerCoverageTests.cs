@@ -165,7 +165,7 @@ public class AuthControllerCoverageTests
         Assert.Equal("Username already taken", Prop<string>(badRequest.Value, "error"));
     }
 
-    // ----- SetupAdmin -----------------------------------------------------
+    // ----- CompleteFirstRunSetup -----------------------------------------------------
 
     private void SetupRequired(bool required) =>
         _authService.Setup(s => s.IsSetupRequiredAsync()).ReturnsAsync(required);
@@ -184,7 +184,7 @@ public class AuthControllerCoverageTests
         SetupRequired(true);
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest(username!, "LongEnough1", null, "code"));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest(username!, "LongEnough1", null, "code"));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Username must be at least 3 characters", Prop<string>(badRequest.Value, "error"));
@@ -201,7 +201,7 @@ public class AuthControllerCoverageTests
         SetupRequired(true);
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", password!, null, "code"));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest("admin", password!, null, "code"));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Password must be at least 8 characters", Prop<string>(badRequest.Value, "error"));
@@ -216,7 +216,7 @@ public class AuthControllerCoverageTests
             .ReturnsAsync((SetupOutcome.Created, null));
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", "admin@example.com", "code"));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest("admin", "12345678", "admin@example.com", "code"));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal("Admin user created successfully", Prop<string>(ok.Value, "message"));
@@ -232,7 +232,7 @@ public class AuthControllerCoverageTests
             .ReturnsAsync((SetupOutcome.NotAvailable, AuthService.SetupNotAvailableError));
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null, "code"));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest("admin", "12345678", null, "code"));
 
         var forbidden = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
@@ -246,7 +246,7 @@ public class AuthControllerCoverageTests
         GrantPolicy(AuthorizationPolicies.CanAdminister);
         var controller = CreateController(SignedIn("admin-1", "admin"));
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin2", "12345678", null, "code"));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest("admin2", "12345678", null, "code"));
 
         var forbidden = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);

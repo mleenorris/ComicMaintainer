@@ -94,7 +94,7 @@ internal static class WebApplicationExtensions
     private static async Task SeedAdminFromEnvironmentAsync(UserManager<ApplicationUser> userManager, Microsoft.Extensions.Logging.ILogger logger)
     {
         var adminUsername = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
-        var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out var passwordSource);
+        var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out var credentialSetting);
         if (string.IsNullOrEmpty(adminUsername))
         {
             return;
@@ -108,7 +108,7 @@ internal static class WebApplicationExtensions
         var existing = await userManager.FindByNameAsync(adminUsername);
         if (existing is not null)
         {
-            await ReplacePublishedAdminPasswordAsync(userManager, existing, adminPassword, passwordSource, safeUsername, logger);
+            await ReplacePublishedAdminPasswordAsync(userManager, existing, adminPassword, credentialSetting, safeUsername, logger);
             return;
         }
 
@@ -123,7 +123,7 @@ internal static class WebApplicationExtensions
                 "Not creating the administrator '{Username}': {PasswordSource} is set to a password that was published " +
                 "with ComicMaintainer, so anyone could sign in with it. Open the web UI to create the first administrator " +
                 "with first-run setup, or set {PasswordSource} to a password of your own and restart.",
-                safeUsername, passwordSource, passwordSource);
+                safeUsername, credentialSetting, credentialSetting);
             return;
         }
 
@@ -142,7 +142,7 @@ internal static class WebApplicationExtensions
         {
             logger.LogError(
                 "Not creating the administrator '{Username}' from {PasswordSource}: {Errors}",
-                safeUsername, passwordSource, string.Join(" ", result.Errors.Select(e => e.Description)));
+                safeUsername, credentialSetting, string.Join(" ", result.Errors.Select(e => e.Description)));
             return;
         }
 
@@ -157,7 +157,7 @@ internal static class WebApplicationExtensions
         UserManager<ApplicationUser> userManager,
         ApplicationUser admin,
         string? adminPassword,
-        string? passwordSource,
+        string? credentialSetting,
         string safeUsername,
         Microsoft.Extensions.Logging.ILogger logger)
     {
@@ -182,13 +182,13 @@ internal static class WebApplicationExtensions
         {
             logger.LogWarning(
                 "Replaced the published password of the account '{Username}' with the one in {PasswordSource}",
-                safeUsername, passwordSource);
+                safeUsername, credentialSetting);
         }
         else
         {
             logger.LogError(
                 "Could not replace the published password of the account '{Username}' with the one in {PasswordSource}: {Errors}",
-                safeUsername, passwordSource, string.Join(" ", result.Errors.Select(e => e.Description)));
+                safeUsername, credentialSetting, string.Join(" ", result.Errors.Select(e => e.Description)));
         }
     }
 

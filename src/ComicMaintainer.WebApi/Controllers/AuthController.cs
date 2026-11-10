@@ -215,6 +215,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpGet("setup-required")]
+    [AllowAnonymous]
     public async Task<ActionResult> IsSetupRequired()
     {
         var setupRequired = await _authService.IsSetupRequiredAsync();
@@ -228,8 +229,9 @@ public class AuthController : ControllerBase
     /// it. Answers 403 when setup is not available or the code is wrong.
     /// </summary>
     [HttpPost("setup")]
+    [AllowAnonymous] // Anonymous by design: guarded by IsSetupRequiredAsync and the one-time setup code.
     [EnableRateLimiting(AuthenticationRateLimit.PolicyName)]
-    public async Task<ActionResult> SetupAdmin([FromBody] SetupRequest request)
+    public async Task<ActionResult> CompleteFirstRunSetup([FromBody] SetupRequest request)
     {
         if (!await _authService.IsSetupRequiredAsync())
         {
@@ -361,9 +363,12 @@ public class AuthController : ControllerBase
 public record LoginRequest(string Username, string Password);
 public record RegisterRequest(string Username, string Password, string Email, string? FullName);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+/// <summary>The body of a request to create or replace the caller's API key.</summary>
 /// <param name="CurrentPassword">The account's password; not needed for an account signed in through Authelia.</param>
 public record CreateApiKeyRequest(string? CurrentPassword = null);
+/// <summary>The body of a sign-out request.</summary>
 /// <param name="AllSessions">Sign out every session of the account, not just this one, and revoke its API key.</param>
 public record LogoutRequest(bool AllSessions = false);
+/// <summary>The body of a first-run setup request, which creates the first administrator.</summary>
 /// <param name="SetupToken">The one-time setup code from the server log, or <c>SETUP_TOKEN</c>.</param>
 public record SetupRequest(string Username, string Password, string? Email, string? SetupToken = null);

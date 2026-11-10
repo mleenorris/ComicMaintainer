@@ -146,7 +146,7 @@ public class AuthService : IAuthService
         if (PublishedPasswords.IsPublished(password))
         {
             // An operator has to act on this, but it is their configuration, not a defect to report.
-            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("operator configuration: published password")))
+            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("operator configuration: a published default sign-in")))
             {
                 _logger.LogError(
                     "Refused the sign-in of {Username} from {ClientAddress}: the account's password was published with " +

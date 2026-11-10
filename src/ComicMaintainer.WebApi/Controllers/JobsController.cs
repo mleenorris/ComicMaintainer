@@ -188,7 +188,8 @@ public class JobsController : ControllerBase
 
         if (files.Count == 0)
         {
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Batch {Operation}-{Scope}: no files to act on"), operation, scope);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Batch {Operation}-{Scope}: no files to act on"),
+                LoggingHelper.SanitizeForLog(operation), LoggingHelper.SanitizeForLog(scope));
             return Ok(new BatchJobResponse(Guid.Empty.ToString(), 0));
         }
 
@@ -196,7 +197,7 @@ public class JobsController : ControllerBase
 
         _logger.LogInformation(
             LoggingHelper.WithWebsitePrefix("Batch {Operation}-{Scope}: job {JobId} started for {TotalFiles} file(s)"),
-            operation, scope, jobId, files.Count);
+            LoggingHelper.SanitizeForLog(operation), LoggingHelper.SanitizeForLog(scope), jobId, files.Count);
 
         return Ok(new BatchJobResponse(jobId.ToString(), files.Count));
     }

@@ -4,8 +4,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadScripts, createLocalStorage } = require('./support/sandbox');
 
-const plain = value => JSON.parse(JSON.stringify(value));
-
 function load(storage = {}) {
     return loadScripts(['js/shared.js'], { localStorage: createLocalStorage(storage) });
 }

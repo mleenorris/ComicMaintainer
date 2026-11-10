@@ -14,7 +14,6 @@ const {
     seriesPages,
     bootLibrary,
     seriesCalls,
-    savedPreferences,
     imageObserver,
     renderedTitles
 } = require('./support/library-helpers');

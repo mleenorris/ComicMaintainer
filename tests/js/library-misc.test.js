@@ -7,10 +7,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
 const {
-    makeSeriesList,
     bootLibrary,
     callsTo,
-    seriesCalls,
     messages
 } = require('./support/library-helpers');
 

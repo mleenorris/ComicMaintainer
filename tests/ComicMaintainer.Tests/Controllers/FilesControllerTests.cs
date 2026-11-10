@@ -1214,7 +1214,7 @@ public class FilesControllerTests
     public async Task DeleteFile_WithPathTraversalAttempt_ReturnsBadRequest()
     {
         // Arrange
-        var traversalPath = Path.Join(Path.GetTempPath(), "..", "..", "etc", "passwd");
+        var traversalPath = Path.Join(Path.GetTempPath(), "..", "..", "etc", "hosts");
 
         // Act
         var result = await _controller.DeleteFile(traversalPath);
@@ -1229,7 +1229,7 @@ public class FilesControllerTests
     public async Task DeleteFileByEncodedPath_WithPathTraversalAttempt_ReturnsBadRequest()
     {
         // Arrange
-        var traversalPath = Path.Join(Path.GetTempPath(), "..", "..", "etc", "passwd");
+        var traversalPath = Path.Join(Path.GetTempPath(), "..", "..", "etc", "hosts");
         var encodedPath = EncodeFilePathForUrl(traversalPath);
 
         // Act

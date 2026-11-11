@@ -36,7 +36,7 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet('setup', 'ci', 'env')]
     [string]$Command = 'ci',
-    [ValidateSet('build', 'unit', 'integration', 'js', 'nuget', 'codeql', 'docker')]
+    # build, unit, integration, js, nuget, codeql or docker; several separated by commas.
     [string[]]$Only,
     [string]$ToolsDir = (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'comicmaintainer-tools'),
     [switch]$Android,
@@ -44,10 +44,19 @@ param(
     # Memory for CodeQL's query evaluation, in MB. By default CodeQL sizes it from the free memory when it starts, which
     # can be too little while other builds run; on an 8 GB machine 4096 works.
     [int]$CodeQLRamMb = 0,
-    # The CodeQL languages to scan; all three by default.
-    [ValidateSet('csharp', 'javascript', 'actions')]
+    # The CodeQL languages to scan: csharp, javascript and actions by default; several separated by commas.
     [string[]]$CodeQLLanguage = @('csharp', 'javascript', 'actions')
 )
+
+# "powershell -File" passes "-Only build,unit" as one string rather than a list, so split lists here and check them.
+function Split-List([string[]]$Values, [string[]]$Allowed, [string]$Name) {
+    $items = @($Values | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
+    $unknown = @($items | Where-Object { $Allowed -notcontains $_ })
+    if ($unknown.Count -gt 0) { throw "Unknown $Name '$($unknown -join ', ')'. Use: $($Allowed -join ', ')." }
+    return $items
+}
+$Only = Split-List $Only @('build', 'unit', 'integration', 'js', 'nuget', 'codeql', 'docker') '-Only step'
+$CodeQLLanguage = Split-List $CodeQLLanguage @('csharp', 'javascript', 'actions') '-CodeQLLanguage'
 
 # The versions CI uses. Update these when the workflows move on.
 $DotnetChannel = '10.0'    # actions/setup-dotnet with dotnet-version 10.0.x

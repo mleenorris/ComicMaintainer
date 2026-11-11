@@ -105,6 +105,20 @@ public sealed class AndroidAppBuildTests
         Assert.DoesNotContain("-Filter \"*.apk\"", workflow, StringComparison.Ordinal);
     }
 
+    // Each release must be signed with the same key to install over the one before, and the password must reach MSBuild
+    // through the environment rather than on a command line that could be logged.
+    [Fact]
+    public void TheWorkflow_SignsWithTheProjectKeyFromSecretsWhenOneIsSet()
+    {
+        var workflow = ReadWorkflow();
+
+        Assert.Contains("${{ secrets.ANDROID_KEYSTORE_BASE64 }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("-p:AndroidKeyStore=true", workflow, StringComparison.Ordinal);
+        Assert.Contains("-p:AndroidSigningStorePass=env:ANDROID_KEYSTORE_PASSWORD", workflow, StringComparison.Ordinal);
+        Assert.Contains("-p:AndroidSigningKeyPass=env:ANDROID_KEYSTORE_PASSWORD", workflow, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"AndroidSigning(Store|Key)Pass=\$\{\{", workflow);
+    }
+
     [Fact]
     public void TheManifest_DoesNotBackUpSecureStorageWithoutItsKey()
     {

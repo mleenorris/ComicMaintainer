@@ -70,13 +70,52 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore src/ComicMaintainer.Android.sln
 
+      # Releases are signed with the project's own key when the ANDROID_KEYSTORE_BASE64 secret is set, so each release
+      # installs over the one before. Without it the build signs with a debug key made on the runner, which differs every
+      # time. docs/MAUI_ANDROID_SETUP.md explains how to create the key and the three secrets.
+      - name: Prepare the signing key
+        id: signing
+        shell: pwsh
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:KEYSTORE_BASE64)) {
+            Write-Output "::warning::ANDROID_KEYSTORE_BASE64 is not set, so this APK is signed with a throwaway debug key and will not install over an earlier release."
+            Write-Output "keystore=" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          if ([string]::IsNullOrWhiteSpace($env:ANDROID_KEY_ALIAS) -or [string]::IsNullOrWhiteSpace($env:ANDROID_KEYSTORE_PASSWORD)) {
+            Write-Error "ANDROID_KEYSTORE_BASE64 is set, so ANDROID_KEY_ALIAS and ANDROID_KEYSTORE_PASSWORD must be set too."
+            exit 1
+          }
+          $path = Join-Path $env:RUNNER_TEMP 'comicmaintainer-release.keystore'
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:KEYSTORE_BASE64))
+          Write-Output "keystore=$path" >> $env:GITHUB_OUTPUT
+
       # Publish, not build: publishing is what produces the signed package, in the publish folder.
       - name: Build Android APK
+        shell: pwsh
+        env:
+          KEYSTORE_PATH: ${{ steps.signing.outputs.keystore }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          # MSBuild reads it through the env: prefix below, so the password never appears on a command line.
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
+          $signing = @()
+          if ($env:KEYSTORE_PATH) {
+            # A PKCS12 keystore, as keytool makes by default, has one password for the store and the key.
+            $signing = @('-p:AndroidKeyStore=true', "-p:AndroidSigningKeyStore=$env:KEYSTORE_PATH",
+              "-p:AndroidSigningKeyAlias=$env:ANDROID_KEY_ALIAS",
+              '-p:AndroidSigningStorePass=env:ANDROID_KEYSTORE_PASSWORD', '-p:AndroidSigningKeyPass=env:ANDROID_KEYSTORE_PASSWORD')
+          }
           dotnet publish src/ComicMaintainer.MauiApp/ComicMaintainer.MauiApp.csproj `
             -c Release `
             -f net10.0-android `
-            -p:AndroidPackageFormat=apk
+            -p:AndroidPackageFormat=apk `
+            @signing
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Locate APK
         id: locate_apk
@@ -93,6 +132,16 @@ jobs:
             Write-Error "APK not found"
             exit 1
           }
+
+      # The certificate's SHA-256 fingerprint identifies the signing key; it has to stay the same from release to release.
+      - name: Show the signing certificate
+        continue-on-error: true
+        shell: pwsh
+        env:
+          APK_FILE: ${{ steps.locate_apk.outputs.apk_file }}
+        run: |
+          $keytool = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin\keytool.exe' } else { 'keytool' }
+          & $keytool -printcert -jarfile $env:APK_FILE | Select-String -Pattern '^\s*(Owner|SHA256):'
 
       - name: Create README for Android release
         shell: pwsh
@@ -198,3 +247,8 @@ jobs:
             ANDROID_README.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove the signing key
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'comicmaintainer-release.keystore')

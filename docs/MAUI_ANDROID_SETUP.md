@@ -169,6 +169,33 @@ new release tag and it attaches the APK to that release. A tag pushed by a workf
 this workflow has no tag trigger. You can also run it by hand: with a tag to rebuild that release's APK, or without one
 to build the selected branch and keep the APK as a workflow artifact.
 
+### Signing releases
+
+Android only installs an update over an app signed with the same key. Without a key of the project's own, the workflow
+signs each APK with a debug key made on the runner, so no release installs over another. To sign with a permanent key:
+
+1. Create the key once. `keytool` comes with any JDK, including the one `scripts/android-local.ps1 setup` installs:
+   ```powershell
+   & "$env:USERPROFILE\android-toolchain\jdk\bin\keytool.exe" -genkeypair -v -storetype PKCS12 `
+     -keystore comicmaintainer-release.keystore -alias comicmaintainer -keyalg RSA -keysize 4096 -validity 10000
+   ```
+   It asks for a password and a name for the certificate. A PKCS12 keystore uses that one password for the store and
+   the key.
+2. Back up the keystore file and its password somewhere safe, outside the repository (`.gitignore` excludes
+   `*.keystore` and `*.jks`). If either is lost, later releases cannot update existing installs: users would have to
+   uninstall and reinstall.
+3. Add three repository secrets under Settings > Secrets and variables > Actions, or with the GitHub CLI:
+   ```powershell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("comicmaintainer-release.keystore")) | gh secret set ANDROID_KEYSTORE_BASE64
+   gh secret set ANDROID_KEY_ALIAS --body comicmaintainer
+   gh secret set ANDROID_KEYSTORE_PASSWORD     # prompts for the value
+   ```
+4. Run "Build Android APK" by hand without a tag to check it. Its "Show the signing certificate" step prints the
+   certificate's SHA-256 fingerprint, which must stay the same in every release.
+
+An install signed with another key, such as the debug key, has to be uninstalled once before the first APK signed with
+the project's key will install.
+
 ## Project layout
 
 ```

@@ -256,7 +256,7 @@ public sealed class SettingsEndpointTests : IDisposable
             "filename-format", "issue-number-padding", "log-max-bytes", "watcher-enable-rename",
             "watcher-enable-normalize", "convert-rar-to-cbz-on-write", "write-cover-to-first-archive",
             "write-cover-to-series-folder", "download-external-series-images", "series-image-limits",
-            "database-cleanup-interval-hours", "default-library-view", "allow-registration", "external-series-metadata",
+            "database-cleanup-interval-hours", "allow-registration", "external-series-metadata",
         })
         {
             using var response = await client.PostAsJsonAsync($"/api/settings/{setting}", new { });

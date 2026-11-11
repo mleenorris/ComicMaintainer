@@ -35,7 +35,6 @@ public class UserPreferencesServiceTests
         Assert.Null(prefs.Theme);
         Assert.Null(prefs.PerPage);
         Assert.Null(prefs.ReadingMode);
-        Assert.Null(prefs.LibraryViewMode);
         Assert.Null(prefs.FilterMode);
         Assert.Null(prefs.SortMode);
         Assert.Null(prefs.SortDirection);
@@ -50,7 +49,6 @@ public class UserPreferencesServiceTests
             Theme = "light",
             PerPage = 50,
             ReadingMode = "webcomic",
-            LibraryViewMode = "series",
             FilterMode = "unmarked",
             SortMode = "date",
             SortDirection = "desc"
@@ -61,7 +59,6 @@ public class UserPreferencesServiceTests
         Assert.Equal("light", retrieved.Theme);
         Assert.Equal(50, retrieved.PerPage);
         Assert.Equal("webcomic", retrieved.ReadingMode);
-        Assert.Equal("series", retrieved.LibraryViewMode);
         Assert.Equal("unmarked", retrieved.FilterMode);
         Assert.Equal("date", retrieved.SortMode);
         Assert.Equal("desc", retrieved.SortDirection);

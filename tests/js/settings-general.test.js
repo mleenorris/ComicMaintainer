@@ -62,7 +62,6 @@ function formValues(page) {
         suwayomiImportDirectory: value('suwayomiImportDirectory'),
         opds: checked('opdsEnabledCheckbox'),
         opdsFeedUrl: value('opdsFeedUrl'),
-        defaultView: value('defaultLibraryViewSelect'),
         preferredLanguage: value('defaultPreferredLanguageSelect'),
         smtpHost: value('smtpHost'),
         smtpPort: value('smtpPort'),
@@ -148,7 +147,6 @@ test('the settings page fills every group from GET /api/settings', async () => {
         suwayomiImportDirectory: 'Manga',
         opds: true,
         opdsFeedUrl: page.window.location.origin + '/opds/v1.2/catalog',
-        defaultView: 'series',
         preferredLanguage: 'ja',
         smtpHost: 'smtp.example.com',
         smtpPort: '2525',
@@ -234,7 +232,6 @@ test('unset optional settings fall back to defaults and first-time hints', async
             suwayomi_username: null,
             suwayomi_password_set: false,
             suwayomi_downloads_directory: null,
-            default_library_view: 'files',
             allow_registration: false,
             default_preferred_language: null,
             convert_rar_to_cbz_on_write: undefined,
@@ -279,7 +276,6 @@ test('unset optional settings fall back to defaults and first-time hints', async
     assert.equal(values.suwayomiUsername, '');
     assert.equal(values.suwayomiPasswordHint, 'Enter a password only if your Suwayomi server requires one.');
     assert.equal(values.suwayomiDownloadsDirectory, '');
-    assert.equal(values.defaultView, 'files');
     assert.equal(values.convertRarToCbz, true, 'converting CBR/RAR to CBZ defaults to on');
     assert.equal(values.preferredLanguage, '');
     // Image limits that are not numbers leave the inputs untouched (blank).
@@ -435,7 +431,7 @@ test('non-administrators see server-wide settings read-only', async () => {
     assert.equal(page.$('#settingsReadOnlyNotice').hidden, false);
     // The personal theme preference stays editable; nothing server-wide does.
     assert.equal(page.$('#themeSelect').disabled, false);
-    for (const id of ['filenameFormat', 'defaultLibraryViewSelect', 'watcherEnableRenameCheckbox', 'smtpHost',
+    for (const id of ['filenameFormat', 'defaultPreferredLanguageSelect', 'watcherEnableRenameCheckbox', 'smtpHost',
         'errorReportingToken', 'saveSettingsBtn', 'resetFilenameFormatBtn']) {
         assert.equal(page.$(`#${id}`).disabled, true, `#${id} is disabled`);
     }
@@ -554,39 +550,6 @@ test('changing the theme applies it and saves the preference', async () => {
     assert.deepEqual(calls[0].body, { theme: 'dark' });
 });
 
-test('the default library view saves on change', async () => {
-    const page = await bootSettings({ routes: { 'PUT /api/settings/default-library-view': { message: 'ok' } } });
-    const route = 'PUT /api/settings/default-library-view';
-
-    page.input('#defaultLibraryViewSelect', 'files');
-    await page.settle();
-    assert.deepEqual(callsTo(page, route).at(-1).body, { view: 'files' });
-    assert.deepEqual(lastMessage(page), { type: 'success', text: 'Default library view set to Files (folder view)' });
-
-    page.input('#defaultLibraryViewSelect', 'series');
-    await page.settle();
-    assert.deepEqual(callsTo(page, route).at(-1).body, { view: 'series' });
-    assert.deepEqual(lastMessage(page), { type: 'success', text: 'Default library view set to Series' });
-
-    page.route(route, respond(500, { error: 'nope' }));
-    page.input('#defaultLibraryViewSelect', 'files');
-    await page.settle();
-    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to update default library view: nope' });
-
-    const shown = messages(page).length;
-    page.route(route, 401);
-    page.input('#defaultLibraryViewSelect', 'series');
-    await page.settle();
-    assert.equal(messages(page).length, shown);
-    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
-
-    // Without the select (e.g. markup from an older page) there is nothing to save.
-    const before = page.fetchCalls.length;
-    page.$('#defaultLibraryViewSelect').remove();
-    await page.run('updateDefaultLibraryViewFromSettings()');
-    assert.equal(page.fetchCalls.length, before);
-});
-
 test('the default preferred language saves on change and refreshes the series list', async () => {
     const route = 'PUT /api/settings/default-preferred-language';
     const page = await bootSettings({ routes: { [route]: { message: 'ok' } } });
@@ -644,14 +607,9 @@ test('the default preferred language saves on change and refreshes the series li
     assert.equal(page.fetchCalls.length, before);
 });
 
-test('the default view and language selects quote the reference of an unexpected failure', async () => {
-    const viewRoute = 'PUT /api/settings/default-library-view';
+test('the default language select quotes the reference of an unexpected failure', async () => {
     const languageRoute = 'PUT /api/settings/default-preferred-language';
-    const page = await bootSettings({ routes: { [viewRoute]: serverFailure('corr-view'), [languageRoute]: serverFailure('corr-language') } });
-
-    page.input('#defaultLibraryViewSelect', 'files');
-    await page.settle();
-    assert.deepEqual(lastMessage(page), { type: 'error', text: `Failed to update default library view: ${SERVER_FAILURE} (ref: corr-view)` });
+    const page = await bootSettings({ routes: { [languageRoute]: serverFailure('corr-language') } });
 
     page.input('#defaultPreferredLanguageSelect', 'ko');
     await page.settle();

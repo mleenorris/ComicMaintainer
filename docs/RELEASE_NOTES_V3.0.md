@@ -114,7 +114,8 @@ docker-compose -f docker-compose.dotnet.yml up -d --build
 - **If the upgrade is interrupted**, the next start tries again from the same backup.
 - **The database structure changes.** New tables hold revoked sessions, library scan records and
   notifications. New columns are added for file and series details, email retries and API keys.
-  The `FileReadStatuses` table, the old API key column and some unused indexes are removed.
+  The `FileReadStatuses` table, the old API key column, each user's library view preference and
+  some unused indexes are removed.
 - **Two kinds of data change.** Unprocessed files flagged as duplicates are marked for one more
   pass. E-reader devices and delivery history are assigned to the first administrator, or stay
   administrator-only if there is none.

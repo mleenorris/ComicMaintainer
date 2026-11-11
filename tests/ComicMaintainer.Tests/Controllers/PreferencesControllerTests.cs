@@ -44,7 +44,6 @@ public class PreferencesControllerTests
                     Theme = update.Theme ?? _stored.Theme,
                     PerPage = update.PerPage ?? _stored.PerPage,
                     ReadingMode = update.ReadingMode ?? _stored.ReadingMode,
-                    LibraryViewMode = update.LibraryViewMode ?? _stored.LibraryViewMode,
                     FilterMode = update.FilterMode ?? _stored.FilterMode,
                     SortMode = update.SortMode ?? _stored.SortMode,
                     SortDirection = update.SortDirection ?? _stored.SortDirection
@@ -116,7 +115,6 @@ public class PreferencesControllerTests
             Theme = "light",
             PerPage = 25,
             ReadingMode = "webcomic",
-            LibraryViewMode = "series",
             FilterMode = "unmarked",
             SortMode = "date",
             SortDirection = "desc"
@@ -127,40 +125,25 @@ public class PreferencesControllerTests
         Assert.Equal("light", GetValue(result, "theme"));
         Assert.Equal(25, GetValue(result, "perPage"));
         Assert.Equal("webcomic", GetValue(result, "readingMode"));
-        Assert.Equal("series", GetValue(result, "libraryViewMode"));
         Assert.Equal("unmarked", GetValue(result, "filterMode"));
         Assert.Equal("date", GetValue(result, "sortMode"));
         Assert.Equal("desc", GetValue(result, "sortDirection"));
     }
 
     [Fact]
-    public async Task GetPreferences_LibraryViewMode_DefaultsToFiles()
+    public async Task GetPreferences_ReturnsExactlyTheCurrentPreferenceFields()
     {
         var result = await _controller.GetPreferences();
 
-        Assert.Equal("files", GetValue(result, "libraryViewMode"));
-    }
-
-    [Theory]
-    [InlineData("series")]
-    [InlineData("files")]
-    public async Task GetPreferences_ReflectsConfiguredDefaultLibraryView(string view)
-    {
-        _appSettings.DefaultLibraryView = view;
-
-        var result = await _controller.GetPreferences();
-
-        Assert.Equal(view, GetValue(result, "libraryViewMode"));
-    }
-
-    [Fact]
-    public async Task GetPreferences_FallsBackToFiles_WhenDefaultLibraryViewIsInvalid()
-    {
-        _appSettings.DefaultLibraryView = "not-a-real-view";
-
-        var result = await _controller.GetPreferences();
-
-        Assert.Equal("files", GetValue(result, "libraryViewMode"));
+        // The library view preference was removed in 3.0.0 along with the Files view.
+        var value = Assert.IsType<OkObjectResult>(result.Result).Value!;
+        Assert.Equal(
+            new[]
+            {
+                "filenameFormat", "filterMode", "issueNumberPadding", "perPage", "readingMode",
+                "sortDirection", "sortMode", "theme", "watcherEnabled"
+            },
+            value.GetType().GetProperties().Select(p => p.Name).Order(StringComparer.Ordinal));
     }
 
     [Fact]

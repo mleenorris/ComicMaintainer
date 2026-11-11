@@ -345,6 +345,15 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
   cover ETag format changed, so browsers refetch each cover once. **What to do:** end sessions as
   the user who started them, retry on 500, and do not cache these responses in shared proxies or
   CDNs.
+- **The default library view is gone, server-wide and per user.** The web app has no Files view
+  left, so nothing read it, and Settings > Appearance no longer offers "Default library view".
+  `GET` and `PUT /api/settings/default-library-view` are removed, `GET /api/settings` no longer
+  returns `default_library_view`, and `GET /api/preferences` no longer returns `libraryViewMode`.
+  `PUT /api/preferences` now ignores `libraryViewMode`, where it used to answer 400 for a value
+  other than `files` or `series`, and the upgrade drops the `UserPreferences.LibraryViewMode`
+  column. A stored `DefaultLibraryView` setting and `AppSettings__DefaultLibraryView` are ignored.
+  **What to do:** stop calling those routes and reading those fields, and remove the variable if
+  you set it.
 
 #### Android app
 
@@ -543,6 +552,8 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
 - The SignalR hub and its package reference.
 - The server-side output cache, which never ran. Any `[OutputCache]` attribute now has no effect.
 - The `SeriesIssuesMaxArchiveUpgrades` setting. A stale value in `appsettings` is ignored.
+- The `DefaultLibraryView` setting and the `UserPreferences.LibraryViewMode` column, which the
+  removed Files view used. See [Breaking changes](#http-api).
 - The legacy `FileReadStatuses` table, whose data was copied to `UserFileReadStatuses` earlier.
   Going back to a pre-3.0 release needs a database backup.
 - The plain-text `AspNetUsers.ApiKey` column.

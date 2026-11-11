@@ -3828,53 +3828,6 @@
 					"response": []
 				},
 				{
-					"name": "Get Default Library View",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/settings/default-library-view",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"settings",
-								"default-library-view"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Default Library View",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/settings/default-library-view",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"settings",
-								"default-library-view"
-							]
-						},
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"view\": \"series\"\n}"
-						}
-					},
-					"response": []
-				},
-				{
 					"name": "Get Default Preferred Language",
 					"request": {
 						"method": "GET",
@@ -4991,7 +4944,7 @@
 						},
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"theme\": \"dark\",\n  \"perPage\": 100,\n  \"readingMode\": \"manga\",\n  \"libraryViewMode\": \"series\",\n  \"filterMode\": \"all\",\n  \"sortMode\": \"name\",\n  \"sortDirection\": \"asc\"\n}"
+							"raw": "{\n  \"theme\": \"dark\",\n  \"perPage\": 100,\n  \"readingMode\": \"manga\",\n  \"filterMode\": \"all\",\n  \"sortMode\": \"name\",\n  \"sortDirection\": \"asc\"\n}"
 						}
 					},
 					"response": []

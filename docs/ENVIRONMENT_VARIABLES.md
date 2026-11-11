@@ -299,7 +299,6 @@ These can be set with an `AppSettings__<Name>` variable. It only sets the starti
 | `AppSettings__WriteCoverToSeriesFolder` | `true` | `true`, `false` | Writes a `cover.<ext>` next to a series' files | Yes |
 | `AppSettings__WriteCoverToFirstArchive` | `true` | `true`, `false` | Embeds the series cover in the first archive | Yes |
 | `AppSettings__DatabaseCleanupIntervalHours` | `12` | 0 or more | Hours between stale-entry cleanups. 0 runs one only after start | Yes |
-| `AppSettings__DefaultLibraryView` | `files` | `files`, `series` | The first view of the library | Yes |
 | `AppSettings__AllowRegistration` | `false` | `true`, `false` | Lets visitors create their own accounts | Yes |
 | `AppSettings__DefaultPreferredLanguage` | Empty | `en`, `ja`, `ko`, `zh` | The language used for series names when a series has none | Yes |
 | `AppSettings__LogMaxBytes` | `10485760` | Above 0 | Largest size of a log file; it stops growing at this size until the next day's file starts. Read at startup | Yes |

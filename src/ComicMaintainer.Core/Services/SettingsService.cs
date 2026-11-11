@@ -206,22 +206,6 @@ public class SettingsService : ISettingsService
         await SaveValuesAsync(values, cancellationToken);
     }
 
-    public async Task UpdateDefaultLibraryViewAsync(string view, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(view))
-        {
-            throw new SettingsValidationException("View cannot be null or whitespace", nameof(view));
-        }
-
-        var normalized = view.Trim().ToLowerInvariant();
-        if (normalized != "files" && normalized != "series")
-        {
-            throw new SettingsValidationException("View must be either 'files' or 'series'", nameof(view));
-        }
-
-        await SaveValueAsync("DefaultLibraryView", normalized, cancellationToken);
-    }
-
     public async Task UpdateAllowRegistrationAsync(bool allowed, CancellationToken cancellationToken = default)
     {
         await SaveValueAsync("AllowRegistration", allowed, cancellationToken);

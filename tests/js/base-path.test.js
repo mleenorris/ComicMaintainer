@@ -171,7 +171,7 @@ test('under a base path the Settings page keeps its requests inside it', async (
             ...SERIES_ROUTES,
             ...settingsRoutes(),
             'PUT /api/settings': {},
-            'PUT /api/settings/default-library-view': {},
+            'PUT /api/settings/default-preferred-language': {},
             'GET /api/settings/filename-format': { default: '{series}' },
             'POST /api/settings/reset': { success: true },
             'POST /api/settings/cleanup-database': { success: true, removedCount: 0 },
@@ -190,7 +190,7 @@ test('under a base path the Settings page keeps its requests inside it', async (
 
     for (const action of [
         'saveAllSettings({})',
-        'updateDefaultLibraryViewFromSettings()',
+        'updateDefaultPreferredLanguageFromSettings()',
         'resetFilenameFormat()',
         'confirmReset()',
         'cleanupDatabaseNow()',
@@ -209,7 +209,7 @@ test('under a base path the Settings page keeps its requests inside it', async (
     const paths = new Set(page.fetchCalls.map(call => call.path));
     for (const path of [
         '/api/settings',
-        '/api/settings/default-library-view',
+        '/api/settings/default-preferred-language',
         '/api/settings/filename-format',
         '/api/settings/reset',
         '/api/settings/cleanup-database',

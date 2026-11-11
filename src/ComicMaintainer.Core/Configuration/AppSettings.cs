@@ -111,12 +111,6 @@ public class AppSettings
     public int ProcessingHistoryMaxEntries { get; set; } = 50000;
 
     /// <summary>
-    /// Default library view shown on initial page load.
-    /// Supported values: "files" (folder/file list) or "series" (grouped series grid).
-    /// </summary>
-    public string DefaultLibraryView { get; set; } = "files";
-
-    /// <summary>
     /// When true, anonymous visitors may create their own account via
     /// <c>POST /api/auth/register</c>. Defaults to <c>false</c>: ComicMaintainer
     /// is normally deployed as a private, self-hosted library, so anyone able to

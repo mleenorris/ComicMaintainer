@@ -826,8 +826,6 @@ Any signed-in account can read settings. Every write needs Admin. Writes use `PU
 | `PUT` | `/api/settings/database-cleanup-interval-hours` | Admin | `{"hours":12}`; 0 runs only after a start |
 | `GET` | `/api/settings/database-cleanup` | Signed in | All cleanup settings |
 | `PUT` | `/api/settings/database-cleanup` | Admin | See below |
-| `GET` | `/api/settings/default-library-view` | Signed in | `{"view"}` |
-| `PUT` | `/api/settings/default-library-view` | Admin | `{"view":"series"}` (`files` or `series`) |
 | `GET` | `/api/settings/allow-registration` | Signed in | `{"enabled"}` |
 | `PUT` | `/api/settings/allow-registration` | Admin | `{"enabled":false}` |
 | `GET` | `/api/settings/default-preferred-language` | Signed in | `{"language"}` |
@@ -849,7 +847,7 @@ A successful write returns `{"message":"..."}`, and the new value is in effect w
 - Cleanup: `database_cleanup_interval_hours`, `stale_cleanup_max_removal_percent`, `stale_cleanup_missing_grace_hours`, `stale_cleanup_sentinel_file`, `processing_history_retention_days`, `processing_history_max_entries`.
 - Metadata: `enable_external_series_metadata`, `comicvine_api_key_set`, `comicvine_base_url`, `enable_mangadex_metadata`, `mangadex_base_url`, `enable_anilist_metadata`, `anilist_base_url`, `fill_comicinfo_from_providers`.
 - Suwayomi: `enable_suwayomi`, `suwayomi_base_url`, `suwayomi_username`, `suwayomi_password_set`, `suwayomi_downloads_directory`, `suwayomi_import_directory`.
-- Library: `default_library_view`, `allow_registration`, `default_preferred_language`, `write_cover_to_first_archive`, `write_cover_to_series_folder`, `download_external_series_images`, `series_image_max_bytes`, `series_image_max_download_bytes`, `series_image_max_dimension`.
+- Library: `allow_registration`, `default_preferred_language`, `write_cover_to_first_archive`, `write_cover_to_series_folder`, `download_external_series_images`, `series_image_max_bytes`, `series_image_max_download_bytes`, `series_image_max_dimension`.
 - Email: `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password_set`, `smtp_use_ssl`, `smtp_allow_insecure`, `email_from_address`, `email_from_name`, `email_max_attachment_mb`, `email_max_sends_per_hour`, `email_max_sends_per_day`, `email_min_seconds_between_sends`.
 - Error reporting: `error_reporting_enabled`, `error_reporting_github_owner`, `error_reporting_github_repo`, `error_reporting_github_token_set`, `error_reporting_assignee`, `error_reporting_max_issues_per_day`, `error_reporting_dedupe_window_hours`, `error_reporting_comment_on_recurrence`.
 - Notifications: for each of `ntfy`, `gotify`, `discord`, `webhook`, `komga` and `kavita`, `notify_<target>_enabled` and `notify_<target>_events`, plus the target's `notify_ntfy_url`, `notify_ntfy_topic`, `notify_ntfy_token_set`, `notify_gotify_url`, `notify_gotify_token_set`, `notify_discord_webhook_url_set`, `notify_webhook_url_set`, `notify_komga_url`, `notify_komga_api_key_set`, `notify_komga_library_id`, `notify_kavita_url`, `notify_kavita_api_key_set`, `notify_kavita_library_id`. `notify_ntfy_topic` is an empty string for anyone who is not an administrator.
@@ -1019,7 +1017,7 @@ These routes show the local record of [automated error reporting](ENVIRONMENT_VA
 
 **`GET /api/processing-history`** returns `{"history":[...],"total"}`. An entry has `timestamp` (Unix seconds), `filepath`, `operation_type`, `success`, `error_message`, and `before_`/`after_` values for `filename`, `title`, `series`, `issue`, `publisher`, `year` and `volume`.
 
-**Preferences** are `{"theme","perPage","readingMode","libraryViewMode","filterMode","sortMode","sortDirection"}`, all optional. `theme` is `light` or `dark`, `readingMode` is `manga` or `webcomic`, `libraryViewMode` is `files` or `series`, `sortMode` is `name`, `date` or `size`, and `perPage` is 1 to 1000. `filterMode` takes the filter values above, plus `all`. The response also has `filenameFormat`, `issueNumberPadding` and `watcherEnabled`. `theme` stays `null` until the user chooses one.
+**Preferences** are `{"theme","perPage","readingMode","filterMode","sortMode","sortDirection"}`, all optional. A field the API does not know is ignored. `theme` is `light` or `dark`, `readingMode` is `manga` or `webcomic`, `sortMode` is `name`, `date` or `size`, and `perPage` is 1 to 1000. `filterMode` takes the filter values above, plus `all`. The response also has `filenameFormat`, `issueNumberPadding` and `watcherEnabled`. `theme` stays `null` until the user chooses one.
 
 ## Event stream
 

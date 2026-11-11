@@ -222,11 +222,48 @@ public class FrontendAppShellTests
     }
 
     [Fact]
+    public void Users_IsARoutedPageOnlyOfferedToAdministrators()
+    {
+        var html = Read("index.html");
+        var js = WwwrootFiles.ReadAppScripts();
+
+        // The Users page (#/users) is a page of the app shell, like Scheduled Jobs.
+        var main = Regex.Match(html, @"<main\b[\s\S]*?</main>");
+        Assert.True(main.Success, "index.html has no <main> element.");
+        Assert.Contains("id=\"usersView\"", main.Value);
+        Assert.Contains("if (raw === '/users') return { view: 'users' };", js);
+        Assert.Matches(@"function openUsers\(\)\s*\{\s*navigate\('#/users'\);", js);
+        Assert.Matches(@"id=""sidebarUsersBtn""[^>]*onclick=""openUsers\(\)""", html);
+        Assert.Contains("sidebarUsersBtn: currentView === 'users'", js);
+
+        // /api/users is administrator-only, so every entry point is hidden
+        // from everyone else ...
+        foreach (var id in new[] { "sidebarUsersBtn", "usersMenuItem", "usersShortcutItem" })
+        {
+            Assert.Contains($"id=\"{id}\"", html);
+            Assert.Matches(new Regex("'" + id + @"'[\s\S]{0,500}?\.hidden = !userCapabilities\.canAdminister"), js);
+        }
+        Assert.Contains("} else if (key === 'u' && userCapabilities.canAdminister) {", js);
+
+        // ... and anyone who still reaches the page sees a notice, not a 403.
+        Assert.Matches(@"id=""usersAdminNotice""[^>]*hidden", html);
+        Assert.Matches(@"if \(!userCapabilities\.canAdminister\) \{\s*showUsersAdminOnly\(\);", js);
+        Assert.Matches(@"if \(error\.status === 403\) \{\s*showUsersAdminOnly\(\);", js);
+
+        // Its dialogs are static .modal elements, so modals.js gives them the
+        // focus trap, Escape and focus return.
+        foreach (var id in new[] { "addUserModal", "userRoleModal", "userPasswordModal", "userConfirmModal" })
+        {
+            Assert.Matches(new Regex(@"<div class=""modal"" id=""" + id + @""" role=""dialog"" aria-modal=""true"""), html);
+        }
+    }
+
+    [Fact]
     public void Router_TreatsOverviewLibraryAndSettingsAsSeparatePages()
     {
         var js = WwwrootFiles.ReadAppScripts();
 
-        Assert.Contains("const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs' };", js);
+        Assert.Contains("const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs', users: 'Users' };", js);
         Assert.Matches(@"applyViewVisibility\(route\.view\);\s*enterPage\(route\.view\);", js);
         // A series page belongs to the library so returning keeps its scroll.
         Assert.Contains("const page = view === 'series' ? 'library' : view;", js);

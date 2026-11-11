@@ -124,7 +124,10 @@ test('toggling the theme flips it and saves the choice', async () => {
     ]);
 });
 
-const ADMIN_ENTRY_POINTS = ['#diagnosticsMenuItem', '#sidebarDiagnosticsItem', '#logsMenuItem', '#sidebarLogsItem', '#scheduledJobsMenuItem', '#sidebarJobsBtn', '#scheduledJobsShortcutItem'];
+const ADMIN_ENTRY_POINTS = [
+    '#diagnosticsMenuItem', '#sidebarDiagnosticsItem', '#logsMenuItem', '#sidebarLogsItem',
+    '#scheduledJobsMenuItem', '#sidebarJobsBtn', '#scheduledJobsShortcutItem', '#usersMenuItem', '#sidebarUsersBtn', '#usersShortcutItem'
+];
 
 function capabilityUi(page) {
     const settingsControls = page.$$('#settingsPageBody input, #settingsPageBody select, #settingsPageBody textarea, #settingsPageBody button');
@@ -149,7 +152,7 @@ test('a read-only user loses the write controls and the administrator entry poin
 
     assert.deepEqual(capabilityUi(page), {
         readOnly: true,
-        adminEntryPointsHidden: [true, true, true, true, true, true, true],
+        adminEntryPointsHidden: ADMIN_ENTRY_POINTS.map(() => true),
         readOnlyNoticeHidden: false,
         backupsHidden: true,
         personalSettings: 'disabled',
@@ -165,7 +168,7 @@ test('once settings have loaded, non-administrators can only change their person
 
     assert.deepEqual(capabilityUi(page), {
         readOnly: false,
-        adminEntryPointsHidden: [true, true, true, true, true, true, true],
+        adminEntryPointsHidden: ADMIN_ENTRY_POINTS.map(() => true),
         readOnlyNoticeHidden: false,
         backupsHidden: true,
         personalSettings: 'enabled',
@@ -177,7 +180,7 @@ test('once settings have loaded, non-administrators can only change their person
     page.run('userCapabilities = { canModifyLibrary: true, canAdminister: true }; applyCapabilities();');
     assert.deepEqual(capabilityUi(page), {
         readOnly: false,
-        adminEntryPointsHidden: [false, false, false, false, false, false, false],
+        adminEntryPointsHidden: ADMIN_ENTRY_POINTS.map(() => false),
         readOnlyNoticeHidden: true,
         backupsHidden: false,
         personalSettings: 'enabled',
@@ -195,8 +198,9 @@ test('when the current user cannot be loaded every control stays available', asy
         const page = await boot({ routes: { 'GET /api/auth/user': route } });
         assert.ok(consoleLines(page, 'error').includes(logged), logged);
         assert.equal(page.document.body.classList.contains('user-read-only'), false);
-        assert.deepEqual(ADMIN_ENTRY_POINTS.map(selector => page.$(selector).hidden), [false, false, false, false, false, false, false]);
+        assert.deepEqual(ADMIN_ENTRY_POINTS.map(selector => page.$(selector).hidden), ADMIN_ENTRY_POINTS.map(() => false));
         assert.deepEqual(page.evaluate('userCapabilities'), { canModifyLibrary: true, canAdminister: true });
+        assert.equal(page.evaluate('currentUserAuthMethod'), null, 'how the user signed in is not known');
     }
 
     const expired = await boot({ routes: { 'GET /api/auth/user': 401 } });
@@ -280,4 +284,11 @@ test('the active job lookup returns only a real job and survives failures', asyn
     page.route('GET /api/active-job', 401);
     assert.equal(await lookup(), null);
     assert.ok(wentToLogin(page));
+});
+
+test('the current user records how they signed in', async () => {
+    for (const [authMethod, recorded] of [['jwt', 'jwt'], ['authelia', 'authelia'], [undefined, null], [42, null]]) {
+        const page = await boot({ user: { authMethod } });
+        assert.equal(page.evaluate('currentUserAuthMethod'), recorded, String(authMethod));
+    }
 });

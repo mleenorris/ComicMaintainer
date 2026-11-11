@@ -12,7 +12,7 @@ const { boot, press, requests, seriesCard, seriesIssue, seriesIssues, seriesPage
 
 const SAGA = seriesCard();
 const ISSUES = `/api/files/series/${SAGA.id}/issues`;
-const NAV_IDS = ['navOverviewBtn', 'navLibraryBtn', 'sidebarOverviewBtn', 'sidebarLibraryBtn', 'sidebarSettingsBtn', 'sidebarJobsBtn'];
+const NAV_IDS = ['navOverviewBtn', 'navLibraryBtn', 'sidebarOverviewBtn', 'sidebarLibraryBtn', 'sidebarSettingsBtn', 'sidebarJobsBtn', 'sidebarUsersBtn'];
 
 /** Routes for a library holding one series, Saga, with one issue. */
 const libraryRoutes = (overrides = {}) => ({
@@ -37,7 +37,8 @@ function pageState(page) {
             health: shown('#libraryHealthDashboard'),
             files: shown('#libraryFilesView'),
             settings: !page.$('#settingsView').hidden,
-            jobs: !page.$('#jobsView').hidden
+            jobs: !page.$('#jobsView').hidden,
+            users: !page.$('#usersView').hidden
         },
         headerControls: ['.header-search', '.header-filter-dropdown', '.header-sort-dropdown'].map(shown),
         layoutToggles: [!page.$('#seriesLayoutToggle').hidden, !page.$('#seriesLayoutToolbarMobile').hidden],
@@ -47,7 +48,7 @@ function pageState(page) {
     };
 }
 
-const NONE = { overview: false, health: false, files: false, settings: false, jobs: false };
+const NONE = { overview: false, health: false, files: false, settings: false, jobs: false, users: false };
 const HOME = {
     view: 'home', title: 'Overview · Comic Maintainer', topbar: 'Overview',
     sections: { ...NONE, overview: true }, headerControls: [false, false, false], layoutToggles: [false, false],
@@ -69,6 +70,11 @@ const JOBS = {
     sections: { ...NONE, jobs: true }, headerControls: [false, false, false], layoutToggles: [false, false],
     settingsBodyClass: false, activeNav: ['sidebarJobsBtn'], currentNav: ['sidebarJobsBtn']
 };
+const USERS = {
+    view: 'users', title: 'Users · Comic Maintainer', topbar: 'Users',
+    sections: { ...NONE, users: true }, headerControls: [false, false, false], layoutToggles: [false, false],
+    settingsBodyClass: false, activeNav: ['sidebarUsersBtn'], currentNav: ['sidebarUsersBtn']
+};
 
 test('each page shows its own sections, header controls, title and active navigation', async () => {
     const page = await boot({ hash: '#/home', routes: libraryRoutes() });
@@ -78,6 +84,7 @@ test('each page shows its own sections, header controls, title and active naviga
         ['#navLibraryBtn', '#/library', LIBRARY],
         ['#sidebarSettingsBtn', '#/settings', SETTINGS],
         ['#sidebarJobsBtn', '#/jobs', JOBS],
+        ['#sidebarUsersBtn', '#/users', USERS],
         ['#sidebarOverviewBtn', '#/home', HOME],
         ['#sidebarLibraryBtn', '#/library', LIBRARY]
     ];
@@ -180,7 +187,7 @@ test('closing Settings returns to the page it was opened from', async () => {
 });
 
 test('a series deep link opens that series, and every other page closes it', async () => {
-    for (const [hash, view] of [['#/library', 'library'], ['#/home', 'home'], ['#/settings', 'settings'], ['#/jobs', 'jobs']]) {
+    for (const [hash, view] of [['#/library', 'library'], ['#/home', 'home'], ['#/settings', 'settings'], ['#/jobs', 'jobs'], ['#/users', 'users']]) {
         const page = await boot({ hash: `#/series/${SAGA.id}`, routes: libraryRoutes() });
         assert.equal(page.evaluate('currentSeriesDetailId'), SAGA.id);
         assert.equal(page.evaluate('currentSeriesDetailSeries.title'), 'Saga');
@@ -304,7 +311,8 @@ test('an Actions menu left open on a series page closes when the page changes wi
         ['g l', async () => await keys('g', 'l'), 'library'],
         ['g h', async () => await keys('g', 'h'), 'home'],
         ['g s', async () => await keys('g', 's'), 'settings'],
-        ['g j', async () => await keys('g', 'j'), 'jobs']
+        ['g j', async () => await keys('g', 'j'), 'jobs'],
+        ['g u', async () => await keys('g', 'u'), 'users']
     ]) {
         await go(page, `#/series/${SAGA.id}`);
         await leaveWithMenuOpen(name, leave, view);
@@ -334,7 +342,7 @@ test('the issue range selection is reset only when leaving the open series', asy
 test('routing tolerates missing page sections and navigation items', async () => {
     const page = await boot({ hash: '#/home' });
     const optional = [
-        '#overviewView', '#settingsView', '#jobsView', '#libraryHealthDashboard', '#libraryFilesView',
+        '#overviewView', '#settingsView', '#jobsView', '#usersView', '#libraryHealthDashboard', '#libraryFilesView',
         '.header-search', '.header-filter-dropdown', '.header-sort-dropdown', '#seriesLayoutToggle',
         '#seriesLayoutToolbarMobile', ...NAV_IDS.map(id => `#${id}`)
     ];

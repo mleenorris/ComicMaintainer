@@ -59,6 +59,10 @@ test('"g" followed by a letter moves between the pages', async () => {
     await keys(page, 'g', 'j');
     assert.equal(hash(page), '#/jobs');
 
+    const [, toUsers] = await keys(page, 'g', 'U');
+    assert.equal(toUsers.defaultPrevented, true);
+    assert.equal(hash(page), '#/users');
+
     await keys(page, 'g', 'h');
     assert.equal(hash(page), '#/home');
     assert.equal(page.evaluate('currentView'), 'home');
@@ -74,11 +78,15 @@ test('an unknown second key cancels the "g" sequence, and a bare letter does not
     assert.equal(page.evaluate('pendingShortcutPrefix'), null);
 });
 
-test('"g j" is only a shortcut for administrators', async () => {
+test('"g j" and "g u" are only shortcuts for administrators', async () => {
     const page = await boot({ hash: '#/home', user: { canAdminister: false } });
 
     const [, jobs] = await keys(page, 'g', 'j');
     assert.equal(jobs.defaultPrevented, false);
+    assert.equal(hash(page), '#/home');
+
+    const [, users] = await keys(page, 'g', 'u');
+    assert.equal(users.defaultPrevented, false);
     assert.equal(hash(page), '#/home');
 });
 

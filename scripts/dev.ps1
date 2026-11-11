@@ -17,7 +17,7 @@
            nuget        NuGet packages with high or critical advisories       (security-scan.yml)
            codeql       CodeQL security-and-quality: C#, JavaScript, Actions  (codeql-analysis.yml)
            docker       image build, container smoke test and Trivy scan      (integration-tests-e2e.yml)
-         Results, including the CodeQL SARIF files, go to <ToolsDir>\ci-results.
+         Results, including the CodeQL SARIF files, go to <ToolsDir>\ci-results\<checkout folder name>.
 
   env    Puts the tools on PATH in the current PowerShell session. Dot-source it:  . .\scripts\dev.ps1 env
 
@@ -71,7 +71,8 @@ $ProgressPreference = 'SilentlyContinue'
 
 $Repo = Split-Path -Parent $PSScriptRoot
 $Downloads = Join-Path $ToolsDir 'downloads'
-$ResultsDir = Join-Path $ToolsDir 'ci-results'
+# One results folder per checkout, so checks running in two worktrees at once do not clear each other's results.
+$ResultsDir = Join-Path (Join-Path $ToolsDir 'ci-results') (Split-Path -Leaf $Repo)
 $IsWindowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 $ExeSuffix = if ($IsWindowsHost) { '.exe' } else { '' }
 # Windows' own tar unpacks zip files too; a GNU tar earlier on PATH would not.

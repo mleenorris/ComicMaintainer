@@ -45,8 +45,8 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 ci -Only codeql    # or
 `ci` runs the same steps as the workflows: the strict build, unit tests with the coverage gate, integration tests,
 the JavaScript tests and their coverage gates, the NuGet advisory check, CodeQL's security-and-quality queries for C#,
 JavaScript and the workflows, and, when Docker is installed, the image build, container smoke test and Trivy scan. It
-ends with a summary and fails if any step failed. The CodeQL findings are listed in
-`%USERPROFILE%\comicmaintainer-tools\ci-results\codeql-findings.txt`, with the SARIF files beside them.
+ends with a summary and fails if any step failed. The CodeQL findings are listed in `codeql-findings.txt` under
+`%USERPROFILE%\comicmaintainer-tools\ci-results\<checkout folder>`, with the SARIF files beside them.
 
 Two differences from CI remain: the macOS file-operation job only runs on a Mac, and coverage reads about one point
 lower on Windows than on Linux, so the unit step's gate is 96.3% on Windows and CI's 97% elsewhere.

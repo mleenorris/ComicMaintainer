@@ -33,8 +33,8 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
   `YourSecurePassword123!` are refused at startup seeding, setup, registration, password change
   and sign-in, even on an existing account. **What to do:** set `ADMIN_USERNAME` to the affected
   account and `ADMIN_PASSWORD` (or `ADMIN_PASSWORD_FILE`) to a password of your own, then restart;
-  the password is replaced at startup. Repeat for each affected account, because the app has no
-  administrator password-reset endpoint.
+  the password is replaced at startup. For the other affected accounts, repeat this, or sign in as
+  an administrator and set new passwords on the Users page.
 - **`ADMIN_PASSWORD` has no default any more.** `docker-compose.dotnet.yml` and `.env.example` no
   longer set it, so a new install without it goes through first-run setup instead of creating
   `admin` / `Admin123!`. **What to do:** to create an administrator from the environment, set
@@ -45,19 +45,21 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
   do:** find the code with `docker logs`. Authelia deployments that used setup to create a local
   administrator must set `ADMIN_PASSWORD` instead.
 - **Wrong passwords now lock accounts, and sign-in requests are rate limited.** Five wrong
-  passwords in a row lock an account for 15 minutes, whether at sign-in, password change or
-  API-key creation; the lockout ends on its own. Sign-in, registration, setup, password change and
-  API-key creation allow 10 requests per 5 minutes per client address, then answer 429 with a JSON
-  error and `Retry-After`. Every sign-in failure now reads "Invalid username or password",
-  including for disabled accounts. **What to do:** behind a reverse proxy, set `TRUSTED_PROXIES`,
-  or all clients share one limit.
+  passwords in a row lock an account for 15 minutes, whether at sign-in, password change, API-key
+  creation or when an administrator confirms a change on the Users page. The lockout ends on its
+  own, or when an administrator sets a new password for the account. Sign-in, registration, setup,
+  password change and API-key creation allow 10 requests per 5 minutes per client address, then
+  answer 429 with a JSON error and `Retry-After`. Every sign-in failure now reads "Invalid username
+  or password", including for disabled accounts. **What to do:** behind a reverse proxy, set
+  `TRUSTED_PROXIES`, or all clients share one limit.
 - **Old API keys are gone and new ones work differently.** The upgrade drops keys stored by
   earlier versions; they never authenticated anyone. Keys now go in the `X-API-Key` header only
   and act as the owning account with its current roles. Any role can create one. Creating one
   needs the account's current password (Authelia sessions are exempt), is rate limited and cannot
-  be done with an API key. Changing the password or signing out of all sessions revokes the key.
-  **What to do:** create a new key at Settings > OPDS Catalog or with `POST /api/auth/api-key`,
-  and again after a password change.
+  be done with an API key. Changing the password or signing out of all sessions revokes the key,
+  as do an administrator resetting the password and disabling the account. **What to do:** create
+  a new key at Settings > OPDS Catalog or with `POST /api/auth/api-key`, and again after a
+  password change.
 - **`POST /api/auth/change-password` refuses API keys (403).** **What to do:** sign in to change a
   password.
 - **Session tokens are no longer accepted in URLs, and `GET /api/auth/sse-token` is removed.**
@@ -77,8 +79,9 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
   longer returns `allow_registration`, and a stored `AllowRegistration` setting and
   `AppSettings__AllowRegistration` are ignored. The Access card, left holding only the default
   series-name language, is now called Series Language. **What to do:** create accounts as an
-  administrator, calling `POST /api/auth/register` with an administrator's session token or API
-  key, stop calling the removed routes, and remove the variable if you set it.
+  administrator on the new Users page, or with `POST /api/users` (see Added); `POST
+  /api/auth/register` with an administrator's session token or API key still works for scripts.
+  Stop calling the removed routes, and remove the variable if you set it.
 
 #### Deployment and the Docker image
 
@@ -414,6 +417,20 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
   with `GET`, `POST` and `DELETE /api/auth/api-key` or Settings > OPDS Catalog.
 - **Signing out can end every session.** `POST /api/auth/logout` with `allSessions` also revokes
   the API key.
+- **A Users page for administrators** (`#/users`, `g` `u`). It lists every account with its role,
+  status, last sign-in and creation date, and adds accounts with a role, changes roles, resets
+  passwords, and disables, enables or deletes accounts. The same is available as `GET` and `POST
+  /api/users`, `PUT /api/users/{id}/role`, `POST /api/users/{id}/password`, `PUT
+  /api/users/{id}/active` and `DELETE /api/users/{id}`. Adding an account, changing a role,
+  resetting a password and enabling an account need the administrator's own password (Authelia
+  sessions are exempt), so a stolen session token alone cannot create or take over an account.
+  Role changes, resets and disabling end the account's sessions; resets and disabling also revoke
+  its API key, and a reset lifts a lockout. Deleting removes the account's reading progress, read
+  status, preferences, e-reader devices, subscriptions and delivery history. Nobody can change
+  their own role, password, status or account there, and the last active administrator cannot be
+  demoted, disabled or deleted. With Authelia enabled, adding accounts, changing roles and
+  resetting passwords are refused, because Authelia does those. See [Users](docs/USER_GUIDE.md#users)
+  and [User accounts](docs/API.md#user-accounts).
 - **New settings:** `ConvertRarToCbzOnWrite`, `SETUP_TOKEN`, `FIX_LIBRARY_PERMISSIONS`,
   `STALE_CLEANUP_MAX_REMOVAL_PERCENT`, `STALE_CLEANUP_MISSING_GRACE_HOURS`,
   `STALE_CLEANUP_SENTINEL_FILE`, `PROCESSING_HISTORY_RETENTION_DAYS`,
@@ -463,6 +480,8 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
   cache), and are never read from a URL. Event streams opened with an API key end once the key is
   revoked.
 - API keys are stored as SHA-256 hashes. A stolen session token alone cannot create one.
+- An account disabled in ComicMaintainer is refused when it signs in through Authelia, as it is with
+  a password or an API key.
 - Series image downloads are checked at connection time against private, loopback, link-local,
   metadata, IPv4-mapped and NAT64 ranges, follow redirects only after re-checking each hop, and
   refuse an HTTPS-to-HTTP downgrade.

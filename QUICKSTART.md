@@ -44,6 +44,8 @@ docker logs comicmaintainer-dotnet 2>&1 | grep "setup code"
 To skip this page, start the container with `-e ADMIN_USERNAME=<name> -e ADMIN_PASSWORD=<your password>`. Choose your
 own password: the examples published with earlier versions are refused.
 
+To add accounts for other people, sign in as the administrator and open **Users** in the sidebar.
+
 ## 3. Use the library
 
 1. Files in the watched folder are added and processed by themselves. Files that were there before the first start are

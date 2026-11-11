@@ -194,6 +194,41 @@ Administrators manage jobs on the **Scheduled Jobs** page.
 | Missing Issues Check | Off, daily | Reports gaps in issue numbering. With `autoDownload`, queues matches through Suwayomi |
 | Metadata Backfill | Off, every 15 minutes | Writes metadata edits stored in the database into the archives. A CBR, RAR or ZIP stays queued while conversion is off |
 
+## Users
+
+Administrators manage accounts on the **Users** page: open it from the sidebar or the account menu, or press `g` then
+`u`. There is no sign-up page, so this is where accounts come from after the first administrator.
+
+| Role | What the account can do |
+| --- | --- |
+| Administrator | Everything a User can do, plus settings, accounts, backups, logs and scheduled jobs |
+| User | Browse and read the library, and change it: process, rename, edit metadata, delete files and email comics |
+| Read-only | Browse and read the library, and keep their own reading progress. It cannot change files or metadata, or email comics |
+
+- **Add user** creates an account with a username, a password, a role, and optionally a full name and an email. Without
+  an email the account gets `<username>@comicmaintainer.local`.
+- **Change role** signs the account out everywhere, so it signs in again with the new role.
+- **Reset password** sets a new password, signs the account out everywhere, revokes its API key and lifts a lockout. Tell
+  the person their new password; they can change it with **Change Password** in the account menu.
+- **Disable** signs the account out everywhere and revokes its API key at once. A disabled account cannot sign in until
+  an administrator enables it again, and its old sessions and key stay revoked.
+- **Delete** removes the account with its reading progress, read status, preferences, e-reader devices and their series
+  subscriptions, and email delivery history. Comic files are not touched. If `ADMIN_USERNAME` names the account and
+  `ADMIN_PASSWORD` is set, it is created again at the next start.
+
+Adding an account, changing a role, resetting a password and enabling an account ask for your own password. They give
+someone lasting access, so a stolen session alone cannot do them. Disabling and deleting only take access away, so they
+do not ask. With Authelia, you are not asked, because your account has no password here.
+
+The page will not let you change your own role, disable or delete your own account, or reset your own password; use
+**Change Password** for that. The last active administrator cannot be demoted, disabled or deleted. Each refused action
+is greyed out with the reason shown on the account.
+
+With Authelia enabled, Authelia creates accounts when people first sign in, sets their roles from its groups, and keeps
+their passwords. The page then only disables, enables and deletes accounts. A deleted account comes back, empty, the
+next time that person signs in through Authelia, so disable an account to keep someone out. See
+[AUTHELIA.md](AUTHELIA.md#user-management).
+
 ## Reader
 
 The reader has **manga** mode, one page at a time, and **webcomic** mode, a continuous scroll. Progress is saved per user.

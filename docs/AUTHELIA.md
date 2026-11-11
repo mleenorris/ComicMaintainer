@@ -295,6 +295,24 @@ When a user successfully authenticates via Authelia:
    administrators, so it lets **every signed-in user who is not ReadOnly administer it**, including users of local
    accounts, rather than locking everyone out. That also lets them read and change everyone's e-reader devices and
    email deliveries. Once admin groups are configured, only users with the Admin role can administer.
+   That includes the **Users** page, so set admin groups before you rely on it.
+
+### The Users Page
+
+Administrators can still see every account on the **Users** page, and disable, enable and delete accounts there.
+With Authelia enabled the page does less than without it:
+
+- **Adding accounts, changing roles and resetting passwords are refused** (`409`). Authelia creates accounts at first
+  sign-in, sets roles from its groups on every request, and keeps the passwords. A role set in ComicMaintainer would
+  be replaced at the person's next request, and a password set in ComicMaintainer would only be a way to sign in
+  around Authelia and its second factor. Add people, change their groups and reset their passwords in Authelia.
+- **Disabling an account keeps the person out** even though Authelia still signs them in: ComicMaintainer refuses
+  every request of a disabled account, and logs
+  `Refused the Authelia sign-in of <name>: the account is disabled in ComicMaintainer`.
+- **Deleting an account only lasts until the person signs in again.** Their next request through Authelia creates a
+  new, empty account. To keep someone out, disable the account, or remove them in Authelia.
+- You are not asked for your password to enable an account when you signed in through Authelia, because Authelia
+  accounts have no password in ComicMaintainer. A local administrator signed in with a password is asked for it.
 
 ### First-Run Setup
 

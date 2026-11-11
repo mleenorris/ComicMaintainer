@@ -9,7 +9,8 @@ namespace ComicMaintainer.Tests.Integration;
 
 /// <summary>
 /// Who may create an account with <c>POST /api/auth/register</c>, through the real authentication and authorization
-/// pipeline. The web app has no sign-up page, so the route is how administrators add accounts, and only they may.
+/// pipeline. There is no sign-up page: the route is kept for administrators' scripts (the Users page uses
+/// <c>/api/users</c>, see <see cref="UsersApiIntegrationTests"/>), and only administrators may call it.
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class RegisterAuthorizationIntegrationTests : IClassFixture<SessionTokenIntegrationTests.JwtHost>

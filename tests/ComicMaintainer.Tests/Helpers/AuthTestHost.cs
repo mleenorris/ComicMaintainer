@@ -62,6 +62,7 @@ internal sealed class AuthTestHost : IAsyncDisposable
         AddComicMaintainerData(services, Configuration);
         AddComicMaintainerAuth(services, Configuration);
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IUserAdministrationService, ComicMaintainer.Core.Services.Auth.UserAdministrationService>();
         configureServices?.Invoke(services);
         Services = services.BuildServiceProvider();
     }

@@ -183,7 +183,7 @@
 							"mode": "raw",
 							"raw": "{\n  \"username\": \"reader\",\n  \"password\": \"A-strong-passw0rd\",\n  \"email\": \"reader@example.com\",\n  \"fullName\": \"A Reader\"\n}"
 						},
-						"description": "Creates an account with the User role. Administrators only: sign in as one first. Anyone else gets 401 or 403."
+						"description": "Creates an account with the User role. Administrators only: sign in as one first. Anyone else gets 401 or 403. Kept for scripts: Users > Create User also sets the role."
 					},
 					"response": []
 				},
@@ -367,6 +367,221 @@
 				}
 			],
 			"description": "Sign-in, API keys and stream tokens."
+		},
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "List Users",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/users",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"users"
+							]
+						},
+						"description": "Every account, sorted by username, and whether Authelia is enabled. Saves the first account that is not yours to user_id."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"if (pm.response.code === 200) { const other = pm.response.json().users.find(u => !u.isCurrentUser); if (other) { pm.environment.set('user_id', other.id); } }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Create User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/users",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"users"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"reader\",\n  \"password\": \"A-strong-passw0rd\",\n  \"email\": \"reader@example.com\",\n  \"fullName\": \"A Reader\",\n  \"role\": \"User\",\n  \"currentPassword\": \"{{admin_password}}\"\n}"
+						},
+						"description": "Creates an account with a role: Admin, User or ReadOnly. Answers 201 and saves the new account to user_id. Needs your own password, except under Authelia, where creating accounts is refused (409)."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"if (pm.response.code === 201) { pm.environment.set('user_id', pm.response.json().id); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Change User Role",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/users/{{user_id}}/role",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"users",
+								"{{user_id}}",
+								"role"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"ReadOnly\",\n  \"currentPassword\": \"{{admin_password}}\"\n}"
+						},
+						"description": "Gives the account one role and ends its sessions. Needs your own password. Refused (409) for your own account, the last active administrator, and under Authelia."
+					},
+					"response": []
+				},
+				{
+					"name": "Reset User Password",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/users/{{user_id}}/password",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"users",
+								"{{user_id}}",
+								"password"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"newPassword\": \"An0ther-strong-passw0rd\",\n  \"currentPassword\": \"{{admin_password}}\"\n}"
+						},
+						"description": "Sets the password, ends every session, revokes the API key and lifts a lockout. Needs your own password. Refused (409) for your own account and under Authelia."
+					},
+					"response": []
+				},
+				{
+					"name": "Disable User",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/users/{{user_id}}/active",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"users",
+								"{{user_id}}",
+								"active"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"isActive\": false\n}"
+						},
+						"description": "Disables the account, ends its sessions and revokes its API key. No password needed. Refused (409) for your own account and the last active administrator."
+					},
+					"response": []
+				},
+				{
+					"name": "Enable User",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/users/{{user_id}}/active",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"users",
+								"{{user_id}}",
+								"active"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"isActive\": true,\n  \"currentPassword\": \"{{admin_password}}\"\n}"
+						},
+						"description": "Lets a disabled account sign in again. Needs your own password, except under Authelia."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/users/{{user_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"users",
+								"{{user_id}}"
+							]
+						},
+						"description": "Deletes the account with its reading progress, read status, preferences, e-reader devices, subscriptions and delivery history. Answers 204. Refused (409) for your own account and the last active administrator."
+					},
+					"response": []
+				}
+			],
+			"description": "Administrator only. Account administration, as on the Users page."
 		},
 		{
 			"name": "Files",

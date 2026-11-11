@@ -269,6 +269,11 @@
         // default to true so the UI stays fully functional if the capability
         // lookup fails — the API is the real enforcement point.
         let userCapabilities = { canModifyLibrary: true, canAdminister: true };
+        // How the current user signed in (authMethod of GET /api/auth/user:
+        // 'jwt', 'authelia' or 'api_key'), or null until it is known. The
+        // Users page asks for the administrator's own password unless they
+        // signed in through Authelia.
+        let currentUserAuthMethod = null;
         let settingsLoaded = false;
         let settingsLoadRequest = 0;
 
@@ -287,6 +292,7 @@
                     canModifyLibrary: user.canModifyLibrary !== false,
                     canAdminister: user.canAdminister !== false
                 };
+                currentUserAuthMethod = typeof user.authMethod === 'string' ? user.authMethod : null;
                 applyCapabilities();
             } catch (error) {
                 console.error('Error loading current user:', error);
@@ -301,11 +307,13 @@
 
             // /api/diagnostics reports host paths, disk space and process
             // memory, the raw logs (/api/logs) name every user, role and
-            // failed sign-in, and scheduled jobs are server administration
-            // (backups, library-wide scans and auto-corrections), so these
-            // APIs are administrator-only. Hide the entry points rather than
-            // let them open a page or panel that can only say "403".
+            // failed sign-in, scheduled jobs are server administration
+            // (backups, library-wide scans and auto-corrections) and the
+            // Users page creates and changes accounts, so these APIs are
+            // administrator-only. Hide the entry points rather than let them
+            // open a page or panel that can only say "403".
             [
+                'usersMenuItem', 'sidebarUsersBtn', 'usersShortcutItem',
                 'diagnosticsMenuItem', 'sidebarDiagnosticsItem',
                 'logsMenuItem', 'sidebarLogsItem',
                 'scheduledJobsMenuItem', 'sidebarJobsBtn', 'scheduledJobsShortcutItem'
@@ -344,9 +352,11 @@
                 if (button) button.disabled = !settingsLoaded || !userCapabilities.canAdminister;
             });
 
-            // Scheduled jobs are administrator-only (see the entry points
-            // above); anyone else who reaches the page gets a notice instead.
+            // Scheduled jobs and users are administrator-only (see the entry
+            // points above); anyone else who reaches those pages gets a notice
+            // instead.
             applyScheduledJobsCapabilities();
+            applyUsersCapabilities();
         }
 
         // =================================================================

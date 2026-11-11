@@ -4,7 +4,7 @@ The repository includes a Postman collection with a request for every route of t
 
 | File | What it is |
 |---|---|
-| `ComicMaintainer.postman_collection.json` | The requests, in 22 folders |
+| `ComicMaintainer.postman_collection.json` | The requests, in 23 folders |
 | `ComicMaintainer.postman_environment.json` | The variables the requests use |
 
 ## Set up
@@ -59,6 +59,7 @@ Some requests need an id from an earlier response. Set these in the environment 
 | `series_alias` | **Metadata > Remove Alias** | An alias you added |
 | `job_id` | **Batch Jobs** | `job_id` from a job you started |
 | `scheduled_job_key` | **Scheduled Jobs** | `jobKey` from **List Scheduled Jobs** |
+| `user_id` | **Users** | Saved by **List Users** (the first account that is not yours) and **Create User** |
 | `backup_name` | **Backups** | `name` from **List Backups** |
 | `device_id`, `subscription_id`, `delivery_id`, `build_id` | **Email** | `id` or `build_id` from the matching list |
 | `error_fingerprint` | **Error Reports** | `fingerprint` from **List Reports** |
@@ -72,6 +73,7 @@ Some requests need an id from an earlier response. Set these in the environment 
 | Folder | Contents |
 |---|---|
 | Auth | Sign-in, setup, password change, API keys, stream tokens |
+| Users | Listing, creating, changing, disabling and deleting accounts. The requests that need your own password send `admin_password` |
 | Files | One page of files, counts, tags, processing a file, read state, stale cleanup |
 | Library Browsing | Series, facets, folders, the overview rows |
 | Folder Combine | Finding, previewing and combining folders |

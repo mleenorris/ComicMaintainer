@@ -111,16 +111,23 @@ secrets from a Kubernetes Secret.
   Requests are signed in with a session token, Authelia forward authentication from trusted
   proxies only, or an API key. HTTP Basic is accepted only on the OPDS catalog.
 - **Session tokens** are sent in the `Authorization` header and are never accepted in a URL. Each
-  is revoked by signing out, a password change, a role change, or disabling or deleting the
-  account. The event stream uses its own single-use token, valid for 60 seconds.
+  is revoked by signing out, a password change or reset, a role change, or disabling or deleting
+  the account. The event stream uses its own single-use token, valid for 60 seconds.
+- **Account administration** is for administrators only, on the Users page and `/api/users`.
+  Creating an account, changing a role, setting a password and enabling an account need the
+  administrator's own password, so a stolen session token alone cannot create or take over an
+  account. Nobody can change their own role, status or account there, or set their own password,
+  and the last active administrator cannot be demoted, disabled or deleted. A disabled account is
+  refused however it signs in, Authelia included.
 - **First-run setup** requires a one-time code from the server's log, or `SETUP_TOKEN`. It is only
   available while no account exists, and never under Authelia.
 - **Published example passwords**, such as `Admin123!`, are refused when setting a password, at
   startup and at sign-in.
-- **Account lockout**: five wrong passwords in a row, whether at sign-in, password change or API
-  key creation, lock the account for 15 minutes.
-  There is no in-app unlock, so the lockout ends on its own. The trade-off: anyone who knows a
-  username can keep that account locked by failing repeatedly.
+- **Account lockout**: five wrong passwords in a row, whether at sign-in, password change, API key
+  creation or an administrator confirming a change on the Users page, lock the account for 15
+  minutes. The lockout ends on its own, or when an administrator sets a new password for the
+  account. The trade-off: anyone who knows a username can keep that account locked by failing
+  repeatedly.
 - **Attempt limits**: sign-in, registration, first-run setup, password change, API key creation
   and OPDS sign-in share a limit of 10 attempts per 5 minutes per client address. Requests over
   it get `429` with a `Retry-After` header. Behind a reverse proxy, set `TRUSTED_PROXIES`, or all
@@ -136,7 +143,8 @@ secrets from a Kubernetes Secret.
   OPDS catalog, a key can be used as the HTTP Basic password instead.
 - Creating a key requires the account's current password, except in an Authelia session, whose
   account has no password of its own. An API key cannot create a key or change a password.
-- Changing the password or signing out of all sessions revokes the key.
+- Changing the password or signing out of all sessions revokes the key, as do an administrator
+  resetting the password and disabling the account.
 
 ### OPDS Catalog
 

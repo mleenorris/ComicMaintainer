@@ -97,7 +97,9 @@ docker run -d \
 
 Passwords need at least 8 characters with an upper-case letter, a lower-case letter and a digit. Example passwords published with this project, such as `Admin123!`, are refused: no account is created, and the log says why.
 
-An account that still has one of those published passwords cannot sign in. Set `ADMIN_USERNAME` to that account's name and `ADMIN_PASSWORD` to a password of your own, then restart, and the password is replaced. Repeat for each affected account; there is no administrator password-reset endpoint.
+An account that still has one of those published passwords cannot sign in. Set `ADMIN_USERNAME` to that account's name and `ADMIN_PASSWORD` to a password of your own, then restart, and the password is replaced. Once you can sign in as an administrator, set new passwords for the other affected accounts on the **Users** page instead.
+
+After the first administrator, add the other accounts on the **Users** page. If you delete the account `ADMIN_USERNAME` names while `ADMIN_PASSWORD` is set, it is created again at the next start.
 
 ### Sign-In Protection
 

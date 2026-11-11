@@ -44,7 +44,8 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
         ["ErrorReports"] = AuthorizationPolicies.CanAdminister,
         ["Backups"] = AuthorizationPolicies.CanAdminister,
         ["ScheduledJobs"] = AuthorizationPolicies.CanAdminister,
-        ["Settings"] = AuthorizationPolicies.CanAdminister
+        ["Settings"] = AuthorizationPolicies.CanAdminister,
+        ["Users"] = AuthorizationPolicies.CanAdminister
     };
 
     public void Apply(ActionModel action)

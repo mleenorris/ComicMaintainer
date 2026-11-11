@@ -5461,6 +5461,191 @@ summary:focus-visible,
     overflow-wrap: anywhere;
 }
 
+/* ===========================================================================
+   Users page (#/users)
+   ---------------------------------------------------------------------------
+   One settings-style card per account, like the Scheduled Jobs cards. An
+   account's details flow into as many columns as fit, so on a phone they
+   stack and nothing scrolls sideways.
+=========================================================================== */
+.users-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+}
+
+.users-toolbar .users-notice {
+    flex: 1 1 280px;
+    min-width: 0;
+    margin: 0;
+}
+
+.users-count {
+    margin: 0 0 var(--space-3);
+}
+
+.users-list-items {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.user-account-heading {
+    flex: 1;
+    min-width: 0;
+}
+
+.user-account-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+}
+
+.user-account-name {
+    overflow-wrap: anywhere;
+}
+
+.user-account-tag,
+.user-account-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.user-account-tag {
+    background: var(--accent-primary-soft);
+    color: var(--accent-text);
+}
+
+.user-account-status {
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+}
+
+.user-account-status--active {
+    background: rgba(39, 174, 96, 0.15);
+    color: var(--status-ok-text);
+}
+
+.user-account-status--locked {
+    background: rgba(243, 156, 18, 0.18);
+    color: var(--status-warn-text);
+}
+
+.user-account-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--space-3) var(--space-5);
+    margin: 0 0 var(--space-4);
+}
+
+.user-account-field {
+    min-width: 0;
+}
+
+.user-account-field dt {
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.user-account-field dd {
+    margin: 2px 0 0;
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+}
+
+.user-account-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4);
+}
+
+.user-account-note {
+    margin: 0 0 var(--space-4);
+}
+
+/* The role choices in the Add User and Change Role dialogs: a radio button
+   with its name, and what the role can do underneath. */
+.users-role-options {
+    min-width: 0;
+    padding: 0;
+    border: none;
+}
+
+.users-role-options legend {
+    margin-bottom: 6px;
+    padding: 0;
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.users-role-option {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 10px;
+    margin-bottom: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-sm);
+}
+
+.users-role-option input[type="radio"] {
+    grid-row: 1 / span 2;
+    width: 18px;
+    height: 18px;
+    margin: 2px 0 0;
+    cursor: pointer;
+}
+
+.form-group .users-role-option label {
+    margin: 0;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.users-role-option .form-hint {
+    margin-top: 2px;
+}
+
+.users-optional {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.users-confirm-message p,
+.users-confirm-message ul {
+    margin: 0 0 12px;
+}
+
+.users-confirm-message ul {
+    padding-left: 20px;
+}
+
+@media (max-width: 768px) {
+    /* Two buttons to a row rather than the full-width small buttons the
+       library uses on phones. */
+    .user-account-actions .btn-small {
+        flex: 1 1 calc(50% - var(--space-2));
+        width: auto;
+    }
+}
+
 /* Current page name in the desktop top bar; the sidebar replaces the
    header brand there, so this keeps the bar from reading as empty. */
 .topbar-title {

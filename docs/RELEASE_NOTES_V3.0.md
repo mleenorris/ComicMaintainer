@@ -59,7 +59,8 @@ To have a choice in force from the first start, set the environment variable bef
 4. **Check for a published password.** `Admin123!`, `YourStrongPassword123!` and
    `YourSecurePassword123!` no longer work, even on an existing account. If an account uses one, set
    `ADMIN_USERNAME` to that account and `ADMIN_PASSWORD` to a password of your own before you
-   start 3.0. The password is replaced at startup. Repeat for each affected account.
+   start 3.0. The password is replaced at startup. For the other affected accounts, repeat this, or
+   sign in as an administrator and set new passwords on the **Users** page.
 5. **Check your Compose file or `.env`.**
    - Remove any `ADMIN_PASSWORD` that holds a published password.
    - Remove `BASE_PATH` unless the app really is served under that subfolder. It used to be ignored
@@ -86,7 +87,8 @@ To have a choice in force from the first start, set the environment variable bef
     without upgrading the database.
 12. **Plan how new accounts are made.** Visitors can no longer create their own account, even if
     you allowed it at **Settings > Access**; that setting is gone. Only an administrator can create
-    accounts, with `POST /api/auth/register`. See [Authentication routes](API.md#authentication-routes).
+    accounts, on the new **Users** page or with `POST /api/users`. See [Users](USER_GUIDE.md#users)
+    and [User accounts](API.md#user-accounts).
 
 ## Upgrading
 
@@ -193,6 +195,8 @@ If you use a network or removable mount for your library, also consider setting
 - **Email retries.** Pending deliveries resume after a restart and temporary failures are retried.
 - **Stronger sign-in.** Account lockout, rate limits, sessions that can be revoked, and a setup code
   for new installs.
+- **A Users page for administrators.** Add accounts with a role, change roles, reset passwords, and
+  disable or delete accounts. See [Users](USER_GUIDE.md#users).
 - **A rebuilt Android app** that can sign in.
 
 The [changelog](../CHANGELOG.md#300---2026-11-09) lists everything, including all breaking changes.
@@ -239,7 +243,8 @@ Going back has limits:
 - Published Android APKs are signed with a key generated for that build, so Android refuses to
   install one over an earlier version. Uninstall the old app first, then sign in again.
 - Anyone who knows a username can keep that account locked out by failing repeatedly. The lockout
-  ends on its own after 15 minutes, and there is no unlock in the app.
+  ends on its own after 15 minutes. An administrator can lift it earlier by resetting the account's
+  password on the **Users** page, but repeated failures lock it again.
 
 ## Support
 

@@ -19,6 +19,7 @@ Related documents:
 - [Caching](#caching)
 - [Request timeouts](#request-timeouts)
 - [Authentication routes](#authentication-routes)
+- [User accounts](#user-accounts)
 - [Files](#files)
 - [Library browsing](#library-browsing)
 - [Folder combine](#folder-combine)
@@ -97,7 +98,7 @@ TOKEN=$(curl -s -X POST http://localhost:5000/api/auth/login \
 curl -H "Authorization: Bearer $TOKEN" 'http://localhost:5000/api/files?per_page=20'
 ```
 
-A session token lasts 24 hours by default (`JwtSettings__ExpirationMinutes`). Signing out, changing the password, changing the account's role, or disabling or deleting the account ends it at once.
+A session token lasts 24 hours by default (`JwtSettings__ExpirationMinutes`). Signing out, changing the password, an administrator setting a new one, changing the account's role, or disabling or deleting the account ends it at once.
 
 ### API keys
 
@@ -107,7 +108,7 @@ Create a key with `POST /api/auth/api-key` or under **Settings > OPDS Catalog**.
 - A key acts as the account that owns it, with that account's current roles. Each account has one key; creating a new one replaces the old one.
 - Creating a key needs the current password (`currentPassword`), unless the session comes from Authelia.
 - A request authenticated with an API key cannot create a key or change the password (`403`).
-- Changing the password or signing out of all sessions revokes the key.
+- Changing the password or signing out of all sessions revokes the key. So does an administrator setting a new password for the account or disabling it.
 
 ### Authelia
 
@@ -130,13 +131,13 @@ The route tables below use these levels:
 | Admin role | Accounts in the `Admin` role, with no Authelia exception |
 | OPDS Basic | HTTP Basic, under `/opds` only |
 
-The roles are `Admin`, `User` and `ReadOnly`. An account created with `POST /api/auth/register` gets `User`.
+The roles are `Admin`, `User` and `ReadOnly`. An account created with `POST /api/auth/register` gets `User`. Administrators choose the role when they create an account with [`POST /api/users`](#user-accounts), and can change it later.
 
 ### Account protection
 
-- Five wrong passwords in a row lock the account for 15 minutes. Sign-in, change-password, API-key creation and OPDS Basic passwords all count. The app has no way to unlock an account early.
+- Five wrong passwords in a row lock the account for 15 minutes. Sign-in, change-password, API-key creation, the administrator's password on the [user account](#user-accounts) routes and OPDS Basic passwords all count. An administrator who sets a new password for the account lifts the lockout early.
 - Every sign-in failure answers `401 {"error":"Invalid username or password"}`, including for disabled and locked accounts.
-- Passwords published as examples with earlier versions are refused at sign-in, setup, registration and password change.
+- Passwords published as examples with earlier versions are refused at sign-in, setup, registration, account creation and password changes.
 
 ## Rate limits
 
@@ -264,7 +265,7 @@ A timed-out request gets `504`.
 
 **`POST /api/auth/login`** takes `{"username":"...","password":"..."}` and returns `{"token":"..."}`.
 
-**`POST /api/auth/register`** takes `{"username","password","email","fullName"}` and creates an account with the `User` role. Only an administrator can call it: the web app has no sign-up page, so this is how administrators add accounts. Without credentials it answers `401`, and for a signed-in non-administrator `403`. Passwords need at least 8 characters with an upper-case letter, a lower-case letter and a digit.
+**`POST /api/auth/register`** takes `{"username","password","email","fullName"}` and creates an account with the `User` role. Only an administrator can call it; there is no sign-up page. It is kept for existing scripts. [`POST /api/users`](#user-accounts), which the web app's **Users** page uses, also sets the role and asks for the administrator's own password. Without credentials it answers `401`, and for a signed-in non-administrator `403`. Passwords need at least 8 characters with an upper-case letter, a lower-case letter and a digit.
 
 **`GET /api/auth/setup-required`** returns `{"setupRequired":true}`.
 
@@ -285,6 +286,41 @@ A timed-out request gets `504`.
 **`POST /api/auth/stream-token`** returns `{"token":"...","expiresIn":60}`. See [Event stream](#event-stream).
 
 **`POST /api/auth/logout`** takes an optional `{"allSessions":true}` and answers `204`. `allSessions` also revokes the API key.
+
+## User accounts
+
+Administrators manage accounts with these routes, or on the **Users** page of the web app (`#/users`).
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/users` | Admin | List every account |
+| `POST` | `/api/users` | Admin | Create an account |
+| `PUT` | `/api/users/{id}/role` | Admin | Change the role |
+| `POST` | `/api/users/{id}/password` | Admin | Set a new password |
+| `PUT` | `/api/users/{id}/active` | Admin | Disable or enable the account |
+| `DELETE` | `/api/users/{id}` | Admin | Delete the account and its data |
+
+**`GET /api/users`** returns `{"autheliaEnabled","users":[...]}`, sorted by username. Each account is `{"id","username","fullName","email","role","isActive","lockedOutUntil","createdAt","lastLoginAt","hasApiKey","isCurrentUser"}`. `role` is `Admin`, `User` or `ReadOnly`, or `null` for an account without one. `lockedOutUntil` is set only while the account is locked out. `lastLoginAt` is the last sign-in with a password. Password hashes, security stamps and API keys are never returned.
+
+**`POST /api/users`** takes `{"username","password","email","fullName","role","currentPassword"}` and answers `201` with the new account. `email` and `fullName` are optional. Without an email the account gets `<username>@comicmaintainer.local`, as in first-run setup. `role` is `Admin`, `User` or `ReadOnly`, in any case. The username needs at least 3 characters, and the password the usual rules. A username or email that another account has answers `409`.
+
+**`PUT /api/users/{id}/role`** takes `{"role","currentPassword"}` and returns the account. Every session of the account ends, because a session token carries the role it was issued with. Its API key keeps working, with the new role.
+
+**`POST /api/users/{id}/password`** takes `{"newPassword","currentPassword"}` and returns the account. Every session of the account ends, its API key is revoked, and a lockout is lifted.
+
+**`PUT /api/users/{id}/active`** takes `{"isActive":false}` or `{"isActive":true,"currentPassword":"..."}` and returns the account. Disabling ends every session and revokes the API key at once. Enabling the account again does not bring them back.
+
+**`DELETE /api/users/{id}`** answers `204`. It deletes the account with its reading progress and reading sessions, read status, reader and app preferences, e-reader devices with their series subscriptions, and email delivery history. Comic files are not touched. E-reader devices and deliveries that belong to no account are kept, as is everything other accounts own. An account named by `ADMIN_USERNAME` is created again at the next start while `ADMIN_PASSWORD` is set.
+
+**The administrator's password.** Creating an account, changing a role, setting a password and enabling an account give lasting access, so they need the caller's own password in `currentPassword`, as creating an API key does. A stolen session token alone cannot create or take over an account. A missing or wrong password answers `403`, and a wrong one counts towards the caller's lockout. A caller signed in through Authelia has no password here and is not asked for one. Disabling and deleting only take access away, so they need no password.
+
+**Refusals.** These answer `409`, with an `error` that says why:
+
+- Changing your own role, setting your own password, and disabling, enabling or deleting your own account. Change your own password with `POST /api/auth/change-password`.
+- Demoting, disabling or deleting the last active administrator.
+- With Authelia enabled, creating an account, changing a role and setting a password. Authelia creates accounts at first sign-in, sets their roles from its groups on every request, and keeps their passwords, so a password set here would only be a way to sign in around Authelia. Disabling, enabling and deleting still work. A disabled account is refused even when Authelia vouches for it. A deleted account is created again, empty, the next time that person signs in through Authelia, so disable an account to keep someone out.
+
+An unknown `id` answers `404`. These routes are not part of the sign-in rate limit: the only password they check is the caller's own, which the lockout protects.
 
 ## Files
 

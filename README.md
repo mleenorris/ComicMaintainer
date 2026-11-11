@@ -167,9 +167,10 @@ Other useful settings: `AppSettings__MaxWorkers` (files processed at once, defau
 ## Security
 
 - Sign-in uses accounts with Admin, User and ReadOnly roles. ReadOnly accounts can browse and read but cannot change the
-  library. Administrators also manage settings, scheduled jobs, backups and logs.
-- Only an administrator can create accounts, with `POST /api/auth/register`. There is no sign-up page, and anyone else
-  calling that endpoint is refused.
+  library. Administrators also manage settings, accounts, scheduled jobs, backups and logs.
+- Only an administrator can create accounts. There is no sign-up page. Administrators add accounts, change roles, set
+  passwords, and disable or delete accounts on the **Users** page, or with the
+  [user account routes](docs/API.md#user-accounts). Changes that give access need the administrator's own password.
 - Behind a reverse proxy, set `TRUSTED_PROXIES` so that clients are counted separately. See
   [REVERSE_PROXY.md](docs/REVERSE_PROXY.md).
 

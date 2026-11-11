@@ -59,10 +59,11 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Creates an account with the <c>User</c> role. Administrators only: the web app has no sign-up page, so this is
-    /// how an administrator adds an account. An anonymous caller gets 401 and a signed-in non-administrator 403, from
-    /// the <see cref="AuthorizationPolicies.CanAdminister"/> policy, before the request is read. It shares the sign-in
-    /// rate limit (<see cref="AuthenticationRateLimit"/>).
+    /// Creates an account with the <c>User</c> role. Administrators only: there is no sign-up page. It is kept for
+    /// scripts; administrators add accounts on the Users page (<c>#/users</c>), and <c>POST /api/users</c>
+    /// (<see cref="UsersController"/>) also sets the role and needs the administrator's own password. An anonymous
+    /// caller gets 401 and a signed-in non-administrator 403, from the <see cref="AuthorizationPolicies.CanAdminister"/>
+    /// policy, before the request is read. It shares the sign-in rate limit (<see cref="AuthenticationRateLimit"/>).
     /// </summary>
     [Authorize(Policy = AuthorizationPolicies.CanAdminister)]
     [HttpPost("register")]

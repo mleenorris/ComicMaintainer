@@ -332,6 +332,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IUserPreferencesService, UserPreferencesService>();
 
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IUserAdministrationService, ComicMaintainer.Core.Services.Auth.UserAdministrationService>();
 
         // Email delivery to saved ereader devices (with optional EPUB/AZW3 conversion).
         services.AddSingleton<IEpubConversionService, EpubConversionService>();

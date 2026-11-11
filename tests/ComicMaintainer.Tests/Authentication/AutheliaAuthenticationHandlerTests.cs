@@ -157,6 +157,19 @@ public class AutheliaAuthenticationHandlerTests
         _userManager.Verify(u => u.CreateAsync(It.IsAny<ApplicationUser>(), It.IsAny<string>()), Times.Never);
     }
 
+    // An administrator can disable an account on the Users page; Authelia vouching for the person does not undo that.
+    [Fact]
+    public async Task Authenticate_ADisabledAccount_Fails()
+    {
+        var existing = ExistingUser("alice", email: "alice@example.com", fullName: "Alice A", "User");
+        existing.IsActive = false;
+
+        var result = await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", "alice")));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("The account is disabled", result.Failure?.Message);
+    }
+
     [Fact]
     public async Task Authenticate_ExistingUserWithoutOptionalHeaders_KeepsStoredDetails()
     {

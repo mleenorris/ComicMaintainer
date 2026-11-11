@@ -116,6 +116,16 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             return AuthenticateResult.Fail("Failed to create or retrieve user");
         }
 
+        // An administrator can disable an account on the Users page; Authelia still vouches for the person, but they
+        // may not use ComicMaintainer, as with a password sign-in or an API key.
+        if (!user.IsActive)
+        {
+            _logger.LogWarning(
+                "Refused the Authelia sign-in of {Username}: the account is disabled in ComicMaintainer",
+                ComicMaintainer.Core.Utilities.LoggingHelper.SanitizeForLog(username));
+            return AuthenticateResult.Fail("The account is disabled");
+        }
+
         // Create claims
         var claims = new List<Claim>
         {

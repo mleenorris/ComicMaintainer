@@ -15,7 +15,7 @@ public static class AuthorizationPolicies
 
     /// <summary>
     /// Required for administrative operations (changing application settings,
-    /// creating users, restarting the service). Satisfied by members of the
+    /// managing user accounts, restarting the service). Satisfied by members of the
     /// <c>Admin</c> role.
     /// </summary>
     public const string CanAdminister = "CanAdminister";

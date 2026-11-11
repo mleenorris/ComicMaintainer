@@ -16,23 +16,6 @@
             await setPreferences({ theme: selectedTheme });
         }
 
-        // Update default library view from settings modal
-        async function updateDefaultLibraryViewFromSettings() {
-            const select = document.getElementById('defaultLibraryViewSelect');
-            if (!select) return;
-            const selectedView = select.value === 'series' ? 'series' : 'files';
-            try {
-                await apiFetch('/api/settings/default-library-view', {
-                    method: 'PUT',
-                    body: { view: selectedView }
-                });
-showMessage(`Default library view set to ${selectedView === 'series' ? 'Series' : 'Files (folder view)'}`, 'success');
-            } catch (error) {
-                console.error('Failed to update default library view:', error);
-                showMessage('Failed to update default library view: ' + error.message, 'error', { reference: error });
-            }
-        }
-
         // Update the global default preferred series-name language. Posting
         // an empty string clears the default and reverts to the canonical
         // title for any series that doesn't have its own override.
@@ -143,23 +126,6 @@ showMessage('Default preferred language updated', 'success');
             }
         }
         
-        async function updateAllowRegistration() {
-            const checkbox = document.getElementById('allowRegistrationCheckbox');
-            const enabled = checkbox.checked;
-
-            try {
-                await apiFetch('/api/settings/allow-registration', {
-                    method: 'PUT',
-                    body: { enabled: enabled }
-                });
-
-                showMessage(`Self-service registration ${enabled ? 'enabled' : 'disabled'} successfully!`, 'success');
-            } catch (error) {
-                checkbox.checked = !enabled;
-                showMessage('Failed to update registration setting: ' + error.message, 'error', { reference: error });
-            }
-        }
-
         async function updateDownloadExternalSeriesImages() {
             const enabled = document.getElementById('downloadExternalSeriesImagesCheckbox').checked;
             
@@ -350,12 +316,6 @@ showMessage('Default preferred language updated', 'success');
                     writeCoverFolderCheckbox.checked = !!settingsData.write_cover_to_series_folder;
                 }
 
-                // Load self-service registration status
-                const allowRegistrationCheckbox = document.getElementById('allowRegistrationCheckbox');
-                if (allowRegistrationCheckbox) {
-                    allowRegistrationCheckbox.checked = !!settingsData.allow_registration;
-                }
-
                 // Load external series image download status
                 const downloadSeriesImagesCheckbox = document.getElementById('downloadExternalSeriesImagesCheckbox');
                 if (downloadSeriesImagesCheckbox) {
@@ -435,13 +395,6 @@ showMessage('Default preferred language updated', 'success');
                 const suwayomiImportDirectory = document.getElementById('suwayomiImportDirectory');
                 if (suwayomiDownloadsDirectory) suwayomiDownloadsDirectory.value = settingsData.suwayomi_downloads_directory || '';
                 if (suwayomiImportDirectory) suwayomiImportDirectory.value = settingsData.suwayomi_import_directory || '';
-
-                // Load default library view
-                const defaultLibraryViewSelect = document.getElementById('defaultLibraryViewSelect');
-                if (defaultLibraryViewSelect) {
-                    const defaultView = settingsData.default_library_view === 'series' ? 'series' : 'files';
-                    defaultLibraryViewSelect.value = defaultView;
-                }
 
                 // Load default preferred-language fallback. Server returns
                 // null/empty when no global default is configured.

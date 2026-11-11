@@ -85,7 +85,6 @@ public sealed class SettingsServiceCoverageTests : IDisposable
     [InlineData("WriteCoverToFirstArchive")]
     [InlineData("WriteCoverToSeriesFolder")]
     [InlineData("DownloadExternalSeriesImages")]
-    [InlineData("AllowRegistration")]
     [InlineData("EnableExternalSeriesMetadata")]
     [InlineData("EnableMangaDexMetadata")]
     [InlineData("EnableAniListMetadata")]
@@ -98,7 +97,6 @@ public sealed class SettingsServiceCoverageTests : IDisposable
             "WriteCoverToFirstArchive" => v => _service.UpdateWriteCoverToFirstArchiveAsync(v),
             "WriteCoverToSeriesFolder" => v => _service.UpdateWriteCoverToSeriesFolderAsync(v),
             "DownloadExternalSeriesImages" => v => _service.UpdateDownloadExternalSeriesImagesAsync(v),
-            "AllowRegistration" => v => _service.UpdateAllowRegistrationAsync(v),
             "EnableExternalSeriesMetadata" => v => _service.UpdateExternalSeriesMetadataEnabledAsync(v),
             "EnableMangaDexMetadata" => v => _service.UpdateMangaDexEnabledAsync(v),
             "EnableAniListMetadata" => v => _service.UpdateAniListEnabledAsync(v),

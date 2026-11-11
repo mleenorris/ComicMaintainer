@@ -864,10 +864,6 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("LibraryViewMode")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
                     b.Property<int?>("PerPage")
                         .HasColumnType("INTEGER");
 

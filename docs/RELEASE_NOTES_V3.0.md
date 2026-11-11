@@ -84,6 +84,9 @@ To have a choice in force from the first start, set the environment variable bef
     [HTTP API](../CHANGELOG.md#http-api) list.
 11. **Check free disk space in the config folder.** If the automatic backup fails, the app stops
     without upgrading the database.
+12. **Plan how new accounts are made.** Visitors can no longer create their own account, even if
+    you allowed it at **Settings > Access**; that setting is gone. Only an administrator can create
+    accounts, with `POST /api/auth/register`. See [Authentication routes](API.md#authentication-routes).
 
 ## Upgrading
 
@@ -114,7 +117,8 @@ docker-compose -f docker-compose.dotnet.yml up -d --build
 - **If the upgrade is interrupted**, the next start tries again from the same backup.
 - **The database structure changes.** New tables hold revoked sessions, library scan records and
   notifications. New columns are added for file and series details, email retries and API keys.
-  The `FileReadStatuses` table, the old API key column and some unused indexes are removed.
+  The `FileReadStatuses` table, the old API key column, each user's library view preference and
+  some unused indexes are removed.
 - **Two kinds of data change.** Unprocessed files flagged as duplicates are marked for one more
   pass. E-reader devices and delivery history are assigned to the first administrator, or stay
   administrator-only if there is none.

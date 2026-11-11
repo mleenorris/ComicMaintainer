@@ -29,7 +29,6 @@ public class SettingsControllerCoverageTests
         IssueNumberPadding = 3,
         LogMaxBytes = 5 * BytesPerMb,
         DatabaseCleanupIntervalHours = 6,
-        DefaultLibraryView = "series",
         DefaultPreferredLanguage = "en",
         SeriesImageMaxBytes = 3 * BytesPerMb + BytesPerMb / 2,
         SeriesImageMaxDownloadBytes = 8 * BytesPerMb,
@@ -144,9 +143,20 @@ public class SettingsControllerCoverageTests
 
         Assert.Equal(ErrorReportingDestination.Owner, json.GetProperty("error_reporting_github_owner").GetString());
         Assert.Equal(ErrorReportingDestination.Repo, json.GetProperty("error_reporting_github_repo").GetString());
-        Assert.Equal("series", json.GetProperty("default_library_view").GetString());
         Assert.Equal("en", json.GetProperty("default_preferred_language").GetString());
         Assert.Equal(1600, json.GetProperty("series_image_max_dimension").GetInt32());
+    }
+
+    // Both were removed in 3.0.0: the web app has no Files view left to choose between, and only an
+    // administrator may create accounts, so there is nothing left to allow.
+    [Theory]
+    [InlineData("library_view")]
+    [InlineData("registration")]
+    public async Task GetAllSettings_HasNoLibraryViewOrRegistrationSetting(string removed)
+    {
+        var json = OkJson(await CreateController().GetAllSettings());
+
+        Assert.DoesNotContain(json.EnumerateObject(), field => field.Name.Contains(removed, StringComparison.Ordinal));
     }
 
     // ---------------------------------------------------------------- simple GETs
@@ -159,14 +169,6 @@ public class SettingsControllerCoverageTests
         Assert.Equal(3.5, json.GetProperty("maxMB").GetDouble());
         Assert.Equal(8.0, json.GetProperty("maxDownloadMB").GetDouble());
         Assert.Equal(1600, json.GetProperty("maxDimension").GetInt32());
-    }
-
-    [Fact]
-    public void GetDefaultLibraryView_ReturnsConfiguredView()
-    {
-        var json = OkJson(CreateController().GetDefaultLibraryView());
-
-        Assert.Equal("series", json.GetProperty("view").GetString());
     }
 
     [Theory]
@@ -202,7 +204,6 @@ public class SettingsControllerCoverageTests
         "write-cover-to-first-archive",
         "write-cover-to-series-folder",
         "download-external-series-images",
-        "allow-registration",
     };
 
     private void SetToggle(string toggle, bool value)
@@ -215,7 +216,6 @@ public class SettingsControllerCoverageTests
             case "write-cover-to-first-archive": _settings.WriteCoverToFirstArchive = value; break;
             case "write-cover-to-series-folder": _settings.WriteCoverToSeriesFolder = value; break;
             case "download-external-series-images": _settings.DownloadExternalSeriesImages = value; break;
-            case "allow-registration": _settings.AllowRegistration = value; break;
             default: throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null);
         }
     }
@@ -228,7 +228,6 @@ public class SettingsControllerCoverageTests
         "write-cover-to-first-archive" => c.GetWriteCoverToFirstArchive(),
         "write-cover-to-series-folder" => c.GetWriteCoverToSeriesFolder(),
         "download-external-series-images" => c.GetDownloadExternalSeriesImages(),
-        "allow-registration" => c.GetAllowRegistration(),
         _ => throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null),
     };
 
@@ -240,7 +239,6 @@ public class SettingsControllerCoverageTests
         "write-cover-to-first-archive" => c.UpdateWriteCoverToFirstArchive(new() { Enabled = enabled }),
         "write-cover-to-series-folder" => c.UpdateWriteCoverToSeriesFolder(new() { Enabled = enabled }),
         "download-external-series-images" => c.UpdateDownloadExternalSeriesImages(new() { Enabled = enabled }),
-        "allow-registration" => c.UpdateAllowRegistration(new() { Enabled = enabled }),
         _ => throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null),
     };
 
@@ -252,7 +250,6 @@ public class SettingsControllerCoverageTests
         "write-cover-to-first-archive" => s => s.UpdateWriteCoverToFirstArchiveAsync(enabled, It.IsAny<CancellationToken>()),
         "write-cover-to-series-folder" => s => s.UpdateWriteCoverToSeriesFolderAsync(enabled, It.IsAny<CancellationToken>()),
         "download-external-series-images" => s => s.UpdateDownloadExternalSeriesImagesAsync(enabled, It.IsAny<CancellationToken>()),
-        "allow-registration" => s => s.UpdateAllowRegistrationAsync(enabled, It.IsAny<CancellationToken>()),
         _ => throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null),
     };
 
@@ -293,15 +290,6 @@ public class SettingsControllerCoverageTests
         _settingsService.Setup(ToggleCall(toggle, true)).ThrowsAsync(failure);
 
         await AssertReachesGlobalHandler(failure, () => PutToggle(CreateController(), toggle, enabled: true));
-    }
-
-    [Fact]
-    public async Task UpdateAllowRegistration_NullBody_ReturnsBadRequest()
-    {
-        var result = await CreateController().UpdateAllowRegistration(null!);
-
-        Assert.Equal("Enabled is required", BadRequestError(result));
-        _settingsService.VerifyNoOtherCalls();
     }
 
     // ---------------------------------------------------------------- scalar settings
@@ -459,69 +447,6 @@ public class SettingsControllerCoverageTests
             .ThrowsAsync(failure);
 
         await AssertReachesGlobalHandler(failure, () => CreateController().UpdateDatabaseCleanupIntervalHours(new() { Hours = 1 }));
-    }
-
-    // ---------------------------------------------------------------- default library view
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task UpdateDefaultLibraryView_MissingView_ReturnsBadRequest(string? view)
-    {
-        var result = await CreateController().UpdateDefaultLibraryView(new() { View = view });
-
-        Assert.Equal("View is required", BadRequestError(result));
-        _settingsService.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task UpdateDefaultLibraryView_NullBody_ReturnsBadRequest()
-    {
-        var result = await CreateController().UpdateDefaultLibraryView(null!);
-
-        Assert.Equal("View is required", BadRequestError(result));
-    }
-
-    [Theory]
-    [InlineData("grid")]
-    [InlineData("file")]
-    public async Task UpdateDefaultLibraryView_UnknownView_ReturnsBadRequest(string view)
-    {
-        var result = await CreateController().UpdateDefaultLibraryView(new() { View = view });
-
-        Assert.Equal("View must be either 'files' or 'series'", BadRequestError(result));
-        _settingsService.VerifyNoOtherCalls();
-    }
-
-    [Theory]
-    [InlineData("  Series ", "series")]
-    [InlineData("FILES", "files")]
-    public async Task UpdateDefaultLibraryView_NormalizesView(string view, string expected)
-    {
-        var result = await CreateController().UpdateDefaultLibraryView(new() { View = view });
-
-        Assert.Equal("Default library view updated successfully", OkJson(result).GetProperty("message").GetString());
-        _settingsService.Verify(s => s.UpdateDefaultLibraryViewAsync(expected, It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task UpdateDefaultLibraryView_PersistsView()
-    {
-        var result = await CreateController().UpdateDefaultLibraryView(new() { View = "files" });
-
-        Assert.IsType<OkObjectResult>(result);
-        _settingsService.Verify(s => s.UpdateDefaultLibraryViewAsync("files", It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task UpdateDefaultLibraryView_ServiceFailure_ReachesTheGlobalHandler()
-    {
-        var failure = new InvalidOperationException("boom");
-        _settingsService.Setup(s => s.UpdateDefaultLibraryViewAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(failure);
-
-        await AssertReachesGlobalHandler(failure, () => CreateController().UpdateDefaultLibraryView(new() { View = "series" }));
     }
 
     // ---------------------------------------------------------------- default preferred language

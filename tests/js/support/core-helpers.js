@@ -22,7 +22,6 @@ function preferences(overrides = {}) {
         issueNumberPadding: 3,
         watcherEnabled: true,
         readingMode: 'manga',
-        libraryViewMode: 'series',
         filterMode: 'all',
         sortMode: 'name',
         sortDirection: 'asc',

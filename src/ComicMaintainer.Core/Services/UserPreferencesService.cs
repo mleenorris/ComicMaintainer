@@ -76,7 +76,6 @@ public class UserPreferencesService : IUserPreferencesService
         if (update.Theme is not null) entity.Theme = update.Theme;
         if (update.PerPage is not null) entity.PerPage = update.PerPage;
         if (update.ReadingMode is not null) entity.ReadingMode = update.ReadingMode;
-        if (update.LibraryViewMode is not null) entity.LibraryViewMode = update.LibraryViewMode;
         if (update.FilterMode is not null) entity.FilterMode = update.FilterMode;
         if (update.SortMode is not null) entity.SortMode = update.SortMode;
         if (update.SortDirection is not null) entity.SortDirection = update.SortDirection;
@@ -97,7 +96,6 @@ public class UserPreferencesService : IUserPreferencesService
         Theme = entity.Theme,
         PerPage = entity.PerPage,
         ReadingMode = entity.ReadingMode,
-        LibraryViewMode = entity.LibraryViewMode,
         FilterMode = entity.FilterMode,
         SortMode = entity.SortMode,
         SortDirection = entity.SortDirection

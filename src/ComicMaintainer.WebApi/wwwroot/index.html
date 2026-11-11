@@ -572,7 +572,7 @@
             <div class="settings-layout">
                 <nav class="settings-nav" aria-label="Settings sections">
                     <button type="button" class="settings-nav-link" data-settings-target="settings-appearance" onclick="scrollToSettingsSection('settings-appearance')"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg><span>Appearance</span></button>
-                    <button type="button" class="settings-nav-link" data-settings-target="settings-access" onclick="scrollToSettingsSection('settings-access')"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><span>Access</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-language" onclick="scrollToSettingsSection('settings-language')"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>Series Language</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-watcher" onclick="scrollToSettingsSection('settings-watcher')"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg><span>Watcher</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-ereader" onclick="scrollToSettingsSection('settings-ereader')"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span>Send to Ereader</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-notifications" onclick="scrollToSettingsSection('settings-notifications')"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><span>Notifications</span></button>
@@ -608,36 +608,16 @@
                                 <option value="dark">Dark Mode</option>
                             </select>
                         </div>
-                        <div class="form-group" style="margin-top: 15px;">
-                            <label for="defaultLibraryViewSelect">Default library view</label>
-                            <select id="defaultLibraryViewSelect" name="defaultLibraryView" onchange="updateDefaultLibraryViewFromSettings()">
-                                <option value="files">📄 Files (folder view)</option>
-                                <option value="series">🖼️ Series</option>
-                            </select>
-                            <small class="form-hint">
-                                Controls which view the library loads into when you first open the site.
-                            </small>
-                        </div>
                     </section>
-                    <section class="settings-card" id="settings-access" aria-labelledby="settings-access-title">
+                    <section class="settings-card" id="settings-language" aria-labelledby="settings-language-title">
                         <header class="settings-card-header">
-                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-lock"/></svg></span>
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-globe"/></svg></span>
                             <div>
-                                <h3 class="settings-card-title" id="settings-access-title">Access</h3>
-                                <p class="settings-card-desc">Sign-in and guest access.</p>
+                                <h3 class="settings-card-title" id="settings-language-title">Series Language</h3>
+                                <p class="settings-card-desc">The language series names are shown in.</p>
                             </div>
                         </header>
                         <div class="form-group">
-                            <label for="allowRegistrationCheckbox" class="checkbox-label">
-                                <input type="checkbox" id="allowRegistrationCheckbox" name="allowRegistration" onchange="updateAllowRegistration()">
-                                <span>Allow visitors to register their own account</span>
-                            </label>
-                            <small class="form-hint form-hint--indent">
-                                Disabled by default. When disabled, only an administrator can create accounts, so anyone who can reach this server cannot sign themselves up. Leave this off unless you intentionally want open sign-ups.
-                            </small>
-                        </div>
-
-                        <div class="form-group" style="margin-top: 15px;">
                             <label for="defaultPreferredLanguageSelect">Default preferred series-name language</label>
                             <select id="defaultPreferredLanguageSelect" name="defaultPreferredLanguage" onchange="updateDefaultPreferredLanguageFromSettings()">
                                 <option value="">None (use canonical title)</option>

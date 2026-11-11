@@ -179,7 +179,7 @@ test('api.js leaves fetch alone', () => {
 });
 
 test('getPreferences returns the saved preferences, or {} when they cannot be loaded', async () => {
-    const prefs = { theme: 'dark', perPage: 50, libraryViewMode: 'series', filterMode: 'unmarked', sortMode: 'date' };
+    const prefs = { theme: 'dark', perPage: 50, filterMode: 'unmarked', sortMode: 'date' };
     const ok = apiPage({ routes: { 'GET /api/preferences': prefs } });
     assert.deepEqual(plain(await ok.run('getPreferences()')), prefs);
     const call = ok.fetchCalls.find(entry => entry.path === '/api/preferences');

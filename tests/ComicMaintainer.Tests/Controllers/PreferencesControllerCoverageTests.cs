@@ -14,8 +14,8 @@ namespace ComicMaintainer.Tests.Controllers;
 
 /// <summary>
 /// Validation paths of <see cref="PreferencesController"/> not covered by
-/// <see cref="PreferencesControllerTests"/>: a missing payload, invalid view and
-/// sort modes, an invalid sort direction, and a blank configured default library view.
+/// <see cref="PreferencesControllerTests"/>: a missing payload, an invalid sort mode
+/// and an invalid sort direction.
 /// </summary>
 public class PreferencesControllerCoverageTests
 {
@@ -50,15 +50,6 @@ public class PreferencesControllerCoverageTests
     }
 
     [Fact]
-    public async Task UpdatePreferences_UnknownLibraryViewModeIsBadRequest()
-    {
-        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { LibraryViewMode = "grid" });
-
-        Assert.Equal("LibraryViewMode must be one of: files, series.", ErrorOf(result));
-        VerifyNothingSaved();
-    }
-
-    [Fact]
     public async Task SavePreferences_UnknownSortModeIsBadRequest()
     {
         var result = await _controller.SavePreferences(new PreferencesController.PreferencesRequest { SortMode = "rating" });
@@ -76,22 +67,6 @@ public class PreferencesControllerCoverageTests
 
         Assert.Equal("SortDirection must be one of: asc, desc.", ErrorOf(result));
         VerifyNothingSaved();
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task GetPreferences_BlankConfiguredDefaultViewFallsBackToFiles(string configuredView)
-    {
-        _appSettings.DefaultLibraryView = configuredView;
-        _preferencesService
-            .Setup(s => s.GetPreferencesAsync("user-1", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new UserPreferences { UserId = "user-1" });
-
-        var result = await _controller.GetPreferences();
-
-        var json = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(result.Result).Value);
-        Assert.Equal("files", json.GetProperty("libraryViewMode").GetString());
     }
 
     private void VerifyNothingSaved() =>

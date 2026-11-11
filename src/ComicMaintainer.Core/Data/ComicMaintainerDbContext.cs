@@ -188,7 +188,6 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.UserId).IsRequired().HasMaxLength(450);
             entity.Property(e => e.Theme).HasMaxLength(32);
             entity.Property(e => e.ReadingMode).HasMaxLength(32);
-            entity.Property(e => e.LibraryViewMode).HasMaxLength(32);
             entity.Property(e => e.FilterMode).HasMaxLength(64);
             entity.Property(e => e.SortMode).HasMaxLength(64);
             entity.Property(e => e.SortDirection).HasMaxLength(32);
@@ -587,7 +586,7 @@ public class ReaderPreferencesEntity
 }
 
 /// <summary>
-/// Database entity for per-user web UI preferences (theme, pagination, library view).
+/// Database entity for per-user web UI preferences (theme, pagination, library filter and sort).
 /// All preference columns are nullable so an unset preference falls back to the
 /// application-level default rather than being pinned to a stored default value.
 /// </summary>
@@ -598,7 +597,6 @@ public class UserPreferencesEntity
     public string? Theme { get; set; }
     public int? PerPage { get; set; }
     public string? ReadingMode { get; set; }
-    public string? LibraryViewMode { get; set; }
     public string? FilterMode { get; set; }
     public string? SortMode { get; set; }
     public string? SortDirection { get; set; }

@@ -7,8 +7,9 @@ using Microsoft.AspNetCore.Mvc.Testing;
 namespace ComicMaintainer.Tests.Security;
 
 /// <summary>
-/// Sign-in, registration and first-run setup share a per-client rate limit (<see cref="AuthenticationRateLimit"/>) on
-/// top of the global one, so one client cannot guess passwords for many accounts (SEC-3).
+/// Sign-in, first-run setup and the other endpoints that check a password share a per-client rate limit
+/// (<see cref="AuthenticationRateLimit"/>) on top of the global one, so one client cannot guess passwords for many
+/// accounts (SEC-3).
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class AuthenticationRateLimitTests : IAsyncLifetime
@@ -41,11 +42,12 @@ public sealed class AuthenticationRateLimitTests : IAsyncLifetime
         var body = await limited.Content.ReadFromJsonAsync<JsonElement>();
         Assert.StartsWith("Too many requests. Please try again in ", body.GetProperty("error").GetString());
 
-        // The limit is shared with setup and registration, and leaves the rest of the API alone.
+        // The limit is shared with setup, and leaves the rest of the API alone. Registration needs an administrator,
+        // so an anonymous client is refused before the limit is consulted.
         using var setup = await client.PostAsJsonAsync("/api/auth/setup", new { username = "someone", password = "An0therGuess", setupToken = "guess" });
         Assert.Equal(HttpStatusCode.TooManyRequests, setup.StatusCode);
         using var register = await client.PostAsJsonAsync("/api/auth/register", new { username = "someone", password = "An0therGuess", email = "someone@example.com" });
-        Assert.Equal(HttpStatusCode.TooManyRequests, register.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, register.StatusCode);
         using var status = await client.GetAsync("/api/auth/status");
         Assert.Equal(HttpStatusCode.OK, status.StatusCode);
     }

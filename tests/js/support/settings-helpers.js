@@ -42,8 +42,6 @@ function settingsResponse(overrides = {}) {
         suwayomi_downloads_directory: '/suwayomi/downloads/mangas',
         suwayomi_import_directory: 'Manga',
         opds_enabled: true,
-        default_library_view: 'series',
-        allow_registration: true,
         default_preferred_language: 'ja',
         write_cover_to_first_archive: true,
         write_cover_to_series_folder: false,

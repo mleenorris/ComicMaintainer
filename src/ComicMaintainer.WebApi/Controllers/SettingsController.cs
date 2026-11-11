@@ -101,8 +101,6 @@ public class SettingsController : ControllerBase
             suwayomi_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.SuwayomiPassword),
             suwayomi_downloads_directory = _appSettings.CurrentValue.SuwayomiDownloadsDirectory,
             suwayomi_import_directory = _appSettings.CurrentValue.SuwayomiImportDirectory,
-            default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
-            allow_registration = _appSettings.CurrentValue.AllowRegistration,
             default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage,
             write_cover_to_first_archive = _appSettings.CurrentValue.WriteCoverToFirstArchive,
             write_cover_to_series_folder = _appSettings.CurrentValue.WriteCoverToSeriesFolder,
@@ -471,54 +469,6 @@ public class SettingsController : ControllerBase
             "Database cleanup settings updated successfully");
     }
 
-    [HttpGet("default-library-view")]
-    public ActionResult<object> GetDefaultLibraryView()
-    {
-        return Ok(new { view = _appSettings.CurrentValue.DefaultLibraryView });
-    }
-
-    [HttpPut("default-library-view")]
-    public async Task<ActionResult> UpdateDefaultLibraryView([FromBody] DefaultLibraryViewRequest request, CancellationToken cancellationToken = default)
-    {
-        if (request == null || string.IsNullOrWhiteSpace(request.View))
-        {
-            return BadRequestProblem("View is required");
-        }
-
-        var normalized = request.View.Trim().ToLowerInvariant();
-        if (normalized != "files" && normalized != "series")
-        {
-            return BadRequestProblem("View must be either 'files' or 'series'");
-        }
-
-        _logger.LogInformation("Default library view update requested: {View}", LoggingHelper.SanitizeForLog(normalized));
-
-        return await SaveAsync(
-            () => _settingsService.UpdateDefaultLibraryViewAsync(normalized, cancellationToken),
-            "Default library view updated successfully");
-    }
-
-    [HttpGet("allow-registration")]
-    public ActionResult<object> GetAllowRegistration()
-    {
-        return Ok(new { enabled = _appSettings.CurrentValue.AllowRegistration });
-    }
-
-    [HttpPut("allow-registration")]
-    public async Task<ActionResult> UpdateAllowRegistration([FromBody] AllowRegistrationRequest request, CancellationToken cancellationToken = default)
-    {
-        if (request == null)
-        {
-            return BadRequestProblem("Enabled is required");
-        }
-
-        _logger.LogInformation("Self-service registration update requested: {Enabled}", request.Enabled);
-
-        return await SaveAsync(
-            () => _settingsService.UpdateAllowRegistrationAsync(request.Enabled, cancellationToken),
-            "Self-service registration updated successfully");
-    }
-
     [HttpGet("default-preferred-language")]
     public ActionResult<object> GetDefaultPreferredLanguage()
     {
@@ -817,16 +767,6 @@ public class SettingsController : ControllerBase
 
         /// <summary>Only the newest this many processing-history entries are kept; 0 disables the cap.</summary>
         public int? ProcessingHistoryMaxEntries { get; set; }
-    }
-
-    public class DefaultLibraryViewRequest
-    {
-        public string? View { get; set; }
-    }
-
-    public class AllowRegistrationRequest
-    {
-        public bool Enabled { get; set; }
     }
 
     public class DefaultPreferredLanguageRequest

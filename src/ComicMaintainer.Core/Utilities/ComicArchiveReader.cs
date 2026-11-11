@@ -192,11 +192,9 @@ public sealed class ComicArchiveReader : IDisposable
     private static (IArchive Archive, long TotalBytes) OpenRarArchive(string filePath, FileStream firstFile)
     {
         var totalBytes = firstFile.Length;
-        var set = RarArchive.OpenArchive(filePath, RarReaderOptions);
-        var returnSet = false;
-        try
+        using (var set = new OwnedUntilReleased<IArchive>(RarArchive.OpenArchive(filePath, RarReaderOptions)))
         {
-            var volumes = ((IArchive)set).Volumes.ToList();
+            var volumes = set.Value.Volumes.ToList();
             if (volumes.Count > 1)
             {
                 foreach (var volume in volumes.Skip(1))
@@ -204,22 +202,39 @@ public sealed class ComicArchiveReader : IDisposable
                     totalBytes += EnsureRarVolumeWithinLimits(volume.FileName!);
                 }
 
+                // Only a multi-volume set is handed to the caller; a refusal or a single file closes it.
                 firstFile.Dispose();
-                returnSet = true;
-                return (set, totalBytes);
-            }
-        }
-        finally
-        {
-            // Only the multi-volume set is handed to the caller; a refusal or a single file closes it here.
-            if (!returnSet)
-            {
-                set.Dispose();
+                return (set.Release(), totalBytes);
             }
         }
 
         firstFile.Position = 0;
         return (RarArchive.OpenArchive(firstFile, RarReaderOptions), totalBytes);
+    }
+
+    /// <summary>
+    /// Owns a disposable until <see cref="Release"/> hands it on: disposing the wrapper disposes the value only when it
+    /// was not handed on, which a using statement alone cannot say.
+    /// </summary>
+    private sealed class OwnedUntilReleased<T>(T value) : IDisposable
+        where T : class, IDisposable
+    {
+        private T? _value = value;
+
+        public T Value => _value ?? throw new ObjectDisposedException(nameof(OwnedUntilReleased<T>));
+
+        public T Release()
+        {
+            var released = Value;
+            _value = null;
+            return released;
+        }
+
+        public void Dispose()
+        {
+            _value?.Dispose();
+            _value = null;
+        }
     }
 
     /// <summary>Checks a following volume the way the first was checked, and returns its size.</summary>

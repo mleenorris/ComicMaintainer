@@ -43,7 +43,10 @@ param(
     [double]$CoverageGate = 0,
     # Memory for CodeQL's query evaluation, in MB. By default CodeQL sizes it from the free memory when it starts, which
     # can be too little while other builds run; on an 8 GB machine 4096 works.
-    [int]$CodeQLRamMb = 0
+    [int]$CodeQLRamMb = 0,
+    # The CodeQL languages to scan; all three by default.
+    [ValidateSet('csharp', 'javascript', 'actions')]
+    [string[]]$CodeQLLanguage = @('csharp', 'javascript', 'actions')
 )
 
 # The versions CI uses. Update these when the workflows move on.
@@ -310,7 +313,7 @@ function Invoke-CodeQL {
     [IO.File]::WriteAllLines($buildScript, [string[]]$lines)
 
     $all = @()
-    foreach ($language in @('csharp', 'javascript', 'actions')) {
+    foreach ($language in $CodeQLLanguage) {
         Write-Step "CodeQL: $language"
         $database = Join-Path $ResultsDir "codeql-db-$language"
         $create = @('database', 'create', $database, "--language=$language", "--source-root=$Repo", '--overwrite',

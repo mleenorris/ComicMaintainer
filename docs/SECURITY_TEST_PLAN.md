@@ -25,6 +25,7 @@ Paths are relative to `tests/ComicMaintainer.Tests/`.
 |---|---|---|
 | Sign-in | Lockout, uniform failure response, published passwords, password confirmation | `Services/AuthServiceSignInTests.cs`, `Services/AuthServiceTests.cs`, `Integration/AuthResponseTests.cs` |
 | First-run setup | Setup code, only with no accounts, never under Authelia | `Services/AuthServiceSetupTests.cs`, `Services/SetupTokenProviderTests.cs` |
+| Account creation | Only administrators can register accounts | `Integration/RegisterAuthorizationIntegrationTests.cs`, `Controllers/AuthControllerCoverageTests.cs` |
 | Session tokens | Revocation, security stamp, stream tokens | `Services/AuthSessionValidatorTests.cs`, `Services/AuthServiceStreamTokenTests.cs`, `Authentication/JwtSessionEventsTests.cs` |
 | Signing secret | Published secrets ignored, generated key handling | `Integration/JwtSigningSecretIntegrationTests.cs` |
 | API keys | Header only, hashed storage, roles, revocation | `Authentication/ApiKeyAuthenticationHandlerTests.cs`, `Authentication/ApiKeysTests.cs`, `Integration/ApiKeyAuthenticationIntegrationTests.cs` |

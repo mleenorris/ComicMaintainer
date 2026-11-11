@@ -69,6 +69,16 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
 - **Logs are for administrators only.** `GET /api/logs` and `GET /api/logs/files` answer 403 to
   User and ReadOnly accounts, and the app hides View Logs from them. **What to do:** read logs
   with an administrator account.
+- **Only administrators can create accounts, and "Allow visitors to register" is gone.** The web
+  app has no sign-up page, so the setting at Settings > Access only opened `POST
+  /api/auth/register` to anonymous callers. That route now requires an administrator, whatever was
+  saved before: it answers 401 without credentials and 403 to a signed-in User or ReadOnly
+  account. `GET` and `PUT /api/settings/allow-registration` are removed, `GET /api/settings` no
+  longer returns `allow_registration`, and a stored `AllowRegistration` setting and
+  `AppSettings__AllowRegistration` are ignored. The Access card, left holding only the default
+  series-name language, is now called Series Language. **What to do:** create accounts as an
+  administrator, calling `POST /api/auth/register` with an administrator's session token or API
+  key, stop calling the removed routes, and remove the variable if you set it.
 
 #### Deployment and the Docker image
 
@@ -554,6 +564,7 @@ Each item ends with what you need to do. Coming from a release before 2.0.413? A
 - The `SeriesIssuesMaxArchiveUpgrades` setting. A stale value in `appsettings` is ignored.
 - The `DefaultLibraryView` setting and the `UserPreferences.LibraryViewMode` column, which the
   removed Files view used. See [Breaking changes](#http-api).
+- The `AllowRegistration` setting. See [Breaking changes](#signing-in-and-accounts).
 - The legacy `FileReadStatuses` table, whose data was copied to `UserFileReadStatuses` earlier.
   Going back to a pre-3.0 release needs a database backup.
 - The plain-text `AspNetUsers.ApiKey` column.

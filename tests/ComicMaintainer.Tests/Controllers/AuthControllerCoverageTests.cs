@@ -5,7 +5,6 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Services.Auth;
-using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
 using ComicMaintainer.WebApi.Infrastructure;
@@ -19,16 +18,13 @@ using Moq;
 namespace ComicMaintainer.Tests.Controllers;
 
 /// <summary>
-/// Covers the registration gate, first-run admin setup, stream token issuance and
+/// Covers who may register an account, first-run admin setup, stream token issuance and
 /// the anonymous / Authelia branches of the status endpoints in <see cref="AuthController"/>.
 /// </summary>
 public class AuthControllerCoverageTests
 {
-    private const string RegistrationDisabledError = "Registration is disabled. Ask an administrator to create your account.";
-
     private readonly Mock<IAuthService> _authService = new();
     private readonly Mock<IAuthorizationService> _authorization = new();
-    private readonly AppSettings _appSettings = new() { AllowRegistration = false };
     private readonly AutheliaSettings _autheliaSettings = new() { Enabled = false };
 
     public AuthControllerCoverageTests()
@@ -46,7 +42,6 @@ public class AuthControllerCoverageTests
             NullLogger<AuthController>.Instance,
             Options.Create(_autheliaSettings),
             _authorization.Object,
-            new TestOptionsMonitor<AppSettings>(_appSettings),
             ClientAddressResolver.Direct)
         {
             ControllerContext = new ControllerContext
@@ -86,48 +81,22 @@ public class AuthControllerCoverageTests
 
     // ----- Register -------------------------------------------------------
 
+    // The pipeline refuses everyone but an administrator before the action runs (401 anonymously, 403 signed in);
+    // RegisterAuthorizationIntegrationTests checks the answers through the real pipeline.
     [Fact]
-    public async Task Register_WhenDisabledAndAnonymous_ReturnsUnauthorizedWithoutCreatingAccount()
+    public void Register_RequiresTheAdministratorPolicy_AndIsNeverAnonymous()
     {
-        var controller = CreateController(Anonymous());
+        var register = typeof(AuthController).GetMethod(nameof(AuthController.Register))!;
 
-        var result = await controller.Register(NewAccount);
-
-        var unauthorized = Assert.IsType<UnauthorizedObjectResult>(result);
-        Assert.Equal(RegistrationDisabledError, Prop<string>(unauthorized.Value, "error"));
-        _authService.VerifyNoOtherCalls();
-        _authorization.Verify(a => a.AuthorizeAsync(
-            It.IsAny<ClaimsPrincipal>(), It.IsAny<object?>(), AuthorizationPolicies.CanAdminister), Times.Once);
+        var authorize = Assert.Single(register.GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true).Cast<AuthorizeAttribute>());
+        Assert.Equal(AuthorizationPolicies.CanAdminister, authorize.Policy);
+        Assert.Empty(register.GetCustomAttributes(typeof(IAllowAnonymous), inherit: true));
+        Assert.Empty(typeof(AuthController).GetCustomAttributes(typeof(IAllowAnonymous), inherit: true));
     }
 
     [Fact]
-    public async Task Register_WhenDisabledAndPrincipalHasNoIdentity_ReturnsUnauthorized()
+    public async Task Register_CreatesTheAccount_WithoutCheckingAnySetting()
     {
-        var controller = CreateController(new ClaimsPrincipal());
-
-        var result = await controller.Register(NewAccount);
-
-        Assert.IsType<UnauthorizedObjectResult>(result);
-        _authService.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task Register_WhenDisabledAndSignedInNonAdmin_ReturnsForbidden()
-    {
-        var controller = CreateController(SignedIn());
-
-        var result = await controller.Register(NewAccount);
-
-        var forbidden = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
-        Assert.Equal(RegistrationDisabledError, Prop<string>(forbidden.Value, "error"));
-        _authService.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task Register_WhenDisabled_AdministratorCanStillCreateAccounts()
-    {
-        GrantPolicy(AuthorizationPolicies.CanAdminister);
         _authService.Setup(s => s.RegisterAsync("newuser", "Password123!", "new@example.com", null)).ReturnsAsync((true, null));
         var controller = CreateController(SignedIn(name: "admin"));
 
@@ -136,28 +105,15 @@ public class AuthControllerCoverageTests
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal("User registered successfully", Prop<string>(ok.Value, "message"));
         _authService.Verify(s => s.RegisterAsync("newuser", "Password123!", "new@example.com", null), Times.Once);
+        _authorization.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task Register_WhenEnabled_AnonymousVisitorCanRegister()
+    public async Task Register_WhenTheServiceRejects_ReturnsBadRequestWithServiceError()
     {
-        _appSettings.AllowRegistration = true;
-        _authService.Setup(s => s.RegisterAsync("newuser", "Password123!", "new@example.com", null)).ReturnsAsync((true, null));
-        var controller = CreateController(Anonymous());
-
-        var result = await controller.Register(NewAccount);
-
-        Assert.IsType<OkObjectResult>(result);
-        _authService.Verify(s => s.RegisterAsync("newuser", "Password123!", "new@example.com", null), Times.Once);
-    }
-
-    [Fact]
-    public async Task Register_WhenEnabledButServiceRejects_ReturnsBadRequestWithServiceError()
-    {
-        _appSettings.AllowRegistration = true;
         _authService.Setup(s => s.RegisterAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
             .ReturnsAsync((false, "Username already taken"));
-        var controller = CreateController(Anonymous());
+        var controller = CreateController(SignedIn(name: "admin"));
 
         var result = await controller.Register(NewAccount);
 

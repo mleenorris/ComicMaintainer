@@ -29,7 +29,6 @@ function formValues(page) {
         convertRarToCbz: checked('convertRarToCbzOnWriteCheckbox'),
         coverToArchive: checked('writeCoverToFirstArchiveCheckbox'),
         coverToFolder: checked('writeCoverToSeriesFolderCheckbox'),
-        allowRegistration: checked('allowRegistrationCheckbox'),
         downloadSeriesImages: checked('downloadExternalSeriesImagesCheckbox'),
         seriesImageMaxMB: value('seriesImageMaxMB'),
         seriesImageMaxDownloadMB: value('seriesImageMaxDownloadMB'),
@@ -114,7 +113,6 @@ test('the settings page fills every group from GET /api/settings', async () => {
         convertRarToCbz: false,
         coverToArchive: true,
         coverToFolder: false,
-        allowRegistration: true,
         downloadSeriesImages: true,
         seriesImageMaxMB: '5',
         seriesImageMaxDownloadMB: '20',
@@ -232,7 +230,6 @@ test('unset optional settings fall back to defaults and first-time hints', async
             suwayomi_username: null,
             suwayomi_password_set: false,
             suwayomi_downloads_directory: null,
-            allow_registration: false,
             default_preferred_language: null,
             convert_rar_to_cbz_on_write: undefined,
             write_cover_to_first_archive: false,
@@ -455,7 +452,6 @@ const TOGGLES = [
     ['convertRarToCbzOnWriteCheckbox', 'PUT', '/api/settings/convert-rar-to-cbz-on-write', 'Convert CBR/RAR to CBZ when writing tags', 'Failed to update CBR/RAR conversion setting: '],
     ['writeCoverToFirstArchiveCheckbox', 'PUT', '/api/settings/write-cover-to-first-archive', 'Embed cover into first issue archive', 'Failed to update cover embed setting: '],
     ['writeCoverToSeriesFolderCheckbox', 'PUT', '/api/settings/write-cover-to-series-folder', 'Write cover into series folder', 'Failed to update cover folder setting: '],
-    ['allowRegistrationCheckbox', 'PUT', '/api/settings/allow-registration', 'Self-service registration', 'Failed to update registration setting: '],
     ['downloadExternalSeriesImagesCheckbox', 'PUT', '/api/settings/download-external-series-images', 'Download external series images', 'Failed to update series image download setting: ']
 ];
 
@@ -677,15 +673,15 @@ test('the section navigation scrolls to a card and focuses its heading', async (
     assert.equal(page.document.activeElement, page.$('#settings-danger-title'));
 
     // A card without a title heading is still scrolled to.
-    page.$('#settings-access .settings-card-title').remove();
-    page.run("scrollToSettingsSection('settings-access')");
-    assert.equal(scrolls.at(-1).id, 'settings-access');
-    assert.deepEqual(activeLinks(), ['settings-access']);
+    page.$('#settings-language .settings-card-title').remove();
+    page.run("scrollToSettingsSection('settings-language')");
+    assert.equal(scrolls.at(-1).id, 'settings-language');
+    assert.deepEqual(activeLinks(), ['settings-language']);
 
     // Unknown sections are ignored.
     page.run("scrollToSettingsSection('settings-nope')");
     assert.equal(scrolls.length, 3);
-    assert.deepEqual(activeLinks(), ['settings-access']);
+    assert.deepEqual(activeLinks(), ['settings-language']);
 });
 
 test('the section navigation follows the card nearest the top while scrolling', async () => {
@@ -701,10 +697,10 @@ test('the section navigation follows the card nearest the top while scrolling', 
     assert.deepEqual(activeLinks(), ['settings-appearance'], 'the first section starts active');
 
     const entry = (id, isIntersecting, top = 0) => ({ target: card(id), isIntersecting, boundingClientRect: { top } });
-    observer.callback([entry('settings-watcher', true, 220), entry('settings-access', true, 40)]);
-    assert.deepEqual(activeLinks(), ['settings-access']);
+    observer.callback([entry('settings-watcher', true, 220), entry('settings-language', true, 40)]);
+    assert.deepEqual(activeLinks(), ['settings-language']);
 
-    observer.callback([entry('settings-access', false)]);
+    observer.callback([entry('settings-language', false)]);
     assert.deepEqual(activeLinks(), ['settings-watcher']);
 
     // Nothing visible (between cards): the last highlight stays.

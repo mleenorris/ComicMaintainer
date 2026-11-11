@@ -110,18 +110,6 @@ public class AppSettings
     /// </summary>
     public int ProcessingHistoryMaxEntries { get; set; } = 50000;
 
-    /// <summary>
-    /// When true, anonymous visitors may create their own account via
-    /// <c>POST /api/auth/register</c>. Defaults to <c>false</c>: ComicMaintainer
-    /// is normally deployed as a private, self-hosted library, so anyone able to
-    /// reach the port would otherwise be able to sign themselves up. Regardless
-    /// of this setting, an administrator can always create accounts because the
-    /// register endpoint additionally accepts authenticated Admin callers, and
-    /// the one-time <c>POST /api/auth/setup</c> bootstrap remains available
-    /// while no admin exists.
-    /// </summary>
-    public bool AllowRegistration { get; set; }
-
     // External series metadata / alias enrichment
     public bool EnableExternalSeriesMetadata { get; set; }
     public string? ComicVineApiKey { get; set; }

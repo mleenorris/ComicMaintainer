@@ -131,10 +131,6 @@ public interface ISettingsService
     /// </summary>
     Task UpdateDatabaseCleanupSettingsAsync(DatabaseCleanupSettings settings, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Enables or disables anonymous self-service account registration.
-    /// </summary>
-    Task UpdateAllowRegistrationAsync(bool allowed, CancellationToken cancellationToken = default);
     Task UpdateExternalSeriesMetadataEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task UpdateComicVineApiKeyAsync(string? apiKey, CancellationToken cancellationToken = default);
     Task UpdateComicVineBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);

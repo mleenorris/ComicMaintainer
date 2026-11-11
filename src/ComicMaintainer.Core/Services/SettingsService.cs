@@ -206,11 +206,6 @@ public class SettingsService : ISettingsService
         await SaveValuesAsync(values, cancellationToken);
     }
 
-    public async Task UpdateAllowRegistrationAsync(bool allowed, CancellationToken cancellationToken = default)
-    {
-        await SaveValueAsync("AllowRegistration", allowed, cancellationToken);
-    }
-
     public async Task UpdateExternalSeriesMetadataEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         await SaveValueAsync("EnableExternalSeriesMetadata", enabled, cancellationToken);

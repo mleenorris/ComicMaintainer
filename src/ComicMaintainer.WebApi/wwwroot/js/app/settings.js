@@ -126,23 +126,6 @@ showMessage('Default preferred language updated', 'success');
             }
         }
         
-        async function updateAllowRegistration() {
-            const checkbox = document.getElementById('allowRegistrationCheckbox');
-            const enabled = checkbox.checked;
-
-            try {
-                await apiFetch('/api/settings/allow-registration', {
-                    method: 'PUT',
-                    body: { enabled: enabled }
-                });
-
-                showMessage(`Self-service registration ${enabled ? 'enabled' : 'disabled'} successfully!`, 'success');
-            } catch (error) {
-                checkbox.checked = !enabled;
-                showMessage('Failed to update registration setting: ' + error.message, 'error', { reference: error });
-            }
-        }
-
         async function updateDownloadExternalSeriesImages() {
             const enabled = document.getElementById('downloadExternalSeriesImagesCheckbox').checked;
             
@@ -331,12 +314,6 @@ showMessage('Default preferred language updated', 'success');
                 const writeCoverFolderCheckbox = document.getElementById('writeCoverToSeriesFolderCheckbox');
                 if (writeCoverFolderCheckbox) {
                     writeCoverFolderCheckbox.checked = !!settingsData.write_cover_to_series_folder;
-                }
-
-                // Load self-service registration status
-                const allowRegistrationCheckbox = document.getElementById('allowRegistrationCheckbox');
-                if (allowRegistrationCheckbox) {
-                    allowRegistrationCheckbox.checked = !!settingsData.allow_registration;
                 }
 
                 // Load external series image download status

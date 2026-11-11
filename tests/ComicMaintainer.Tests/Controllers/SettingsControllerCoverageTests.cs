@@ -147,13 +147,16 @@ public class SettingsControllerCoverageTests
         Assert.Equal(1600, json.GetProperty("series_image_max_dimension").GetInt32());
     }
 
-    [Fact]
-    public async Task GetAllSettings_HasNoLibraryViewSetting()
+    // Both were removed in 3.0.0: the web app has no Files view left to choose between, and only an
+    // administrator may create accounts, so there is nothing left to allow.
+    [Theory]
+    [InlineData("library_view")]
+    [InlineData("registration")]
+    public async Task GetAllSettings_HasNoLibraryViewOrRegistrationSetting(string removed)
     {
         var json = OkJson(await CreateController().GetAllSettings());
 
-        // Removed in 3.0.0: the web app has no Files view left to choose between.
-        Assert.DoesNotContain(json.EnumerateObject(), field => field.Name.Contains("library_view", StringComparison.Ordinal));
+        Assert.DoesNotContain(json.EnumerateObject(), field => field.Name.Contains(removed, StringComparison.Ordinal));
     }
 
     // ---------------------------------------------------------------- simple GETs
@@ -201,7 +204,6 @@ public class SettingsControllerCoverageTests
         "write-cover-to-first-archive",
         "write-cover-to-series-folder",
         "download-external-series-images",
-        "allow-registration",
     };
 
     private void SetToggle(string toggle, bool value)
@@ -214,7 +216,6 @@ public class SettingsControllerCoverageTests
             case "write-cover-to-first-archive": _settings.WriteCoverToFirstArchive = value; break;
             case "write-cover-to-series-folder": _settings.WriteCoverToSeriesFolder = value; break;
             case "download-external-series-images": _settings.DownloadExternalSeriesImages = value; break;
-            case "allow-registration": _settings.AllowRegistration = value; break;
             default: throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null);
         }
     }
@@ -227,7 +228,6 @@ public class SettingsControllerCoverageTests
         "write-cover-to-first-archive" => c.GetWriteCoverToFirstArchive(),
         "write-cover-to-series-folder" => c.GetWriteCoverToSeriesFolder(),
         "download-external-series-images" => c.GetDownloadExternalSeriesImages(),
-        "allow-registration" => c.GetAllowRegistration(),
         _ => throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null),
     };
 
@@ -239,7 +239,6 @@ public class SettingsControllerCoverageTests
         "write-cover-to-first-archive" => c.UpdateWriteCoverToFirstArchive(new() { Enabled = enabled }),
         "write-cover-to-series-folder" => c.UpdateWriteCoverToSeriesFolder(new() { Enabled = enabled }),
         "download-external-series-images" => c.UpdateDownloadExternalSeriesImages(new() { Enabled = enabled }),
-        "allow-registration" => c.UpdateAllowRegistration(new() { Enabled = enabled }),
         _ => throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null),
     };
 
@@ -251,7 +250,6 @@ public class SettingsControllerCoverageTests
         "write-cover-to-first-archive" => s => s.UpdateWriteCoverToFirstArchiveAsync(enabled, It.IsAny<CancellationToken>()),
         "write-cover-to-series-folder" => s => s.UpdateWriteCoverToSeriesFolderAsync(enabled, It.IsAny<CancellationToken>()),
         "download-external-series-images" => s => s.UpdateDownloadExternalSeriesImagesAsync(enabled, It.IsAny<CancellationToken>()),
-        "allow-registration" => s => s.UpdateAllowRegistrationAsync(enabled, It.IsAny<CancellationToken>()),
         _ => throw new ArgumentOutOfRangeException(nameof(toggle), toggle, null),
     };
 
@@ -292,15 +290,6 @@ public class SettingsControllerCoverageTests
         _settingsService.Setup(ToggleCall(toggle, true)).ThrowsAsync(failure);
 
         await AssertReachesGlobalHandler(failure, () => PutToggle(CreateController(), toggle, enabled: true));
-    }
-
-    [Fact]
-    public async Task UpdateAllowRegistration_NullBody_ReturnsBadRequest()
-    {
-        var result = await CreateController().UpdateAllowRegistration(null!);
-
-        Assert.Equal("Enabled is required", BadRequestError(result));
-        _settingsService.VerifyNoOtherCalls();
     }
 
     // ---------------------------------------------------------------- scalar settings

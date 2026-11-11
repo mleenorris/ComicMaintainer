@@ -21,15 +21,13 @@ public class AuthController : ControllerBase
     private readonly ILogger<AuthController> _logger;
     private readonly AutheliaSettings _autheliaSettings;
     private readonly IAuthorizationService _authorizationService;
-    private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ClientAddressResolver _clientAddresses;
 
     public AuthController(
-        IAuthService authService, 
+        IAuthService authService,
         ILogger<AuthController> logger,
         IOptions<AutheliaSettings> autheliaSettings,
         IAuthorizationService authorizationService,
-        IOptionsMonitor<AppSettings> appSettings,
         ClientAddressResolver clientAddresses)
     {
         _clientAddresses = clientAddresses;
@@ -37,7 +35,6 @@ public class AuthController : ControllerBase
         _logger = logger;
         _autheliaSettings = autheliaSettings.Value;
         _authorizationService = authorizationService;
-        _appSettings = appSettings;
     }
 
     private bool IsApiKeyRequest => User.FindFirst("auth_method")?.Value == ApiKeys.AuthMethod;
@@ -62,31 +59,16 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Creates a new account.
+    /// Creates an account with the <c>User</c> role. Administrators only: the web app has no sign-up page, so this is
+    /// how an administrator adds an account. An anonymous caller gets 401 and a signed-in non-administrator 403, from
+    /// the <see cref="AuthorizationPolicies.CanAdminister"/> policy, before the request is read. It shares the sign-in
+    /// rate limit (<see cref="AuthenticationRateLimit"/>).
     /// </summary>
-    /// <remarks>
-    /// Self-service registration is disabled unless <c>AllowRegistration</c> is
-    /// enabled in settings, so a self-hosted instance is not open to anyone who
-    /// can reach the port. Administrators can always create accounts here.
-    /// </remarks>
-    [AllowAnonymous]
+    [Authorize(Policy = AuthorizationPolicies.CanAdminister)]
     [HttpPost("register")]
     [EnableRateLimiting(AuthenticationRateLimit.PolicyName)]
     public async Task<ActionResult> Register([FromBody] RegisterRequest request)
     {
-        var isAdmin = (await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister)).Succeeded;
-
-        if (!isAdmin && !_appSettings.CurrentValue.AllowRegistration)
-        {
-            _logger.LogWarning("Rejected registration attempt: self-service registration is disabled.");
-
-            // 401 when unauthenticated so clients know to sign in first; 403
-            // when a signed-in non-admin tries to create another account.
-            return User.Identity?.IsAuthenticated == true
-                ? StatusCode(StatusCodes.Status403Forbidden, new { error = "Registration is disabled. Ask an administrator to create your account." })
-                : Unauthorized(new { error = "Registration is disabled. Ask an administrator to create your account." });
-        }
-
         var (success, error) = await _authService.RegisterAsync(
             request.Username, 
             request.Password, 

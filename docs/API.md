@@ -130,7 +130,7 @@ The route tables below use these levels:
 | Admin role | Accounts in the `Admin` role, with no Authelia exception |
 | OPDS Basic | HTTP Basic, under `/opds` only |
 
-The roles are `Admin`, `User` and `ReadOnly`. A self-registered account gets `User`.
+The roles are `Admin`, `User` and `ReadOnly`. An account created with `POST /api/auth/register` gets `User`.
 
 ### Account protection
 
@@ -250,7 +250,7 @@ A timed-out request gets `504`.
 | Method | Path | Access | Purpose |
 |---|---|---|---|
 | `POST` | `/api/auth/login` | Public | Sign in with a password |
-| `POST` | `/api/auth/register` | Public | Create an account, when allowed |
+| `POST` | `/api/auth/register` | Admin | Create an account |
 | `GET` | `/api/auth/setup-required` | Public | Whether first-run setup is available |
 | `POST` | `/api/auth/setup` | Public | Create the first administrator |
 | `GET` | `/api/auth/status` | Public | How the caller is signed in |
@@ -264,7 +264,7 @@ A timed-out request gets `504`.
 
 **`POST /api/auth/login`** takes `{"username":"...","password":"..."}` and returns `{"token":"..."}`.
 
-**`POST /api/auth/register`** takes `{"username","password","email","fullName"}`. It works for anyone when `allow_registration` is on, and always for an administrator. Otherwise it answers `401`, or `403` for a signed-in non-administrator. Passwords need at least 8 characters with an upper-case letter, a lower-case letter and a digit.
+**`POST /api/auth/register`** takes `{"username","password","email","fullName"}` and creates an account with the `User` role. Only an administrator can call it: the web app has no sign-up page, so this is how administrators add accounts. Without credentials it answers `401`, and for a signed-in non-administrator `403`. Passwords need at least 8 characters with an upper-case letter, a lower-case letter and a digit.
 
 **`GET /api/auth/setup-required`** returns `{"setupRequired":true}`.
 
@@ -826,8 +826,6 @@ Any signed-in account can read settings. Every write needs Admin. Writes use `PU
 | `PUT` | `/api/settings/database-cleanup-interval-hours` | Admin | `{"hours":12}`; 0 runs only after a start |
 | `GET` | `/api/settings/database-cleanup` | Signed in | All cleanup settings |
 | `PUT` | `/api/settings/database-cleanup` | Admin | See below |
-| `GET` | `/api/settings/allow-registration` | Signed in | `{"enabled"}` |
-| `PUT` | `/api/settings/allow-registration` | Admin | `{"enabled":false}` |
 | `GET` | `/api/settings/default-preferred-language` | Signed in | `{"language"}` |
 | `PUT` | `/api/settings/default-preferred-language` | Admin | `{"language":"en"}` (`en`, `ja`, `ko`, `zh`, or `null`) |
 | `PUT` | `/api/settings/external-series-metadata` | Admin | See below |
@@ -847,7 +845,7 @@ A successful write returns `{"message":"..."}`, and the new value is in effect w
 - Cleanup: `database_cleanup_interval_hours`, `stale_cleanup_max_removal_percent`, `stale_cleanup_missing_grace_hours`, `stale_cleanup_sentinel_file`, `processing_history_retention_days`, `processing_history_max_entries`.
 - Metadata: `enable_external_series_metadata`, `comicvine_api_key_set`, `comicvine_base_url`, `enable_mangadex_metadata`, `mangadex_base_url`, `enable_anilist_metadata`, `anilist_base_url`, `fill_comicinfo_from_providers`.
 - Suwayomi: `enable_suwayomi`, `suwayomi_base_url`, `suwayomi_username`, `suwayomi_password_set`, `suwayomi_downloads_directory`, `suwayomi_import_directory`.
-- Library: `allow_registration`, `default_preferred_language`, `write_cover_to_first_archive`, `write_cover_to_series_folder`, `download_external_series_images`, `series_image_max_bytes`, `series_image_max_download_bytes`, `series_image_max_dimension`.
+- Library: `default_preferred_language`, `write_cover_to_first_archive`, `write_cover_to_series_folder`, `download_external_series_images`, `series_image_max_bytes`, `series_image_max_download_bytes`, `series_image_max_dimension`.
 - Email: `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password_set`, `smtp_use_ssl`, `smtp_allow_insecure`, `email_from_address`, `email_from_name`, `email_max_attachment_mb`, `email_max_sends_per_hour`, `email_max_sends_per_day`, `email_min_seconds_between_sends`.
 - Error reporting: `error_reporting_enabled`, `error_reporting_github_owner`, `error_reporting_github_repo`, `error_reporting_github_token_set`, `error_reporting_assignee`, `error_reporting_max_issues_per_day`, `error_reporting_dedupe_window_hours`, `error_reporting_comment_on_recurrence`.
 - Notifications: for each of `ntfy`, `gotify`, `discord`, `webhook`, `komga` and `kavita`, `notify_<target>_enabled` and `notify_<target>_events`, plus the target's `notify_ntfy_url`, `notify_ntfy_topic`, `notify_ntfy_token_set`, `notify_gotify_url`, `notify_gotify_token_set`, `notify_discord_webhook_url_set`, `notify_webhook_url_set`, `notify_komga_url`, `notify_komga_api_key_set`, `notify_komga_library_id`, `notify_kavita_url`, `notify_kavita_api_key_set`, `notify_kavita_library_id`. `notify_ntfy_topic` is an empty string for anyone who is not an administrator.

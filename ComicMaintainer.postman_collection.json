@@ -179,14 +179,11 @@
 								"register"
 							]
 						},
-						"auth": {
-							"type": "noauth"
-						},
 						"body": {
 							"mode": "raw",
 							"raw": "{\n  \"username\": \"reader\",\n  \"password\": \"A-strong-passw0rd\",\n  \"email\": \"reader@example.com\",\n  \"fullName\": \"A Reader\"\n}"
 						},
-						"description": "Creates an account. Only works when registration is allowed, or for an administrator (send the session token for that)."
+						"description": "Creates an account with the User role. Administrators only: sign in as one first. Anyone else gets 401 or 403."
 					},
 					"response": []
 				},
@@ -3611,53 +3608,6 @@
 							"raw": "{\n  \"issueNumberPadding\": 4,\n  \"databaseCleanup\": {\n    \"intervalHours\": 12\n  },\n  \"opds\": {\n    \"enabled\": false\n  }\n}"
 						},
 						"description": "Saves any groups in one write. null or left out keeps a value. Answers 409 for a setting an environment variable pins. See docs/API.md for every group."
-					},
-					"response": []
-				},
-				{
-					"name": "Get Allow Registration",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/settings/allow-registration",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"settings",
-								"allow-registration"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Allow Registration",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/settings/allow-registration",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"settings",
-								"allow-registration"
-							]
-						},
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"enabled\": false\n}"
-						}
 					},
 					"response": []
 				},

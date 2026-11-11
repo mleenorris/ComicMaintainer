@@ -256,13 +256,29 @@ public sealed class SettingsEndpointTests : IDisposable
             "filename-format", "issue-number-padding", "log-max-bytes", "watcher-enable-rename",
             "watcher-enable-normalize", "convert-rar-to-cbz-on-write", "write-cover-to-first-archive",
             "write-cover-to-series-folder", "download-external-series-images", "series-image-limits",
-            "database-cleanup-interval-hours", "allow-registration", "external-series-metadata",
+            "database-cleanup-interval-hours", "external-series-metadata",
         })
         {
             using var response = await client.PostAsJsonAsync($"/api/settings/{setting}", new { });
 
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
+    }
+
+    // Removed in 3.0.0: the default library view (the web app has no Files view left) and the switch that let
+    // anonymous visitors register (only an administrator may create accounts).
+    [Fact]
+    public async Task GetSettings_HasNoLibraryViewOrRegistrationField()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var read = await client.GetAsync("/api/settings");
+        using var settings = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.DoesNotContain(settings.RootElement.EnumerateObject(), field =>
+            field.Name.Contains("library_view", StringComparison.Ordinal) || field.Name.Contains("registration", StringComparison.Ordinal));
     }
 
     private WebApplicationFactory<Program> CreateFactory()
